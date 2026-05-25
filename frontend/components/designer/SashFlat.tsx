@@ -10,6 +10,7 @@ const COLOR_HEX: Record<string, { base: string; light: string; dark: string }> =
   "أسود": { base: "#111111", light: "#2a2a2a", dark: "#000000" },
   "كحلي": { base: "#0b1e3f", light: "#162e57", dark: "#050f23" },
   "عنابي": { base: "#7a1f2b", light: "#9a2b3a", dark: "#561218" },
+  "ماروني": { base: "#7a1f2b", light: "#9a2b3a", dark: "#561218" },
 };
 
 const SIDE_LABEL: Record<"left" | "right", string> = {

@@ -150,15 +150,20 @@ export default function StudentProductPage() {
         )}
 
         {product.type === "sash" && (
-          <Link
-            href="/design"
-            className="flex min-h-12 items-center justify-center rounded-xl bg-orange font-semibold text-white hover:bg-orange-light"
-          >
-            صمّم وشاحك
-          </Link>
+          <div className="space-y-2">
+            <Link
+              href="/design"
+              className="flex min-h-12 items-center justify-center rounded-xl bg-orange font-semibold text-white hover:bg-orange-light"
+            >
+              صمّم وشاحك واطلبه
+            </Link>
+            <p className="text-center text-xs text-ink/50">
+              اختيار اللون والنوع والسعر يتم داخل المصمّم
+            </p>
+          </div>
         )}
 
-        {groups.map((group) => {
+        {product.type !== "sash" && groups.map((group) => {
           const optionId = getSelectedOptionId(group, selection);
           const needsImage =
             optionId != null &&
@@ -189,36 +194,37 @@ export default function StudentProductPage() {
           );
         })}
 
-        <PriceBreakdown
-          lines={preview.lines}
-          total={preview.total}
-          compact
-        />
-
-        {confirmed && (
-          <OrderBreakdownCard
-            lines={confirmed.breakdown}
-            total={confirmed.total}
-          />
+        {product.type !== "sash" && (
+          <>
+            <PriceBreakdown lines={preview.lines} total={preview.total} compact />
+            {confirmed && (
+              <OrderBreakdownCard
+                lines={confirmed.breakdown}
+                total={confirmed.total}
+              />
+            )}
+          </>
         )}
       </div>
 
-      <div className="fixed bottom-0 left-0 right-0 border-t border-neutral bg-beige p-4">
-        {confirmed ? (
-          <Button fullWidth variant="secondary" onClick={() => router.push("/shop")}>
-            متابعة التسوق
-          </Button>
-        ) : (
-          <Button
-            fullWidth
-            loading={submitting}
-            disabled={Boolean(customerImageError)}
-            onClick={handleConfirm}
-          >
-            تأكيد الطلب (نقداً)
-          </Button>
-        )}
-      </div>
+      {product.type !== "sash" && (
+        <div className="fixed bottom-0 left-0 right-0 border-t border-neutral bg-beige p-4">
+          {confirmed ? (
+            <Button fullWidth variant="secondary" onClick={() => router.push("/shop")}>
+              متابعة التسوق
+            </Button>
+          ) : (
+            <Button
+              fullWidth
+              loading={submitting}
+              disabled={Boolean(customerImageError)}
+              onClick={handleConfirm}
+            >
+              تأكيد الطلب (نقداً)
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
