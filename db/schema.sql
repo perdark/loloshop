@@ -270,6 +270,7 @@ CREATE TABLE option_groups (
   image_url          TEXT,                              -- explanatory image (admin upload)
   max_select         INTEGER NOT NULL DEFAULT 1,        -- e.g. sleeves = 2
   gender_restriction gender,
+  requires_customer_image BOOLEAN NOT NULL DEFAULT FALSE, -- customer must upload a photo for this field
   active             BOOLEAN NOT NULL DEFAULT TRUE,
   created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -282,6 +283,7 @@ CREATE TABLE options (
   price_delta INTEGER NOT NULL DEFAULT 0 CHECK (price_delta >= 0),
   image_url   TEXT,
   sort        INTEGER NOT NULL DEFAULT 0,
+  requires_customer_image BOOLEAN NOT NULL DEFAULT FALSE, -- this specific value needs a customer photo (e.g. مثلث)
   active      BOOLEAN NOT NULL DEFAULT TRUE,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -321,6 +323,7 @@ CREATE TABLE order_items (
   label_snapshot TEXT NOT NULL,
   price_snapshot INTEGER NOT NULL DEFAULT 0,
   qty            INTEGER NOT NULL DEFAULT 1,
+  customer_image_url TEXT,                       -- photo the customer uploaded for this option
   created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX idx_order_items_order ON order_items(order_id);

@@ -35,7 +35,7 @@ async function getProductFull(req, res) {
   );
   const groups = await query(
     `SELECT id, name_ar, input_type, sort, required, has_image, hint_ar, image_url,
-            max_select, gender_restriction
+            max_select, gender_restriction, requires_customer_image
      FROM option_groups WHERE product_id = $1 AND active = TRUE ORDER BY sort, created_at`,
     [id]
   );
@@ -43,7 +43,7 @@ async function getProductFull(req, res) {
   let options = { rows: [] };
   if (groupIds.length) {
     options = await query(
-      `SELECT o.id, o.group_id, o.label_ar, o.image_url, o.sort,
+      `SELECT o.id, o.group_id, o.label_ar, o.image_url, o.sort, o.requires_customer_image,
               COALESCE(opr.price_delta, o.price_delta) AS price_delta
        FROM options o
        LEFT JOIN option_price_roles opr ON opr.option_id = o.id AND opr.role = $2
@@ -191,7 +191,7 @@ async function createGroup(req, res) {
 async function updateGroup(req, res) {
   const upd = buildUpdate(
     'option_groups',
-    ['name_ar', 'input_type', 'sort', 'required', 'has_image', 'hint_ar', 'image_url', 'max_select', 'gender_restriction', 'active'],
+    ['name_ar', 'input_type', 'sort', 'required', 'has_image', 'hint_ar', 'image_url', 'max_select', 'gender_restriction', 'requires_customer_image', 'active'],
     req.body, req.params.id
   );
   if (!upd) return res.status(400).json({ error: 'لا تغييرات', code: 'ERR_VALIDATION' });
@@ -222,7 +222,7 @@ async function createOption(req, res) {
 async function updateOption(req, res) {
   const upd = buildUpdate(
     'options',
-    ['label_ar', 'price_delta', 'image_url', 'sort', 'active'],
+    ['label_ar', 'price_delta', 'image_url', 'sort', 'requires_customer_image', 'active'],
     req.body, req.params.id
   );
   if (!upd) return res.status(400).json({ error: 'لا تغييرات', code: 'ERR_VALIDATION' });

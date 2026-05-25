@@ -139,7 +139,7 @@ async function configureOrder(req, res) {
   }
 
   const groups = await query(
-    `SELECT id, name_ar, required, max_select, input_type, gender_restriction
+    `SELECT id, name_ar, required, max_select, input_type, gender_restriction, requires_customer_image
      FROM option_groups WHERE product_id = $1 AND active = TRUE`,
     [product_id]
   );
@@ -164,7 +164,8 @@ async function configureOrder(req, res) {
       ? Math.min(Math.max(parseInt(s.qty, 10) || 1, 1), g.max_select)
       : 1;
     const opt = await query(
-      `SELECT o.id, o.label_ar, COALESCE(opr.price_delta, o.price_delta) AS price_delta
+      `SELECT o.id, o.label_ar, o.requires_customer_image,
+              COALESCE(opr.price_delta, o.price_delta) AS price_delta
        FROM options o
        LEFT JOIN option_price_roles opr ON opr.option_id = o.id AND opr.role = $2
        WHERE o.id = $1 AND o.group_id = $3 AND o.active = TRUE`,
@@ -173,11 +174,17 @@ async function configureOrder(req, res) {
     if (!opt.rows.length) {
       return res.status(400).json({ error: 'خيار غير صالح', code: 'ERR_VALIDATION' });
     }
+    // customer must upload a reference photo when group or option requires it (e.g. مثلث)
+    const needsImage = g.requires_customer_image || opt.rows[0].requires_customer_image;
+    if (needsImage && !s.customer_image_url) {
+      return res.status(400).json({ error: `يرجى رفع صورة لـ ${g.name_ar}`, code: 'ERR_CUSTOMER_IMAGE_REQUIRED' });
+    }
     const line = opt.rows[0].price_delta * qty;
     total += line;
     items.push({
       label: `${g.name_ar}: ${opt.rows[0].label_ar}${qty > 1 ? ' ×' + qty : ''}`,
       price: line, group_id: s.group_id, option_id: opt.rows[0].id, qty,
+      customer_image_url: s.customer_image_url || null,
     });
   }
 
@@ -207,9 +214,9 @@ async function configureOrder(req, res) {
     }
     for (const it of items) {
       await client.query(
-        `INSERT INTO order_items (order_id, group_id, option_id, label_snapshot, price_snapshot, qty)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [oid, it.group_id, it.option_id, it.label, it.price, it.qty]
+        `INSERT INTO order_items (order_id, group_id, option_id, label_snapshot, price_snapshot, qty, customer_image_url)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [oid, it.group_id, it.option_id, it.label, it.price, it.qty, it.customer_image_url || null]
       );
     }
     return oid;
@@ -237,7 +244,7 @@ async function getOrderBreakdown(req, res) {
     return res.status(403).json({ error: 'ممنوع', code: 'ERR_FORBIDDEN' });
   }
   const items = await query(
-    `SELECT label_snapshot, price_snapshot, qty FROM order_items
+    `SELECT label_snapshot, price_snapshot, qty, customer_image_url FROM order_items
      WHERE order_id = $1 ORDER BY created_at`,
     [id]
   );
