@@ -1,0 +1,167 @@
+"use client";
+
+import Link from "next/link";
+import { useParams, useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
+import { OptionGroupField } from "@/components/catalog/OptionGroupField";
+import { OrderBreakdownCard } from "@/components/catalog/OrderBreakdownCard";
+import { ProductMediaGallery } from "@/components/catalog/ProductMediaGallery";
+import { PriceBreakdown } from "@/components/catalog/PriceBreakdown";
+import { getProductFull } from "@/lib/catalog";
+import { getApiErrorMessage } from "@/lib/api";
+import { buildConfigureSelections, configureOrder } from "@/lib/orders";
+import {
+  computePriceBreakdown,
+  groupVisibleForGender,
+  validateSelection,
+  type OptionSelection,
+} from "@/lib/pricing";
+import type { CatalogProduct, ConfigureOrderResult } from "@/lib/types";
+import { Button } from "@/components/ui/Button";
+import { PageLoader } from "@/components/ui/Spinner";
+
+const GENDER_KEY = "loloshop_student_gender";
+
+export default function StudentProductPage() {
+  const { id } = useParams<{ id: string }>();
+  const router = useRouter();
+  const [product, setProduct] = useState<CatalogProduct | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [selection, setSelection] = useState<OptionSelection>({});
+  const [confirmed, setConfirmed] = useState<ConfigureOrderResult | null>(null);
+  const [gender, setGender] = useState<"male" | "female" | null>(null);
+
+  useEffect(() => {
+    const saved = localStorage.getItem(GENDER_KEY);
+    if (saved === "male" || saved === "female") setGender(saved);
+  }, []);
+
+  useEffect(() => {
+    if (!id) return;
+    getProductFull(id)
+      .then(setProduct)
+      .catch(() => toast.error("تعذر تحميل المنتج"))
+      .finally(() => setLoading(false));
+  }, [id]);
+
+  const role = product?.priceRole ?? "retail";
+
+  const preview = useMemo(() => {
+    if (!product) return { lines: [], total: 0 };
+    return computePriceBreakdown(product, selection, role);
+  }, [product, selection, role]);
+
+  function setGroupValue(groupId: string, value: OptionSelection[string]) {
+    setSelection((prev) => ({ ...prev, [groupId]: value }));
+    setConfirmed(null);
+  }
+
+  async function handleConfirm() {
+    if (!product || !id) return;
+    const err = validateSelection(product, selection, gender);
+    if (err) {
+      toast.error(err);
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const result = await configureOrder({
+        productId: id,
+        selections: buildConfigureSelections(product, selection),
+      });
+      setConfirmed(result);
+      toast.success("تم تأكيد الطلب");
+    } catch (e) {
+      toast.error(getApiErrorMessage(e, "تعذر تأكيد الطلب — سجّل دخولك كطالب"));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (loading || !product) return <PageLoader />;
+
+  const groups = product.optionGroups
+    .filter((g) => groupVisibleForGender(g, gender))
+    .sort((a, b) => a.sort - b.sort);
+
+  return (
+    <div className="mx-auto max-w-lg bg-cream pb-28">
+      <header className="border-b border-ink/10 bg-beige px-4 py-4">
+        <p className="font-script text-2xl text-orange">lolo shop</p>
+        <p className="font-display text-sm font-semibold text-ink">لولو شوب</p>
+      </header>
+
+      <div className="space-y-5 px-4 py-6">
+        <div>
+          <Link href="/shop" className="text-sm text-orange hover:underline">
+            ← المنتجات
+          </Link>
+          <h1 className="mt-2 font-display text-2xl font-bold text-ink">
+            {product.nameAr}
+          </h1>
+          {product.description && (
+            <p className="mt-1 text-sm text-ink/60">{product.description}</p>
+          )}
+        </div>
+
+        <ProductMediaGallery
+          nameAr={product.nameAr}
+          imageUrl={product.imageUrl}
+          images={product.images}
+        />
+
+        {!gender && (
+          <div className="rounded-xl border border-orange/40 bg-orange/5 p-3 text-sm text-ink/70">
+            اختر جنسك من صفحة المنتجات لتفعيل الفلترة (مثلاً الشال للإناث).
+          </div>
+        )}
+
+        {product.type === "sash" && (
+          <Link
+            href="/design"
+            className="flex min-h-12 items-center justify-center rounded-xl bg-orange font-semibold text-white hover:bg-orange-light"
+          >
+            صمّم وشاحك
+          </Link>
+        )}
+
+        {groups.map((group) => (
+          <OptionGroupField
+            key={group.id}
+            group={group}
+            selection={selection}
+            role={role}
+            onChange={setGroupValue}
+          />
+        ))}
+
+        <PriceBreakdown
+          lines={preview.lines}
+          total={preview.total}
+          compact
+        />
+
+        {confirmed && (
+          <OrderBreakdownCard
+            lines={confirmed.breakdown}
+            total={confirmed.total}
+          />
+        )}
+      </div>
+
+      <div className="fixed bottom-0 left-0 right-0 border-t border-neutral bg-beige p-4">
+        {confirmed ? (
+          <Button fullWidth variant="secondary" onClick={() => router.push("/shop")}>
+            متابعة التسوق
+          </Button>
+        ) : (
+          <Button fullWidth loading={submitting} onClick={handleConfirm}>
+            تأكيد الطلب (نقداً)
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}

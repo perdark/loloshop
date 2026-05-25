@@ -1,0 +1,38 @@
+# dependencies
+node_modules/
+*/node_modules/
+
+# env / secrets — NEVER commit
+.env
+.env.*
+!.env.example
+*/.env
+*/.env.*
+!*/.env.example
+
+# next.js
+.next/
+*/.next/
+out/
+
+# build / cache
+dist/
+*.tsbuildinfo
+*/tsconfig.tsbuildinfo
+
+# uploaded media (user content, lives on the server disk)
+uploads/*
+!uploads/.gitkeep
+!uploads/logos/.gitkeep
+!uploads/images/.gitkeep
+!uploads/fonts/.gitkeep
+
+# logs
+*.log
+npm-debug.log*
+
+# os / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

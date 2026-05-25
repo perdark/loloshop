@@ -1,0 +1,45 @@
+const multer = require('multer');
+const path = require('path');
+const crypto = require('crypto');
+const fs = require('fs');
+
+const ROOT = path.join(__dirname, '..', '..', 'uploads');
+
+function makeStorage(subdir) {
+  const dir = path.join(ROOT, subdir);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  return multer.diskStorage({
+    destination: (req, file, cb) => cb(null, dir),
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname).toLowerCase();
+      const name = crypto.randomBytes(16).toString('hex') + ext;
+      cb(null, name);
+    },
+  });
+}
+
+const IMAGE_TYPES = /^image\/(png|jpe?g|webp|svg\+xml)$/i;
+
+function imageFilter(req, file, cb) {
+  if (IMAGE_TYPES.test(file.mimetype)) cb(null, true);
+  else cb(new Error('نوع الملف غير مدعوم'));
+}
+
+const logoUpload = multer({
+  storage: makeStorage('logos'),
+  fileFilter: imageFilter,
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
+
+const imageUpload = multer({
+  storage: makeStorage('images'),
+  fileFilter: imageFilter,
+  limits: { fileSize: 10 * 1024 * 1024 },
+});
+
+function publicUrl(req, subdir, filename) {
+  const base = process.env.PUBLIC_URL || `${req.protocol}://${req.get('host')}`;
+  return `${base}/uploads/${subdir}/${filename}`;
+}
+
+module.exports = { logoUpload, imageUpload, publicUrl };

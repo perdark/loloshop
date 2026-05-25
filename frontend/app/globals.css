@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+@theme {
+  /* --- Brand: warm orange (primary) — official hex codes --- */
+  --color-orange: #ff8c00;
+  --color-orange-light: #ffa07a;
+
+  /* --- Soft accents --- */
+  --color-peach: #ffdab9;
+  --color-blush: #ffe4e1;
+
+  /* --- Backgrounds --- */
+  --color-cream: #faebd7;
+  --color-beige: #f5f5dc;
+
+  /* --- Ink / text --- */
+  --color-ink: #1a1a1a;
+  --color-ink-soft: #333333;
+
+  /* --- Neutrals --- */
+  --color-neutral: #e0e0e0;
+  --color-neutral-dark: #bdbdbd;
+
+  /* --- Back-compat aliases --- */
+  --color-amber: #ff8c00;
+  --color-offwhite: #f5f5dc;
+
+  /* --- Fonts --- */
+  --font-sans: var(--font-cairo), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-playfair), var(--font-amiri), serif;
+  --font-script: var(--font-great-vibes), cursive;
+}
+
+.bg-brand-gradient {
+  background-image: linear-gradient(
+    135deg,
+    var(--color-orange),
+    var(--color-orange-light)
+  );
+}
+
+body {
+  background-color: var(--color-cream);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+.font-script {
+  font-family: var(--font-script);
+}

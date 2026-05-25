@@ -1,0 +1,59 @@
+/* ============================================================
+   LoloShop 96 — Brand tokens (from official visual identity PNG)
+   FOR CURSOR: replace the @theme block in app/globals.css with this,
+   then migrate component classes per the map at the bottom.
+   ============================================================ */
+
+@theme {
+  /* --- Brand: warm orange (primary) — official hex codes --- */
+  --color-orange:        #ff8c00; /* primary CTA / brand, gradient start */
+  --color-orange-light:  #ffa07a; /* gradient end / hover */
+
+  /* --- Soft accents --- */
+  --color-peach:  #ffdab9; /* soft section bg */
+  --color-blush:  #ffe4e1; /* softest accent */
+
+  /* --- Backgrounds --- */
+  --color-cream:    #faebd7; /* page background */
+  --color-beige:    #f5f5dc; /* alt surface / cards */
+
+  /* --- Ink / text --- */
+  --color-ink:      #1a1a1a; /* primary text, dark surfaces */
+  --color-ink-soft: #333333; /* secondary text */
+
+  /* --- Neutrals --- */
+  --color-neutral:      #e0e0e0; /* borders / dividers */
+  --color-neutral-dark: #bdbdbd; /* muted text / disabled */
+
+  /* --- Back-compat aliases (don't break already-shipped classes) --- */
+  --color-amber:    #ff8c00; /* = orange (was gradient start) */
+  --color-offwhite: #f5f5dc; /* = beige (cards/raised) */
+
+  /* --- Fonts --- */
+  --font-sans:    var(--font-cairo), ui-sans-serif, system-ui, sans-serif; /* Arabic UI body */
+  --font-display: var(--font-playfair), var(--font-amiri), serif;          /* elegant serif headings */
+  --font-script:  var(--font-great-vibes), cursive;                        /* logo / flourish only */
+}
+
+/* Brand gradient (hero, badges). Use: class="bg-brand-gradient" */
+.bg-brand-gradient {
+  background-image: linear-gradient(135deg, var(--color-orange), var(--color-orange-light));
+}
+
+.font-script { font-family: var(--font-script); }
+
+/* ============================================================
+   CLASS MIGRATION MAP (Cursor — apply across components):
+     bg-navy   -> bg-ink        (dark headers/surfaces)
+     text-navy -> text-ink      (headings/body)
+     bg-gold   -> bg-orange     (primary CTA; pair text-white or text-ink)
+     text-gold -> text-orange   (accents/links)
+     bg-cream  -> bg-cream      (unchanged name, value updated)
+   Primary CTA pattern:  bg-orange text-white hover:bg-orange-light
+   Logo wordmark "lolo shop": className="font-script"
+
+   FONTS — add to app/layout.tsx via next/font/google and expose CSS vars:
+     Playfair_Display -> variable: "--font-playfair"
+     Great_Vibes      -> variable: "--font-great-vibes"
+   (Cairo + Amiri already wired — keep them.)
+   ============================================================ */
