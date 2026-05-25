@@ -30,6 +30,9 @@ function mapOption(raw: Record<string, unknown>): CatalogOption {
     imageUrl: resolveCatalogMediaUrl(raw.image_url as string | null),
     sort: Number(raw.sort ?? 0),
     active: raw.active !== false,
+    requiresCustomerImage: Boolean(
+      raw.requires_customer_image ?? raw.requiresCustomerImage
+    ),
   };
 }
 
@@ -51,6 +54,9 @@ function mapGroup(
     maxSelect: raw.max_select != null ? Number(raw.max_select) : null,
     genderRestriction:
       (raw.gender_restriction as CatalogOptionGroup["genderRestriction"]) ?? null,
+    requiresCustomerImage: Boolean(
+      raw.requires_customer_image ?? raw.requiresCustomerImage
+    ),
     options: opts.map(mapOption),
   };
 }

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { StaffOrderBreakdown } from "@/components/staff/StaffOrderBreakdown";
 import { DesignViewer } from "@/components/staff/DesignViewer";
 import { ExportPngButton } from "@/components/staff/ExportPngButton";
 import { PdfExportButton } from "@/components/staff/PdfExportButton";
@@ -17,8 +18,9 @@ import {
   getStaffOrderById,
   updateOrderStatus,
 } from "@/lib/staff";
+import { getOrderBreakdown } from "@/lib/orders";
 import type { StaffDesign, StaffOrder } from "@/lib/staff-types";
-import type { OrderStatus } from "@/lib/types";
+import type { OrderBreakdownDetail, OrderStatus } from "@/lib/types";
 
 function resolveImageUrl(url: string | null): string | null {
   if (!url) return null;
@@ -36,6 +38,7 @@ export default function StaffOrderDetailPage() {
 
   const [order, setOrder] = useState<StaffOrder | null>(null);
   const [design, setDesign] = useState<StaffDesign | null>(null);
+  const [breakdown, setBreakdown] = useState<OrderBreakdownDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
 
@@ -49,8 +52,12 @@ export default function StaffOrderDetailPage() {
         return;
       }
       setOrder(o);
-      const d = await getDesignByStudent(o.studentId);
+      const [d, bd] = await Promise.all([
+        getDesignByStudent(o.studentId),
+        getOrderBreakdown(orderId).catch(() => null),
+      ]);
       setDesign(d);
+      setBreakdown(bd);
     } catch {
       toast.error("تعذر تحميل تفاصيل الطلب");
     } finally {
@@ -176,6 +183,8 @@ export default function StaffOrderDetailPage() {
               </p>
             </article>
           )}
+
+          {breakdown && <StaffOrderBreakdown detail={breakdown} />}
 
           {(logoUrl || extraUrl) && (
             <article className="rounded-xl border border-ink/10 bg-white p-5">

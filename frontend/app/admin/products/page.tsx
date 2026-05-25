@@ -95,6 +95,7 @@ export default function AdminProductsPage() {
         hint_ar: patch.hintAr,
         image_url: patch.imageUrl,
         name_ar: patch.nameAr,
+        requires_customer_image: patch.requiresCustomerImage,
       });
       if (selectedId) await loadProduct(selectedId, previewRole);
       toast.success("تم الحفظ");
@@ -303,54 +304,89 @@ export default function AdminProductsPage() {
                         />
                         مطلوب
                       </label>
-                      <label className="flex items-center gap-2">
+                    </div>
+
+                    <div className="mt-3 rounded-lg border border-ink/10 bg-cream/60 p-3">
+                      <p className="text-xs font-semibold text-ink/70">
+                        صورة توضيحية للزبون (من الأدمن)
+                      </p>
+                      <div className="mt-2 flex flex-wrap gap-4 text-sm">
+                        <label className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={group.hasImage}
+                            disabled={savingId === group.id}
+                            onChange={(e) =>
+                              persistGroup(group.id, {
+                                hasImage: e.target.checked,
+                              })
+                            }
+                            className="accent-orange"
+                          />
+                          إظهار صورة توضيحية
+                        </label>
+                        <label className="text-xs text-ink/60">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            id={`img-${group.id}`}
+                            onChange={(e) => {
+                              const f = e.target.files?.[0];
+                              if (f) handleGroupImage(group.id, f);
+                            }}
+                          />
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            className="cursor-pointer text-orange underline"
+                            onClick={() =>
+                              document
+                                .getElementById(`img-${group.id}`)
+                                ?.click()
+                            }
+                          >
+                            رفع صورة توضيحية
+                          </span>
+                        </label>
+                      </div>
+                      <Input
+                        className="mt-2"
+                        value={group.hintAr || ""}
+                        placeholder="تلميح للطالب"
+                        onBlur={(e) => {
+                          if (e.target.value !== (group.hintAr || "")) {
+                            persistGroup(group.id, {
+                              hintAr: e.target.value || null,
+                            });
+                          }
+                        }}
+                      />
+                    </div>
+
+                    <div className="mt-3 rounded-lg border-2 border-orange/30 bg-orange/5 p-3">
+                      <p className="text-xs font-semibold text-ink">
+                        صورة مطلوبة من الزبون
+                      </p>
+                      <p className="mt-0.5 text-[11px] text-ink/50">
+                        يجب على الطالب رفع صورة عند اختيار أي خيار في هذه
+                        المجموعة
+                      </p>
+                      <label className="mt-2 flex items-center gap-2 text-sm">
                         <input
                           type="checkbox"
-                          checked={group.hasImage}
+                          checked={group.requiresCustomerImage}
                           disabled={savingId === group.id}
                           onChange={(e) =>
-                            persistGroup(group.id, { hasImage: e.target.checked })
+                            persistGroup(group.id, {
+                              requiresCustomerImage: e.target.checked,
+                            })
                           }
                           className="accent-orange"
                         />
-                        صورة توضيحية
-                      </label>
-                      <label className="text-xs text-ink/60">
-                        <input
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          id={`img-${group.id}`}
-                          onChange={(e) => {
-                            const f = e.target.files?.[0];
-                            if (f) handleGroupImage(group.id, f);
-                          }}
-                        />
-                        <span
-                          role="button"
-                          tabIndex={0}
-                          className="cursor-pointer text-orange underline"
-                          onClick={() =>
-                            document.getElementById(`img-${group.id}`)?.click()
-                          }
-                        >
-                          رفع صورة
-                        </span>
+                        تفعيل على مستوى المجموعة
                       </label>
                     </div>
-
-                    <Input
-                      className="mt-2"
-                      value={group.hintAr || ""}
-                      placeholder="تلميح للطالب"
-                      onBlur={(e) => {
-                        if (e.target.value !== (group.hintAr || "")) {
-                          persistGroup(group.id, {
-                            hintAr: e.target.value || null,
-                          });
-                        }
-                      }}
-                    />
 
                     <ul className="mt-3 space-y-2">
                       {group.options.map((opt) => (
@@ -389,6 +425,33 @@ export default function AdminProductsPage() {
                           >
                             جملة
                           </Button>
+                          <label className="flex w-full items-center gap-2 border-t border-ink/10 pt-2 text-xs text-ink/70">
+                            <input
+                              type="checkbox"
+                              checked={opt.requiresCustomerImage}
+                              disabled={savingId === opt.id}
+                              onChange={async (e) => {
+                                setSavingId(opt.id);
+                                try {
+                                  await updateCatalogOption(opt.id, {
+                                    requires_customer_image: e.target.checked,
+                                  });
+                                  if (selectedId) {
+                                    await loadProduct(selectedId, previewRole);
+                                  }
+                                  toast.success("تم الحفظ");
+                                } catch (err) {
+                                  toast.error(
+                                    getApiErrorMessage(err, "تعذر الحفظ")
+                                  );
+                                } finally {
+                                  setSavingId(null);
+                                }
+                              }}
+                              className="accent-orange"
+                            />
+                            صورة مطلوبة من الزبون (لهذا الخيار)
+                          </label>
                         </li>
                       ))}
                     </ul>

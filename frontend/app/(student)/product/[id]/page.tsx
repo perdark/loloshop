@@ -4,12 +4,19 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { CustomerImageUpload } from "@/components/catalog/CustomerImageUpload";
 import { OptionGroupField } from "@/components/catalog/OptionGroupField";
 import { OrderBreakdownCard } from "@/components/catalog/OrderBreakdownCard";
 import { ProductMediaGallery } from "@/components/catalog/ProductMediaGallery";
 import { PriceBreakdown } from "@/components/catalog/PriceBreakdown";
 import { getProductFull } from "@/lib/catalog";
 import { getApiErrorMessage } from "@/lib/api";
+import {
+  customerImageRequired,
+  getSelectedOptionId,
+  selectionKey,
+  validateCustomerImages,
+} from "@/lib/customerImage";
 import { buildConfigureSelections, configureOrder } from "@/lib/orders";
 import {
   computePriceBreakdown,
@@ -30,6 +37,9 @@ export default function StudentProductPage() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [selection, setSelection] = useState<OptionSelection>({});
+  const [customerImages, setCustomerImages] = useState<Record<string, string>>(
+    {}
+  );
   const [confirmed, setConfirmed] = useState<ConfigureOrderResult | null>(null);
   const [gender, setGender] = useState<"male" | "female" | null>(null);
 
@@ -55,8 +65,20 @@ export default function StudentProductPage() {
 
   function setGroupValue(groupId: string, value: OptionSelection[string]) {
     setSelection((prev) => ({ ...prev, [groupId]: value }));
+    setCustomerImages((prev) => {
+      const next = { ...prev };
+      for (const k of Object.keys(next)) {
+        if (k.startsWith(`${groupId}:`)) delete next[k];
+      }
+      return next;
+    });
     setConfirmed(null);
   }
+
+  const customerImageError = useMemo(() => {
+    if (!product) return null;
+    return validateCustomerImages(product, selection, customerImages);
+  }, [product, selection, customerImages]);
 
   async function handleConfirm() {
     if (!product || !id) return;
@@ -65,11 +87,20 @@ export default function StudentProductPage() {
       toast.error(err);
       return;
     }
+    const imgErr = validateCustomerImages(product, selection, customerImages);
+    if (imgErr) {
+      toast.error(imgErr);
+      return;
+    }
     setSubmitting(true);
     try {
       const result = await configureOrder({
         productId: id,
-        selections: buildConfigureSelections(product, selection),
+        selections: buildConfigureSelections(
+          product,
+          selection,
+          customerImages
+        ),
       });
       setConfirmed(result);
       toast.success("تم تأكيد الطلب");
@@ -127,15 +158,36 @@ export default function StudentProductPage() {
           </Link>
         )}
 
-        {groups.map((group) => (
-          <OptionGroupField
-            key={group.id}
-            group={group}
-            selection={selection}
-            role={role}
-            onChange={setGroupValue}
-          />
-        ))}
+        {groups.map((group) => {
+          const optionId = getSelectedOptionId(group, selection);
+          const needsImage =
+            optionId != null &&
+            customerImageRequired(group, optionId);
+          const key =
+            optionId != null ? selectionKey(group.id, optionId) : null;
+
+          return (
+            <div key={group.id}>
+              <OptionGroupField
+                group={group}
+                selection={selection}
+                role={role}
+                onChange={setGroupValue}
+              />
+              {needsImage && key && optionId && (
+                <CustomerImageUpload
+                  group={group}
+                  optionId={optionId}
+                  value={customerImages[key]}
+                  onChange={(url) => {
+                    setCustomerImages((prev) => ({ ...prev, [key]: url }));
+                    setConfirmed(null);
+                  }}
+                />
+              )}
+            </div>
+          );
+        })}
 
         <PriceBreakdown
           lines={preview.lines}
@@ -157,7 +209,12 @@ export default function StudentProductPage() {
             متابعة التسوق
           </Button>
         ) : (
-          <Button fullWidth loading={submitting} onClick={handleConfirm}>
+          <Button
+            fullWidth
+            loading={submitting}
+            disabled={Boolean(customerImageError)}
+            onClick={handleConfirm}
+          >
             تأكيد الطلب (نقداً)
           </Button>
         )}

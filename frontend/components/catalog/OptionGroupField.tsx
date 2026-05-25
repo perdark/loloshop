@@ -31,19 +31,25 @@ export function OptionGroupField({
         )}
       </legend>
 
-      {group.hintAr && (
-        <p className="mb-3 text-xs text-ink/60">{group.hintAr}</p>
-      )}
-
-      {group.imageUrl && (
-        <div className="relative mb-3 h-32 w-full overflow-hidden rounded-lg bg-peach/40">
-          <Image
-            src={group.imageUrl}
-            alt=""
-            fill
-            className="object-contain"
-            unoptimized
-          />
+      {(group.hintAr || group.imageUrl) && (
+        <div className="mb-3 rounded-md border border-ink/8 bg-cream/50 p-2">
+          <p className="text-[11px] font-medium text-ink/45">
+            صورة توضيحية من الأدمن
+          </p>
+          {group.hintAr && (
+            <p className="mt-1 text-xs text-ink/60">{group.hintAr}</p>
+          )}
+          {group.imageUrl && (
+            <div className="relative mt-2 h-32 w-full overflow-hidden rounded-lg bg-peach/40">
+              <Image
+                src={group.imageUrl}
+                alt=""
+                fill
+                className="object-contain"
+                unoptimized
+              />
+            </div>
+          )}
         </div>
       )}
 
@@ -77,6 +83,27 @@ export function OptionGroupField({
                 )}
               </label>
             ))}
+          {group.inputType === "single_select" &&
+            typeof value === "string" &&
+            (() => {
+              const sel = group.options.find((o) => o.id === value);
+              return sel?.imageUrl ? (
+                <div className="mt-2 rounded-md border border-ink/8 bg-cream/50 p-2">
+                  <p className="text-[11px] font-medium text-ink/45">
+                    توضيح للخيار: {sel.labelAr}
+                  </p>
+                  <div className="relative mt-2 h-28 w-full overflow-hidden rounded-lg bg-peach/40">
+                    <Image
+                      src={sel.imageUrl}
+                      alt=""
+                      fill
+                      className="object-contain"
+                      unoptimized
+                    />
+                  </div>
+                </div>
+              ) : null;
+            })()}
         </div>
       )}
 

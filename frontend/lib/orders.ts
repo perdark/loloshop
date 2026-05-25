@@ -7,26 +7,54 @@ import type {
   PriceRole,
 } from "./types";
 import type { OptionSelection } from "./pricing";
+import { selectionKey } from "./customerImage";
+
+export interface ConfigureSelectionPayload {
+  group_id: string;
+  option_id: string;
+  qty?: number;
+  customer_image_url?: string;
+}
 
 export function buildConfigureSelections(
   product: CatalogProduct,
-  selection: OptionSelection
-): { group_id: string; option_id: string; qty?: number }[] {
-  const out: { group_id: string; option_id: string; qty?: number }[] = [];
+  selection: OptionSelection,
+  customerImages: Record<string, string> = {}
+): ConfigureSelectionPayload[] {
+  const out: ConfigureSelectionPayload[] = [];
 
   for (const group of product.optionGroups) {
     const sel = selection[group.id];
     if (sel == null || sel === false) continue;
 
+    let optionId: string | null = null;
+    let qty: number | undefined;
+
     if (group.inputType === "single_select" && typeof sel === "string") {
-      out.push({ group_id: group.id, option_id: sel });
+      optionId = sel;
     } else if (group.inputType === "toggle" && sel === true) {
       const opt = group.options.find((o) => o.active) ?? group.options[0];
-      if (opt) out.push({ group_id: group.id, option_id: opt.id });
+      if (opt) optionId = opt.id;
     } else if (group.inputType === "counter" && typeof sel === "number" && sel > 0) {
       const opt = group.options.find((o) => o.active) ?? group.options[0];
-      if (opt) out.push({ group_id: group.id, option_id: opt.id, qty: sel });
+      if (opt) {
+        optionId = opt.id;
+        qty = sel;
+      }
     }
+
+    if (!optionId) continue;
+
+    const row: ConfigureSelectionPayload = {
+      group_id: group.id,
+      option_id: optionId,
+    };
+    if (qty != null) row.qty = qty;
+
+    const url = customerImages[selectionKey(group.id, optionId)];
+    if (url) row.customer_image_url = url;
+
+    out.push(row);
   }
 
   return out;
@@ -39,6 +67,10 @@ function mapBreakdownLine(raw: Record<string, unknown>): OrderBreakdownLine {
     groupId: (raw.group_id as string | null) ?? null,
     optionId: (raw.option_id as string | null) ?? null,
     qty: Number(raw.qty ?? 1),
+    customerImageUrl:
+      (raw.customer_image_url as string | null) ??
+      (raw.customerImageUrl as string | null) ??
+      null,
   };
 }
 
@@ -46,7 +78,7 @@ export async function configureOrder(payload: {
   productId: string;
   designId?: string;
   batchId?: string;
-  selections: { group_id: string; option_id: string; qty?: number }[];
+  selections: ConfigureSelectionPayload[];
 }): Promise<ConfigureOrderResult> {
   const { data } = await api.post<{ data: Record<string, unknown> }>(
     "/orders/configure",
@@ -86,6 +118,8 @@ export async function getOrderBreakdown(
       label: String(l.label_snapshot),
       price: Number(l.price_snapshot),
       qty: Number(l.qty ?? 1),
+      customerImageUrl:
+        (l.customer_image_url as string | null) ?? null,
     })),
   };
 }

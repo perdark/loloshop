@@ -142,9 +142,12 @@ export interface CatalogOption {
   groupId: string;
   labelAr: string;
   priceDelta: number;
+  /** Admin → customer hint image (guidance only) */
   imageUrl: string | null;
   sort: number;
   active: boolean;
+  /** Customer → admin: must upload photo for this option value */
+  requiresCustomerImage: boolean;
 }
 
 export interface CatalogOptionGroup {
@@ -154,11 +157,14 @@ export interface CatalogOptionGroup {
   inputType: CatalogInputType;
   sort: number;
   required: boolean;
+  /** Admin may show hint image to customer */
   hasImage: boolean;
   hintAr: string | null;
   imageUrl: string | null;
   maxSelect: number | null;
   genderRestriction: GenderRestriction;
+  /** Customer → admin: must upload for any selection in this group */
+  requiresCustomerImage: boolean;
   options: CatalogOption[];
 }
 
@@ -274,6 +280,7 @@ export interface OrderBreakdownLine {
   groupId?: string | null;
   optionId?: string | null;
   qty?: number;
+  customerImageUrl?: string | null;
 }
 
 export interface ConfigureOrderResult {
@@ -290,7 +297,12 @@ export interface OrderBreakdownDetail {
   total: number;
   status: OrderStatus;
   createdAt: string;
-  breakdown: { label: string; price: number; qty: number }[];
+  breakdown: {
+    label: string;
+    price: number;
+    qty: number;
+    customerImageUrl: string | null;
+  }[];
 }
 
 export interface ProductVariant {
