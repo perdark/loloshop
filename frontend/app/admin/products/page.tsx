@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { AdminProductMedia } from "@/components/admin/AdminProductMedia";
 import { PriceBreakdown } from "@/components/catalog/PriceBreakdown";
 import { resolveCatalogMediaUrl } from "@/lib/catalog";
 import Image from "next/image";
 import {
+  createCatalogProduct,
   getProductFull,
   listCatalogProductsAdmin,
   setOptionPriceRole,
@@ -71,10 +72,12 @@ export default function AdminProductsPage() {
   );
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial fetch
     loadList();
   }, [loadList]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch on selection/role change
     if (selectedId) loadProduct(selectedId, previewRole);
   }, [selectedId, previewRole, loadProduct]);
 
@@ -166,37 +169,126 @@ export default function AdminProductsPage() {
 
       <div className="grid gap-6 lg:grid-cols-[220px_1fr_260px]">
         <aside className="space-y-2">
-          {summaries.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => setSelectedId(p.id)}
-              className={`flex w-full items-center gap-2 rounded-lg border px-2 py-2 text-right text-sm ${
-                selectedId === p.id
-                  ? "border-orange bg-orange/10 font-semibold text-orange"
-                  : "border-ink/10 bg-beige hover:bg-peach/30"
-              } ${!p.active ? "opacity-50" : ""}`}
-            >
-              <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-md bg-peach/40">
-                {p.imageUrl ? (
-                  <Image
-                    src={resolveCatalogMediaUrl(p.imageUrl) || p.imageUrl}
-                    alt=""
-                    fill
-                    className="object-cover"
-                    unoptimized
-                  />
-                ) : null}
-              </div>
-              <span className="min-w-0 flex-1">
-                {p.nameAr}
-                <span className="mt-0.5 block text-xs font-normal text-ink/50">
-                  {PRODUCT_TYPE_LABELS[p.type]} · {p.groupCount} مجموعة
-                  {p.featured ? " · مميز" : ""}
-                </span>
-              </span>
-            </button>
-          ))}
+          <Button
+            variant="ghost"
+            className="w-full text-sm"
+            onClick={async () => {
+              const typeInput = prompt("نوع المنتج (sash/robe/cap/shawl)", "sash");
+              if (!typeInput) return;
+              const name_ar = prompt("اسم المنتج بالعربي");
+              if (!name_ar) return;
+              const priceStr = prompt("السعر الأساسي (د.ع)", "0");
+              if (priceStr == null) return;
+
+              const parentId = await (async () => {
+                const parents = summaries.filter(s => !s.parentId && s.active);
+                if (!parents.length) return null;
+                const choices = parents.map((p, i) => `${i + 1}. ${p.nameAr}`).join('\n');
+                const choice = prompt(`المنتج الأساسي (اختر رقم أو اترك فارغاً للمنتج المستقل):\n${choices}`);
+                if (!choice || !choice.trim()) return null;
+                const idx = Number(choice.trim()) - 1;
+                return parents[idx]?.id ?? null;
+              })();
+
+              try {
+                await createCatalogProduct({
+                  type: typeInput,
+                  name_ar,
+                  base_price: Number(priceStr) || 0,
+                  parent_id: parentId,
+                });
+                toast.success("تم إنشاء المنتج");
+                await loadList();
+              } catch (e) {
+                toast.error(getApiErrorMessage(e, "تعذر إنشاء المنتج"));
+              }
+            }}
+          >
+            + إضافة منتج
+          </Button>
+          {(() => {
+            const parents = summaries.filter(s => !s.parentId);
+            const children = summaries.filter(s => s.parentId);
+            const items: React.ReactNode[] = [];
+
+            for (const p of parents) {
+              const hasChildren = children.some(c => c.parentId === p.id);
+              items.push(
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setSelectedId(p.id)}
+                  className={`flex w-full items-center gap-2 rounded-lg border px-2 py-2 text-right text-sm ${
+                    selectedId === p.id
+                      ? "border-orange bg-orange/10 font-semibold text-orange"
+                      : "border-ink/10 bg-beige hover:bg-peach/30"
+                  } ${!p.active ? "opacity-50" : ""}`}
+                >
+                  <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-md bg-peach/40">
+                    {p.imageUrl ? (
+                      <Image
+                        src={resolveCatalogMediaUrl(p.imageUrl) || p.imageUrl}
+                        alt=""
+                        fill
+                        className="object-cover"
+                        unoptimized
+                      />
+                    ) : null}
+                  </div>
+                  <span className="min-w-0 flex-1">
+                    {p.nameAr}
+                    <span className="mt-0.5 block text-xs font-normal text-ink/50">
+                      {PRODUCT_TYPE_LABELS[p.type]} · {p.groupCount} مجموعة
+                      {p.featured ? " · مميز" : ""}
+                    </span>
+                  </span>
+                  {hasChildren && (
+                    <span className="shrink-0 rounded-full bg-orange/20 px-1.5 py-0.5 text-[10px] font-semibold text-orange-ink">
+                      أساسي
+                    </span>
+                  )}
+                </button>
+              );
+
+              // Render children under this parent
+              for (const c of children.filter(ch => ch.parentId === p.id)) {
+                items.push(
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => setSelectedId(c.id)}
+                    className={`flex w-full items-center gap-2 rounded-lg border border-r-2 border-orange/30 pl-6 px-2 py-2 text-right text-sm ${
+                      selectedId === c.id
+                        ? "border-orange bg-orange/10 font-semibold text-orange"
+                        : "border-ink/10 bg-beige hover:bg-peach/30"
+                    } ${!c.active ? "opacity-50" : ""}`}
+                  >
+                    <div className="relative h-8 w-8 shrink-0 overflow-hidden rounded-md bg-peach/40">
+                      {c.imageUrl ? (
+                        <Image
+                          src={resolveCatalogMediaUrl(c.imageUrl) || c.imageUrl}
+                          alt=""
+                          fill
+                          className="object-cover"
+                          unoptimized
+                        />
+                      ) : null}
+                    </div>
+                    <span className="min-w-0 flex-1">
+                      {c.nameAr}
+                      <span className="mt-0.5 block text-xs font-normal text-ink/50">
+                        {PRODUCT_TYPE_LABELS[c.type]} · {c.groupCount} مجموعة
+                      </span>
+                    </span>
+                  </button>
+                );
+              }
+            }
+
+            // Standalone products: parents with no children AND no parentId
+            // (already included above as "parents"; children-free parents without children label are already shown)
+            return <>{items}</>;
+          })()}
         </aside>
 
         <section className="min-h-[320px] rounded-xl border border-ink/10 bg-beige p-5">
@@ -209,6 +301,21 @@ export default function AdminProductsPage() {
                 product={product}
                 onUpdated={refreshProduct}
               />
+              {product.parentNameAr && (
+                <div className="mb-3 rounded-lg border border-orange/20 bg-orange/5 px-3 py-2 text-sm">
+                  <span className="text-ink/60">المنتج الأساسي: </span>
+                  <button
+                    type="button"
+                    className="font-semibold text-orange-ink hover:underline"
+                    onClick={() => {
+                      const parent = summaries.find(s => s.id === product.parentId);
+                      if (parent) setSelectedId(parent.id);
+                    }}
+                  >
+                    {product.parentNameAr}
+                  </button>
+                </div>
+              )}
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h2 className="font-display text-xl font-bold text-ink">
@@ -284,109 +391,135 @@ export default function AdminProductsPage() {
                     key={group.id}
                     className="mb-4 rounded-lg border border-ink/10 p-4"
                   >
-                    <h3 className="font-semibold text-ink">
-                      {group.nameAr}
-                      <span className="mr-2 text-xs font-normal text-ink/50">
-                        ({group.inputType})
-                      </span>
-                    </h3>
-
-                    <div className="mt-2 flex flex-wrap gap-4 text-sm">
-                      <label className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={group.required}
-                          disabled={savingId === group.id}
-                          onChange={(e) =>
-                            persistGroup(group.id, { required: e.target.checked })
-                          }
-                          className="accent-orange"
-                        />
-                        مطلوب
-                      </label>
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-semibold text-ink">
+                        {group.nameAr}
+                        <span className="mr-2 text-xs font-normal text-ink/50">
+                          ({group.inputType})
+                        </span>
+                        {group.inherited && (
+                          <span className="mr-2 rounded-full bg-orange/10 px-2 py-0.5 text-[10px] font-normal text-orange-ink">
+                            موروث من الأساسي
+                          </span>
+                        )}
+                      </h3>
+                      {previewRole === 'retail' && !group.inherited && (
+                        <button
+                          type="button"
+                          className="text-xs text-red-400 hover:text-red-600"
+                          title="حذف المجموعة"
+                        >
+                          × حذف المجموعة
+                        </button>
+                      )}
                     </div>
 
-                    <div className="mt-3 rounded-lg border border-ink/10 bg-cream/60 p-3">
-                      <p className="text-xs font-semibold text-ink/70">
-                        صورة توضيحية للزبون (من الأدمن)
+                    {group.inherited && (
+                      <p className="mb-2 text-[11px] text-ink/50">
+                        هذه المجموعة موروثة من &quot;{product.parentNameAr}&quot; — لتعديلها افتح المنتج الأساسي
                       </p>
-                      <div className="mt-2 flex flex-wrap gap-4 text-sm">
-                        <label className="flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={group.hasImage}
-                            disabled={savingId === group.id}
-                            onChange={(e) =>
-                              persistGroup(group.id, {
-                                hasImage: e.target.checked,
-                              })
-                            }
-                            className="accent-orange"
-                          />
-                          إظهار صورة توضيحية
-                        </label>
-                        <label className="text-xs text-ink/60">
-                          <input
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            id={`img-${group.id}`}
-                            onChange={(e) => {
-                              const f = e.target.files?.[0];
-                              if (f) handleGroupImage(group.id, f);
+                    )}
+
+                    {!group.inherited && (
+                      <>
+                        <div className="mt-2 flex flex-wrap gap-4 text-sm">
+                          <label className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={group.required}
+                              disabled={savingId === group.id}
+                              onChange={(e) =>
+                                persistGroup(group.id, { required: e.target.checked })
+                              }
+                              className="accent-orange"
+                            />
+                            مطلوب
+                          </label>
+                        </div>
+
+                        <div className="mt-3 rounded-lg border border-ink/10 bg-cream/60 p-3">
+                          <p className="text-xs font-semibold text-ink/70">
+                            صورة توضيحية للزبون (من الأدمن)
+                          </p>
+                          <div className="mt-2 flex flex-wrap gap-4 text-sm">
+                            <label className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={group.hasImage}
+                                disabled={savingId === group.id}
+                                onChange={(e) =>
+                                  persistGroup(group.id, {
+                                    hasImage: e.target.checked,
+                                  })
+                                }
+                                className="accent-orange"
+                              />
+                              إظهار صورة توضيحية
+                            </label>
+                            <label className="text-xs text-ink/60">
+                              <input
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                id={`img-${group.id}`}
+                                onChange={(e) => {
+                                  const f = e.target.files?.[0];
+                                  if (f) handleGroupImage(group.id, f);
+                                }}
+                              />
+                              <span
+                                role="button"
+                                tabIndex={0}
+                                className="cursor-pointer text-orange underline"
+                                onClick={() =>
+                                  document
+                                    .getElementById(`img-${group.id}`)
+                                    ?.click()
+                                }
+                              >
+                                رفع صورة توضيحية
+                              </span>
+                            </label>
+                          </div>
+                          <Input
+                            className="mt-2"
+                            value={group.hintAr || ""}
+                            placeholder="تلميح للطالب"
+                            onBlur={(e) => {
+                              if (e.target.value !== (group.hintAr || "")) {
+                                persistGroup(group.id, {
+                                  hintAr: e.target.value || null,
+                                });
+                              }
                             }}
                           />
-                          <span
-                            role="button"
-                            tabIndex={0}
-                            className="cursor-pointer text-orange underline"
-                            onClick={() =>
-                              document
-                                .getElementById(`img-${group.id}`)
-                                ?.click()
-                            }
-                          >
-                            رفع صورة توضيحية
-                          </span>
-                        </label>
-                      </div>
-                      <Input
-                        className="mt-2"
-                        value={group.hintAr || ""}
-                        placeholder="تلميح للطالب"
-                        onBlur={(e) => {
-                          if (e.target.value !== (group.hintAr || "")) {
-                            persistGroup(group.id, {
-                              hintAr: e.target.value || null,
-                            });
-                          }
-                        }}
-                      />
-                    </div>
+                        </div>
 
-                    <div className="mt-3 rounded-lg border-2 border-orange/30 bg-orange/5 p-3">
-                      <p className="text-xs font-semibold text-ink">
-                        صورة مطلوبة من الزبون
-                      </p>
-                      <p className="mt-0.5 text-[11px] text-ink/50">
-                        يجب على الطالب رفع صورة عند اختيار أي خيار في هذه
-                        المجموعة
-                      </p>
-                      <label className="mt-2 flex items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
-                          checked={group.requiresCustomerImage}
-                          disabled={savingId === group.id}
-                          onChange={(e) =>
-                            persistGroup(group.id, {
-                              requiresCustomerImage: e.target.checked,
-                            })
-                          }
-                          className="accent-orange"
-                        />
-                        تفعيل على مستوى المجموعة
-                      </label>
-                    </div>
+                        <div className="mt-3 rounded-lg border-2 border-orange/30 bg-orange/5 p-3">
+                          <p className="text-xs font-semibold text-ink">
+                            صورة مطلوبة من الزبون
+                          </p>
+                          <p className="mt-0.5 text-[11px] text-ink/50">
+                            يجب على الطالب رفع صورة عند اختيار أي خيار في هذه
+                            المجموعة
+                          </p>
+                          <label className="mt-2 flex items-center gap-2 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={group.requiresCustomerImage}
+                              disabled={savingId === group.id}
+                              onChange={(e) =>
+                                persistGroup(group.id, {
+                                  requiresCustomerImage: e.target.checked,
+                                })
+                              }
+                              className="accent-orange"
+                            />
+                            تفعيل على مستوى المجموعة
+                          </label>
+                        </div>
+                      </>
+                    )}
 
                     <ul className="mt-3 space-y-2">
                       {group.options.map((opt) => (
@@ -395,63 +528,81 @@ export default function AdminProductsPage() {
                           className="flex flex-wrap items-center gap-2 rounded-lg bg-cream/60 px-3 py-2 text-sm"
                         >
                           <span className="min-w-[6rem] flex-1">{opt.labelAr}</span>
-                          <Input
-                            type="number"
-                            className="max-w-[7rem]"
-                            defaultValue={opt.priceDelta}
-                            onBlur={(e) => {
-                              const n = Number(e.target.value) || 0;
-                              if (n !== opt.priceDelta) {
-                                persistOption(opt.id, n, group.id);
-                              }
-                            }}
-                          />
-                          <Button
-                            variant="ghost"
-                            className="!min-h-8 !px-2 text-xs"
-                            onClick={() => {
-                              const v = prompt(
-                                `سعر جملة لـ ${opt.labelAr}`,
-                                String(opt.priceDelta)
-                              );
-                              if (v != null) {
-                                persistOptionRole(
-                                  opt.id,
-                                  "wholesaler",
-                                  Number(v)
-                                );
-                              }
-                            }}
-                          >
-                            جملة
-                          </Button>
-                          <label className="flex w-full items-center gap-2 border-t border-ink/10 pt-2 text-xs text-ink/70">
-                            <input
-                              type="checkbox"
-                              checked={opt.requiresCustomerImage}
-                              disabled={savingId === opt.id}
-                              onChange={async (e) => {
-                                setSavingId(opt.id);
-                                try {
-                                  await updateCatalogOption(opt.id, {
-                                    requires_customer_image: e.target.checked,
-                                  });
-                                  if (selectedId) {
-                                    await loadProduct(selectedId, previewRole);
+                          {!group.inherited && (
+                            <>
+                              <Input
+                                type="number"
+                                className="max-w-[7rem]"
+                                defaultValue={opt.priceDelta}
+                                onBlur={(e) => {
+                                  const n = Number(e.target.value) || 0;
+                                  if (n !== opt.priceDelta) {
+                                    persistOption(opt.id, n, group.id);
                                   }
-                                  toast.success("تم الحفظ");
-                                } catch (err) {
-                                  toast.error(
-                                    getApiErrorMessage(err, "تعذر الحفظ")
+                                }}
+                              />
+                              <Button
+                                variant="ghost"
+                                className="!min-h-8 !px-2 text-xs"
+                                onClick={() => {
+                                  const v = prompt(
+                                    `سعر جملة لـ ${opt.labelAr}`,
+                                    String(opt.priceDelta)
                                   );
-                                } finally {
-                                  setSavingId(null);
-                                }
-                              }}
-                              className="accent-orange"
-                            />
-                            صورة مطلوبة من الزبون (لهذا الخيار)
-                          </label>
+                                  if (v != null) {
+                                    persistOptionRole(
+                                      opt.id,
+                                      "wholesaler",
+                                      Number(v)
+                                    );
+                                  }
+                                }}
+                              >
+                                جملة
+                              </Button>
+                              {previewRole === 'retail' && (
+                                <button
+                                  type="button"
+                                  className="text-xs text-red-400 hover:text-red-600"
+                                  title="حذف الخيار"
+                                >
+                                  ×
+                                </button>
+                              )}
+                              <label className="flex w-full items-center gap-2 border-t border-ink/10 pt-2 text-xs text-ink/70">
+                                <input
+                                  type="checkbox"
+                                  checked={opt.requiresCustomerImage}
+                                  disabled={savingId === opt.id}
+                                  onChange={async (e) => {
+                                    setSavingId(opt.id);
+                                    try {
+                                      await updateCatalogOption(opt.id, {
+                                        requires_customer_image: e.target.checked,
+                                      });
+                                      if (selectedId) {
+                                        await loadProduct(selectedId, previewRole);
+                                      }
+                                      toast.success("تم الحفظ");
+                                    } catch (err) {
+                                      toast.error(
+                                        getApiErrorMessage(err, "تعذر الحفظ")
+                                      );
+                                    } finally {
+                                      setSavingId(null);
+                                    }
+                                  }}
+                                  className="accent-orange"
+                                />
+                                صورة مطلوبة من الزبون (لهذا الخيار)
+                              </label>
+                            </>
+                          )}
+                          {group.inherited && (
+                            <span className="text-xs text-ink/40">
+                              {opt.priceDelta !== 0 ? `+${opt.priceDelta} د.ع` : "—"}
+                            </span>
+                          )}
                         </li>
                       ))}
                     </ul>

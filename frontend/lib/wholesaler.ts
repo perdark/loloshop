@@ -1,8 +1,10 @@
 import { api } from "./api";
 import type {
   JoinPayload,
+  OrderStatus,
   PendingStudent,
   WholesalerDashboard,
+  WholesalerStudentRow,
 } from "./types";
 
 interface ApiDashboard {
@@ -10,6 +12,8 @@ interface ApiDashboard {
   student_count: number;
   pending_count: number;
   completed_designs: number;
+  commission_rate: number;
+  earned_commission: number;
   referral_url: string;
   referral_code: string;
 }
@@ -31,6 +35,8 @@ export async function getWholesalerDashboard(): Promise<WholesalerDashboard> {
     studentCount: data.student_count,
     pendingCount: data.pending_count,
     completedDesigns: data.completed_designs,
+    commissionRate: data.commission_rate ?? 0,
+    earnedCommission: data.earned_commission ?? 0,
     referralUrl: data.referral_url,
     referralCode: data.referral_code,
   };
@@ -57,6 +63,63 @@ export async function approveStudent(studentId: string): Promise<void> {
 
 export async function rejectStudent(studentId: string): Promise<void> {
   await api.post(`/wholesaler/reject/${studentId}`);
+}
+
+export async function bulkSetStudentStatus(
+  studentIds: string[],
+  action: "approve" | "reject"
+): Promise<number> {
+  const { data } = await api.post<{ data: { count: number } }>(
+    "/wholesaler/students/bulk",
+    { studentIds, action }
+  );
+  return data.data?.count ?? 0;
+}
+
+interface ApiWholesalerStudentRow {
+  id: string;
+  name: string;
+  phone: string;
+  status: "pending_approval" | "approved" | "rejected";
+  university_name: string | null;
+  department: string | null;
+  order_status: string | null;
+  is_completed?: boolean;
+}
+
+const ORDER_STATUS_SET = new Set<OrderStatus>([
+  "pending_approval",
+  "designing",
+  "design_complete",
+  "staff_review",
+  "printing",
+  "ready",
+  "delivered",
+  "cancelled",
+]);
+
+function parseOrderStatus(v: string | null): OrderStatus | null {
+  if (!v) return null;
+  return ORDER_STATUS_SET.has(v as OrderStatus) ? (v as OrderStatus) : null;
+}
+
+export async function getWholesalerStudents(params?: {
+  status?: "" | "pending_approval" | "approved" | "rejected";
+}): Promise<WholesalerStudentRow[]> {
+  const { data } = await api.get<{ data: ApiWholesalerStudentRow[] }>(
+    "/wholesaler/students",
+    { params: { status: params?.status || undefined } }
+  );
+  return (data.data || []).map((r) => ({
+    id: r.id,
+    name: r.name,
+    phone: r.phone,
+    status: r.status,
+    universityName: r.university_name,
+    department: r.department,
+    orderStatus: parseOrderStatus(r.order_status),
+    isCompleted: Boolean(r.is_completed),
+  }));
 }
 
 export async function joinWithCode(

@@ -57,6 +57,7 @@ function mapGroup(
     requiresCustomerImage: Boolean(
       raw.requires_customer_image ?? raw.requiresCustomerImage
     ),
+    inherited: Boolean((raw as Record<string, unknown>)._inherited ?? (raw as Record<string, unknown>).inherited ?? false),
     options: opts.map(mapOption),
   };
 }
@@ -118,6 +119,8 @@ function mapProductFull(raw: Record<string, unknown>): CatalogProduct {
     images: gallery.map(mapProductImage),
     priceRole: (raw.price_role as PriceRole) ?? undefined,
     optionGroups: groups.map((g) => mapGroup(g, id)),
+    parentId: (raw.parent_id as string | null) ?? null,
+    parentNameAr: (raw.parent_name_ar as string | null) ?? null,
   };
 }
 
@@ -138,6 +141,8 @@ function mapProductSummary(raw: Record<string, unknown>): CatalogProductSummary 
     imageUrl: resolveCatalogMediaUrl(raw.image_url as string | null),
     groupCount: Number(raw.group_count ?? raw.groupCount ?? 0),
     imageCount: Number(raw.image_count ?? raw.imageCount ?? 0),
+    parentId: (raw.parent_id as string | null) ?? null,
+    parentNameAr: (raw.parent_name as string | null) ?? null,
   };
 }
 
@@ -180,6 +185,19 @@ export async function getProductFull(
     { params: role ? { role } : undefined }
   );
   return mapProductFull(data.data);
+}
+
+export async function createCatalogProduct(body: {
+  type: string;
+  name_ar: string;
+  description?: string | null;
+  base_price: number;
+  customizable?: boolean;
+  gender_restriction?: string | null;
+  parent_id?: string | null;
+}): Promise<{ id: string }> {
+  const { data } = await api.post<{ data: { id: string } }>("/catalog/products", body);
+  return data.data;
 }
 
 export async function updateCatalogProduct(

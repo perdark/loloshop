@@ -96,7 +96,7 @@ export function AdminProductMedia({
           )}
         </div>
         <div className="flex flex-col gap-2 text-sm">
-          <label className="cursor-pointer text-orange underline">
+          <label className="cursor-pointer text-orange-ink underline">
             رفع صورة رئيسية
             <input
               type="file"
@@ -110,7 +110,7 @@ export function AdminProductMedia({
               }}
             />
           </label>
-          <label className="cursor-pointer text-orange underline">
+          <label className="cursor-pointer text-orange-ink underline">
             إضافة للمعرض
             <input
               type="file"

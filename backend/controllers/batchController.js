@@ -79,12 +79,20 @@ async function getBatch(req, res) {
   const students = await query(
     `SELECT s.id, u.name, s.full_name_third, s.status,
             COALESCE(SUM(o.price), 0)::bigint AS total,
-            COUNT(o.id)::int AS order_count
+            CASE WHEN COUNT(o.id) FILTER (WHERE o.status <> 'cancelled') = 0
+                 THEN NULL
+                 ELSE COALESCE(SUM(o.cost) FILTER (WHERE o.status <> 'cancelled'), 0)::bigint
+            END AS cost,
+            CASE WHEN COUNT(o.id) FILTER (WHERE o.status <> 'cancelled') = 0
+                 THEN NULL
+                 ELSE COALESCE(SUM(o.profit) FILTER (WHERE o.status <> 'cancelled'), 0)::bigint
+            END AS profit,
+            COUNT(o.id) FILTER (WHERE o.status <> 'cancelled')::int AS order_count
      FROM students s
      JOIN users u ON u.id = s.user_id
-     LEFT JOIN orders o ON o.student_id = s.id AND o.batch_id = $1 AND o.status <> 'cancelled'
+     LEFT JOIN orders o ON o.student_id = s.id AND o.batch_id = $1
      WHERE s.wholesaler_id = $2
-     GROUP BY s.id, u.name
+     GROUP BY s.id, u.name, s.full_name_third, s.status
      ORDER BY u.name`,
     [id, batch.wholesaler_id]
   );

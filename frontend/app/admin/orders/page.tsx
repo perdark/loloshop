@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { getAdminOrders, getAdminWholesalers } from "@/lib/admin";
+import { getApiErrorMessage } from "@/lib/api";
+import { getAdminOrders, getAdminWholesalers, updateOrderCost } from "@/lib/admin";
 import { ORDER_STATUS_LABELS, ORDER_STATUS_OPTIONS } from "@/lib/constants";
 import { formatDateShort, formatIQD } from "@/lib/format";
 import type { AdminOrder, AdminWholesaler, OrderStatus } from "@/lib/types";
@@ -21,6 +22,8 @@ export default function AdminOrdersPage() {
   const [status, setStatus] = useState<OrderStatus | "">("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [costDraftById, setCostDraftById] = useState<Record<string, string>>({});
+  const [savingCostId, setSavingCostId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -36,16 +39,45 @@ export default function AdminOrdersPage() {
       ]);
       setOrders(ordersData);
       setWholesalers(wholesalersData);
-    } catch {
-      toast.error("تعذر تحميل الطلبات");
+      setCostDraftById(
+        Object.fromEntries(
+          ordersData.map((o) => [o.id, o.cost != null ? String(o.cost) : ""])
+        )
+      );
+    } catch (e) {
+      toast.error(getApiErrorMessage(e, "تعذر تحميل الطلبات"));
     } finally {
       setLoading(false);
     }
   }, [wholesalerId, status, dateFrom, dateTo]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch on mount / filters
     load();
   }, [load]);
+
+  async function handleSaveCost(orderId: string) {
+    const raw = (costDraftById[orderId] ?? "").trim().replace(/[^\d]/g, "");
+    if (raw === "") {
+      toast.error("أدخل رقماً للتكلفة (دينار عراقي)");
+      return;
+    }
+    const cost = Number.parseInt(raw, 10);
+    if (Number.isNaN(cost) || cost < 0) {
+      toast.error("تكلفة غير صالحة");
+      return;
+    }
+    setSavingCostId(orderId);
+    try {
+      await updateOrderCost(orderId, cost);
+      toast.success("تم حفظ التكلفة");
+      await load();
+    } catch (e) {
+      toast.error(getApiErrorMessage(e, "تعذر حفظ التكلفة"));
+    } finally {
+      setSavingCostId(null);
+    }
+  }
 
   const wholesalerOptions = [
     { value: "", label: "كل الممثلين" },
@@ -103,7 +135,7 @@ export default function AdminOrdersPage() {
       ) : (
         <>
           <div className="hidden overflow-x-auto rounded-xl border border-ink/10 bg-white md:block">
-            <table className="w-full min-w-[700px] text-sm">
+            <table className="w-full min-w-[880px] text-sm">
               <thead>
                 <tr className="border-b border-ink/10 bg-ink/5 text-right">
                   <th className="px-4 py-3 font-semibold text-ink">الاسم الكامل</th>
@@ -113,6 +145,7 @@ export default function AdminOrdersPage() {
                   <th className="px-4 py-3 font-semibold text-ink">الربح</th>
                   <th className="px-4 py-3 font-semibold text-ink">الحالة</th>
                   <th className="px-4 py-3 font-semibold text-ink">الممثل</th>
+                  <th className="px-4 py-3 font-semibold text-ink">تعديل التكلفة</th>
                 </tr>
               </thead>
               <tbody>
@@ -133,6 +166,31 @@ export default function AdminOrdersPage() {
                       {ORDER_STATUS_LABELS[order.status]}
                     </td>
                     <td className="px-4 py-3 text-ink/70">{order.wholesalerName}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Input
+                          type="text"
+                          inputMode="numeric"
+                          className="max-w-[8rem]"
+                          value={costDraftById[order.id] ?? ""}
+                          onChange={(e) =>
+                            setCostDraftById((p) => ({
+                              ...p,
+                              [order.id]: e.target.value,
+                            }))
+                          }
+                          placeholder="د.ع"
+                          dir="ltr"
+                        />
+                        <Button
+                          className="min-h-9 px-3 py-2 text-xs"
+                          loading={savingCostId === order.id}
+                          onClick={() => handleSaveCost(order.id)}
+                        >
+                          حفظ
+                        </Button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -164,6 +222,30 @@ export default function AdminOrdersPage() {
                       {order.profit != null ? formatIQD(order.profit) : "—"}
                     </span>
                   </div>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-ink/10 pt-3">
+                  <span className="text-sm text-ink/50">تعديل التكلفة:</span>
+                  <Input
+                    type="text"
+                    inputMode="numeric"
+                    className="max-w-[7rem]"
+                    value={costDraftById[order.id] ?? ""}
+                    onChange={(e) =>
+                      setCostDraftById((p) => ({
+                        ...p,
+                        [order.id]: e.target.value,
+                      }))
+                    }
+                    placeholder="د.ع"
+                    dir="ltr"
+                  />
+                  <Button
+                    className="min-h-9 px-3 py-2 text-xs"
+                    loading={savingCostId === order.id}
+                    onClick={() => handleSaveCost(order.id)}
+                  >
+                    حفظ
+                  </Button>
                 </div>
                 <p className="mt-2 text-xs text-ink/50">
                   {ORDER_STATUS_LABELS[order.status]} · {formatDateShort(order.createdAt)}

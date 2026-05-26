@@ -46,6 +46,7 @@ export default function WholesalerLayout({
         <div className="mx-auto flex max-w-md">
           {[
             { href: "/wholesaler", label: "الرئيسية" },
+            { href: "/wholesaler/students", label: "الطلاب" },
             { href: "/wholesaler/batch", label: "الدفعة" },
             { href: "/wholesaler/package", label: "الباقات" },
           ].map((item) => (
@@ -53,7 +54,7 @@ export default function WholesalerLayout({
               key={item.href}
               href={item.href}
               className={`flex min-h-14 flex-1 items-center justify-center text-sm font-medium ${
-                pathname === item.href ? "text-orange" : "text-ink/50"
+                pathname === item.href ? "text-orange-ink" : "text-ink/50"
               }`}
             >
               {item.label}

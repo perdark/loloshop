@@ -9,5 +9,6 @@ router.get('/pending-students', c.pendingStudents);
 router.get('/students', c.listStudents);
 router.post('/approve/:studentId', c.approve);
 router.post('/reject/:studentId', c.reject);
+router.post('/students/bulk', c.bulkSetStatus);
 
 module.exports = router;

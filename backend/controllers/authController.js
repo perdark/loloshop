@@ -18,9 +18,16 @@ async function register(req, res) {
   if (gender && !['male', 'female'].includes(gender)) {
     return res.status(400).json({ error: 'الجنس غير صالح', code: 'ERR_VALIDATION' });
   }
-  const existing = await query(`SELECT id FROM users WHERE phone = $1`, [phone]);
+  const existing = await query(
+    `SELECT phone, email FROM users WHERE phone = $1 OR (email IS NOT NULL AND email = $2)`,
+    [phone, email || null]
+  );
   if (existing.rows.length) {
-    return res.status(409).json({ error: 'الرقم مستخدم', code: 'ERR_PHONE_TAKEN' });
+    const taken = existing.rows[0];
+    if (taken.phone === phone) {
+      return res.status(409).json({ error: 'رقم الهاتف مستخدم مسبقاً', code: 'ERR_PHONE_TAKEN' });
+    }
+    return res.status(409).json({ error: 'البريد الإلكتروني مستخدم مسبقاً', code: 'ERR_EMAIL_TAKEN' });
   }
   const hash = await bcrypt.hash(password, SALT_ROUNDS);
   const u = await query(

@@ -27,7 +27,7 @@ export function StaffOrderBreakdown({ detail }: StaffOrderBreakdownProps) {
             </div>
             {line.customerImageUrl && (
               <div className="mt-2">
-                <p className="mb-1 text-[11px] font-medium text-orange">
+                <p className="mb-1 text-[11px] font-medium text-orange-ink">
                   صورة مطلوبة من الزبون
                 </p>
                 <div className="relative h-32 w-full overflow-hidden rounded-lg border border-orange/20 bg-cream">
@@ -49,7 +49,7 @@ export function StaffOrderBreakdown({ detail }: StaffOrderBreakdownProps) {
       </ul>
       <div className="mt-3 flex justify-between border-t border-ink/10 pt-3 font-bold">
         <span>المجموع</span>
-        <span className="text-orange" dir="ltr">
+        <span className="text-orange-ink" dir="ltr">
           {formatIQD(detail.total)}
         </span>
       </div>

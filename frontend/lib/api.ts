@@ -18,15 +18,46 @@ api.interceptors.request.use((config) => {
       config.headers.Authorization = `Bearer ${token}`;
     }
   }
+  // Default json Content-Type breaks multer — server returns «لم يتم رفع ملف»
+  if (typeof FormData !== "undefined" && config.data instanceof FormData) {
+    if (typeof config.headers.setContentType === "function") {
+      config.headers.setContentType(false);
+    } else if (typeof config.headers.delete === "function") {
+      config.headers.delete("Content-Type");
+    } else {
+      delete config.headers["Content-Type"];
+    }
+  }
   return config;
 });
+
+/** Multipart upload — reuses the axios instance (interceptor strips the JSON
+ *  Content-Type for FormData) so auth + 401 handling stay unified. */
+export async function apiUploadFile(
+  path: string,
+  file: File,
+  fieldName = "file"
+): Promise<unknown> {
+  const form = new FormData();
+  form.append(fieldName, file, file.name);
+  const { data } = await api.post(path, form);
+  return data;
+}
 
 api.interceptors.response.use(
   (res) => res,
   (error: AxiosError<ApiError>) => {
     if (error.response?.status === 401 && typeof window !== "undefined") {
       const path = window.location.pathname;
-      if (!path.startsWith("/login") && !path.startsWith("/join")) {
+      const url = error.config?.url || "";
+      const isPublicCatalog =
+        url.includes("/catalog/shop") ||
+        url.includes("/catalog/products/") && url.includes("/full");
+      if (
+        !isPublicCatalog &&
+        !path.startsWith("/login") &&
+        !path.startsWith("/join")
+      ) {
         logout();
       }
     }

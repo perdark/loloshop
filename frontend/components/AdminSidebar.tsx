@@ -17,7 +17,7 @@ const navItems: {
   { href: "/admin/wholesalers", label: "الممثلون", exact: false },
   { href: "/admin/products", label: "الكتالوج", exact: false },
   { href: "/admin/batches", label: "الدفعات", exact: false },
-  { href: "#", label: "الموظفون", exact: false, disabled: true },
+  { href: "/admin/staff", label: "الموظفون", exact: false },
   { href: "#", label: "الإعدادات", exact: false, disabled: true },
 ];
 
@@ -45,7 +45,7 @@ export function AdminSidebar({ user, open, onClose }: AdminSidebarProps) {
   const sidebar = (
     <aside className="flex h-full w-64 flex-col bg-ink text-cream">
       <div className="border-b border-cream/10 px-5 py-6">
-        <p className="font-script text-2xl text-orange">lolo shop</p>
+        <p className="font-script text-2xl text-orange-ink">lolo shop</p>
         <p className="font-display text-sm font-semibold text-cream/90">لولو شوب</p>
         <p className="mt-1 text-xs text-cream/60">لوحة المدير</p>
       </div>
@@ -66,7 +66,7 @@ export function AdminSidebar({ user, open, onClose }: AdminSidebarProps) {
               onClick={onClose}
               className={`block rounded-lg px-3 py-2.5 text-sm transition-colors ${
                 isActive(item.href, item.exact)
-                  ? "bg-orange/20 font-semibold text-orange"
+                  ? "bg-orange/20 font-semibold text-orange-ink"
                   : "text-cream/80 hover:bg-cream/10"
               }`}
             >

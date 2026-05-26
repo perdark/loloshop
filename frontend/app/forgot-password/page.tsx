@@ -42,7 +42,7 @@ export default function ForgotPasswordPage() {
           </p>
           <Link
             href="/login"
-            className="mt-6 inline-block text-sm text-orange hover:underline"
+            className="mt-6 inline-block text-sm text-orange-ink hover:underline"
           >
             العودة لتسجيل الدخول
           </Link>
@@ -61,7 +61,7 @@ export default function ForgotPasswordPage() {
             إرسال الرابط
           </Button>
           <p className="text-center text-sm">
-            <Link href="/login" className="text-orange hover:underline">
+            <Link href="/login" className="text-orange-ink hover:underline">
               العودة لتسجيل الدخول
             </Link>
           </p>

@@ -20,6 +20,7 @@ const navItems: { filter: StaffListFilter; label: string; href: string }[] = [
     href: "/staff?filter=printing",
   },
   { filter: "done", label: "مكتمل", href: "/staff?filter=done" },
+  { filter: "all", label: "طلاب الممثلين", href: "/staff/wholesalers" },
 ];
 
 interface StaffSidebarProps {
@@ -40,6 +41,7 @@ export function StaffSidebar({ user, open, onClose }: StaffSidebarProps) {
   }
 
   function isActive(item: (typeof navItems)[0]) {
+    if (item.href === "/staff/wholesalers") return pathname.startsWith("/staff/wholesalers");
     if (pathname !== "/staff") return false;
     if (item.filter === "all") {
       return !searchParams.get("filter") || currentFilter === "all";
@@ -50,7 +52,7 @@ export function StaffSidebar({ user, open, onClose }: StaffSidebarProps) {
   const sidebar = (
     <aside className="flex h-full w-64 flex-col bg-ink text-cream">
       <div className="border-b border-cream/10 px-5 py-6">
-        <p className="font-script text-2xl text-orange">lolo shop</p>
+        <p className="font-script text-2xl text-orange-ink">lolo shop</p>
         <p className="font-display text-sm font-semibold text-cream/90">لولو شوب</p>
         <p className="mt-1 text-xs text-cream/60">لوحة الموظف</p>
       </div>
@@ -63,7 +65,7 @@ export function StaffSidebar({ user, open, onClose }: StaffSidebarProps) {
             onClick={onClose}
             className={`block rounded-lg px-3 py-2.5 text-sm transition-colors ${
               isActive(item)
-                ? "bg-orange/20 font-semibold text-orange"
+                ? "bg-orange/20 font-semibold text-orange-ink"
                 : "text-cream/80 hover:bg-cream/10"
             }`}
           >

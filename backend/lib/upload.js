@@ -18,11 +18,16 @@ function makeStorage(subdir) {
   });
 }
 
-const IMAGE_TYPES = /^image\/(png|jpe?g|webp|svg\+xml)$/i;
+const IMAGE_TYPES = /^image\/(png|jpe?g|webp|svg\+xml|heic|heif)$/i;
+const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.svg', '.heic', '.heif']);
 
 function imageFilter(req, file, cb) {
-  if (IMAGE_TYPES.test(file.mimetype)) cb(null, true);
-  else cb(new Error('نوع الملف غير مدعوم'));
+  const ext = path.extname(file.originalname || '').toLowerCase();
+  if (IMAGE_TYPES.test(file.mimetype) || IMAGE_EXT.has(ext)) {
+    cb(null, true);
+    return;
+  }
+  cb(new Error('نوع الملف غير مدعوم (PNG, JPG, WEBP)'));
 }
 
 const logoUpload = multer({

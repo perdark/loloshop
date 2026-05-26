@@ -11,6 +11,18 @@ export type OrderStatus =
   | "cancelled";
 
 export type ProductType = "sash" | "robe" | "cap" | "shawl";
+export type StudentApprovalStatus = "pending_approval" | "approved" | "rejected";
+
+export interface WholesalerStudentRow {
+  id: string;
+  name: string;
+  phone: string;
+  status: StudentApprovalStatus;
+  universityName: string | null;
+  department: string | null;
+  orderStatus: OrderStatus | null;
+  isCompleted: boolean;
+}
 export type CatalogInputType = "single_select" | "toggle" | "counter";
 export type GenderRestriction = "male" | "female" | null;
 export type PriceRole = "wholesaler" | "retail";
@@ -89,6 +101,9 @@ export interface AdminWholesaler {
   referralCode: string;
   referralUrl: string;
   createdAt?: string;
+  commissionRate?: number;
+  totalCommission?: number;
+  earnedCommission?: number;
 }
 
 export interface CreateWholesalerPayload {
@@ -98,6 +113,7 @@ export interface CreateWholesalerPayload {
   password: string;
   referralCode: string;
   deadline: string;
+  commissionRate?: number;
 }
 
 export interface CreateWholesalerResult {
@@ -112,6 +128,8 @@ export interface WholesalerDashboard {
   completedDesigns: number;
   referralUrl: string;
   referralCode: string;
+  commissionRate?: number;
+  earnedCommission?: number;
 }
 
 export interface PendingStudent {
@@ -166,6 +184,7 @@ export interface CatalogOptionGroup {
   /** Customer → admin: must upload for any selection in this group */
   requiresCustomerImage: boolean;
   options: CatalogOption[];
+  inherited?: boolean;
 }
 
 export interface ProductImage {
@@ -189,6 +208,8 @@ export interface CatalogProduct {
   images: ProductImage[];
   priceRole?: PriceRole;
   optionGroups: CatalogOptionGroup[];
+  parentId?: string | null;
+  parentNameAr?: string | null;
 }
 
 export interface CatalogProductSummary {
@@ -205,6 +226,8 @@ export interface CatalogProductSummary {
   imageUrl: string | null;
   groupCount: number;
   imageCount: number;
+  parentId?: string | null;
+  parentNameAr?: string | null;
 }
 
 export interface ShopPackageCard {
@@ -237,13 +260,16 @@ export interface PackageTier {
   id: string;
   nameAr: string;
   price: number;
+  imageUrl?: string | null;
+  sort?: number;
+  active?: boolean;
   sashTypeOptionId: string;
   sashTypeLabel: string;
-  defaultCapOptionId: string;
-  defaultCapLabel: string;
-  robeProductId: string;
-  sashProductId: string;
-  capProductId: string;
+  defaultCapOptionId?: string;
+  defaultCapLabel?: string;
+  robeProductId?: string;
+  sashProductId?: string;
+  capProductId?: string;
 }
 
 export interface BatchSummary {
@@ -263,6 +289,8 @@ export interface BatchStudentDetail {
   status: string;
   total: number;
   orderCount: number;
+  cost: number | null;
+  profit: number | null;
 }
 
 export interface BatchDetail {

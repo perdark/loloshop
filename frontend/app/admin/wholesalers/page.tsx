@@ -4,12 +4,14 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
   createWholesaler,
+  deleteWholesaler,
   extendWholesalerDeadline,
   getAdminWholesalers,
+  updateWholesalerCommission,
 } from "@/lib/admin";
 import { getApiErrorMessage } from "@/lib/api";
-import { formatDateIQ, getJoinUrl } from "@/lib/format";
-import type { AdminWholesaler, CreateWholesalerPayload } from "@/lib/types";
+import { formatDateIQ, formatIQD, getJoinUrl } from "@/lib/format";
+import type { AdminWholesaler } from "@/lib/types";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { CopyButton } from "@/components/ui/CopyButton";
@@ -17,6 +19,7 @@ import { Modal } from "@/components/ui/Modal";
 import { Input } from "@/components/ui/Input";
 import { PageLoader } from "@/components/ui/Spinner";
 import { EmptyState } from "@/components/ui/EmptyState";
+import Link from "next/link";
 
 const SLUG_RE = /^[a-z0-9-]+$/;
 
@@ -25,19 +28,21 @@ export default function AdminWholesalersPage() {
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
   const [extendOpen, setExtendOpen] = useState(false);
+  const [commissionOpen, setCommissionOpen] = useState(false);
   const [selected, setSelected] = useState<AdminWholesaler | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  const [form, setForm] = useState<CreateWholesalerPayload>({
-    name: "",
-    phone: "",
-    email: "",
-    password: "",
-    referralCode: "",
-    deadline: "",
-  });
+  // simpler per-field state to avoid any surprising remounts/focus jumps
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [referralCode, setReferralCode] = useState("");
+  const [deadline, setDeadline] = useState("");
+  const [commission, setCommission] = useState("0");
   const [newDeadline, setNewDeadline] = useState("");
+  const [newCommission, setNewCommission] = useState("0");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -52,20 +57,21 @@ export default function AdminWholesalersPage() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial fetch
     load();
   }, [load]);
 
   function validateCreate(): boolean {
     const e: Record<string, string> = {};
-    if (!form.name.trim()) e.name = "الاسم مطلوب";
-    if (!form.phone.trim()) e.phone = "رقم الهاتف مطلوب";
-    if (!form.email.trim()) e.email = "البريد مطلوب";
-    if (!form.password || form.password.length < 6)
+    if (!name.trim()) e.name = "الاسم مطلوب";
+    if (!phone.trim()) e.phone = "رقم الهاتف مطلوب";
+    if (!email.trim()) e.email = "البريد مطلوب";
+    if (!password || password.length < 6)
       e.password = "كلمة المرور ٦ أحرف على الأقل";
-    if (!form.referralCode.trim()) e.referralCode = "رمز الدعوة مطلوب";
-    else if (!SLUG_RE.test(form.referralCode))
+    if (!referralCode.trim()) e.referralCode = "رمز الدعوة مطلوب";
+    else if (!SLUG_RE.test(referralCode))
       e.referralCode = "أحرف إنجليزية صغيرة وأرقام وشرطة فقط";
-    if (!form.deadline) e.deadline = "الموعد النهائي مطلوب";
+    if (!deadline) e.deadline = "الموعد النهائي مطلوب";
     setErrors(e);
     return Object.keys(e).length === 0;
   }
@@ -74,20 +80,48 @@ export default function AdminWholesalersPage() {
     if (!validateCreate()) return;
     setSubmitting(true);
     try {
-      await createWholesaler(form);
+      await createWholesaler({
+        name,
+        phone,
+        email,
+        password,
+        referralCode,
+        deadline,
+        commissionRate: Number(commission) || 0,
+      });
       toast.success("تم إنشاء الممثل");
       setCreateOpen(false);
-      setForm({
-        name: "",
-        phone: "",
-        email: "",
-        password: "",
-        referralCode: "",
-        deadline: "",
-      });
+      setName("");
+      setPhone("");
+      setEmail("");
+      setPassword("");
+      setReferralCode("");
+      setDeadline("");
+      setCommission("0");
       load();
     } catch (err) {
       toast.error(getApiErrorMessage(err, "تعذر إنشاء الممثل"));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleCommission() {
+    if (!selected) return;
+    const rate = Number(newCommission);
+    if (!Number.isFinite(rate) || rate < 0 || rate > 100) {
+      toast.error("نسبة بين 0 و 100");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await updateWholesalerCommission(selected.id, rate);
+      toast.success("تم تحديث العمولة");
+      setCommissionOpen(false);
+      setSelected(null);
+      load();
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "تعذر تحديث العمولة"));
     } finally {
       setSubmitting(false);
     }
@@ -145,6 +179,15 @@ export default function AdminWholesalersPage() {
                     <span className="text-ink/50">الموعد: </span>
                     {formatDateIQ(w.deadline)}
                   </p>
+                  <p className="mt-1 text-sm">
+                    <span className="text-ink/50">العمولة: </span>
+                    {w.commissionRate}%
+                    <span className="mx-2 text-ink/30">|</span>
+                    <span className="text-ink/50">المستحق: </span>
+                    <span className="font-semibold text-orange-ink">
+                      {formatIQD(w.earnedCommission ?? 0)}
+                    </span>
+                  </p>
                   <p className="mt-1 break-all text-xs text-ink/50">
                     {w.referralUrl || getJoinUrl(w.referralCode)}
                   </p>
@@ -153,6 +196,12 @@ export default function AdminWholesalersPage() {
                   <CopyButton
                     text={w.referralUrl || getJoinUrl(w.referralCode)}
                   />
+                  <Link
+                    href={`/admin/wholesalers/${w.id}/students`}
+                    className="inline-flex min-h-11 items-center justify-center rounded-lg border border-ink/15 bg-white px-4 text-sm font-medium text-ink hover:bg-ink/5"
+                  >
+                    عرض الطلاب
+                  </Link>
                   <Button
                     variant="ghost"
                     onClick={() => {
@@ -166,6 +215,40 @@ export default function AdminWholesalersPage() {
                     }}
                   >
                     تمديد الموعد
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      setSelected(w);
+                      setNewCommission(String(w.commissionRate ?? 0));
+                      setCommissionOpen(true);
+                    }}
+                  >
+                    العمولة
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    className="text-red-600"
+                    onClick={async () => {
+                      if (
+                        !window.confirm(
+                          "هل أنت متأكد من حذف هذا الممثل؟ سيتم إلغاء ربط الطلاب به."
+                        )
+                      ) {
+                        return;
+                      }
+                      try {
+                        await deleteWholesaler(w.id);
+                        toast.success("تم حذف الممثل");
+                        load();
+                      } catch (err) {
+                        toast.error(
+                          getApiErrorMessage(err, "تعذر حذف الممثل")
+                        );
+                      }
+                    }}
+                  >
+                    حذف
                   </Button>
                 </div>
               </div>
@@ -192,48 +275,88 @@ export default function AdminWholesalersPage() {
         <div className="space-y-3">
           <Input
             label="الاسم"
-            value={form.name}
-            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            autoComplete="name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
             error={errors.name}
           />
           <Input
             label="الهاتف"
             type="tel"
-            value={form.phone}
-            onChange={(e) => setForm({ ...form, phone: e.target.value })}
+            autoComplete="tel"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
             error={errors.phone}
           />
           <Input
             label="البريد الإلكتروني"
             type="email"
-            value={form.email}
-            onChange={(e) => setForm({ ...form, email: e.target.value })}
+            autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
             error={errors.email}
           />
           <Input
             label="كلمة المرور"
             type="password"
-            value={form.password}
-            onChange={(e) => setForm({ ...form, password: e.target.value })}
+            autoComplete="new-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
             error={errors.password}
           />
           <Input
             label="رمز الدعوة (مثال: baghdad-cs-2026)"
-            value={form.referralCode}
-            onChange={(e) =>
-              setForm({ ...form, referralCode: e.target.value.toLowerCase() })
-            }
+            autoComplete="off"
+            value={referralCode}
+            onChange={(e) => setReferralCode(e.target.value.toLowerCase())}
             error={errors.referralCode}
             dir="ltr"
           />
           <Input
             label="الموعد النهائي"
             type="date"
-            value={form.deadline}
-            onChange={(e) => setForm({ ...form, deadline: e.target.value })}
+            autoComplete="off"
+            value={deadline}
+            onChange={(e) => setDeadline(e.target.value)}
             error={errors.deadline}
           />
+          <Input
+            label="نسبة العمولة (%)"
+            type="number"
+            min={0}
+            max={100}
+            step={0.5}
+            autoComplete="off"
+            value={commission}
+            onChange={(e) => setCommission(e.target.value)}
+          />
         </div>
+      </Modal>
+
+      <Modal
+        open={commissionOpen}
+        onClose={() => setCommissionOpen(false)}
+        title={`العمولة — ${selected?.name ?? ""}`}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setCommissionOpen(false)}>
+              إلغاء
+            </Button>
+            <Button onClick={handleCommission} loading={submitting}>
+              حفظ
+            </Button>
+          </>
+        }
+      >
+        <Input
+          label="نسبة العمولة (%)"
+          type="number"
+          min={0}
+          max={100}
+          step={0.5}
+          value={newCommission}
+          onChange={(e) => setNewCommission(e.target.value)}
+        />
       </Modal>
 
       <Modal

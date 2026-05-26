@@ -66,6 +66,7 @@ export default function StaffOrderDetailPage() {
   }, [orderId, router]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial fetch
     load();
   }, [load]);
 
@@ -106,7 +107,7 @@ export default function StaffOrderDetailPage() {
       <div className="mb-4">
         <Link
           href="/staff"
-          className="text-sm text-orange hover:underline"
+          className="text-sm text-orange-ink hover:underline"
         >
           ← العودة للطلبات
         </Link>
@@ -126,6 +127,7 @@ export default function StaffOrderDetailPage() {
             sashColor={design.sash_color}
             leftCanvas={design.left_canvas}
             rightCanvas={design.right_canvas}
+            fontsUsed={design.fonts_used || []}
           />
           <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
             <ExportPngButton

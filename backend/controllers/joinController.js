@@ -18,8 +18,18 @@ async function getReferral(req, res) {
 
 async function joinReferral(req, res) {
   const { code } = req.params;
-  const { name, phone, email, password, university_name, department, gender } = req.body;
-  if (!name || !phone || !password) {
+  const {
+    name,
+    full_name_third,
+    phone,
+    email,
+    password,
+    university_name,
+    department,
+    gender,
+  } = req.body;
+  const studentName = name || full_name_third;
+  if (!studentName || !phone || !password) {
     return res.status(400).json({ error: 'بيانات ناقصة', code: 'ERR_VALIDATION' });
   }
   if (gender && !['male', 'female'].includes(gender)) {
@@ -33,26 +43,33 @@ async function joinReferral(req, res) {
     return res.status(404).json({ error: 'الرابط غير صالح', code: 'ERR_REFERRAL_INVALID' });
   }
   const wholesalerId = wRows[0].id;
-  const exists = await query(`SELECT id FROM users WHERE phone = $1`, [phone]);
+  const exists = await query(
+    `SELECT phone, email FROM users WHERE phone = $1 OR (email IS NOT NULL AND email = $2)`,
+    [phone, email || null]
+  );
   if (exists.rows.length) {
-    return res.status(409).json({ error: 'الرقم مستخدم', code: 'ERR_PHONE_TAKEN' });
+    const taken = exists.rows[0];
+    if (taken.phone === phone) {
+      return res.status(409).json({ error: 'رقم الهاتف مستخدم مسبقاً', code: 'ERR_PHONE_TAKEN' });
+    }
+    return res.status(409).json({ error: 'البريد الإلكتروني مستخدم مسبقاً', code: 'ERR_EMAIL_TAKEN' });
   }
   const hash = await bcrypt.hash(password, 10);
   const result = await tx(async (client) => {
     const u = await client.query(
       `INSERT INTO users (name, phone, email, password_hash, role) VALUES ($1, $2, $3, $4, 'retail') RETURNING id`,
-      [name, phone, email || null, hash]
+      [studentName, phone, email || null, hash]
     );
     const s = await client.query(
       `INSERT INTO students (user_id, wholesaler_id, full_name_third, university_name, department, gender, status)
        VALUES ($1, $2, $3, $4, $5, $6, 'pending_approval') RETURNING id`,
-      [u.rows[0].id, wholesalerId, name, university_name || null, department || null, gender || null]
+      [u.rows[0].id, wholesalerId, studentName, university_name || null, department || null, gender || null]
     );
     await client.query(
       `INSERT INTO notifications (user_id, type, title_ar, body_ar, link)
        SELECT w.user_id, 'student_joined', 'طالب جديد ينتظر الموافقة', $1, '/wholesaler'
        FROM wholesalers w WHERE w.id = $2`,
-      [`${name} انضم عبر رابطك`, wholesalerId]
+      [`${studentName} انضم عبر رابطك`, wholesalerId]
     );
     await client.query(
       `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)

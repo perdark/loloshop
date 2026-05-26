@@ -63,7 +63,7 @@ export default function ResetPasswordPage() {
           حفظ
         </Button>
         <p className="text-center text-sm">
-          <Link href="/login" className="text-orange hover:underline">
+          <Link href="/login" className="text-orange-ink hover:underline">
             العودة لتسجيل الدخول
           </Link>
         </p>

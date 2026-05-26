@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/Button";
 import {
   exportHighResCombinedPng,
+  exportHighResGownPng,
   type HighResExportInput,
 } from "./HighResExporter";
 
@@ -14,28 +15,53 @@ interface ExportPngButtonProps {
 }
 
 export function ExportPngButton({ design, studentName }: ExportPngButtonProps) {
-  const [loading, setLoading] = useState(false);
+  const [loadingGown, setLoadingGown] = useState(false);
+  const [loadingPanels, setLoadingPanels] = useState(false);
 
-  async function handleExport() {
-    setLoading(true);
+  const safeName = studentName.replace(/\s+/g, "-").slice(0, 40);
+
+  async function handleGownExport() {
+    setLoadingGown(true);
     try {
-      const safeName = studentName.replace(/\s+/g, "-").slice(0, 40);
-      await exportHighResCombinedPng(
-        design,
-        `loloshop-${safeName}-300dpi.png`
-      );
-      toast.success("تم تنزيل PNG بدقة عالية");
+      await exportHighResGownPng(design, `loloshop-gown-${safeName}.png`);
+      toast.success("تم تنزيل صورة الروب");
     } catch (e) {
       console.error(e);
-      toast.error("تعذر تصدير الصورة");
+      toast.error("تعذر تصدير صورة الروب");
     } finally {
-      setLoading(false);
+      setLoadingGown(false);
+    }
+  }
+
+  async function handlePanelsExport() {
+    setLoadingPanels(true);
+    try {
+      await exportHighResCombinedPng(
+        design,
+        `loloshop-panels-${safeName}-300dpi.png`
+      );
+      toast.success("تم تنزيل لوحات الطباعة");
+    } catch (e) {
+      console.error(e);
+      toast.error("تعذر تصدير اللوحات");
+    } finally {
+      setLoadingPanels(false);
     }
   }
 
   return (
-    <Button onClick={handleExport} loading={loading}>
-      تنزيل PNG (300 DPI)
-    </Button>
+    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+      <Button onClick={handleGownExport} loading={loadingGown} disabled={loadingPanels}>
+        تنزيل PNG الروب
+      </Button>
+      <Button
+        variant="ghost"
+        onClick={handlePanelsExport}
+        loading={loadingPanels}
+        disabled={loadingGown}
+      >
+        تنزيل لوحات الطباعة
+      </Button>
+    </div>
   );
 }

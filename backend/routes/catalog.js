@@ -1,11 +1,12 @@
 const router = require('express').Router();
-const { authRequired, requireRole } = require('../middleware/auth');
+const { authRequired, requireRole, optionalAuth } = require('../middleware/auth');
 const { imageUpload } = require('../lib/upload');
 const c = require('../controllers/catalogController');
 
 // Public-ish (auth optional for role pricing)
 router.get('/shop', optionalAuth, c.getShop);                      // packages + products grouped by type
 router.get('/products/:id/full', optionalAuth, c.getProductFull);  // full config for configurator
+router.get('/packages', optionalAuth, c.listPackages);             // active packages for wholesaler students
 
 // Everything below is admin-only
 router.use(authRequired, requireRole('admin'));
@@ -29,10 +30,10 @@ router.put('/options/:id/price-role', c.setOptionPriceRole);
 
 router.post('/uploads/image', imageUpload.single('file'), c.uploadImage);
 
-module.exports = router;
+// Package CRUD (admin) — GET uses public route above (with ?role= override)
+router.post('/packages', c.createPackage);
+router.patch('/packages/:id', c.updatePackage);
+router.delete('/packages/:id', c.deletePackage);
+router.put('/packages/:id/rule', c.setPackageRule);
 
-// Resolve req.user when a token is present, but don't reject anonymous (retail price fallback)
-function optionalAuth(req, res, next) {
-  if (req.headers.authorization) return authRequired(req, res, next);
-  next();
-}
+module.exports = router;

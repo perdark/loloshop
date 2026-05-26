@@ -44,7 +44,7 @@ export function CustomerImageUpload({
     <div className="mt-3 rounded-lg border-2 border-orange/50 bg-orange/5 p-3">
       <p className="text-sm font-semibold text-ink">
         صورة مطلوبة منك
-        <span className="mr-1 text-orange">*</span>
+        <span className="mr-1 text-orange-ink">*</span>
       </p>
       <p className="mt-0.5 text-xs text-ink/55">
         ارفع صورة مرجعية للطباعة — يختلف عن صورة التوضيح من الأدمن أدناه.
@@ -97,7 +97,7 @@ export function CustomerImageUpload({
           </div>
           <button
             type="button"
-            className="mt-2 text-xs text-orange underline"
+            className="mt-2 text-xs text-orange-ink underline"
             disabled={uploading}
             onClick={() => inputRef.current?.click()}
           >
@@ -109,7 +109,7 @@ export function CustomerImageUpload({
           type="button"
           disabled={uploading}
           onClick={() => inputRef.current?.click()}
-          className="mt-3 flex min-h-12 w-full items-center justify-center rounded-lg border border-dashed border-orange bg-white text-sm font-medium text-orange disabled:opacity-50"
+          className="mt-3 flex min-h-12 w-full items-center justify-center rounded-lg border border-dashed border-orange bg-white text-sm font-medium text-orange-ink disabled:opacity-50"
         >
           {uploading ? "جاري الرفع…" : "اختر صورة من جهازك"}
         </button>

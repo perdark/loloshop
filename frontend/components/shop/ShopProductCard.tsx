@@ -39,10 +39,10 @@ export function ShopProductCardLink({ product }: ShopProductCardProps) {
         )}
       </div>
       <div className="flex flex-1 flex-col p-3">
-        <p className="line-clamp-2 text-sm font-semibold text-ink group-hover:text-orange">
+        <p className="line-clamp-2 text-sm font-semibold text-ink group-hover:text-orange-ink">
           {product.nameAr}
         </p>
-        <p className="mt-auto pt-2 text-xs font-bold text-orange" dir="ltr">
+        <p className="mt-auto pt-2 text-xs font-bold text-orange-ink" dir="ltr">
           يبدأ من {formatIQD(product.basePrice)}
         </p>
       </div>

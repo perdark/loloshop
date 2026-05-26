@@ -17,7 +17,7 @@ export function AuthCard({ title, subtitle, children }: AuthCardProps) {
     >
       <div className="w-full max-w-md overflow-hidden rounded-2xl border border-ink/10 bg-white shadow-lg">
         <div className="bg-ink px-6 py-5 text-center">
-          <p className="font-script text-3xl text-orange">lolo shop</p>
+          <p className="font-script text-3xl text-orange-ink">lolo shop</p>
           <p className="font-display text-lg font-semibold text-cream">لولو شوب</p>
           {subtitle && (
             <p className="mt-1 text-sm text-cream/70">{subtitle}</p>

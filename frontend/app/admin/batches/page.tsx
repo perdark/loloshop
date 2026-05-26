@@ -47,7 +47,7 @@ export default function AdminBatchesPage() {
                       الموعد: {formatDateIQ(b.deadline)} · {b.orderCount} طلب
                     </p>
                   </div>
-                  <p className="font-bold text-orange" dir="ltr">
+                  <p className="font-bold text-orange-ink" dir="ltr">
                     {formatIQD(b.grandTotal)}
                   </p>
                 </div>
@@ -57,7 +57,7 @@ export default function AdminBatchesPage() {
         </ul>
       )}
 
-      <Link href="/admin" className="text-sm text-orange hover:underline">
+      <Link href="/admin" className="text-sm text-orange-ink hover:underline">
         ← لوحة التحكم
       </Link>
     </div>

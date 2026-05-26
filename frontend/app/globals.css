@@ -4,6 +4,9 @@
   /* --- Brand: warm orange (primary) — official hex codes --- */
   --color-orange: #ff8c00;
   --color-orange-light: #ffa07a;
+  /* Accessible interactive orange for text/links on light backgrounds (WCAG AA ≥4.5:1).
+     Keep --color-orange for large fills/buttons only. */
+  --color-orange-ink: #c2410c;
 
   /* --- Soft accents --- */
   --color-peach: #ffdab9;
@@ -46,10 +49,29 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Global keyboard focus outline for every focusable element (a11y baseline). */
+:focus-visible {
+  outline: 2px solid var(--color-orange-ink);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
 .font-display {
   font-family: var(--font-display);
 }
 
 .font-script {
   font-family: var(--font-script);
+}
+
+/* Gown hotspot panel fill */
+.sash-gown-panel {
+  width: 100%;
+  height: 100%;
+}
+.sash-gown-panel img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
 }

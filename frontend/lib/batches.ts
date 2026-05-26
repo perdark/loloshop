@@ -21,6 +21,8 @@ function mapBatchStudent(raw: Record<string, unknown>): BatchStudentDetail {
     status: String(raw.status),
     total: Number(raw.total ?? 0),
     orderCount: Number(raw.order_count ?? raw.orderCount ?? 0),
+    cost: raw.cost != null ? Number(raw.cost) : null,
+    profit: raw.profit != null ? Number(raw.profit) : null,
   };
 }
 

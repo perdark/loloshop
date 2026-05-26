@@ -1,22 +1,50 @@
 -- LoloShop — PostgreSQL Schema
 -- Currency: IQD | Timezone: stored UTC, displayed UTC+3
--- All prices and costs in Iraqi Dinar (integer, no decimals)
+-- All prices and costs in Iraqi Dinar (BIGINT, no decimals — batch totals can exceed INT4).
+-- Idempotent: safe to re-run `npm run migrate` against an existing DB.
 
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- =====================================================
+-- ENUMS (guarded so re-running migrate does not error)
+-- =====================================================
+DO $$ BEGIN
+  CREATE TYPE user_role AS ENUM ('admin', 'staff', 'wholesaler', 'retail');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE gender AS ENUM ('male', 'female');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE price_role AS ENUM ('wholesaler', 'retail');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE option_input AS ENUM ('single_select', 'toggle', 'counter');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE student_status AS ENUM ('pending_approval', 'approved', 'rejected');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE product_type AS ENUM ('sash', 'robe', 'cap', 'shawl');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE order_status AS ENUM (
+    'pending_approval', 'designing', 'design_complete', 'staff_review',
+    'printing', 'ready', 'delivered', 'cancelled'
+  );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- =====================================================
 -- USERS — all roles share this table
 -- =====================================================
-CREATE TYPE user_role AS ENUM ('admin', 'staff', 'wholesaler', 'retail');
-
--- v2 shared enums
-CREATE TYPE gender AS ENUM ('male', 'female');
-CREATE TYPE price_role AS ENUM ('wholesaler', 'retail');
-CREATE TYPE option_input AS ENUM ('single_select', 'toggle', 'counter');
-
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name          TEXT NOT NULL,
   phone         TEXT NOT NULL UNIQUE,
@@ -27,13 +55,12 @@ CREATE TABLE users (
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
-CREATE INDEX idx_users_role ON users(role);
+CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
 
 -- =====================================================
 -- OTP CODES — phone verification via Zentramsg WhatsApp
 -- =====================================================
-CREATE TABLE otp_codes (
+CREATE TABLE IF NOT EXISTS otp_codes (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   phone      TEXT NOT NULL,
   code       TEXT NOT NULL,
@@ -41,13 +68,12 @@ CREATE TABLE otp_codes (
   used       BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
-CREATE INDEX idx_otp_phone ON otp_codes(phone, used);
+CREATE INDEX IF NOT EXISTS idx_otp_phone ON otp_codes(phone, used);
 
 -- =====================================================
 -- PASSWORD RESET TOKENS — email-based
 -- =====================================================
-CREATE TABLE password_resets (
+CREATE TABLE IF NOT EXISTS password_resets (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   token      TEXT NOT NULL UNIQUE,
@@ -59,176 +85,166 @@ CREATE TABLE password_resets (
 -- =====================================================
 -- WHOLESALERS — extends users for role=wholesaler
 -- =====================================================
-CREATE TABLE wholesalers (
+CREATE TABLE IF NOT EXISTS wholesalers (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id           UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
-  referral_code     TEXT NOT NULL UNIQUE,        -- e.g. 'baghdad-cs-2026'
-  deadline          TIMESTAMPTZ,                  -- date by which students must complete designs
-  approved_by_admin BOOLEAN NOT NULL DEFAULT TRUE, -- admin creates so default TRUE
+  referral_code     TEXT NOT NULL UNIQUE,
+  deadline          TIMESTAMPTZ,
+  commission_rate   NUMERIC(5,2) NOT NULL DEFAULT 0 CHECK (commission_rate >= 0 AND commission_rate <= 100),
+  approved_by_admin BOOLEAN NOT NULL DEFAULT TRUE,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
-CREATE INDEX idx_wholesalers_code ON wholesalers(referral_code);
+ALTER TABLE wholesalers ADD COLUMN IF NOT EXISTS commission_rate NUMERIC(5,2) NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS idx_wholesalers_code ON wholesalers(referral_code);
 
 -- =====================================================
--- STUDENTS — extends users for role=retail joining via wholesaler
--- (retail-only students without wholesaler also use this table; wholesaler_id NULL)
+-- STUDENTS — retail users; wholesaler_id NULL for independent retail
 -- =====================================================
-CREATE TYPE student_status AS ENUM ('pending_approval', 'approved', 'rejected');
-
-CREATE TABLE students (
+CREATE TABLE IF NOT EXISTS students (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id           UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
   wholesaler_id     UUID REFERENCES wholesalers(id) ON DELETE SET NULL,
-  university_name   TEXT,                          -- free text per open.md answer #9
+  university_name   TEXT,
   department        TEXT,
-  full_name_third   TEXT NOT NULL,                 -- name + father + grandfather (3rd name) for accountability
-  gender            gender,                          -- v2: required to enforce shawl (female-only)
+  full_name_third   TEXT NOT NULL,
+  gender            gender,
   status            student_status NOT NULL DEFAULT 'pending_approval',
-  edit_exception    BOOLEAN NOT NULL DEFAULT FALSE, -- admin flag: allow design edit after confirm
+  edit_exception    BOOLEAN NOT NULL DEFAULT FALSE,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
-CREATE INDEX idx_students_wholesaler ON students(wholesaler_id);
-CREATE INDEX idx_students_status ON students(status);
+CREATE INDEX IF NOT EXISTS idx_students_wholesaler ON students(wholesaler_id);
+CREATE INDEX IF NOT EXISTS idx_students_status ON students(status);
 
 -- =====================================================
 -- PRODUCTS — sashes + robes (admin-managed catalog)
 -- =====================================================
-CREATE TYPE product_type AS ENUM ('sash', 'robe', 'cap', 'shawl');
-
-CREATE TABLE products (
+CREATE TABLE IF NOT EXISTS products (
   id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   type               product_type NOT NULL,
   name_ar            TEXT NOT NULL,
   description        TEXT,
-  base_price         INTEGER NOT NULL CHECK (base_price >= 0), -- IQD
-  customizable       BOOLEAN NOT NULL DEFAULT FALSE,           -- sash=true, robe=false
-  gender_restriction gender,                                    -- v2: shawl = female-only
-  image_url          TEXT,                                      -- main card photo
+  base_price         BIGINT NOT NULL CHECK (base_price >= 0),
+  customizable       BOOLEAN NOT NULL DEFAULT FALSE,
+  gender_restriction gender,
+  image_url          TEXT,
   featured           BOOLEAN NOT NULL DEFAULT FALSE,
   sort               INTEGER NOT NULL DEFAULT 0,
   active             BOOLEAN NOT NULL DEFAULT TRUE,
+  parent_id          UUID REFERENCES products(id) ON DELETE SET NULL,
   created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE product_images (
+CREATE TABLE IF NOT EXISTS product_images (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
   url        TEXT NOT NULL,
   sort       INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX idx_product_images_product ON product_images(product_id);
+CREATE INDEX IF NOT EXISTS idx_product_images_product ON product_images(product_id);
 
--- product variants: color/material/size — affect price
-CREATE TABLE product_variants (
+CREATE TABLE IF NOT EXISTS product_variants (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-  color      TEXT,                                   -- white, gray, green, black, navy, burgundy...
-  material   TEXT,                                   -- velvet, satin, etc.
-  size       TEXT,                                   -- one-size, S, M, L, XL, XXL
-  price      INTEGER NOT NULL CHECK (price >= 0),    -- IQD, overrides base_price
+  color      TEXT,
+  material   TEXT,
+  size       TEXT,
+  price      BIGINT NOT NULL CHECK (price >= 0),
   image_url  TEXT,
   active     BOOLEAN NOT NULL DEFAULT TRUE
 );
-
-CREATE INDEX idx_variants_product ON product_variants(product_id);
+CREATE INDEX IF NOT EXISTS idx_variants_product ON product_variants(product_id);
 
 -- =====================================================
 -- DESIGNS — student-created sash designs (Fabric.js JSON)
+-- Canvas JSON must reference uploaded images by /uploads URL, never inline base64.
 -- =====================================================
-CREATE TABLE designs (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  student_id      UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
-  variant_id      UUID REFERENCES product_variants(id),
-  sash_color      TEXT,
-  left_canvas     JSONB,        -- Fabric.js serialized state for left panel
-  right_canvas    JSONB,        -- Fabric.js serialized state for right panel
-  logo_url        TEXT,         -- university logo uploaded
-  extra_image_url TEXT,         -- custom uploaded image
-  fonts_used      TEXT[],       -- ['amiri', 'cairo', ...] for staff to load
-  notes           TEXT,         -- student notes to staff
-  completed       BOOLEAN NOT NULL DEFAULT FALSE,
-  completed_at    TIMESTAMPTZ,
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+CREATE TABLE IF NOT EXISTS designs (
+  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  student_id            UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+  variant_id            UUID REFERENCES product_variants(id) ON DELETE SET NULL,
+  sash_color            TEXT,
+  left_canvas           JSONB,
+  right_canvas          JSONB,
+  canvas_schema_version SMALLINT NOT NULL DEFAULT 1,
+  fabric_version        TEXT,
+  logo_url              TEXT,
+  extra_image_url       TEXT,
+  fonts_used            TEXT[],
+  notes                 TEXT,
+  completed             BOOLEAN NOT NULL DEFAULT FALSE,
+  completed_at          TIMESTAMPTZ,
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
-CREATE INDEX idx_designs_student ON designs(student_id);
-CREATE INDEX idx_designs_completed ON designs(completed);
+CREATE INDEX IF NOT EXISTS idx_designs_student ON designs(student_id);
+CREATE INDEX IF NOT EXISTS idx_designs_completed ON designs(completed);
 
 -- =====================================================
--- ORDERS — one per student per product
+-- ORDERS — one active order per student per product (enforced below)
 -- =====================================================
-CREATE TYPE order_status AS ENUM (
-  'pending_approval',  -- wholesaler hasn't approved student yet
-  'designing',         -- student working on design
-  'design_complete',   -- student confirmed
-  'staff_review',      -- staff checking before print
-  'printing',          -- in production
-  'ready',             -- done, awaiting pickup
-  'delivered',         -- picked up
-  'cancelled'
-);
-
-CREATE TABLE orders (
+CREATE TABLE IF NOT EXISTS orders (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   student_id   UUID NOT NULL REFERENCES students(id) ON DELETE RESTRICT,
   product_id   UUID NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
-  variant_id   UUID REFERENCES product_variants(id),
-  design_id    UUID REFERENCES designs(id),
-  price        INTEGER NOT NULL CHECK (price >= 0),   -- IQD, snapshot at order time
-  cost         INTEGER CHECK (cost >= 0),             -- admin enters manually
-  profit       INTEGER GENERATED ALWAYS AS (price - COALESCE(cost, 0)) STORED,
+  variant_id   UUID REFERENCES product_variants(id) ON DELETE SET NULL,
+  design_id    UUID REFERENCES designs(id) ON DELETE SET NULL,
+  price        BIGINT NOT NULL CHECK (price >= 0),
+  cost         BIGINT NOT NULL DEFAULT 0 CHECK (cost >= 0),
+  profit       BIGINT GENERATED ALWAYS AS (price - cost) STORED,
+  currency     CHAR(3) NOT NULL DEFAULT 'IQD',
   status       order_status NOT NULL DEFAULT 'pending_approval',
   notes        TEXT,
   created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   delivered_at TIMESTAMPTZ
 );
-
-CREATE INDEX idx_orders_student ON orders(student_id);
-CREATE INDEX idx_orders_status ON orders(status);
-CREATE INDEX idx_orders_created ON orders(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_orders_student ON orders(student_id);
+CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+CREATE INDEX IF NOT EXISTS idx_orders_created ON orders(created_at DESC);
+-- Serve the admin dashboard (filter by status, sort by date) and per-student lists.
+CREATE INDEX IF NOT EXISTS idx_orders_status_created ON orders(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_orders_student_created ON orders(student_id, created_at DESC);
+-- One non-cancelled order per (student, product) when no design is attached.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_orders_student_product_nodesign
+  ON orders(student_id, product_id)
+  WHERE design_id IS NULL AND status <> 'cancelled';
 
 -- =====================================================
--- AUDIT LOG — track approvals, deadline extensions, status changes
+-- AUDIT LOG
 -- =====================================================
-CREATE TABLE audit_log (
+CREATE TABLE IF NOT EXISTS audit_log (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  actor_id   UUID REFERENCES users(id),              -- who did it
-  action     TEXT NOT NULL,                          -- 'approve_student', 'extend_deadline', 'status_change', etc.
-  entity     TEXT NOT NULL,                          -- 'student', 'wholesaler', 'order'
+  actor_id   UUID REFERENCES users(id),
+  action     TEXT NOT NULL,
+  entity     TEXT NOT NULL,
   entity_id  UUID NOT NULL,
-  details    JSONB,                                  -- before/after state
+  details    JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
-CREATE INDEX idx_audit_entity ON audit_log(entity, entity_id);
-CREATE INDEX idx_audit_actor ON audit_log(actor_id);
-CREATE INDEX idx_audit_created ON audit_log(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity, entity_id);
+CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log(actor_id);
+CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at DESC);
 
 -- =====================================================
 -- NOTIFICATIONS — in-app only (MVP)
 -- =====================================================
-CREATE TABLE notifications (
+CREATE TABLE IF NOT EXISTS notifications (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  type       TEXT NOT NULL,         -- 'student_joined', 'approved', 'rejected', 'deadline_warning', 'status_change'
+  type       TEXT NOT NULL,
   title_ar   TEXT NOT NULL,
   body_ar    TEXT,
-  link       TEXT,                  -- in-app deep link
+  link       TEXT,
   read       BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
-CREATE INDEX idx_notifications_user ON notifications(user_id, read);
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, read);
 
 -- =====================================================
 -- TEMPLATES — pre-made designs per university (P3, scaffold now)
 -- =====================================================
-CREATE TABLE design_templates (
+CREATE TABLE IF NOT EXISTS design_templates (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name            TEXT NOT NULL,
   university_name TEXT,
@@ -250,100 +266,108 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER trg_users_updated      BEFORE UPDATE ON users      FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-CREATE TRIGGER trg_designs_updated    BEFORE UPDATE ON designs    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-CREATE TRIGGER trg_orders_updated     BEFORE UPDATE ON orders     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+DROP TRIGGER IF EXISTS trg_users_updated ON users;
+CREATE TRIGGER trg_users_updated   BEFORE UPDATE ON users   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+DROP TRIGGER IF EXISTS trg_designs_updated ON designs;
+CREATE TRIGGER trg_designs_updated BEFORE UPDATE ON designs FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+DROP TRIGGER IF EXISTS trg_orders_updated ON orders;
+CREATE TRIGGER trg_orders_updated  BEFORE UPDATE ON orders  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- =====================================================
 -- V2 — admin-managed options + role pricing + batches + packages
--- (mirrors db/migrations/001_v2_product_pricing.sql for fresh installs)
 -- =====================================================
-CREATE TABLE option_groups (
+CREATE TABLE IF NOT EXISTS option_groups (
   id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   product_id         UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
   name_ar            TEXT NOT NULL,
   input_type         option_input NOT NULL DEFAULT 'single_select',
   sort               INTEGER NOT NULL DEFAULT 0,
-  required           BOOLEAN NOT NULL DEFAULT FALSE,   -- admin-editable
-  has_image          BOOLEAN NOT NULL DEFAULT FALSE,   -- admin-editable (can remove image)
+  required           BOOLEAN NOT NULL DEFAULT FALSE,
+  has_image          BOOLEAN NOT NULL DEFAULT FALSE,
   hint_ar            TEXT,
-  image_url          TEXT,                              -- explanatory image (admin upload)
-  max_select         INTEGER NOT NULL DEFAULT 1,        -- e.g. sleeves = 2
+  image_url          TEXT,
+  max_select         INTEGER NOT NULL DEFAULT 1,
   gender_restriction gender,
-  requires_customer_image BOOLEAN NOT NULL DEFAULT FALSE, -- customer must upload a photo for this field
+  requires_customer_image BOOLEAN NOT NULL DEFAULT FALSE,
   active             BOOLEAN NOT NULL DEFAULT TRUE,
   created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX idx_option_groups_product ON option_groups(product_id);
+CREATE INDEX IF NOT EXISTS idx_option_groups_product ON option_groups(product_id);
 
-CREATE TABLE options (
+CREATE TABLE IF NOT EXISTS options (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   group_id    UUID NOT NULL REFERENCES option_groups(id) ON DELETE CASCADE,
   label_ar    TEXT NOT NULL,
-  price_delta INTEGER NOT NULL DEFAULT 0 CHECK (price_delta >= 0),
+  price_delta BIGINT NOT NULL DEFAULT 0 CHECK (price_delta >= 0),
   image_url   TEXT,
   sort        INTEGER NOT NULL DEFAULT 0,
-  requires_customer_image BOOLEAN NOT NULL DEFAULT FALSE, -- this specific value needs a customer photo (e.g. مثلث)
+  requires_customer_image BOOLEAN NOT NULL DEFAULT FALSE,
   active      BOOLEAN NOT NULL DEFAULT TRUE,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX idx_options_group ON options(group_id);
+CREATE INDEX IF NOT EXISTS idx_options_group ON options(group_id);
 
-CREATE TABLE option_price_roles (
+CREATE TABLE IF NOT EXISTS option_price_roles (
   option_id   UUID NOT NULL REFERENCES options(id) ON DELETE CASCADE,
   role        price_role NOT NULL,
-  price_delta INTEGER NOT NULL CHECK (price_delta >= 0),
+  price_delta BIGINT NOT NULL CHECK (price_delta >= 0),
   PRIMARY KEY (option_id, role)
 );
 
-CREATE TABLE product_price_roles (
+CREATE TABLE IF NOT EXISTS product_price_roles (
   product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
   role       price_role NOT NULL,
-  base_price INTEGER NOT NULL CHECK (base_price >= 0),
+  base_price BIGINT NOT NULL CHECK (base_price >= 0),
   PRIMARY KEY (product_id, role)
 );
 
-CREATE TABLE batches (
+CREATE TABLE IF NOT EXISTS batches (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name_ar       TEXT NOT NULL,                          -- e.g. 'طب عام 2026'
+  name_ar       TEXT NOT NULL,
   wholesaler_id UUID REFERENCES wholesalers(id) ON DELETE SET NULL,
   deadline      TIMESTAMPTZ,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX idx_batches_wholesaler ON batches(wholesaler_id);
+CREATE INDEX IF NOT EXISTS idx_batches_wholesaler ON batches(wholesaler_id);
 
-ALTER TABLE orders ADD COLUMN batch_id UUID REFERENCES batches(id) ON DELETE SET NULL;
-CREATE INDEX idx_orders_batch ON orders(batch_id);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS batch_id UUID REFERENCES batches(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_orders_batch ON orders(batch_id);
 
-CREATE TABLE order_items (
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS package_id UUID REFERENCES packages(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_orders_package ON orders(package_id);
+
+CREATE TABLE IF NOT EXISTS order_items (
   id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   order_id       UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
   group_id       UUID REFERENCES option_groups(id) ON DELETE SET NULL,
   option_id      UUID REFERENCES options(id) ON DELETE SET NULL,
   label_snapshot TEXT NOT NULL,
-  price_snapshot INTEGER NOT NULL DEFAULT 0,
+  price_snapshot BIGINT NOT NULL DEFAULT 0,
   qty            INTEGER NOT NULL DEFAULT 1,
-  customer_image_url TEXT,                       -- photo the customer uploaded for this option
+  customer_image_url TEXT,
   created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX idx_order_items_order ON order_items(order_id);
+CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);
 
-CREATE TABLE packages (
+CREATE TABLE IF NOT EXISTS packages (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name_ar    TEXT NOT NULL,                             -- 'ملكي' | 'عادي'
+  name_ar    TEXT NOT NULL,
   role       price_role NOT NULL DEFAULT 'wholesaler',
-  price      INTEGER NOT NULL CHECK (price >= 0),
+  price      BIGINT NOT NULL CHECK (price >= 0),
   image_url  TEXT,
   sort       INTEGER NOT NULL DEFAULT 0,
   active     BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE package_rules (
+CREATE TABLE IF NOT EXISTS package_rules (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   package_id          UUID NOT NULL REFERENCES packages(id) ON DELETE CASCADE,
   sash_type_option_id UUID NOT NULL REFERENCES options(id) ON DELETE CASCADE,
   UNIQUE (sash_type_option_id)
 );
+
+-- Migration 005: product parent-child hierarchy
+ALTER TABLE products ADD COLUMN IF NOT EXISTS parent_id UUID REFERENCES products(id) ON DELETE SET NULL;
 
 COMMIT;

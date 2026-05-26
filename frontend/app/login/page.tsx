@@ -77,7 +77,7 @@ export default function LoginPage() {
           دخول
         </button>
         <p className="text-center text-sm">
-          <Link href="/forgot-password" className="text-orange hover:underline">
+          <Link href="/forgot-password" className="text-orange-ink hover:underline">
             نسيت كلمة المرور؟
           </Link>
         </p>

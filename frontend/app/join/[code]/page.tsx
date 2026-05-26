@@ -64,7 +64,7 @@ export default function JoinPage() {
         lang="ar"
       >
         <div className="w-full max-w-md rounded-2xl border border-ink/10 bg-white p-8 text-center">
-          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-orange/20 text-3xl text-orange">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-orange/20 text-3xl text-orange-ink">
             ✓
           </div>
           <h1 className="font-display text-2xl font-bold text-ink">
@@ -88,7 +88,7 @@ export default function JoinPage() {
         <div className="mb-8 text-center">
           <p className="font-display text-3xl font-bold text-ink">لولو شوب</p>
           <p className="mt-2 text-sm text-ink/60">التسجيل عبر دعوة الممثل</p>
-          <p className="mt-1 text-xs text-orange" dir="ltr">
+          <p className="mt-1 text-xs text-orange-ink" dir="ltr">
             {code}
           </p>
         </div>

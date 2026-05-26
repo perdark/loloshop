@@ -34,7 +34,7 @@ export function ShowMoreGrid<T>({
         <button
           type="button"
           onClick={() => setExpanded(true)}
-          className="min-h-11 w-full rounded-lg border border-orange/30 bg-beige py-2.5 text-sm font-semibold text-orange transition-colors hover:bg-orange/10"
+          className="min-h-11 w-full rounded-lg border border-orange/30 bg-beige py-2.5 text-sm font-semibold text-orange-ink transition-colors hover:bg-orange/10"
         >
           عرض المزيد ({remaining}+)
         </button>

@@ -27,7 +27,7 @@ export function PriceBreakdown({
       </ul>
       <div className="mt-3 flex justify-between border-t border-neutral pt-3 font-bold text-ink">
         <span>المجموع</span>
-        <span className="text-orange" dir="ltr">
+        <span className="text-orange-ink" dir="ltr">
           {formatIQD(total)}
         </span>
       </div>

@@ -1,10 +1,21 @@
-import { api } from "./api";
+import { api, apiUploadFile } from "./api";
 import type {
   DesignState,
   FontDef,
   Product,
   ProductType,
 } from "./types";
+
+const apiOrigin =
+  process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ||
+  "http://localhost:4000";
+
+/** Absolute URL for /uploads/* paths returned by the API */
+export function resolveDesignMediaUrl(url: string | null | undefined): string {
+  if (!url) return "";
+  if (url.startsWith("http")) return url;
+  return `${apiOrigin}${url.startsWith("/") ? "" : "/"}${url}`;
+}
 
 export async function listProducts(type?: ProductType): Promise<Product[]> {
   const { data } = await api.get<{ data: Product[] }>("/products", {
@@ -26,6 +37,8 @@ export async function listFonts(): Promise<FontDef[]> {
 export interface MyDesignResponse {
   data: DesignState | null;
   student_status: "pending_approval" | "approved" | "rejected" | null;
+  student_gender?: "male" | "female" | null;
+  edit_exception?: boolean;
 }
 
 export async function getMyDesign(): Promise<MyDesignResponse> {
@@ -48,23 +61,15 @@ export async function completeDesign(): Promise<void> {
 }
 
 export async function uploadLogo(file: File): Promise<string> {
-  const form = new FormData();
-  form.append("file", file);
-  const { data } = await api.post<{ data: { url: string } }>(
-    "/designs/uploads/logo",
-    form,
-    { headers: { "Content-Type": "multipart/form-data" } }
-  );
-  return data.data.url;
+  const data = (await apiUploadFile("/designs/uploads/logo", file)) as {
+    data: { url: string };
+  };
+  return resolveDesignMediaUrl(data.data.url);
 }
 
 export async function uploadDesignImage(file: File): Promise<string> {
-  const form = new FormData();
-  form.append("file", file);
-  const { data } = await api.post<{ data: { url: string } }>(
-    "/designs/uploads/image",
-    form,
-    { headers: { "Content-Type": "multipart/form-data" } }
-  );
-  return data.data.url;
+  const data = (await apiUploadFile("/designs/uploads/image", file)) as {
+    data: { url: string };
+  };
+  return resolveDesignMediaUrl(data.data.url);
 }

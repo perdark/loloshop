@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { Button } from "./Button";
 
 interface ModalProps {
@@ -9,28 +9,42 @@ interface ModalProps {
   title: string;
   children: ReactNode;
   footer?: ReactNode;
+  descriptionId?: string;
 }
 
-export function Modal({ open, onClose, title, children, footer }: ModalProps) {
+export function Modal({ open, onClose, title, children, footer, descriptionId }: ModalProps) {
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
   useEffect(() => {
     if (!open) return;
+    const close = () => onCloseRef.current();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") close();
     };
     document.addEventListener("keydown", onKey);
     document.body.style.overflow = "hidden";
+    const prev = document.activeElement as HTMLElement | null;
+    requestAnimationFrame(() => {
+      const dialog = document.querySelector('[role="dialog"][aria-modal="true"]');
+      const focusable = dialog?.querySelector<HTMLElement>("button, [href], input, textarea");
+      focusable?.focus();
+    });
     return () => {
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = "";
+      prev?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-ink/50 p-4 sm:items-center"
-      onClick={onClose}
+      onClick={() => onCloseRef.current()}
       role="presentation"
     >
       <div
@@ -39,6 +53,7 @@ export function Modal({ open, onClose, title, children, footer }: ModalProps) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="modal-title"
+        {...(descriptionId ? { "aria-describedby": descriptionId } : {})}
       >
         <div className="border-b border-ink/10 px-5 py-4">
           <h2 id="modal-title" className="font-display text-xl text-ink">

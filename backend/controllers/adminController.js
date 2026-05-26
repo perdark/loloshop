@@ -1,6 +1,8 @@
 const bcrypt = require('bcrypt');
 const { query, tx } = require('../lib/db');
 
+const SALT_ROUNDS = 10;
+
 async function analytics(req, res) {
   const totals = await query(
     `SELECT
@@ -61,16 +63,17 @@ async function accounting(req, res) {
      GROUP BY b.id, wu.name ORDER BY revenue DESC`
   );
   const byWholesaler = await query(
-    `SELECT w.id, u.name AS wholesaler_name,
+    `SELECT w.id, u.name AS wholesaler_name, w.commission_rate,
             COALESCE(SUM(o.price),0)::bigint AS revenue,
             COALESCE(SUM(o.cost),0)::bigint AS cost,
             COALESCE(SUM(o.profit),0)::bigint AS profit,
+            ROUND(COALESCE(SUM(o.price),0) * w.commission_rate / 100)::bigint AS commission,
             COUNT(o.id)::int AS orders
      FROM wholesalers w
      JOIN users u ON u.id = w.user_id
      LEFT JOIN students s ON s.wholesaler_id = w.id
      LEFT JOIN orders o ON o.student_id = s.id AND o.status <> 'cancelled'
-     GROUP BY w.id, u.name ORDER BY revenue DESC`
+     GROUP BY w.id, u.name, w.commission_rate ORDER BY revenue DESC`
   );
   const retail = await query(
     `SELECT COALESCE(SUM(o.price),0)::bigint AS revenue,
@@ -110,9 +113,14 @@ async function updateOrderCost(req, res) {
 
 async function listWholesalers(req, res) {
   const { rows } = await query(
-    `SELECT w.id, u.name, u.phone, u.email, w.referral_code, w.deadline, w.created_at,
+    `SELECT w.id, u.name, u.phone, u.email, w.referral_code, w.deadline, w.commission_rate, w.created_at,
        (SELECT COUNT(*)::int FROM students s WHERE s.wholesaler_id = w.id) AS student_count,
-       (SELECT COUNT(*)::int FROM students s WHERE s.wholesaler_id = w.id AND s.status = 'pending_approval') AS pending_count
+       (SELECT COUNT(*)::int FROM students s WHERE s.wholesaler_id = w.id AND s.status = 'pending_approval') AS pending_count,
+       COALESCE((
+         SELECT ROUND(SUM(o.price) * w.commission_rate / 100)::bigint
+         FROM students s JOIN orders o ON o.student_id = s.id
+         WHERE s.wholesaler_id = w.id AND o.status <> 'cancelled'
+       ), 0) AS earned_commission
      FROM wholesalers w JOIN users u ON u.id = w.user_id
      ORDER BY w.created_at DESC`
   );
@@ -123,8 +131,18 @@ async function listWholesalers(req, res) {
   res.json({ data });
 }
 
+function parseCommission(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0 || n > 100) return null;
+  return Math.round(n * 100) / 100;
+}
+
 async function createWholesaler(req, res) {
   const { name, phone, email, password, referral_code, deadline } = req.body;
+  const commissionRate = parseCommission(req.body.commission_rate ?? 0);
+  if (commissionRate === null) {
+    return res.status(400).json({ error: 'نسبة عمولة غير صالحة (0-100)', code: 'ERR_VALIDATION' });
+  }
   if (!name || !phone || !password || !referral_code) {
     return res.status(400).json({ error: 'بيانات ناقصة', code: 'ERR_VALIDATION' });
   }
@@ -148,9 +166,9 @@ async function createWholesaler(req, res) {
       [name, phone, email || null, hash]
     );
     const w = await client.query(
-      `INSERT INTO wholesalers (user_id, referral_code, deadline, approved_by_admin)
-       VALUES ($1, $2, $3, TRUE) RETURNING id, referral_code`,
-      [u.rows[0].id, referral_code, deadline || null]
+      `INSERT INTO wholesalers (user_id, referral_code, deadline, commission_rate, approved_by_admin)
+       VALUES ($1, $2, $3, $4, TRUE) RETURNING id, referral_code`,
+      [u.rows[0].id, referral_code, deadline || null, commissionRate]
     );
     await client.query(
       `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
@@ -191,12 +209,58 @@ async function updateDeadline(req, res) {
   res.json({ data: rows[0] });
 }
 
+async function updateCommission(req, res) {
+  const { id } = req.params;
+  const rate = parseCommission(req.body.commission_rate);
+  if (rate === null) {
+    return res.status(400).json({ error: 'نسبة عمولة غير صالحة (0-100)', code: 'ERR_VALIDATION' });
+  }
+  const { rows } = await query(
+    `UPDATE wholesalers SET commission_rate = $1 WHERE id = $2 RETURNING id, commission_rate`,
+    [rate, id]
+  );
+  if (!rows.length) return res.status(404).json({ error: 'غير موجود', code: 'ERR_NOT_FOUND' });
+  await query(
+    `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
+     VALUES ($1, 'update_commission', 'wholesaler', $2, $3)`,
+    [req.user.id, id, JSON.stringify({ commission_rate: rate })]
+  );
+  res.json({ data: rows[0] });
+}
+
+async function deleteWholesaler(req, res) {
+  const { id } = req.params;
+  const { rows } = await query(
+    `SELECT user_id FROM wholesalers WHERE id = $1`,
+    [id]
+  );
+  if (!rows.length) {
+    return res
+      .status(404)
+      .json({ error: 'غير موجود', code: 'ERR_NOT_FOUND' });
+  }
+  const userId = rows[0].user_id;
+  await tx(async (client) => {
+    await client.query(
+      `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
+       VALUES ($1, 'delete_wholesaler', 'wholesaler', $2, $3)`,
+      [req.user.id, id, JSON.stringify({ user_id: userId })]
+    );
+    await client.query(`DELETE FROM users WHERE id = $1`, [userId]);
+  });
+  res.json({ data: { id } });
+}
 async function wholesalerStudents(req, res) {
   const { id } = req.params;
   const { rows } = await query(
     `SELECT s.id, u.name, u.phone, s.status, s.university_name, s.department,
-       (SELECT status FROM orders WHERE student_id = s.id ORDER BY created_at DESC LIMIT 1) AS order_status
-     FROM students s JOIN users u ON u.id = s.user_id
+       lo.status AS order_status,
+       (lo.status IN ('design_complete', 'staff_review', 'printing', 'ready', 'delivered')) AS is_completed
+     FROM students s
+     JOIN users u ON u.id = s.user_id
+     LEFT JOIN LATERAL (
+       SELECT status FROM orders WHERE student_id = s.id ORDER BY created_at DESC LIMIT 1
+     ) lo ON TRUE
      WHERE s.wholesaler_id = $1
      ORDER BY s.created_at DESC`,
     [id]
@@ -219,8 +283,85 @@ async function toggleEditException(req, res) {
   res.json({ data: rows[0] });
 }
 
+async function listStaff(req, res) {
+  const { rows } = await query(
+    `SELECT id, name, phone, email, phone_verified
+     FROM users
+     WHERE role = 'staff'
+     ORDER BY name ASC`
+  );
+  res.json({ data: rows });
+}
+
+async function createStaff(req, res) {
+  const { name, phone, email, password } = req.body;
+  if (!name || !phone || !password) {
+    return res.status(400).json({ error: 'بيانات ناقصة', code: 'ERR_VALIDATION' });
+  }
+  if (String(password).length < 6) {
+    return res.status(400).json({ error: 'كلمة المرور قصيرة', code: 'ERR_VALIDATION' });
+  }
+  const exists = await query(`SELECT id FROM users WHERE phone = $1`, [phone]);
+  if (exists.rows.length) {
+    return res.status(409).json({ error: 'الرقم مستخدم', code: 'ERR_PHONE_TAKEN' });
+  }
+  const hash = await bcrypt.hash(password, SALT_ROUNDS);
+  const { rows } = await query(
+    `INSERT INTO users (name, phone, email, password_hash, role, phone_verified)
+     VALUES ($1, $2, $3, $4, 'staff', TRUE)
+     RETURNING id, name, phone, email, phone_verified`,
+    [name, phone, email || null, hash]
+  );
+  const staff = rows[0];
+  await query(
+    `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
+     VALUES ($1, 'create_staff', 'user', $2, $3)`,
+    [req.user.id, staff.id, JSON.stringify({ role: 'staff', phone })]
+  );
+  res.status(201).json({ data: staff });
+}
+
+async function updateStaffPassword(req, res) {
+  const { id } = req.params;
+  const { password } = req.body;
+  if (!password || String(password).length < 6) {
+    return res.status(400).json({ error: 'كلمة المرور قصيرة', code: 'ERR_VALIDATION' });
+  }
+  const hash = await bcrypt.hash(password, SALT_ROUNDS);
+  const { rows } = await query(
+    `UPDATE users
+     SET password_hash = $1
+     WHERE id = $2 AND role = 'staff'
+     RETURNING id`,
+    [hash, id]
+  );
+  if (!rows.length) return res.status(404).json({ error: 'غير موجود', code: 'ERR_NOT_FOUND' });
+  await query(
+    `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
+     VALUES ($1, 'reset_staff_password', 'user', $2, $3)`,
+    [req.user.id, id, JSON.stringify({ role: 'staff' })]
+  );
+  res.json({ data: { id } });
+}
+
+async function deleteStaff(req, res) {
+  const { id } = req.params;
+  const { rows } = await query(
+    `DELETE FROM users WHERE id = $1 AND role = 'staff' RETURNING id`,
+    [id]
+  );
+  if (!rows.length) return res.status(404).json({ error: 'غير موجود', code: 'ERR_NOT_FOUND' });
+  await query(
+    `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
+     VALUES ($1, 'delete_staff', 'user', $2, $3)`,
+    [req.user.id, id, JSON.stringify({ role: 'staff' })]
+  );
+  res.json({ data: { id } });
+}
+
 module.exports = {
   analytics, accounting, updateOrderCost,
-  listWholesalers, createWholesaler, updateDeadline,
+  listWholesalers, createWholesaler, updateDeadline, updateCommission, deleteWholesaler,
   wholesalerStudents, toggleEditException,
+  listStaff, createStaff, updateStaffPassword, deleteStaff,
 };

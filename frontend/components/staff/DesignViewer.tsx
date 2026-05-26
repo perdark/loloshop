@@ -1,7 +1,17 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { sashColorToHex } from "@/lib/sash-colors";
+import dynamic from "next/dynamic";
+import { useEffect, useRef, useState } from "react";
+import { Button } from "@/components/ui/Button";
+import { Spinner } from "@/components/ui/Spinner";
+import { getFabric } from "@/lib/fabric-loader";
+import { loadPanelOntoCanvas } from "@/lib/render-sash-panel";
+
+const SashGownPreview = dynamic(
+  () =>
+    import("@/components/designer/SashGownPreview").then((m) => m.SashGownPreview),
+  { ssr: false, loading: () => <Spinner /> }
+);
 
 function ReadOnlyPanel({
   label,
@@ -9,48 +19,21 @@ function ReadOnlyPanel({
   sashColor,
   width,
   height,
-  zoom,
+  fontsUsed,
 }: {
   label: string;
   json: unknown | null;
   sashColor: string | null;
   width: number;
   height: number;
-  zoom: number;
+  fontsUsed?: string[];
 }) {
   const canvasElRef = useRef<HTMLCanvasElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fabricRef = useRef<any>(null);
 
   useEffect(() => {
-    if (!canvasElRef.current) return;
-    let disposed = false;
-
-    (async () => {
-      const fabric = await import("fabric");
-      if (disposed || !canvasElRef.current) return;
-
-      const canvas = new fabric.StaticCanvas(canvasElRef.current, {
-        width,
-        height,
-        backgroundColor: sashColorToHex(sashColor),
-      });
-      fabricRef.current = canvas;
-
-      if (json) {
-        try {
-          await canvas.loadFromJSON(json as Record<string, unknown>);
-          canvas.setZoom(zoom);
-          canvas.backgroundColor = sashColorToHex(sashColor);
-          canvas.renderAll();
-        } catch {
-          // ignore corrupt JSON
-        }
-      }
-    })();
-
     return () => {
-      disposed = true;
       try {
         fabricRef.current?.dispose();
       } catch {
@@ -58,7 +41,44 @@ function ReadOnlyPanel({
       }
       fabricRef.current = null;
     };
-  }, [json, sashColor, width, height, zoom]);
+  }, []);
+
+  useEffect(() => {
+    if (!canvasElRef.current) return;
+    let disposed = false;
+
+    (async () => {
+      const fabric = await getFabric();
+      if (disposed || !canvasElRef.current) return;
+
+      let canvas = fabricRef.current;
+      if (!canvas) {
+        canvas = new fabric.StaticCanvas(canvasElRef.current, {
+          width,
+          height,
+        });
+        fabricRef.current = canvas;
+      } else {
+        canvas.setDimensions({ width, height });
+      }
+
+      try {
+        await loadPanelOntoCanvas(canvas, {
+          json,
+          sashColor,
+          targetWidth: width,
+          targetHeight: height,
+          fontsUsed,
+        });
+      } catch {
+        // ignore corrupt JSON
+      }
+    })();
+
+    return () => {
+      disposed = true;
+    };
+  }, [json, sashColor, width, height, fontsUsed]);
 
   return (
     <div className="flex flex-col items-center gap-2">
@@ -70,10 +90,13 @@ function ReadOnlyPanel({
   );
 }
 
+type ViewMode = "gown" | "panels";
+
 interface DesignViewerProps {
   sashColor: string | null;
   leftCanvas: unknown | null;
   rightCanvas: unknown | null;
+  fontsUsed?: string[];
   compact?: boolean;
 }
 
@@ -81,33 +104,59 @@ export function DesignViewer({
   sashColor,
   leftCanvas,
   rightCanvas,
+  fontsUsed,
   compact = false,
 }: DesignViewerProps) {
+  const [view, setView] = useState<ViewMode>("gown");
   const w = compact ? 200 : 320;
   const h = compact ? 333 : 533;
-  const zoom = w / 360;
+  const color = sashColor ?? "أبيض";
 
   return (
-    <div
-      className="flex flex-col items-center justify-center gap-6 lg:flex-row lg:gap-10"
-      aria-label="معاينة التصميم للطباعة"
-    >
-      <ReadOnlyPanel
-        label="الجانب الأيمن (الجامعة)"
-        json={rightCanvas}
-        sashColor={sashColor}
-        width={w}
-        height={h}
-        zoom={zoom}
-      />
-      <ReadOnlyPanel
-        label="الجانب الأيسر (الاسم)"
-        json={leftCanvas}
-        sashColor={sashColor}
-        width={w}
-        height={h}
-        zoom={zoom}
-      />
+    <div className="space-y-4" aria-label="معاينة التصميم">
+      <div className="flex flex-wrap justify-center gap-2">
+        <Button
+          variant={view === "gown" ? "primary" : "ghost"}
+          onClick={() => setView("gown")}
+        >
+          على الروب
+        </Button>
+        <Button
+          variant={view === "panels" ? "primary" : "ghost"}
+          onClick={() => setView("panels")}
+        >
+          لوحات مسطحة
+        </Button>
+      </div>
+
+      {view === "gown" ? (
+        <SashGownPreview
+          sashColor={color}
+          leftJson={leftCanvas}
+          rightJson={rightCanvas}
+          fontsUsed={fontsUsed}
+          readOnly
+        />
+      ) : (
+        <div className="flex flex-col items-center justify-center gap-6 lg:flex-row lg:gap-10">
+          <ReadOnlyPanel
+            label="الجانب الأيمن (الجامعة)"
+            json={rightCanvas}
+            sashColor={sashColor}
+            width={w}
+            height={h}
+            fontsUsed={fontsUsed}
+          />
+          <ReadOnlyPanel
+            label="الجانب الأيسر (الاسم)"
+            json={leftCanvas}
+            sashColor={sashColor}
+            width={w}
+            height={h}
+            fontsUsed={fontsUsed}
+          />
+        </div>
+      )}
     </div>
   );
 }

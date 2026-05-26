@@ -20,7 +20,7 @@ export function ShopPackageCardView({ pkg }: ShopPackageCardProps) {
             unoptimized
           />
         ) : (
-          <div className="flex h-full items-center justify-center font-display text-lg text-orange/60">
+          <div className="flex h-full items-center justify-center font-display text-lg text-orange-ink/60">
             باكج
           </div>
         )}
@@ -28,7 +28,7 @@ export function ShopPackageCardView({ pkg }: ShopPackageCardProps) {
       <div className="flex flex-1 flex-col p-3">
         <p className="font-semibold text-ink">{pkg.nameAr}</p>
         <p className="mt-1 text-xs text-ink/50">روب + وشاح + قبعة</p>
-        <p className="mt-auto pt-2 text-sm font-bold text-orange" dir="ltr">
+        <p className="mt-auto pt-2 text-sm font-bold text-orange-ink" dir="ltr">
           {formatIQD(pkg.price)}
         </p>
       </div>

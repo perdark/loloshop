@@ -8,6 +8,7 @@ import type {
   CreateWholesalerPayload,
   CreateWholesalerResult,
   OrderStatus,
+  User,
 } from "./types";
 
 interface ApiAnalytics {
@@ -47,6 +48,8 @@ interface ApiWholesalerRow {
   student_count: number;
   pending_count: number;
   deadline: string | null;
+  commission_rate: number;
+  earned_commission: number;
   created_at?: string;
 }
 
@@ -76,6 +79,8 @@ function mapWholesaler(row: ApiWholesalerRow): AdminWholesaler {
     studentCount: row.student_count,
     pendingCount: row.pending_count,
     deadline: row.deadline,
+    commissionRate: Number(row.commission_rate ?? 0),
+    earnedCommission: Number(row.earned_commission ?? 0),
     referralCode: row.referral_code,
     referralUrl: row.referral_url,
     createdAt: row.created_at,
@@ -114,6 +119,13 @@ export async function getAdminAnalytics(): Promise<AdminAnalytics> {
   return mapAnalytics(data);
 }
 
+export async function updateOrderCost(
+  orderId: string,
+  cost: number
+): Promise<void> {
+  await api.patch(`/admin/orders/${orderId}/cost`, { cost });
+}
+
 export async function getAdminOrders(
   filters: OrdersFilters = {}
 ): Promise<AdminOrder[]> {
@@ -147,6 +159,7 @@ export async function createWholesaler(
     password: payload.password,
     referral_code: payload.referralCode,
     deadline: payload.deadline,
+    commission_rate: payload.commissionRate ?? 0,
   });
   const row = data.data;
   return { id: row.id, referralUrl: row.referral_url };
@@ -157,6 +170,62 @@ export async function extendWholesalerDeadline(
   deadline: string
 ): Promise<void> {
   await api.patch(`/admin/wholesalers/${id}/deadline`, { deadline });
+}
+
+export async function updateWholesalerCommission(
+  id: string,
+  commissionRate: number
+): Promise<void> {
+  await api.patch(`/admin/wholesalers/${id}/commission`, {
+    commission_rate: commissionRate,
+  });
+}
+
+export async function deleteWholesaler(id: string): Promise<void> {
+  await api.delete(`/admin/wholesalers/${id}`);
+}
+
+interface ApiStaffRow {
+  id: string;
+  name: string;
+  phone: string;
+  email?: string | null;
+  phone_verified?: boolean;
+}
+
+export interface CreateStaffPayload {
+  name: string;
+  phone: string;
+  email?: string;
+  password: string;
+}
+
+export async function getAdminStaff(): Promise<User[]> {
+  const { data } = await api.get<{ data: ApiStaffRow[] }>("/admin/staff");
+  return (data.data || []).map((r) => ({
+    id: r.id,
+    name: r.name,
+    phone: r.phone,
+    email: r.email || undefined,
+    role: "staff",
+  }));
+}
+
+export async function createStaff(payload: CreateStaffPayload): Promise<void> {
+  await api.post("/admin/staff", {
+    name: payload.name,
+    phone: payload.phone,
+    email: payload.email,
+    password: payload.password,
+  });
+}
+
+export async function resetStaffPassword(id: string, password: string): Promise<void> {
+  await api.patch(`/admin/staff/${id}/password`, { password });
+}
+
+export async function deleteStaff(id: string): Promise<void> {
+  await api.delete(`/admin/staff/${id}`);
 }
 
 interface ApiAccounting {

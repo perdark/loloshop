@@ -50,7 +50,7 @@ export function OrderBreakdownCard({
       </ul>
       <div className="mt-3 flex justify-between border-t border-orange/20 pt-3 font-bold">
         <span>المجموع</span>
-        <span className="text-orange" dir="ltr">
+        <span className="text-orange-ink" dir="ltr">
           {formatIQD(total)}
         </span>
       </div>

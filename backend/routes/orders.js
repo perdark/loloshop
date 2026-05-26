@@ -9,6 +9,9 @@ router.patch('/:id/status', authRequired, requireRole('admin', 'staff'), c.updat
 // Retail student: configure an order from selected options
 router.post('/configure', authRequired, requireRole('retail'), c.configureOrder);
 
+// Wholesaler package selection or rep student package bundle
+router.post('/configure-package', authRequired, requireRole('wholesaler', 'retail'), c.configurePackage);
+
 // Owner (student) or staff/admin: price breakdown
 router.get('/:id/breakdown', authRequired, c.getOrderBreakdown);
 

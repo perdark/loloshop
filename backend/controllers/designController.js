@@ -3,7 +3,7 @@ const { publicUrl } = require('../lib/upload');
 
 async function getStudentByUserId(userId) {
   const { rows } = await query(
-    `SELECT id, wholesaler_id, status FROM students WHERE user_id = $1`,
+    `SELECT id, wholesaler_id, status, gender, edit_exception FROM students WHERE user_id = $1`,
     [userId]
   );
   return rows[0];
@@ -17,10 +17,15 @@ async function getMyDesign(req, res) {
   const student = await getStudentByUserId(req.user.id);
   if (!student) return res.status(404).json({ error: 'لم يتم العثور على ملف الطالب', code: 'ERR_NOT_FOUND' });
   const { rows } = await query(
-    `SELECT * FROM designs WHERE student_id = $1 ORDER BY created_at DESC LIMIT 1`,
+    `SELECT * FROM designs WHERE student_id = $1 ORDER BY updated_at DESC LIMIT 1`,
     [student.id]
   );
-  res.json({ data: rows[0] || null, student_status: student.status });
+  res.json({
+    data: rows[0] || null,
+    student_status: student.status,
+    student_gender: student.gender || null,
+    edit_exception: !!student.edit_exception,
+  });
 }
 
 async function saveDesign(req, res) {
@@ -34,8 +39,12 @@ async function saveDesign(req, res) {
   }
   const { variant_id, sash_color, left_canvas, right_canvas, logo_url, extra_image_url, fonts_used, notes } = req.body;
 
-  const existing = await query(`SELECT id, completed FROM designs WHERE student_id = $1`, [student.id]);
-  if (existing.rows.length && existing.rows[0].completed) {
+  const latest = await query(
+    `SELECT id, completed FROM designs WHERE student_id = $1 ORDER BY updated_at DESC LIMIT 1`,
+    [student.id]
+  );
+  const existing = latest.rows[0];
+  if (existing?.completed) {
     const { rows: sRows } = await query(`SELECT edit_exception FROM students WHERE id = $1`, [student.id]);
     if (!sRows[0]?.edit_exception) {
       return res.status(403).json({ error: 'لا يمكن تعديل التصميم بعد التأكيد', code: 'ERR_FORBIDDEN' });
@@ -43,15 +52,21 @@ async function saveDesign(req, res) {
   }
 
   let designId;
-  if (existing.rows.length) {
-    const { rows } = await query(
-      `UPDATE designs SET variant_id = $1, sash_color = $2, left_canvas = $3, right_canvas = $4,
-         logo_url = $5, extra_image_url = $6, fonts_used = $7, notes = $8
-       WHERE id = $9 RETURNING id`,
-      [variant_id || null, sash_color || null, left_canvas || null, right_canvas || null,
-       logo_url || null, extra_image_url || null, fonts_used || null, notes || null, existing.rows[0].id]
-    );
-    designId = rows[0].id;
+  if (existing) {
+    designId = await tx(async (client) => {
+      const { rows } = await client.query(
+        `UPDATE designs SET variant_id = $1, sash_color = $2, left_canvas = $3, right_canvas = $4,
+           logo_url = $5, extra_image_url = $6, fonts_used = $7, notes = $8
+         WHERE id = $9 RETURNING id`,
+        [variant_id || null, sash_color || null, left_canvas || null, right_canvas || null,
+         logo_url || null, extra_image_url || null, fonts_used || null, notes || null, existing.id]
+      );
+      await client.query(
+        `DELETE FROM designs WHERE student_id = $1 AND id <> $2`,
+        [student.id, rows[0].id]
+      );
+      return rows[0].id;
+    });
   } else {
     const { rows } = await query(
       `INSERT INTO designs (student_id, variant_id, sash_color, left_canvas, right_canvas, logo_url, extra_image_url, fonts_used, notes)
@@ -91,7 +106,10 @@ async function completeDesign(req, res) {
   const result = await tx(async (client) => {
     const d = await client.query(
       `UPDATE designs SET completed = TRUE, completed_at = NOW()
-       WHERE student_id = $1 RETURNING id`,
+       WHERE id = (
+         SELECT id FROM designs WHERE student_id = $1 ORDER BY updated_at DESC LIMIT 1
+       )
+       RETURNING id`,
       [student.id]
     );
     if (!d.rows.length) throw new Error('NO_DESIGN');

@@ -37,4 +37,22 @@ function requireRole(...roles) {
   };
 }
 
-module.exports = { signToken, authRequired, requireRole };
+/** Token present but invalid/expired → continue as anonymous (public catalog). */
+async function optionalAuth(req, res, next) {
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+  if (!token) return next();
+  try {
+    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    const { rows } = await query(
+      `SELECT id, name, phone, email, role, phone_verified FROM users WHERE id = $1`,
+      [payload.sub]
+    );
+    if (rows.length) req.user = rows[0];
+  } catch {
+    /* ignore — retail pricing for shop/configurator */
+  }
+  next();
+}
+
+module.exports = { signToken, authRequired, requireRole, optionalAuth };

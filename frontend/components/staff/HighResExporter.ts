@@ -1,7 +1,7 @@
-import { listFonts } from "@/lib/designer";
-import { loadFont } from "@/lib/fonts-loader";
+import { getFabric } from "@/lib/fabric-loader";
+import { exportGownCompositePng } from "@/lib/render-gown-composite";
+import { loadPanelOntoCanvas } from "@/lib/render-sash-panel";
 import {
-  DESIGN_PANEL_WIDTH,
   HIGH_RES_PANEL_HEIGHT,
   HIGH_RES_PANEL_WIDTH,
   sashColorToHex,
@@ -14,25 +14,6 @@ export interface HighResExportInput {
   fontsUsed: string[];
 }
 
-async function ensureFontsLoaded(fontIds: string[]): Promise<void> {
-  if (!fontIds.length) return;
-  try {
-    const catalog = await listFonts();
-    const byId = new Map(catalog.map((f) => [f.id, f]));
-    await Promise.all(
-      fontIds.map((id) => {
-        const def = byId.get(id);
-        return def ? loadFont(def) : Promise.resolve();
-      })
-    );
-  } catch {
-    // mock / offline — fonts may already be in page from Google links
-  }
-  if (typeof document !== "undefined" && document.fonts) {
-    await document.fonts.ready;
-  }
-}
-
 async function renderPanelToDataUrl(
   json: unknown | null,
   sashColor: string | null,
@@ -40,9 +21,7 @@ async function renderPanelToDataUrl(
 ): Promise<string | null> {
   if (!json) return null;
 
-  const fabric = await import("fabric");
-  await ensureFontsLoaded(fontsUsed);
-
+  const fabric = await getFabric();
   const el = document.createElement("canvas");
   const canvas = new fabric.StaticCanvas(el, {
     width: HIGH_RES_PANEL_WIDTH,
@@ -50,11 +29,13 @@ async function renderPanelToDataUrl(
     backgroundColor: sashColorToHex(sashColor),
   });
 
-  await canvas.loadFromJSON(json as Record<string, unknown>);
-  const scale = HIGH_RES_PANEL_WIDTH / DESIGN_PANEL_WIDTH;
-  canvas.setZoom(scale);
-  canvas.backgroundColor = sashColorToHex(sashColor);
-  canvas.renderAll();
+  await loadPanelOntoCanvas(canvas, {
+    json,
+    sashColor,
+    targetWidth: HIGH_RES_PANEL_WIDTH,
+    targetHeight: HIGH_RES_PANEL_HEIGHT,
+    fontsUsed,
+  });
 
   const url = canvas.toDataURL({
     format: "png",
@@ -130,6 +111,14 @@ export async function exportHighResCombinedPng(
 ): Promise<void> {
   const dataUrl = await buildHighResCombinedDataUrl(input);
   triggerDownload(dataUrl, filename);
+}
+
+/** Full gown photo with text/images composited on sash hotspots (2× native res) */
+export async function exportHighResGownPng(
+  input: HighResExportInput,
+  filename = "loloshop-gown.png"
+): Promise<void> {
+  await exportGownCompositePng(input, filename, 2);
 }
 
 export async function exportHighResPanelPng(

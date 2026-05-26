@@ -1,7 +1,7 @@
 # LoloShop — PROGRESS.md
 
 ## Status: 🟡 In Progress
-## Last Updated: 2026-05-25
+## Last Updated: 2026-05-26 (student home + packages API + batch profit)
 
 ---
 
@@ -16,6 +16,9 @@
 - **Frontend Phase 1** — Login, forgot-password, reset-password, verify-otp
 - **Backend Phase 1+2+3** — auth, admin API, wholesaler API, join referral flow, notifications
 - **Phase 4 — Sash Designer (DONE)** — Fabric.js v6 flat 2D canvas, color picker, font picker (12 Arabic+Latin fonts via Google), text editor (drag/resize/rotate/edit-in-place), logo + image uploads, 3-step flow, live preview, save/auto-save/complete, status-gated (pending students blocked)
+- **Design pipeline sprint (2026-05-26)** — `lib/render-sash-panel.ts` unified horizontal→vertical panel render for gown preview, staff `DesignViewer`, and `HighResExporter`; font preload in `FabricPanelPreview`; step-1 draft in sessionStorage + save health UI; gown empty-state CTAs; side-aware Whiteboard; design row `ORDER BY updated_at` on save
+- **Admin + retail funnel polish (2026-05-26)** — Admin orders: per-order **تكلفة** (IQD) draft + **حفظ** via `PATCH /admin/orders/:id/cost` (`lib/admin.updateOrderCost`). Shop home: login-aware sash CTA, gender from `localStorage` without effect churn, friendly load errors (no raw API URL). Student product page: load error vs missing product, retry + link to `/`, login hint for sash-only path; ESLint `react-hooks/set-state-in-effect` handled with targeted disables / lazy `localStorage` state.
+- **Wire frontend APIs (2026-05-26)** — Student home at `/` via `app/(student)/page.tsx` (`getShopFeed`, packages + products by type, sash CTA → `/design`, gender filter for shawl, `/shop` redirects). Wholesaler packages: `lib/packages.ts` (`listPackages`, `confirmPackage`), real cap options from catalog, removed `lib/mocks/catalog.ts`. Admin batch detail: per-student **تكلفة** / **ربح** columns; backend `GET /batches/:id` aggregates `cost` + `profit`; `POST /orders/configure-package` supports wholesaler + retail with `cap_option_id`.
 - **Phase 6 — Staff Panel (DONE)** — `/staff` orders list (filters: review / printing / done), `/staff/orders/[orderId]` read-only design viewer, PNG 300 DPI + PDF export (jspdf), status actions with TODO fallback for `PATCH /orders/:id/status`
 - Backend: products + variants endpoint, fonts endpoint, designs save/get/complete, multer uploads (logo/image), staff-view of student designs
 - Backend: auth/register now creates `students` row (pre-approved for pure retail), join referral creates pending student
@@ -48,8 +51,28 @@
 - **Catalog media + shop feed (DONE backend)** — migration 002 (applied): products.image_url/featured/sort, product_images gallery, packages.image_url/sort. Catalog API: public `GET /api/catalog/shop` (packages-first + products grouped by_type, role-aware price), product gallery `POST /api/catalog/products/:id/images` + `DELETE /api/catalog/images/:id`, updateProduct now accepts image_url/featured/sort, getProductFull returns image_url+images[], listProductsAdmin returns image_count. Shop endpoint verified.
 - **Brand colors v2 (DONE)** — `brand-tokens.css` updated to official hex: orange #FF8C00, light #FFA07A, peach #FFDAB9, blush #FFE4E1, ink #1A1A1A/#333, cream #FAEBD7, beige #F5F5DC, neutrals #E0E0E0/#BDBDBD. amber/offwhite kept as back-compat aliases. → Cursor re-apply to globals.css.
 
+- **Design page hardening (DONE 2026-05-26)** — Merged UX/a11y/tech critique fixes: `useDesignDraft` hook, `FabricPanelPreview` + `designer-colors.ts`, stepper labels (mobile-visible), step 3 uses `SashFlat` readOnly (WYSIWYG), responsive sash layout, accessible `Modal` confirm w/ recap, `await persist` before preview, gender from API (`GET /designs/me` + `student_gender`), `edit_exception` unlock, empty-panel CTAs, auto-open Whiteboard on empty side, live portrait mini-preview in editor, color swatches in step 1, 8s autosave, safe-area sticky bar, dynamic import TextEditor/DesignPreview, removed dead ColorPicker/Uploader/OrientationModal.
+
+- **Designer v2 rewrite (DONE)** — `/design` is now the full v2 sash flow: Step 1 = real option groups (نوع الوشاح/اللون/إطار/خلف via OptionGroupField + live PriceBreakdown + CustomerImageUpload for مثلث), Step 2 = canvas (SashFlat, color from selected option), Step 3 = preview + confirm. **Confirm now: saveDesign → configureOrder(productId,designId,selections) → completeDesign** — fixes the old bug where sash priced at base only + no order_items. Brand header (script logo), autosave indicator, sticky action bar, total shown on confirm. Sash `/product/[id]` now delegates to designer (hides duplicate configurator). Legacy ColorPicker unused. tsc + build pass. ماروني added to SashFlat color map.
+- **Staff system + wholesaler student tracking (DONE 2026-05-26)** — Admin can manage staff accounts (`/admin/staff` + `/api/admin/staff` CRUD). Admin + wholesaler + staff can view all students under a wholesaler with **مكتمل/غير مكتمل** derived from `order_status >= design_complete` (new pages: `/wholesaler/students`, `/admin/wholesalers/[id]/students`, `/staff/wholesalers` + `/staff/wholesalers/[id]/students`; new staff API: `GET /api/staff/wholesalers/:id/students`; student list APIs now also return `is_completed`).
+- **Gown WYSIWYG preview + staff composite export (DONE 2026-05-26)** — Shared `lib/gown-hotspots.ts` + `lib/render-gown-composite.ts`; `SashGownPreview` + `GownPanelImage` on gown hotspots. **Fix (2026-05-26):** `rasterizePanelCanvas` renders horizontal board then rotates with 2D matrix (Fabric viewport PNG export was blank). Editor: no live gown strip; gown preview on step 2/3 after **حفظ الجانب**. **Staff**: gown + flat panel PNG export.
+
+- **Package API (DONE 2026-05-26)** — `GET /api/catalog/packages` (public/role-aware, joins sash_type_label from package_rules); Admin CRUD `POST/PATCH/DELETE /api/catalog/packages` + `PUT /packages/:id/rule` (sash type link); `POST /api/orders/configure-package` (retail, wholesaler-linked only): validates student approval, resolves batch, creates 3 orders (sash at package price + robe+cap at 0) in tx, snapshots package name in order_items. Migration 004 (`orders.package_id`) applied to Neon. → Cursor: wire `wholesaler/package/page.tsx` + `(student)/page.tsx` + batch detail columns.
+
 ## 🔄 Current Task
-Phase 6 staff COMPLETE. Next: Phase 5 (student retail pages).
+Parent-child products + catalog bug fix DONE (2026-05-26).
+
+- **Admin can create/delete products, groups, options** — `lib/catalog.ts` + `admin/products/page.tsx` wired to `POST/DELETE /catalog/products|groups|options`.
+- **Product page auto-selects single-option required groups** — if admin creates "وشاح مثلث" with only 1 option in نوع الوشاح, it auto-selects on load. Applies to all product types.
+- **Sash → Designer preset flow** — clicking "صمّم وشاحك" on a sash product page saves `{productId, selections}` to sessionStorage (`loloshop_sash_preset`). Designer (`useDesignDraft`) reads it: loads that specific product instead of always sash[0], pre-fills selections, persists productId across refreshes.
+- **Sizes page** — `(student)/sizes/page.tsx` (S/M/L/XL/XXL robe chart + cap sizing).
+- **Home page** — INITIAL_PER_TYPE raised 4→6, sizes link added.
+
+Workflow for admin adding 20 sash products:
+1. Go to `/admin/products` → click "إضافة منتج+" → type=sash, name="وشاح مثلث", price=30000
+2. Inside that product → "إضافة مجموعة خيارات+" → name="نوع الوشاح", type=single_select, required=true
+3. "+ خيار" → label="مثلث", price_delta=0
+4. Repeat for each sash type → student home shows all 20 as cards.
 
 ---
 
@@ -196,7 +219,7 @@ None
 | frontend/app/verify-otp/page.tsx | ✅ |
 | frontend/components/designer/SashFlat.tsx | ⏳ |
 | frontend/components/designer/TextEditor.tsx (Fabric.js) | ⏳ |
-| frontend/app/(student)/page.tsx | ⏳ |
+| frontend/app/(student)/page.tsx | ✅ |
 | frontend/app/(student)/sizes/page.tsx | ⏳ |
 | frontend/app/staff/layout.tsx | ✅ |
 | frontend/app/staff/page.tsx | ✅ |

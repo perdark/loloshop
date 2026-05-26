@@ -45,16 +45,34 @@ export default function StudentProductPage() {
 
   useEffect(() => {
     const saved = localStorage.getItem(GENDER_KEY);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage read on mount
     if (saved === "male" || saved === "female") setGender(saved);
   }, []);
 
   useEffect(() => {
     if (!id) return;
     getProductFull(id)
-      .then(setProduct)
+      .then(setProduct) // eslint-disable-line react-hooks/set-state-in-effect -- async fetch
       .catch(() => toast.error("تعذر تحميل المنتج"))
       .finally(() => setLoading(false));
   }, [id]);
+
+  // Auto-select single-option required groups (e.g. product has only 1 sash type)
+  useEffect(() => {
+    if (!product) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- derived from product, no cascade
+    setSelection((prev) => {
+      const autoSel: OptionSelection = { ...prev };
+      for (const g of product.optionGroups) {
+        if (prev[g.id] !== undefined) continue;
+        const active = g.options.filter((o) => o.active);
+        if (g.required && active.length === 1) {
+          autoSel[g.id] = active[0].id;
+        }
+      }
+      return autoSel;
+    });
+  }, [product]);
 
   const role = product?.priceRole ?? "retail";
 
@@ -149,21 +167,7 @@ export default function StudentProductPage() {
           </div>
         )}
 
-        {product.type === "sash" && (
-          <div className="space-y-2">
-            <Link
-              href="/design"
-              className="flex min-h-12 items-center justify-center rounded-xl bg-orange font-semibold text-white hover:bg-orange-light"
-            >
-              صمّم وشاحك واطلبه
-            </Link>
-            <p className="text-center text-xs text-ink/50">
-              اختيار اللون والنوع والسعر يتم داخل المصمّم
-            </p>
-          </div>
-        )}
-
-        {product.type !== "sash" && groups.map((group) => {
+        {groups.map((group) => {
           const optionId = getSelectedOptionId(group, selection);
           const needsImage =
             optionId != null &&
@@ -194,16 +198,33 @@ export default function StudentProductPage() {
           );
         })}
 
-        {product.type !== "sash" && (
-          <>
-            <PriceBreakdown lines={preview.lines} total={preview.total} compact />
-            {confirmed && (
-              <OrderBreakdownCard
-                lines={confirmed.breakdown}
-                total={confirmed.total}
-              />
-            )}
-          </>
+        <PriceBreakdown lines={preview.lines} total={preview.total} compact />
+        {confirmed && (
+          <OrderBreakdownCard
+            lines={confirmed.breakdown}
+            total={confirmed.total}
+          />
+        )}
+
+        {product.type === "sash" && (
+          <div className="space-y-2">
+            <button
+              type="button"
+              className="flex min-h-12 w-full items-center justify-center rounded-xl bg-orange font-semibold text-white hover:bg-orange-light"
+              onClick={() => {
+                sessionStorage.setItem(
+                  "loloshop_sash_preset",
+                  JSON.stringify({ productId: id, selections: selection })
+                );
+                router.push("/design");
+              }}
+            >
+              صمّم وشاحك واطلبه
+            </button>
+            <p className="text-center text-xs text-ink/50">
+              اختيار اللون والنوع والسعر يتم داخل المصمّم
+            </p>
+          </div>
         )}
       </div>
 
