@@ -35,7 +35,7 @@ export function DesignerToolsAside({
       <aside
         id={panelId}
         className={`flex-col gap-3 overflow-y-auto sm:max-h-none sm:flex sm:overflow-visible ${
-          open ? "flex max-h-[min(52vh,420px)]" : "hidden sm:flex"
+          open ? "flex max-h-[min(60vh,520px)]" : "hidden sm:flex"
         }`}
       >
         {children}

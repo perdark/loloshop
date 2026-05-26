@@ -114,7 +114,7 @@ export function TextEditor({
   const [hasSelection, setHasSelection] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [whiteboardOpen, setWhiteboardOpen] = useState(false);
-  const [toolsOpen, setToolsOpen] = useState(true);
+  const [toolsOpen, setToolsOpen] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const usedFontsRef = useRef<Set<string>>(new Set());
@@ -505,12 +505,8 @@ export function TextEditor({
         {!whiteboardOpen && (
           <main
             ref={mainRef}
-            className="flex min-h-[min(48vh,320px)] flex-1 flex-col items-center justify-center gap-3 sm:min-h-0 sm:justify-start"
+            className="flex min-h-[min(44vh,280px)] flex-1 flex-col gap-2 sm:min-h-0"
           >
-            <p className="mb-1 max-w-md px-1 text-center text-xs font-medium text-orange-ink">
-              اكتب على المستطيل أدناه (لوحة الوشاح الملوّنة). للنص الجديد اضغط «إضافة / تحرير نص» ثم أضف
-              النص وطبّقه هنا. بعد الحفظ ستظهر المعاينة على الروب في الخطوة التالية.
-            </p>
             <div className="relative w-full touch-none">
               {!ready && (
                 <div className="absolute inset-0 z-10 flex items-center justify-center">
@@ -522,10 +518,66 @@ export function TextEditor({
                 aria-label={`لوحة تصميم — ${sideLabel}`}
                 className="mx-auto rounded-md shadow-lg ring-1 ring-ink/10"
               />
-              <p className="mt-2 text-center text-xs text-ink/50">
+              <p className="mt-1 text-center text-xs text-ink/50">
                 اسحب أي عنصر • الزوايا للتكبير والتدوير
               </p>
             </div>
+
+            {hasSelection && (
+              <div className="rounded-xl border border-orange/20 bg-cream p-2 shadow-sm">
+                <div className="flex items-center justify-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => changeSize(-6)}
+                    disabled={!activeIsText}
+                    className="flex h-10 w-10 items-center justify-center rounded-lg border border-ink/20 text-lg font-bold text-ink disabled:opacity-30"
+                    aria-label="تصغير الخط"
+                  >
+                    −
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => changeSize(6)}
+                    disabled={!activeIsText}
+                    className="flex h-10 w-10 items-center justify-center rounded-lg border border-ink/20 text-lg font-bold text-ink disabled:opacity-30"
+                    aria-label="تكبير الخط"
+                  >
+                    +
+                  </button>
+                  <button
+                    type="button"
+                    onClick={toggleBold}
+                    disabled={!activeIsText}
+                    className="flex h-10 w-10 items-center justify-center rounded-lg border border-ink/20 font-bold text-ink disabled:opacity-30"
+                    aria-label="عريض"
+                  >
+                    B
+                  </button>
+                  <button
+                    type="button"
+                    onClick={deleteActive}
+                    className="flex h-10 items-center justify-center rounded-lg bg-red-100 px-3 text-sm font-semibold text-red-700"
+                    aria-label="حذف العنصر"
+                  >
+                    حذف
+                  </button>
+                </div>
+                {activeIsText && (
+                  <div className="mt-2 flex justify-center gap-2">
+                    {TEXT_COLORS.map((c) => (
+                      <button
+                        key={c.hex}
+                        type="button"
+                        onClick={() => changeColor(c.hex)}
+                        className="h-9 w-9 rounded-full ring-1 ring-ink/20"
+                        style={{ background: c.hex }}
+                        aria-label={c.label}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </main>
         )}
 
@@ -577,47 +629,6 @@ export function TextEditor({
                 </Button>
               )}
             </details>
-
-            <div className="rounded-xl border border-ink/10 bg-cream p-3 shadow-sm">
-              <p className="mb-2 text-sm font-semibold text-ink">العنصر المحدد</p>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="ghost"
-                  className="min-h-11 min-w-11"
-                  onClick={() => changeSize(-6)}
-                  disabled={!activeIsText}
-                >
-                  −
-                </Button>
-                <Button
-                  variant="ghost"
-                  className="min-h-11 min-w-11"
-                  onClick={() => changeSize(6)}
-                  disabled={!activeIsText}
-                >
-                  +
-                </Button>
-                <Button variant="ghost" onClick={toggleBold} disabled={!activeIsText}>
-                  B
-                </Button>
-                <Button variant="danger" fullWidth onClick={deleteActive} disabled={!hasSelection}>
-                  حذف
-                </Button>
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {TEXT_COLORS.map((c) => (
-                  <button
-                    key={c.hex}
-                    type="button"
-                    onClick={() => changeColor(c.hex)}
-                    disabled={!activeIsText}
-                    className="h-11 w-11 rounded-full ring-1 ring-ink/20 disabled:opacity-40"
-                    style={{ background: c.hex }}
-                    aria-label={c.label}
-                  />
-                ))}
-              </div>
-            </div>
           </DesignerToolsAside>
         )}
       </div>

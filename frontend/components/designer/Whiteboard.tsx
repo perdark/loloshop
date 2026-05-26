@@ -64,7 +64,7 @@ export function Whiteboard({ side, fonts, onApply, onClose }: Props) {
   const [textColor, setTextColor] = useState("#1a1a1a");
   const [fontSize, setFontSize] = useState(48);
   const [hasSelection, setHasSelection] = useState(false);
-  const [toolsOpen, setToolsOpen] = useState(true);
+  const [toolsOpen, setToolsOpen] = useState(false);
 
   useEffect(() => {
     if (!canvasElRef.current) return;
@@ -274,7 +274,7 @@ export function Whiteboard({ side, fonts, onApply, onClose }: Props) {
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-3 sm:flex-row-reverse sm:gap-3">
         <main
           ref={mainRef}
-          className="flex min-h-[min(48vh,320px)] flex-1 items-center justify-center overflow-hidden sm:min-h-0 sm:items-start sm:justify-center"
+          className="flex flex-col gap-2 sm:min-h-0 sm:flex-1"
         >
           <div className="relative touch-none">
             {!ready && (
@@ -283,21 +283,12 @@ export function Whiteboard({ side, fonts, onApply, onClose }: Props) {
               </div>
             )}
             <canvas ref={canvasElRef} className="rounded-md shadow-lg ring-1 ring-ink/10" />
-            <p className="mt-2 text-center text-xs text-ink/50">
+            <p className="mt-1 text-center text-xs text-ink/50">
               اسحب أي عنصر لأي مكان • اسحب الزوايا للتكبير والتدوير
             </p>
           </div>
-        </main>
 
-        <DesignerToolsAside
-          open={toolsOpen}
-          onToggle={() => setToolsOpen((v) => !v)}
-          panelId="whiteboard-tools"
-          desktopWidthClass="sm:w-80"
-        >
           <div className="rounded-xl border border-ink/10 bg-beige/60 p-3 shadow-sm">
-            <p className="mb-2 text-sm font-semibold text-ink">أضف نصاً</p>
-            <p className="mb-2 text-xs text-ink/60">{SIDE_HINT[side]}</p>
             <textarea
               value={text}
               onChange={(e) => setText(e.target.value)}
@@ -311,7 +302,14 @@ export function Whiteboard({ side, fonts, onApply, onClose }: Props) {
               أضف النص للوحة
             </Button>
           </div>
+        </main>
 
+        <DesignerToolsAside
+          open={toolsOpen}
+          onToggle={() => setToolsOpen((v) => !v)}
+          panelId="whiteboard-tools"
+          desktopWidthClass="sm:w-80"
+        >
           <div className="rounded-xl border border-ink/10 bg-cream p-3 shadow-sm">
             <p className="mb-1 text-xs font-semibold text-ink/70">حركات — اضغط ثم اسحبها لأي مكان</p>
             <div className="flex flex-wrap gap-1.5">
@@ -384,7 +382,7 @@ export function Whiteboard({ side, fonts, onApply, onClose }: Props) {
         </DesignerToolsAside>
       </div>
 
-      <footer className="flex gap-2 border-t border-ink/10 bg-cream p-3">
+      <footer className="flex gap-2 border-t border-ink/10 bg-cream p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
         <Button variant="ghost" fullWidth onClick={onClose}>إلغاء</Button>
         <Button variant="primary" fullWidth onClick={apply} disabled={!ready}>
           تطبيق على الوشاح
