@@ -80,6 +80,16 @@ app.use('/api/designs', require('./routes/designs'));
 app.use('/api/fonts', require('./routes/fonts'));
 
 app.use((err, req, res, next) => {
+  // Propagate errors thrown inside route handlers with an attached status/code
+  if (err.code && err.status) {
+    const messages = {
+      ERR_ORDER_IN_PROGRESS: 'طلبك قيد التنفيذ ولا يمكن تعديله الآن — تواصل مع الإدارة',
+    };
+    return res.status(err.status).json({
+      error: messages[err.code] || err.message,
+      code: err.code,
+    });
+  }
   console.error('Unhandled:', err);
   res.status(500).json({ error: 'خطأ في الخادم', code: 'ERR_SERVER' });
 });

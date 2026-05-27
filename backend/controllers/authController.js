@@ -62,6 +62,14 @@ async function login(req, res) {
     return res.status(401).json({ error: 'بيانات خاطئة', code: 'ERR_INVALID_CREDENTIALS' });
   }
   const token = signToken(user);
+  // Retail (student) accounts require phone verification before login
+  if (user.role === 'retail' && !user.phone_verified) {
+    return res.status(403).json({
+      error: 'يجب التحقق من رقم الهاتف أولاً — تحقق من واتساب',
+      code: 'ERR_PHONE_NOT_VERIFIED',
+      phone: user.phone,
+    });
+  }
   res.json({
     token,
     user: { id: user.id, name: user.name, role: user.role, phone_verified: user.phone_verified },

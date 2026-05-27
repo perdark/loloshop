@@ -1,12 +1,12 @@
 "use client";
 
+import axios from "axios";
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { AuthCard } from "@/components/auth/AuthCard";
 import { Input } from "@/components/ui/Input";
-import { Button } from "@/components/ui/Button";
 import { login, getApiErrorMessage } from "@/lib/auth-api";
 import { setToken, setUser } from "@/lib/auth";
 import type { UserRole } from "@/lib/types";
@@ -41,6 +41,13 @@ export default function LoginPage() {
       toast.success(`مرحباً ${user.name}`);
       router.replace(ROLE_REDIRECT[user.role]);
     } catch (err) {
+      // Unverified phone → redirect to OTP verification
+      if (axios.isAxiosError(err) && err.response?.data?.code === "ERR_PHONE_NOT_VERIFIED") {
+        const serverPhone: string = err.response.data.phone || phone.trim();
+        toast.info("أكمل التحقق من رقم الهاتف أولاً");
+        router.replace(`/verify-otp?phone=${encodeURIComponent(serverPhone)}`);
+        return;
+      }
       toast.error(getApiErrorMessage(err, "بيانات الدخول غير صحيحة"));
     } finally {
       setLoading(false);

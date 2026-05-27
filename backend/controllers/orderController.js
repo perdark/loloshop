@@ -234,16 +234,26 @@ async function configureOrder(req, res) {
     });
   }
 
-  // Reconcile with an existing order to avoid duplicates:
-  //  - sash: the designer auto-creates a 'designing' order keyed by design_id → update it
-  //  - other products: one order per (student, product) without a design → update on re-config
-  const existing = design_id
-    ? await query(`SELECT id FROM orders WHERE student_id = $1 AND design_id = $2`, [student.id, design_id])
-    : await query(`SELECT id FROM orders WHERE student_id = $1 AND product_id = $2 AND design_id IS NULL`, [student.id, product_id]);
-
+  // Reconcile with an existing order to avoid duplicates. SELECT + UPDATE must be
+  // inside the same transaction with FOR UPDATE to prevent a race condition where
+  // two simultaneous taps both see no existing order and both INSERT.
   const orderId = await tx(async (client) => {
+    const existingSql = design_id
+      ? `SELECT id, status FROM orders WHERE student_id = $1 AND design_id = $2 FOR UPDATE`
+      : `SELECT id, status FROM orders WHERE student_id = $1 AND product_id = $2 AND design_id IS NULL FOR UPDATE`;
+    const existingArgs = design_id
+      ? [student.id, design_id]
+      : [student.id, product_id];
+    const existing = await client.query(existingSql, existingArgs);
+
     let oid;
     if (existing.rows.length) {
+      const currentStatus = existing.rows[0].status;
+      // Only allow reconfiguring orders that haven't been picked up for production
+      const reconfigurable = ['designing', 'design_complete'];
+      if (!reconfigurable.includes(currentStatus)) {
+        throw Object.assign(new Error('ORDER_IN_PROGRESS'), { status: 409, code: 'ERR_ORDER_IN_PROGRESS' });
+      }
       oid = existing.rows[0].id;
       await client.query(
         `UPDATE orders SET price = $1, batch_id = $2, status = 'design_complete' WHERE id = $3`,
