@@ -283,18 +283,9 @@ export function TextEditor({
       if (!canvas || !el || !main || main.clientWidth < 80) return;
       const avail = Math.max(220, main.clientWidth - 16);
       const scale = Math.min(1, avail / CANVAS.w);
-      // Keep Fabric coordinates at 600×360; scale display with CSS only
-      canvas.setDimensions({ width: CANVAS.w, height: CANVAS.h });
-      canvas.setZoom(1);
-      canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
-      const wrap = el.parentElement;
-      if (wrap) {
-        wrap.style.width = `${CANVAS.w * scale}px`;
-        wrap.style.height = `${CANVAS.h * scale}px`;
-        wrap.style.marginInline = "auto";
-      }
-      el.style.width = "100%";
-      el.style.height = "100%";
+      // Scale both Fabric dimensions AND zoom so touch coordinates map correctly on mobile
+      canvas.setDimensions({ width: CANVAS.w * scale, height: CANVAS.h * scale });
+      canvas.setZoom(scale);
       canvas.calcOffset?.();
       canvas.requestRenderAll();
     };

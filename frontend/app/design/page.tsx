@@ -145,9 +145,25 @@ export default function DesignPage() {
 
   return (
     <div className="mx-auto min-h-screen max-w-4xl bg-cream">
-      <header className="bg-brand-gradient px-4 py-5 text-center text-cream">
-        <p className="font-script text-3xl leading-none text-orange-ink">lolo shop</p>
-        <h1 className="mt-1 font-display text-xl">صمّم وشاحك</h1>
+      <header className="bg-brand-gradient px-4 py-4 text-cream">
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            onClick={() => { router.replace("/"); }}
+            className="text-sm text-cream/70 hover:text-cream"
+          >
+            ← الرئيسية
+          </button>
+          <p className="font-script text-2xl leading-none text-orange-ink">lolo shop</p>
+          <button
+            type="button"
+            onClick={() => { import("@/lib/auth").then(({ logout }) => { logout(); router.replace("/login"); }); }}
+            className="text-sm text-cream/70 hover:text-cream"
+          >
+            خروج
+          </button>
+        </div>
+        <h1 className="mt-2 text-center font-display text-xl">صمّم وشاحك</h1>
       </header>
 
       <div aria-live="polite" className="sr-only">

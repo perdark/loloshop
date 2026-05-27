@@ -69,8 +69,12 @@ export function serializeHorizontalCanvas(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   canvas: any
 ): Record<string, unknown> {
-  const displayW = canvas.getWidth?.() ?? EDITOR_CANVAS_WIDTH;
-  const displayH = canvas.getHeight?.() ?? EDITOR_CANVAS_HEIGHT;
+  // Divide by zoom to get the logical (unzoomed) canvas dimensions.
+  // When canvas uses setDimensions(scaled) + setZoom(scale), getWidth() returns
+  // pixel size not logical size; zoom restores the 600×360 logical space.
+  const zoom = canvas.getZoom?.() ?? 1;
+  const displayW = (canvas.getWidth?.() ?? EDITOR_CANVAS_WIDTH) / zoom;
+  const displayH = (canvas.getHeight?.() ?? EDITOR_CANVAS_HEIGHT) / zoom;
   const sx = EDITOR_CANVAS_WIDTH / displayW;
   const sy = EDITOR_CANVAS_HEIGHT / displayH;
 

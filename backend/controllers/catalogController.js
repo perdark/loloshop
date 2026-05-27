@@ -380,16 +380,26 @@ async function setPackageRule(req, res) {
 async function upsertPresets(req, res) {
   const { id } = req.params;
   const { presets } = req.body; // [{optionId, customerImageUrl?}]
+  // Validate: all optionIds must belong to the product's own or parent's option groups
+  const validOpts = await query(
+    `SELECT o.id FROM options o
+     JOIN option_groups g ON g.id = o.group_id
+     WHERE g.product_id = $1
+       OR g.product_id = (SELECT parent_id FROM products WHERE id = $1)`,
+    [id]
+  );
+  const validSet = new Set(validOpts.rows.map((r) => r.id));
+  const filtered = (presets || []).filter((p) => p.optionId && validSet.has(p.optionId));
+
   await query(`DELETE FROM product_preset_options WHERE product_id = $1`, [id]);
-  for (const p of (presets || [])) {
-    if (!p.optionId) continue;
+  for (const p of filtered) {
     await query(
       `INSERT INTO product_preset_options (product_id, option_id, customer_image_url)
        VALUES ($1, $2, $3)`,
       [id, p.optionId, p.customerImageUrl || null]
     );
   }
-  res.json({ data: { saved: (presets || []).length } });
+  res.json({ data: { saved: filtered.length } });
 }
 
 // ---------- ADMIN: image upload (option / group illustrative images) ----------

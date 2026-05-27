@@ -59,12 +59,13 @@ export function VerifyOtpForm() {
     setLoading(true);
     try {
       const result = await verifyOtp(phone.trim(), code);
-      toast.success("تم التحقق بنجاح");
-      if (result?.user) {
-        router.replace(ROLE_REDIRECT[result.user.role] ?? "/");
-      } else {
+      if (!result?.user) {
+        toast.error("تحقق ناجح لكن تعذر تسجيل الدخول — أدخل بياناتك");
         router.replace("/login");
+        return;
       }
+      toast.success("تم التحقق وتسجيل الدخول");
+      router.replace(ROLE_REDIRECT[result.user.role] ?? "/");
     } catch (err) {
       toast.error(getApiErrorMessage(err, "رمز غير صحيح"));
     } finally {

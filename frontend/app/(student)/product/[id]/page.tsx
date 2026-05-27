@@ -57,20 +57,51 @@ export default function StudentProductPage() {
       .finally(() => setLoading(false));
   }, [id]);
 
-  // Auto-select single-option required groups (e.g. product has only 1 sash type)
+  // Apply product presets + auto-select single-option required groups
   useEffect(() => {
     if (!product) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- derived from product, no cascade
     setSelection((prev) => {
       const autoSel: OptionSelection = { ...prev };
+      // Apply admin-configured presets first (child product defaults)
+      for (const preset of product.presets ?? []) {
+        for (const g of product.optionGroups) {
+          const opt = g.options.find((o) => o.id === preset.optionId);
+          if (opt) {
+            if (autoSel[g.id] === undefined) {
+              if (g.inputType === "single_select") autoSel[g.id] = preset.optionId;
+              else if (g.inputType === "toggle") autoSel[g.id] = true;
+            }
+            break;
+          }
+        }
+      }
+      // Auto-select single-option required groups
       for (const g of product.optionGroups) {
-        if (prev[g.id] !== undefined) continue;
+        if (autoSel[g.id] !== undefined) continue;
         const active = g.options.filter((o) => o.active);
         if (g.required && active.length === 1) {
           autoSel[g.id] = active[0].id;
         }
       }
       return autoSel;
+    });
+    // Apply preset customer images (e.g. admin-uploaded مثلث reference photo)
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- derived from product, no cascade
+    setCustomerImages((prev) => {
+      if (Object.keys(prev).length > 0) return prev;
+      const imgs: Record<string, string> = {};
+      for (const p of product.presets ?? []) {
+        if (!p.customerImageUrl) continue;
+        for (const g of product.optionGroups) {
+          const opt = g.options.find((o) => o.id === p.optionId);
+          if (opt) {
+            imgs[selectionKey(g.id, p.optionId)] = p.customerImageUrl;
+            break;
+          }
+        }
+      }
+      return Object.keys(imgs).length ? imgs : prev;
     });
   }, [product]);
 

@@ -158,10 +158,15 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
           // Persist product choice for page refreshes
           try { sessionStorage.setItem(DRAFT_PRODUCT_ID_KEY, targetProductId); } catch { /* ignore */ }
 
-          const savedSelection = readSessionJson<OptionSelection>(DRAFT_SELECTION_KEY);
-          const savedCustomerImages = readSessionJson<Record<string, string>>(
-            DRAFT_CUSTOMER_IMAGES_KEY
-          );
+          // If a fresh preset arrived for a different product, discard the old draft session
+          const productSwitched = preset?.productId && preset.productId !== savedProductId;
+
+          const savedSelection = productSwitched
+            ? null
+            : readSessionJson<OptionSelection>(DRAFT_SELECTION_KEY);
+          const savedCustomerImages = productSwitched
+            ? null
+            : readSessionJson<Record<string, string>>(DRAFT_CUSTOMER_IMAGES_KEY);
 
           // Build preset selection from product.presets (child product defaults)
           const productPresetSelection: OptionSelection = {};
@@ -185,7 +190,7 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
             }
           }
 
-          // Priority: saved session > URL preset > product presets
+          // Priority: page-preset (from product card) > saved session > product presets
           const mergedSelection: OptionSelection = {
             ...productPresetSelection,
             ...(savedSelection ?? {}),
@@ -221,12 +226,15 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
 
           const hasCanvas = !!(my.data?.left_canvas || my.data?.right_canvas);
           let restoredStep: 1 | 2 | 3 = hasCanvas ? 2 : 1;
-          const savedStepRaw =
-            typeof sessionStorage !== "undefined"
-              ? sessionStorage.getItem(DRAFT_STEP_KEY)
-              : null;
-          if (savedStepRaw === "1" || savedStepRaw === "2" || savedStepRaw === "3") {
-            restoredStep = Number(savedStepRaw) as 1 | 2 | 3;
+          // Don't restore step from a previous session when switching products
+          if (!productSwitched) {
+            const savedStepRaw =
+              typeof sessionStorage !== "undefined"
+                ? sessionStorage.getItem(DRAFT_STEP_KEY)
+                : null;
+            if (savedStepRaw === "1" || savedStepRaw === "2" || savedStepRaw === "3") {
+              restoredStep = Number(savedStepRaw) as 1 | 2 | 3;
+            }
           }
           setStep(restoredStep);
         }
