@@ -79,11 +79,17 @@ async function getProductFull(req, res) {
   const byGroup = {};
   options.rows.forEach((o) => (byGroup[o.group_id] ||= []).push(o));
 
+  const presetsRes = await query(
+    `SELECT option_id, customer_image_url FROM product_preset_options WHERE product_id = $1`,
+    [id]
+  );
+
   const data = {
     ...row,
     price_role: role,
     images: gallery.rows,
     groups: allGroupRows.map((g) => ({ ...g, options: byGroup[g.id] || [] })),
+    presets: presetsRes.rows,
   };
   res.json({ data });
 }
@@ -93,7 +99,7 @@ async function getShop(req, res) {
   const role = await priceRoleForUser(req.user, req.query.role);
   const products = await query(
     `SELECT p.id, p.type, p.name_ar, p.description, p.customizable, p.gender_restriction,
-            p.image_url, p.featured, p.sort,
+            p.image_url, p.featured, p.sort, p.parent_id,
             COALESCE(ppr.base_price, p.base_price) AS base_price
      FROM products p
      LEFT JOIN product_price_roles ppr ON ppr.product_id = p.id AND ppr.role = $1
@@ -370,6 +376,22 @@ async function setPackageRule(req, res) {
   res.json({ data: { package_id: id, sash_type_option_id } });
 }
 
+// ---------- ADMIN: product preset options (child product defaults) ----------
+async function upsertPresets(req, res) {
+  const { id } = req.params;
+  const { presets } = req.body; // [{optionId, customerImageUrl?}]
+  await query(`DELETE FROM product_preset_options WHERE product_id = $1`, [id]);
+  for (const p of (presets || [])) {
+    if (!p.optionId) continue;
+    await query(
+      `INSERT INTO product_preset_options (product_id, option_id, customer_image_url)
+       VALUES ($1, $2, $3)`,
+      [id, p.optionId, p.customerImageUrl || null]
+    );
+  }
+  res.json({ data: { saved: (presets || []).length } });
+}
+
 // ---------- ADMIN: image upload (option / group illustrative images) ----------
 async function uploadImage(req, res) {
   if (!req.file) return res.status(400).json({ error: 'لا ملف', code: 'ERR_VALIDATION' });
@@ -384,4 +406,5 @@ module.exports = {
   createOption, updateOption, deleteOption,
   setOptionPriceRole, setProductPriceRole, uploadImage,
   listPackages, createPackage, updatePackage, deletePackage, setPackageRule,
+  upsertPresets,
 };

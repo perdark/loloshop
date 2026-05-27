@@ -82,6 +82,7 @@ function mapShopProduct(raw: Record<string, unknown>): ShopProductCard {
     customizable: Boolean(raw.customizable),
     genderRestriction:
       (raw.gender_restriction as ShopProductCard["genderRestriction"]) ?? null,
+    parentId: (raw.parent_id as string | null) ?? null,
   };
 }
 
@@ -121,6 +122,10 @@ function mapProductFull(raw: Record<string, unknown>): CatalogProduct {
     optionGroups: groups.map((g) => mapGroup(g, id)),
     parentId: (raw.parent_id as string | null) ?? null,
     parentNameAr: (raw.parent_name_ar as string | null) ?? null,
+    presets: ((raw.presets as Record<string, unknown>[] | undefined) || []).map((p) => ({
+      optionId: String(p.option_id),
+      customerImageUrl: resolveCatalogMediaUrl(p.customer_image_url as string | null),
+    })),
   };
 }
 
@@ -216,6 +221,13 @@ export async function setProductPriceRole(
     role,
     base_price: basePrice,
   });
+}
+
+export async function setProductPresets(
+  productId: string,
+  presets: { optionId: string; customerImageUrl?: string | null }[]
+): Promise<void> {
+  await api.put(`/catalog/products/${productId}/presets`, { presets });
 }
 
 export async function updateCatalogGroup(

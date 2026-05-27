@@ -12,6 +12,7 @@ import {
   listCatalogProductsAdmin,
   setOptionPriceRole,
   setProductPriceRole,
+  setProductPresets,
   updateCatalogGroup,
   updateCatalogOption,
   uploadCatalogImage,
@@ -40,6 +41,9 @@ export default function AdminProductsPage() {
   const [previewRole, setPreviewRole] = useState<PriceRole>("retail");
   const [previewSel, setPreviewSel] = useState<OptionSelection>({});
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [presetSel, setPresetSel] = useState<Record<string, string | boolean>>({});
+  const [presetImages, setPresetImages] = useState<Record<string, string>>({});
+  const [savingPresets, setSavingPresets] = useState(false);
 
   const loadList = useCallback(async () => {
     setLoadingList(true);
@@ -145,6 +149,56 @@ export default function AdminProductsPage() {
   async function refreshProduct() {
     await loadList();
     if (selectedId) await loadProduct(selectedId, previewRole);
+  }
+
+  useEffect(() => {
+    if (!product?.presets?.length) {
+      setPresetSel({});
+      setPresetImages({});
+      return;
+    }
+    const sel: Record<string, string | boolean> = {};
+    const imgs: Record<string, string> = {};
+    for (const preset of product.presets) {
+      for (const g of product.optionGroups) {
+        const opt = g.options.find((o) => o.id === preset.optionId);
+        if (opt) {
+          sel[g.id] = g.inputType === "toggle" ? true : preset.optionId;
+          if (preset.customerImageUrl) imgs[preset.optionId] = preset.customerImageUrl;
+          break;
+        }
+      }
+    }
+    setPresetSel(sel);
+    setPresetImages(imgs);
+  }, [product]);
+
+  async function handleSavePresets() {
+    if (!product) return;
+    setSavingPresets(true);
+    try {
+      const presets: { optionId: string; customerImageUrl?: string | null }[] = [];
+      for (const [groupId, val] of Object.entries(presetSel)) {
+        if (!val) continue;
+        let optionId: string | undefined;
+        const group = product.optionGroups.find((g) => g.id === groupId);
+        if (!group) continue;
+        if (group.inputType === "toggle") {
+          optionId = group.options.find((o) => o.active)?.id ?? group.options[0]?.id;
+        } else if (typeof val === "string") {
+          optionId = val;
+        }
+        if (!optionId) continue;
+        presets.push({ optionId, customerImageUrl: presetImages[optionId] ?? null });
+      }
+      await setProductPresets(product.id, presets);
+      await loadProduct(product.id, previewRole);
+      toast.success("تم حفظ الافتراضيات");
+    } catch (e) {
+      toast.error(getApiErrorMessage(e, "تعذر الحفظ"));
+    } finally {
+      setSavingPresets(false);
+    }
   }
 
   const selectedSummary = summaries.find((s) => s.id === selectedId);
@@ -314,6 +368,112 @@ export default function AdminProductsPage() {
                   >
                     {product.parentNameAr}
                   </button>
+                </div>
+              )}
+
+              {product.parentId && (
+                <div className="mb-4 rounded-xl border border-orange/30 bg-orange/5 p-4">
+                  <div className="mb-3 flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-ink">الخيارات الافتراضية</h3>
+                    <p className="text-xs text-ink/50">تُطبَّق مسبقاً عند دخول الطالب للمصمم</p>
+                  </div>
+                  <div className="space-y-3">
+                    {product.optionGroups
+                      .filter((g) => g.inherited)
+                      .map((group) => (
+                        <div key={group.id} className="rounded-lg bg-cream/80 p-3">
+                          <p className="mb-1.5 text-xs font-semibold text-ink">{group.nameAr}</p>
+                          {group.inputType === "single_select" && (
+                            <select
+                              className="w-full rounded border border-ink/20 bg-cream px-2 py-1.5 text-sm"
+                              value={typeof presetSel[group.id] === "string" ? (presetSel[group.id] as string) : ""}
+                              onChange={(e) =>
+                                setPresetSel((s) => ({
+                                  ...s,
+                                  [group.id]: e.target.value || false,
+                                }))
+                              }
+                            >
+                              <option value="">— بدون افتراضي —</option>
+                              {group.options.map((o) => (
+                                <option key={o.id} value={o.id}>
+                                  {o.labelAr}
+                                </option>
+                              ))}
+                            </select>
+                          )}
+                          {group.inputType === "toggle" && (
+                            <label className="flex items-center gap-2 text-sm">
+                              <input
+                                type="checkbox"
+                                checked={!!presetSel[group.id]}
+                                onChange={(e) =>
+                                  setPresetSel((s) => ({
+                                    ...s,
+                                    [group.id]: e.target.checked,
+                                  }))
+                                }
+                                className="accent-orange"
+                              />
+                              مفعّل افتراضياً
+                            </label>
+                          )}
+                          {/* Customer image upload for preset */}
+                          {(() => {
+                            const selOptId = typeof presetSel[group.id] === "string"
+                              ? (presetSel[group.id] as string)
+                              : group.options.find((o) => o.active)?.id;
+                            const selOpt = selOptId ? group.options.find((o) => o.id === selOptId) : null;
+                            const needsImg = selOpt?.requiresCustomerImage || group.requiresCustomerImage;
+                            if (!needsImg || !selOptId) return null;
+                            const imgUrl = presetImages[selOptId];
+                            const inputId = `preset-img-${selOptId}`;
+                            return (
+                              <div className="mt-2">
+                                <p className="mb-1 text-[11px] text-ink/60">
+                                  صورة العميل المرفقة مسبقاً (اختياري)
+                                </p>
+                                {imgUrl && (
+                                  <div className="relative mb-2 h-16 w-16 overflow-hidden rounded-lg border border-ink/10">
+                                    <Image src={imgUrl} alt="" fill className="object-cover" unoptimized />
+                                  </div>
+                                )}
+                                <label
+                                  htmlFor={inputId}
+                                  className="cursor-pointer text-xs text-orange-ink underline"
+                                >
+                                  {imgUrl ? "تغيير الصورة" : "رفع صورة افتراضية"}
+                                </label>
+                                <input
+                                  id={inputId}
+                                  type="file"
+                                  accept="image/*"
+                                  className="hidden"
+                                  onChange={async (e) => {
+                                    const f = e.target.files?.[0];
+                                    if (!f) return;
+                                    try {
+                                      const url = await uploadCatalogImage(f);
+                                      setPresetImages((prev) => ({ ...prev, [selOptId]: url }));
+                                    } catch (err) {
+                                      toast.error(getApiErrorMessage(err, "فشل رفع الصورة"));
+                                    }
+                                  }}
+                                />
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      ))}
+                  </div>
+                  <Button
+                    variant="primary"
+                    className="mt-3 w-full"
+                    loading={savingPresets}
+                    onClick={handleSavePresets}
+                  >
+                    حفظ الافتراضيات
+                  </Button>
                 </div>
               )}
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">

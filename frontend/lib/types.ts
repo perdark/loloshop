@@ -210,6 +210,7 @@ export interface CatalogProduct {
   optionGroups: CatalogOptionGroup[];
   parentId?: string | null;
   parentNameAr?: string | null;
+  presets?: { optionId: string; customerImageUrl: string | null }[];
 }
 
 export interface CatalogProductSummary {
@@ -248,6 +249,7 @@ export interface ShopProductCard {
   featured: boolean;
   customizable: boolean;
   genderRestriction: GenderRestriction;
+  parentId?: string | null;
 }
 
 export interface ShopFeed {

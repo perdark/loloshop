@@ -370,4 +370,13 @@ CREATE TABLE IF NOT EXISTS package_rules (
 -- Migration 005: product parent-child hierarchy
 ALTER TABLE products ADD COLUMN IF NOT EXISTS parent_id UUID REFERENCES products(id) ON DELETE SET NULL;
 
+-- Migration 006: product preset options (pre-selected options for child products)
+CREATE TABLE IF NOT EXISTS product_preset_options (
+  product_id         UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  option_id          UUID NOT NULL REFERENCES options(id)  ON DELETE CASCADE,
+  customer_image_url TEXT,
+  PRIMARY KEY (product_id, option_id)
+);
+CREATE INDEX IF NOT EXISTS idx_product_preset_options_product ON product_preset_options(product_id);
+
 COMMIT;

@@ -16,6 +16,7 @@ router.post('/products', c.createProduct);
 router.patch('/products/:id', c.updateProduct);
 router.delete('/products/:id', c.deleteProduct);
 router.put('/products/:id/price-role', c.setProductPriceRole);
+router.put('/products/:id/presets', c.upsertPresets);
 router.post('/products/:id/groups', c.createGroup);
 router.post('/products/:id/images', c.addProductImage);
 router.delete('/images/:id', c.deleteProductImage);

@@ -16,7 +16,7 @@ import {
   validateSelection,
   type OptionSelection,
 } from "@/lib/pricing";
-import { validateCustomerImages } from "@/lib/customerImage";
+import { selectionKey, validateCustomerImages } from "@/lib/customerImage";
 import type { CatalogProduct } from "@/lib/types";
 import { getApiErrorMessage } from "@/lib/api";
 
@@ -163,8 +163,31 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
             DRAFT_CUSTOMER_IMAGES_KEY
           );
 
-          // Preset selections take priority, fall back to saved session
+          // Build preset selection from product.presets (child product defaults)
+          const productPresetSelection: OptionSelection = {};
+          const productPresetImages: Record<string, string> = {};
+          if (full.presets?.length) {
+            for (const p of full.presets) {
+              for (const group of full.optionGroups) {
+                const opt = group.options.find((o) => o.id === p.optionId);
+                if (opt) {
+                  if (group.inputType === "single_select") {
+                    productPresetSelection[group.id] = p.optionId;
+                  } else if (group.inputType === "toggle") {
+                    productPresetSelection[group.id] = true;
+                  }
+                  if (p.customerImageUrl) {
+                    productPresetImages[selectionKey(group.id, p.optionId)] = p.customerImageUrl;
+                  }
+                  break;
+                }
+              }
+            }
+          }
+
+          // Priority: saved session > URL preset > product presets
           const mergedSelection: OptionSelection = {
+            ...productPresetSelection,
             ...(savedSelection ?? {}),
             ...(preset?.selections ?? {}),
           };
@@ -173,6 +196,8 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
           }
           if (savedCustomerImages && Object.keys(savedCustomerImages).length > 0) {
             setCustomerImages(savedCustomerImages);
+          } else if (Object.keys(productPresetImages).length > 0) {
+            setCustomerImages(productPresetImages);
           }
 
           if (my.data) {
