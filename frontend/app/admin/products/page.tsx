@@ -8,6 +8,9 @@ import { resolveCatalogMediaUrl } from "@/lib/catalog";
 import Image from "next/image";
 import {
   createCatalogProduct,
+  deleteCatalogGroup,
+  deleteCatalogOption,
+  deleteCatalogProduct,
   getProductFull,
   listCatalogProductsAdmin,
   setOptionPriceRole,
@@ -90,10 +93,7 @@ export default function AdminProductsPage() {
     return computePriceBreakdown(product, previewSel, previewRole);
   }, [product, previewSel, previewRole]);
 
-  async function persistGroup(
-    groupId: string,
-    patch: Partial<CatalogOptionGroup>
-  ) {
+  async function persistGroup(groupId: string, patch: Partial<CatalogOptionGroup>) {
     setSavingId(groupId);
     try {
       await updateCatalogGroup(groupId, {
@@ -113,14 +113,17 @@ export default function AdminProductsPage() {
     }
   }
 
-  async function persistOption(
-    optionId: string,
-    priceDelta: number,
-    groupId: string
-  ) {
+  // Role-aware option price save:
+  // - retail view → edits options.price_delta (base / retail price)
+  // - wholesale view → edits option_price_roles for wholesaler
+  async function persistOptionDelta(optionId: string, priceDelta: number) {
     setSavingId(optionId);
     try {
-      await updateCatalogOption(optionId, { price_delta: priceDelta });
+      if (previewRole === "wholesaler") {
+        await setOptionPriceRole(optionId, "wholesaler", priceDelta);
+      } else {
+        await updateCatalogOption(optionId, { price_delta: priceDelta });
+      }
       if (selectedId) await loadProduct(selectedId, previewRole);
     } catch (e) {
       toast.error(getApiErrorMessage(e, "تعذر تحديث السعر"));
@@ -141,6 +144,50 @@ export default function AdminProductsPage() {
       toast.success("تم تحديث سعر الدور");
     } catch (e) {
       toast.error(getApiErrorMessage(e, "تعذر تحديث سعر الدور"));
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  async function handleDeleteGroup(groupId: string, nameAr: string) {
+    if (!confirm(`حذف المجموعة "${nameAr}" وجميع خياراتها؟`)) return;
+    setSavingId(`del-group-${groupId}`);
+    try {
+      await deleteCatalogGroup(groupId);
+      toast.success("تم حذف المجموعة");
+      if (selectedId) await loadProduct(selectedId, previewRole);
+    } catch (e) {
+      toast.error(getApiErrorMessage(e, "تعذر الحذف"));
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  async function handleDeleteOption(optionId: string, labelAr: string) {
+    if (!confirm(`حذف الخيار "${labelAr}"؟`)) return;
+    setSavingId(`del-opt-${optionId}`);
+    try {
+      await deleteCatalogOption(optionId);
+      toast.success("تم حذف الخيار");
+      if (selectedId) await loadProduct(selectedId, previewRole);
+    } catch (e) {
+      toast.error(getApiErrorMessage(e, "تعذر الحذف"));
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  async function handleDeleteProduct(productId: string, nameAr: string) {
+    if (!confirm(`حذف المنتج "${nameAr}" نهائياً؟`)) return;
+    setSavingId(`del-prod-${productId}`);
+    try {
+      await deleteCatalogProduct(productId);
+      toast.success("تم حذف المنتج");
+      setSelectedId(null);
+      setProduct(null);
+      await loadList();
+    } catch (e) {
+      toast.error(getApiErrorMessage(e, "تعذر حذف المنتج"));
     } finally {
       setSavingId(null);
     }
@@ -222,6 +269,7 @@ export default function AdminProductsPage() {
       />
 
       <div className="grid gap-6 lg:grid-cols-[220px_1fr_260px]">
+        {/* ── Sidebar ── */}
         <aside className="space-y-2">
           <Button
             variant="ghost"
@@ -280,13 +328,7 @@ export default function AdminProductsPage() {
                 >
                   <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-md bg-peach/40">
                     {p.imageUrl ? (
-                      <Image
-                        src={resolveCatalogMediaUrl(p.imageUrl) || p.imageUrl}
-                        alt=""
-                        fill
-                        className="object-cover"
-                        unoptimized
-                      />
+                      <Image src={resolveCatalogMediaUrl(p.imageUrl) || p.imageUrl} alt="" fill className="object-cover" unoptimized />
                     ) : null}
                   </div>
                   <span className="min-w-0 flex-1">
@@ -304,7 +346,6 @@ export default function AdminProductsPage() {
                 </button>
               );
 
-              // Render children under this parent
               for (const c of children.filter(ch => ch.parentId === p.id)) {
                 items.push(
                   <button
@@ -319,13 +360,7 @@ export default function AdminProductsPage() {
                   >
                     <div className="relative h-8 w-8 shrink-0 overflow-hidden rounded-md bg-peach/40">
                       {c.imageUrl ? (
-                        <Image
-                          src={resolveCatalogMediaUrl(c.imageUrl) || c.imageUrl}
-                          alt=""
-                          fill
-                          className="object-cover"
-                          unoptimized
-                        />
+                        <Image src={resolveCatalogMediaUrl(c.imageUrl) || c.imageUrl} alt="" fill className="object-cover" unoptimized />
                       ) : null}
                     </div>
                     <span className="min-w-0 flex-1">
@@ -338,23 +373,19 @@ export default function AdminProductsPage() {
                 );
               }
             }
-
-            // Standalone products: parents with no children AND no parentId
-            // (already included above as "parents"; children-free parents without children label are already shown)
             return <>{items}</>;
           })()}
         </aside>
 
+        {/* ── Main panel ── */}
         <section className="min-h-[320px] rounded-xl border border-ink/10 bg-beige p-5">
           {loadingProduct || !product ? (
             <PageLoader />
           ) : (
             <>
-              <AdminProductMedia
-                summary={selectedSummary}
-                product={product}
-                onUpdated={refreshProduct}
-              />
+              <AdminProductMedia summary={selectedSummary} product={product} onUpdated={refreshProduct} />
+
+              {/* Parent breadcrumb */}
               {product.parentNameAr && (
                 <div className="mb-3 rounded-lg border border-orange/20 bg-orange/5 px-3 py-2 text-sm">
                   <span className="text-ink/60">المنتج الأساسي: </span>
@@ -371,11 +402,12 @@ export default function AdminProductsPage() {
                 </div>
               )}
 
+              {/* Preset options (child products only) */}
               {product.parentId && (
                 <div className="mb-4 rounded-xl border border-orange/30 bg-orange/5 p-4">
                   <div className="mb-3 flex items-center justify-between">
                     <h3 className="text-sm font-bold text-ink">الخيارات الافتراضية</h3>
-                    <p className="text-xs text-ink/50">تُطبَّق مسبقاً عند دخول الطالب للمصمم</p>
+                    <p className="text-xs text-ink/50">تُطبَّق مسبقاً عند دخول الطالب للمصمّم</p>
                   </div>
                   <div className="space-y-3">
                     {product.optionGroups
@@ -387,18 +419,11 @@ export default function AdminProductsPage() {
                             <select
                               className="w-full rounded border border-ink/20 bg-cream px-2 py-1.5 text-sm"
                               value={typeof presetSel[group.id] === "string" ? (presetSel[group.id] as string) : ""}
-                              onChange={(e) =>
-                                setPresetSel((s) => ({
-                                  ...s,
-                                  [group.id]: e.target.value || false,
-                                }))
-                              }
+                              onChange={(e) => setPresetSel((s) => ({ ...s, [group.id]: e.target.value || false }))}
                             >
                               <option value="">— بدون افتراضي —</option>
                               {group.options.map((o) => (
-                                <option key={o.id} value={o.id}>
-                                  {o.labelAr}
-                                </option>
+                                <option key={o.id} value={o.id}>{o.labelAr}</option>
                               ))}
                             </select>
                           )}
@@ -407,18 +432,12 @@ export default function AdminProductsPage() {
                               <input
                                 type="checkbox"
                                 checked={!!presetSel[group.id]}
-                                onChange={(e) =>
-                                  setPresetSel((s) => ({
-                                    ...s,
-                                    [group.id]: e.target.checked,
-                                  }))
-                                }
+                                onChange={(e) => setPresetSel((s) => ({ ...s, [group.id]: e.target.checked }))}
                                 className="accent-orange"
                               />
                               مفعّل افتراضياً
                             </label>
                           )}
-                          {/* Customer image upload for preset */}
                           {(() => {
                             const selOptId = typeof presetSel[group.id] === "string"
                               ? (presetSel[group.id] as string)
@@ -430,18 +449,13 @@ export default function AdminProductsPage() {
                             const inputId = `preset-img-${selOptId}`;
                             return (
                               <div className="mt-2">
-                                <p className="mb-1 text-[11px] text-ink/60">
-                                  صورة العميل المرفقة مسبقاً (اختياري)
-                                </p>
+                                <p className="mb-1 text-[11px] text-ink/60">صورة العميل المرفقة مسبقاً (اختياري)</p>
                                 {imgUrl && (
                                   <div className="relative mb-2 h-16 w-16 overflow-hidden rounded-lg border border-ink/10">
                                     <Image src={imgUrl} alt="" fill className="object-cover" unoptimized />
                                   </div>
                                 )}
-                                <label
-                                  htmlFor={inputId}
-                                  className="cursor-pointer text-xs text-orange-ink underline"
-                                >
+                                <label htmlFor={inputId} className="cursor-pointer text-xs text-orange-ink underline">
                                   {imgUrl ? "تغيير الصورة" : "رفع صورة افتراضية"}
                                 </label>
                                 <input
@@ -466,43 +480,45 @@ export default function AdminProductsPage() {
                         </div>
                       ))}
                   </div>
-                  <Button
-                    variant="primary"
-                    className="mt-3 w-full"
-                    loading={savingPresets}
-                    onClick={handleSavePresets}
-                  >
+                  <Button variant="primary" className="mt-3 w-full" loading={savingPresets} onClick={handleSavePresets}>
                     حفظ الافتراضيات
                   </Button>
                 </div>
               )}
+
+              {/* Product header + role toggle */}
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h2 className="font-display text-xl font-bold text-ink">
-                    {product.nameAr}
-                  </h2>
+                  <h2 className="font-display text-xl font-bold text-ink">{product.nameAr}</h2>
                   <p className="text-sm text-ink/60">
-                    أساس ({previewRole}): {formatIQD(product.basePrice)}
+                    {previewRole === "retail" ? "سعر تجزئة" : "سعر جملة"}: {formatIQD(product.basePrice)}
                   </p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex items-center gap-2">
                   {(["retail", "wholesaler"] as const).map((r) => (
                     <button
                       key={r}
                       type="button"
                       onClick={() => setPreviewRole(r)}
                       className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
-                        previewRole === r
-                          ? "bg-orange text-white"
-                          : "border border-neutral"
+                        previewRole === r ? "bg-orange text-white" : "border border-neutral"
                       }`}
                     >
                       {r === "retail" ? "تجزئة" : "جملة"}
                     </button>
                   ))}
+                  <button
+                    type="button"
+                    onClick={() => product && handleDeleteProduct(product.id, product.nameAr)}
+                    disabled={!!savingId}
+                    className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-500 hover:bg-red-50 disabled:opacity-40"
+                  >
+                    حذف المنتج
+                  </button>
                 </div>
               </div>
 
+              {/* Base price buttons — always both visible */}
               <div className="mb-4 flex gap-2">
                 <Button
                   variant="ghost"
@@ -521,7 +537,7 @@ export default function AdminProductsPage() {
                     }
                   }}
                 >
-                  سعر تجزئة
+                  تعديل سعر تجزئة
                 </Button>
                 <Button
                   variant="ghost"
@@ -540,34 +556,42 @@ export default function AdminProductsPage() {
                     }
                   }}
                 >
-                  سعر جملة
+                  تعديل سعر جملة
                 </Button>
               </div>
 
+              {/* Role notice */}
+              <div className={`mb-4 rounded-lg px-3 py-2 text-xs font-medium ${
+                previewRole === "wholesaler"
+                  ? "bg-blue-50 text-blue-700 border border-blue-200"
+                  : "bg-orange/5 text-orange-ink border border-orange/20"
+              }`}>
+                {previewRole === "wholesaler"
+                  ? "وضع الجملة — تعديل الأسعار يحدّث أسعار الجملة فقط · تجزئة يظهر كمرجع"
+                  : "وضع التجزئة — تعديل الأسعار يحدّث أسعار التجزئة (الأساسية)"}
+              </div>
+
+              {/* Option groups */}
               {product.optionGroups
                 .sort((a, b) => a.sort - b.sort)
                 .map((group) => (
-                  <article
-                    key={group.id}
-                    className="mb-4 rounded-lg border border-ink/10 p-4"
-                  >
+                  <article key={group.id} className="mb-4 rounded-lg border border-ink/10 p-4">
                     <div className="flex items-center justify-between">
                       <h3 className="font-semibold text-ink">
                         {group.nameAr}
-                        <span className="mr-2 text-xs font-normal text-ink/50">
-                          ({group.inputType})
-                        </span>
+                        <span className="mr-2 text-xs font-normal text-ink/50">({group.inputType})</span>
                         {group.inherited && (
                           <span className="mr-2 rounded-full bg-orange/10 px-2 py-0.5 text-[10px] font-normal text-orange-ink">
-                            موروث من الأساسي
+                            موروث
                           </span>
                         )}
                       </h3>
-                      {previewRole === 'retail' && !group.inherited && (
+                      {!group.inherited && (
                         <button
                           type="button"
-                          className="text-xs text-red-400 hover:text-red-600"
-                          title="حذف المجموعة"
+                          disabled={savingId === `del-group-${group.id}`}
+                          className="text-xs text-red-400 hover:text-red-600 disabled:opacity-40"
+                          onClick={() => handleDeleteGroup(group.id, group.nameAr)}
                         >
                           × حذف المجموعة
                         </button>
@@ -576,7 +600,7 @@ export default function AdminProductsPage() {
 
                     {group.inherited && (
                       <p className="mb-2 text-[11px] text-ink/50">
-                        هذه المجموعة موروثة من &quot;{product.parentNameAr}&quot; — لتعديلها افتح المنتج الأساسي
+                        موروثة من &quot;{product.parentNameAr}&quot; — لتعديلها افتح المنتج الأساسي
                       </p>
                     )}
 
@@ -588,9 +612,7 @@ export default function AdminProductsPage() {
                               type="checkbox"
                               checked={group.required}
                               disabled={savingId === group.id}
-                              onChange={(e) =>
-                                persistGroup(group.id, { required: e.target.checked })
-                              }
+                              onChange={(e) => persistGroup(group.id, { required: e.target.checked })}
                               className="accent-orange"
                             />
                             مطلوب
@@ -598,20 +620,14 @@ export default function AdminProductsPage() {
                         </div>
 
                         <div className="mt-3 rounded-lg border border-ink/10 bg-cream/60 p-3">
-                          <p className="text-xs font-semibold text-ink/70">
-                            صورة توضيحية للزبون (من الأدمن)
-                          </p>
+                          <p className="text-xs font-semibold text-ink/70">صورة توضيحية للزبون (من الأدمن)</p>
                           <div className="mt-2 flex flex-wrap gap-4 text-sm">
                             <label className="flex items-center gap-2">
                               <input
                                 type="checkbox"
                                 checked={group.hasImage}
                                 disabled={savingId === group.id}
-                                onChange={(e) =>
-                                  persistGroup(group.id, {
-                                    hasImage: e.target.checked,
-                                  })
-                                }
+                                onChange={(e) => persistGroup(group.id, { hasImage: e.target.checked })}
                                 className="accent-orange"
                               />
                               إظهار صورة توضيحية
@@ -631,11 +647,7 @@ export default function AdminProductsPage() {
                                 role="button"
                                 tabIndex={0}
                                 className="cursor-pointer text-orange underline"
-                                onClick={() =>
-                                  document
-                                    .getElementById(`img-${group.id}`)
-                                    ?.click()
-                                }
+                                onClick={() => document.getElementById(`img-${group.id}`)?.click()}
                               >
                                 رفع صورة توضيحية
                               </span>
@@ -647,32 +659,23 @@ export default function AdminProductsPage() {
                             placeholder="تلميح للطالب"
                             onBlur={(e) => {
                               if (e.target.value !== (group.hintAr || "")) {
-                                persistGroup(group.id, {
-                                  hintAr: e.target.value || null,
-                                });
+                                persistGroup(group.id, { hintAr: e.target.value || null });
                               }
                             }}
                           />
                         </div>
 
                         <div className="mt-3 rounded-lg border-2 border-orange/30 bg-orange/5 p-3">
-                          <p className="text-xs font-semibold text-ink">
-                            صورة مطلوبة من الزبون
-                          </p>
+                          <p className="text-xs font-semibold text-ink">صورة مطلوبة من الزبون</p>
                           <p className="mt-0.5 text-[11px] text-ink/50">
-                            يجب على الطالب رفع صورة عند اختيار أي خيار في هذه
-                            المجموعة
+                            يجب على الطالب رفع صورة عند اختيار أي خيار في هذه المجموعة
                           </p>
                           <label className="mt-2 flex items-center gap-2 text-sm">
                             <input
                               type="checkbox"
                               checked={group.requiresCustomerImage}
                               disabled={savingId === group.id}
-                              onChange={(e) =>
-                                persistGroup(group.id, {
-                                  requiresCustomerImage: e.target.checked,
-                                })
-                              }
+                              onChange={(e) => persistGroup(group.id, { requiresCustomerImage: e.target.checked })}
                               className="accent-orange"
                             />
                             تفعيل على مستوى المجموعة
@@ -683,52 +686,59 @@ export default function AdminProductsPage() {
 
                     <ul className="mt-3 space-y-2">
                       {group.options.map((opt) => (
-                        <li
-                          key={opt.id}
-                          className="flex flex-wrap items-center gap-2 rounded-lg bg-cream/60 px-3 py-2 text-sm"
-                        >
+                        <li key={opt.id} className="flex flex-wrap items-center gap-2 rounded-lg bg-cream/60 px-3 py-2 text-sm">
                           <span className="min-w-[6rem] flex-1">{opt.labelAr}</span>
+
                           {!group.inherited && (
                             <>
-                              <Input
-                                type="number"
-                                className="max-w-[7rem]"
-                                defaultValue={opt.priceDelta}
-                                onBlur={(e) => {
-                                  const n = Number(e.target.value) || 0;
-                                  if (n !== opt.priceDelta) {
-                                    persistOption(opt.id, n, group.id);
-                                  }
-                                }}
-                              />
-                              <Button
-                                variant="ghost"
-                                className="!min-h-8 !px-2 text-xs"
-                                onClick={() => {
-                                  const v = prompt(
-                                    `سعر جملة لـ ${opt.labelAr}`,
-                                    String(opt.priceDelta)
-                                  );
-                                  if (v != null) {
-                                    persistOptionRole(
-                                      opt.id,
-                                      "wholesaler",
-                                      Number(v)
-                                    );
-                                  }
-                                }}
-                              >
-                                جملة
-                              </Button>
-                              {previewRole === 'retail' && (
-                                <button
-                                  type="button"
-                                  className="text-xs text-red-400 hover:text-red-600"
-                                  title="حذف الخيار"
+                              {/* Role-aware price input */}
+                              <div className="flex items-center gap-1">
+                                <span className="text-xs text-ink/50">
+                                  {previewRole === "wholesaler" ? "جملة:" : "تجزئة:"}
+                                </span>
+                                <Input
+                                  type="number"
+                                  className="max-w-[7rem]"
+                                  key={`${opt.id}-${previewRole}`}
+                                  defaultValue={opt.priceDelta}
+                                  onBlur={(e) => {
+                                    const n = Number(e.target.value) || 0;
+                                    if (n !== opt.priceDelta) persistOptionDelta(opt.id, n);
+                                  }}
+                                />
+                              </div>
+
+                              {/* In retail mode: quick button to also set wholesale delta */}
+                              {previewRole === "retail" && (
+                                <Button
+                                  variant="ghost"
+                                  className="!min-h-8 !px-2 text-xs"
+                                  loading={savingId === `${opt.id}-wholesaler`}
+                                  onClick={() => {
+                                    const v = prompt(`سعر جملة لـ ${opt.labelAr} (د.ع)`, String(opt.priceDelta));
+                                    if (v != null) persistOptionRole(opt.id, "wholesaler", Number(v));
+                                  }}
                                 >
-                                  ×
-                                </button>
+                                  تعيين جملة
+                                </Button>
                               )}
+
+                              {/* In wholesale mode: show retail price as read-only reference */}
+                              {previewRole === "wholesaler" && (
+                                <span className="rounded bg-ink/5 px-2 py-0.5 text-xs text-ink/50">
+                                  تجزئة: {formatIQD(opt.priceDelta)}
+                                </span>
+                              )}
+
+                              <button
+                                type="button"
+                                disabled={savingId === `del-opt-${opt.id}`}
+                                className="text-xs text-red-400 hover:text-red-600 disabled:opacity-40"
+                                onClick={() => handleDeleteOption(opt.id, opt.labelAr)}
+                              >
+                                ×
+                              </button>
+
                               <label className="flex w-full items-center gap-2 border-t border-ink/10 pt-2 text-xs text-ink/70">
                                 <input
                                   type="checkbox"
@@ -737,17 +747,11 @@ export default function AdminProductsPage() {
                                   onChange={async (e) => {
                                     setSavingId(opt.id);
                                     try {
-                                      await updateCatalogOption(opt.id, {
-                                        requires_customer_image: e.target.checked,
-                                      });
-                                      if (selectedId) {
-                                        await loadProduct(selectedId, previewRole);
-                                      }
+                                      await updateCatalogOption(opt.id, { requires_customer_image: e.target.checked });
+                                      if (selectedId) await loadProduct(selectedId, previewRole);
                                       toast.success("تم الحفظ");
                                     } catch (err) {
-                                      toast.error(
-                                        getApiErrorMessage(err, "تعذر الحفظ")
-                                      );
+                                      toast.error(getApiErrorMessage(err, "تعذر الحفظ"));
                                     } finally {
                                       setSavingId(null);
                                     }
@@ -758,9 +762,10 @@ export default function AdminProductsPage() {
                               </label>
                             </>
                           )}
+
                           {group.inherited && (
                             <span className="text-xs text-ink/40">
-                              {opt.priceDelta !== 0 ? `+${opt.priceDelta} د.ع` : "—"}
+                              {opt.priceDelta !== 0 ? `+${formatIQD(opt.priceDelta)}` : "—"}
                             </span>
                           )}
                         </li>
@@ -772,11 +777,14 @@ export default function AdminProductsPage() {
           )}
         </section>
 
+        {/* ── Right preview panel ── */}
         <aside className="space-y-4">
           {product && (
             <>
               <div className="rounded-xl border border-ink/10 bg-cream p-4">
-                <p className="mb-2 text-sm font-semibold text-ink">معاينة الطالب</p>
+                <p className="mb-2 text-sm font-semibold text-ink">
+                  معاينة — {previewRole === "retail" ? "تجزئة" : "جملة"}
+                </p>
                 {product.optionGroups.map((g) => {
                   if (g.inputType === "single_select") {
                     return (
@@ -785,18 +793,11 @@ export default function AdminProductsPage() {
                         <select
                           className="mt-1 w-full rounded border border-neutral px-2 py-1"
                           value={(previewSel[g.id] as string) || ""}
-                          onChange={(e) =>
-                            setPreviewSel((s) => ({
-                              ...s,
-                              [g.id]: e.target.value,
-                            }))
-                          }
+                          onChange={(e) => setPreviewSel((s) => ({ ...s, [g.id]: e.target.value }))}
                         >
                           <option value="">—</option>
                           {g.options.map((o) => (
-                            <option key={o.id} value={o.id}>
-                              {o.labelAr}
-                            </option>
+                            <option key={o.id} value={o.id}>{o.labelAr}</option>
                           ))}
                         </select>
                       </label>
@@ -804,19 +805,11 @@ export default function AdminProductsPage() {
                   }
                   if (g.inputType === "toggle") {
                     return (
-                      <label
-                        key={g.id}
-                        className="mb-2 flex items-center gap-2 text-xs"
-                      >
+                      <label key={g.id} className="mb-2 flex items-center gap-2 text-xs">
                         <input
                           type="checkbox"
                           checked={!!previewSel[g.id]}
-                          onChange={(e) =>
-                            setPreviewSel((s) => ({
-                              ...s,
-                              [g.id]: e.target.checked,
-                            }))
-                          }
+                          onChange={(e) => setPreviewSel((s) => ({ ...s, [g.id]: e.target.checked }))}
                         />
                         {g.nameAr}
                       </label>
@@ -832,12 +825,7 @@ export default function AdminProductsPage() {
                           max={g.maxSelect ?? 99}
                           className="mt-1 w-full rounded border px-2 py-1"
                           value={Number(previewSel[g.id] || 0)}
-                          onChange={(e) =>
-                            setPreviewSel((s) => ({
-                              ...s,
-                              [g.id]: Number(e.target.value),
-                            }))
-                          }
+                          onChange={(e) => setPreviewSel((s) => ({ ...s, [g.id]: Number(e.target.value) }))}
                         />
                       </label>
                     );
@@ -845,10 +833,7 @@ export default function AdminProductsPage() {
                   return null;
                 })}
               </div>
-              <PriceBreakdown
-                lines={previewBreakdown.lines}
-                total={previewBreakdown.total}
-              />
+              <PriceBreakdown lines={previewBreakdown.lines} total={previewBreakdown.total} />
             </>
           )}
         </aside>

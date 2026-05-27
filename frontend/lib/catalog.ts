@@ -237,11 +237,23 @@ export async function updateCatalogGroup(
   await api.patch(`/catalog/groups/${groupId}`, body);
 }
 
+export async function deleteCatalogGroup(groupId: string): Promise<void> {
+  await api.delete(`/catalog/groups/${groupId}`);
+}
+
 export async function updateCatalogOption(
   optionId: string,
   body: Record<string, unknown>
 ): Promise<void> {
   await api.patch(`/catalog/options/${optionId}`, body);
+}
+
+export async function deleteCatalogOption(optionId: string): Promise<void> {
+  await api.delete(`/catalog/options/${optionId}`);
+}
+
+export async function deleteCatalogProduct(productId: string): Promise<void> {
+  await api.delete(`/catalog/products/${productId}`);
 }
 
 export async function setOptionPriceRole(
