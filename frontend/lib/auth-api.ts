@@ -1,6 +1,6 @@
 import axios from "axios";
 import { api, getApiErrorMessage } from "./api";
-import { getUser } from "./auth";
+import { getUser, setToken, setUser } from "./auth";
 import type { LoginResponse, User } from "./types";
 
 function extractMessage(e: unknown, fallback: string): string {
@@ -22,6 +22,25 @@ export async function login(
     return data;
   } catch (e) {
     throw new Error(extractMessage(e, "بيانات الدخول غير صحيحة"));
+  }
+}
+
+export async function register(
+  name: string,
+  phone: string,
+  password: string,
+  email?: string
+): Promise<{ user_id: string }> {
+  try {
+    const { data } = await api.post<{ data: { user_id: string } }>("/auth/register", {
+      name,
+      phone,
+      password,
+      email: email || undefined,
+    });
+    return data.data;
+  } catch (e) {
+    throw new Error(extractMessage(e, "تعذر إنشاء الحساب"));
   }
 }
 
@@ -47,8 +66,25 @@ export async function resetPassword(
   await api.post("/auth/reset-password", { token, password });
 }
 
-export async function verifyOtp(phone: string, code: string): Promise<void> {
-  await api.post("/auth/verify-otp", { phone, code });
+export async function verifyOtp(
+  phone: string,
+  code: string
+): Promise<{ token: string; user: User } | null> {
+  const { data } = await api.post<{
+    verified: boolean;
+    token: string;
+    user: User;
+  }>("/auth/verify-otp", { phone, code });
+  if (data.token && data.user) {
+    setToken(data.token);
+    setUser(data.user);
+    return { token: data.token, user: data.user };
+  }
+  return null;
+}
+
+export async function resendOtp(phone: string): Promise<void> {
+  await api.post("/auth/resend-otp", { phone });
 }
 
 export { getApiErrorMessage };

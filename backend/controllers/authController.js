@@ -84,8 +84,9 @@ async function postVerifyOtp(req, res) {
     [phone]
   );
   if (!rows.length) return res.status(404).json({ error: 'المستخدم غير موجود', code: 'ERR_NOT_FOUND' });
-  const token = signToken(rows[0]);
-  res.json({ verified: true, token });
+  const u = rows[0];
+  const token = signToken(u);
+  res.json({ verified: true, token, user: { id: u.id, name: u.name, role: u.role, phone_verified: u.phone_verified } });
 }
 
 async function resendOtp(req, res) {

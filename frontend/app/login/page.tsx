@@ -76,11 +76,14 @@ export default function LoginPage() {
           )}
           دخول
         </button>
-        <p className="text-center text-sm">
+        <div className="flex items-center justify-between text-sm">
           <Link href="/forgot-password" className="text-orange-ink hover:underline">
             نسيت كلمة المرور؟
           </Link>
-        </p>
+          <Link href="/register" className="text-ink/70 hover:underline">
+            إنشاء حساب
+          </Link>
+        </div>
       </form>
     </AuthCard>
   );

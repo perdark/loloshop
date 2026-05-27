@@ -7,7 +7,15 @@ import { toast } from "sonner";
 import { AuthCard } from "@/components/auth/AuthCard";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
-import { verifyOtp, getApiErrorMessage } from "@/lib/auth-api";
+import { verifyOtp, resendOtp, getApiErrorMessage } from "@/lib/auth-api";
+import type { UserRole } from "@/lib/types";
+
+const ROLE_REDIRECT: Record<UserRole, string> = {
+  admin: "/admin",
+  staff: "/staff",
+  wholesaler: "/wholesaler",
+  retail: "/",
+};
 
 export function VerifyOtpForm() {
   const router = useRouter();
@@ -17,6 +25,7 @@ export function VerifyOtpForm() {
   const [phone, setPhone] = useState(defaultPhone);
   const [digits, setDigits] = useState(["", "", "", "", "", ""]);
   const [loading, setLoading] = useState(false);
+  const [resending, setResending] = useState(false);
   const inputsRef = useRef<(HTMLInputElement | null)[]>([]);
 
   function handleDigitChange(index: number, value: string) {
@@ -49,13 +58,33 @@ export function VerifyOtpForm() {
 
     setLoading(true);
     try {
-      await verifyOtp(phone.trim(), code);
+      const result = await verifyOtp(phone.trim(), code);
       toast.success("تم التحقق بنجاح");
-      router.replace("/login");
+      if (result?.user) {
+        router.replace(ROLE_REDIRECT[result.user.role] ?? "/");
+      } else {
+        router.replace("/login");
+      }
     } catch (err) {
       toast.error(getApiErrorMessage(err, "رمز غير صحيح"));
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleResend() {
+    if (!phone.trim()) {
+      toast.error("أدخل رقم الهاتف أولاً");
+      return;
+    }
+    setResending(true);
+    try {
+      await resendOtp(phone.trim());
+      toast.success("تم إرسال رمز جديد");
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "تعذر إرسال الرمز"));
+    } finally {
+      setResending(false);
     }
   }
 
@@ -93,11 +122,19 @@ export function VerifyOtpForm() {
         <Button type="submit" fullWidth loading={loading}>
           تحقق
         </Button>
-        <p className="text-center text-sm">
-          <Link href="/login" className="text-orange-ink hover:underline">
+        <div className="flex items-center justify-between text-sm">
+          <button
+            type="button"
+            onClick={handleResend}
+            disabled={resending}
+            className="text-orange-ink hover:underline disabled:opacity-50"
+          >
+            {resending ? "جاري الإرسال…" : "إعادة إرسال الرمز"}
+          </button>
+          <Link href="/login" className="text-ink/60 hover:underline">
             العودة لتسجيل الدخول
           </Link>
-        </p>
+        </div>
       </form>
     </AuthCard>
   );
