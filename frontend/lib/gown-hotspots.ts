@@ -38,9 +38,10 @@ export const HOTSPOT_RIGHT_PERCENT: HotspotPercent = {
 export const SASH_CLIP_PATH =
   "polygon(0% 0%, 100% 0%, 100% 88%, 50% 100%, 0% 88%)";
 
-/** In-DOM FabricPanelPreview size inside each hotspot */
+/** In-DOM FabricPanelPreview size inside each hotspot.
+ *  Height = srcW * scale = 600 * (150/360) = 250 — content fills canvas exactly. */
 export const PREVIEW_PANEL_WIDTH = 150;
-export const PREVIEW_PANEL_HEIGHT = 430;
+export const PREVIEW_PANEL_HEIGHT = 250;
 
 export function hotspotPercent(side: GownSide): HotspotPercent {
   return side === "left" ? HOTSPOT_LEFT_PERCENT : HOTSPOT_RIGHT_PERCENT;

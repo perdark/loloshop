@@ -62,7 +62,7 @@ export function Whiteboard({ side, fonts, onApply, onClose }: Props) {
   const [text, setText] = useState("");
   const [currentFont, setCurrentFont] = useState(() => defaultFontForSide(side, fonts));
   const [textColor, setTextColor] = useState("#1a1a1a");
-  const [fontSize, setFontSize] = useState(48);
+  const [fontSize, setFontSize] = useState(36);
   const [hasSelection, setHasSelection] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(true);
 
@@ -208,7 +208,7 @@ export function Whiteboard({ side, fonts, onApply, onClose }: Props) {
   }
 
   function changeSize(delta: number) {
-    const next = Math.max(12, Math.min(160, fontSize + delta));
+    const next = Math.max(10, Math.min(120, fontSize + delta));
     setFontSize(next);
     const o = activeText();
     if (o) {
@@ -362,9 +362,9 @@ export function Whiteboard({ side, fonts, onApply, onClose }: Props) {
               )}
             </select>
             <div className="flex items-center gap-2">
-              <Button variant="ghost" onClick={() => changeSize(-4)}>−</Button>
+              <Button variant="ghost" onClick={() => changeSize(-2)}>−</Button>
               <span className="min-w-10 text-center text-sm text-ink/70">{fontSize}</span>
-              <Button variant="ghost" onClick={() => changeSize(4)}>+</Button>
+              <Button variant="ghost" onClick={() => changeSize(2)}>+</Button>
               <Button variant="ghost" onClick={toggleBold} disabled={!hasSelection}>B</Button>
               <Button variant="danger" onClick={deleteActive} disabled={!hasSelection}>حذف</Button>
             </div>
