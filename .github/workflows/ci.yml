@@ -55,4 +55,4 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: ${{ secrets.SERVER_PORT || 22 }}
           script: |
-            bash /home/${{ secrets.SERVER_USER }}/loloshop/scripts/deploy.sh
+            bash /var/www/loloshop/scripts/deploy.sh
