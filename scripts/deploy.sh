@@ -6,8 +6,9 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_DIR"
 
-echo "==> git pull"
-git pull origin main
+echo "==> git fetch + reset"
+git fetch origin
+git reset --hard origin/main
 
 echo "==> backend: install deps"
 cd backend && npm ci --omit=dev && cd ..
