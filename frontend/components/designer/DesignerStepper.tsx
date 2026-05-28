@@ -22,18 +22,21 @@ export function DesignerStepper({ step }: DesignerStepperProps) {
           >
             <div className="flex items-center gap-2">
               <div
-                className={`flex h-9 w-9 items-center justify-center rounded-full text-sm font-semibold transition-colors ${
+                className={`flex h-9 w-9 items-center justify-center rounded-full text-sm font-semibold transition-all duration-300 ${
                   done
-                    ? "bg-ink text-cream"
+                    ? "bg-ink text-cream scale-100"
                     : active
-                    ? "bg-orange text-ink ring-2 ring-orange ring-offset-2 ring-offset-cream"
-                    : "bg-ink/10 text-ink/40"
+                    ? "bg-orange text-ink ring-2 ring-orange ring-offset-2 ring-offset-cream scale-110 shadow-md"
+                    : "bg-ink/10 text-ink/40 scale-100"
                 }`}
               >
                 {done ? "✓" : s.num}
               </div>
               {i < STEPS.length - 1 && (
-                <span className="hidden h-px w-4 bg-ink/20 sm:inline sm:w-8" aria-hidden />
+                <span
+                  className={`hidden h-px w-4 transition-colors duration-500 sm:inline sm:w-8 ${done ? "bg-orange" : "bg-ink/20"}`}
+                  aria-hidden
+                />
               )}
             </div>
             <span

@@ -58,12 +58,16 @@ function GownSash({
         />
       ) : null}
       {showChip ? (
-        <span
-          className="pointer-events-none absolute inset-x-0 bottom-[8%] z-10 mx-auto max-w-[95%] rounded-full bg-ink/75 px-2 py-1 text-center text-[10px] leading-tight font-medium text-cream shadow-sm"
-          aria-hidden
-        >
-          {SIDE_CHIP[side]}
-        </span>
+        <>
+          <span
+            className="pointer-events-none absolute inset-x-0 bottom-[8%] z-10 mx-auto max-w-[95%] rounded-full bg-ink/75 px-2 py-1 text-center text-[10px] leading-tight font-medium text-cream shadow-sm animate-sash-float"
+            aria-hidden
+          >
+            {SIDE_CHIP[side]}
+          </span>
+          {/* subtle shimmer on empty panel */}
+          <span className="sash-shimmer-strip" aria-hidden />
+        </>
       ) : null}
     </span>
   );
@@ -79,7 +83,7 @@ function GownSash({
       type="button"
       onClick={() => onClick?.(side)}
       aria-label={SIDE_LABEL[side]}
-      className="group min-h-11 min-w-11 cursor-pointer transition-transform hover:scale-[1.03] focus:outline-none focus-visible:ring-2 focus-visible:ring-orange"
+      className={`group min-h-11 min-w-11 cursor-pointer transition-transform duration-200 hover:scale-[1.04] focus:outline-none focus-visible:ring-2 focus-visible:ring-orange ${!panelHasContent(json) ? "animate-pulse-ring" : ""}`}
       style={style}
     >
       {inner}

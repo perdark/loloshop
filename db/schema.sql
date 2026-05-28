@@ -64,11 +64,16 @@ CREATE TABLE IF NOT EXISTS otp_codes (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   phone      TEXT NOT NULL,
   code       TEXT NOT NULL,
+  purpose    TEXT NOT NULL DEFAULT 'verify',
   expires_at TIMESTAMPTZ NOT NULL,
   used       BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_otp_phone ON otp_codes(phone, used);
+CREATE INDEX IF NOT EXISTS idx_otp_phone_purpose ON otp_codes(phone, purpose, used);
+
+-- Migrate existing rows if column was added to a live DB:
+-- ALTER TABLE otp_codes ADD COLUMN IF NOT EXISTS purpose TEXT NOT NULL DEFAULT 'verify';
 
 -- =====================================================
 -- PASSWORD RESET TOKENS — email-based

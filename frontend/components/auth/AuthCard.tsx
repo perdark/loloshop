@@ -15,7 +15,7 @@ export function AuthCard({ title, subtitle, children }: AuthCardProps) {
       dir="rtl"
       lang="ar"
     >
-      <div className="w-full max-w-md overflow-hidden rounded-2xl border border-ink/10 bg-white shadow-lg">
+      <div className="w-full max-w-md overflow-hidden rounded-2xl border border-ink/10 bg-white shadow-lg animate-auth-card-in">
         <div className="bg-ink px-6 py-5 text-center">
           <p className="font-script text-3xl text-orange-ink">lolo shop</p>
           <p className="font-display text-lg font-semibold text-cream">لولو شوب</p>

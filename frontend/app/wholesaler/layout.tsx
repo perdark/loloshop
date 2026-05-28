@@ -40,7 +40,7 @@ export default function WholesalerLayout({
         </div>
       </header>
 
-      <main className="mx-auto max-w-md px-4 py-4 pb-24">{children}</main>
+      <main className="mx-auto max-w-md px-4 py-4 pb-24 animate-page-in">{children}</main>
 
       <nav className="fixed bottom-0 left-0 right-0 z-20 border-t border-ink/10 bg-white pb-[env(safe-area-inset-bottom)]">
         <div className="mx-auto flex max-w-md">
@@ -53,8 +53,8 @@ export default function WholesalerLayout({
             <Link
               key={item.href}
               href={item.href}
-              className={`flex min-h-14 flex-1 items-center justify-center text-sm font-medium ${
-                pathname === item.href ? "text-orange-ink" : "text-ink/50"
+              className={`flex min-h-14 flex-1 items-center justify-center text-sm font-medium transition-colors duration-200 ${
+                pathname === item.href ? "text-orange-ink" : "text-ink/50 hover:text-ink/80"
               }`}
             >
               {item.label}

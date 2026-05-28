@@ -13,15 +13,30 @@ function extractMessage(e: unknown, fallback: string): string {
 export async function login(
   phone: string,
   password: string
-): Promise<LoginResponse> {
+): Promise<{ otp_required: true; phone: string }> {
   try {
-    const { data } = await api.post<LoginResponse>("/auth/login", {
+    const { data } = await api.post<{ otp_required: true; phone: string }>("/auth/login", {
       phone,
       password,
     });
     return data;
   } catch (e) {
     throw new Error(extractMessage(e, "بيانات الدخول غير صحيحة"));
+  }
+}
+
+export async function loginVerifyOtp(
+  phone: string,
+  code: string
+): Promise<LoginResponse> {
+  try {
+    const { data } = await api.post<LoginResponse>("/auth/login-verify", {
+      phone,
+      code,
+    });
+    return data;
+  } catch (e) {
+    throw new Error(extractMessage(e, "رمز غير صحيح"));
   }
 }
 
@@ -49,6 +64,14 @@ export async function resetPassword(
 
 export async function verifyOtp(phone: string, code: string): Promise<void> {
   await api.post("/auth/verify-otp", { phone, code });
+}
+
+export async function resendLoginOtp(phone: string): Promise<void> {
+  try {
+    await api.post("/auth/resend-otp", { phone, purpose: "login" });
+  } catch (e) {
+    throw new Error(extractMessage(e, "تعذّر إرسال الرمز"));
+  }
 }
 
 export { getApiErrorMessage };

@@ -9,7 +9,7 @@ export default function StudentLayout({
         <p className="font-script text-2xl text-orange-ink">lolo shop</p>
         <p className="font-display text-sm font-semibold text-ink">لولو شوب</p>
       </header>
-      <main className="mx-auto max-w-lg px-4 py-6">{children}</main>
+      <main className="mx-auto max-w-lg px-4 py-6 animate-page-in">{children}</main>
     </div>
   );
 }

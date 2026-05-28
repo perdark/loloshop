@@ -35,7 +35,7 @@ function SashPanel({
   const inner = (
     <div
       className={`relative overflow-hidden border-2 shadow-md ${
-        readOnly ? "" : "transition-all group-hover:-translate-y-0.5 group-hover:shadow-lg"
+        readOnly ? "" : "transition-all duration-200 group-hover:-translate-y-1 group-hover:shadow-xl"
       }`}
       style={{
         width: PANEL_W,
@@ -45,23 +45,21 @@ function SashPanel({
         background: json
           ? colors.base
           : `linear-gradient(150deg, ${colors.light}, ${colors.base} 55%, ${colors.dark})`,
+        transition: "background 0.6s ease, border-color 0.6s ease",
       }}
     >
       {json ? <FabricPanelPreview json={json} sashColor={sashColor} width={PANEL_W} height={PANEL_H} /> : null}
       {!json && !readOnly && (
-        <span className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 px-3 text-center text-sm font-semibold text-ink/80">
+        <span className="animate-sash-float pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 px-3 text-center text-sm font-semibold text-ink/80">
           {EMPTY_CTA[side]}
         </span>
       )}
-      <span
-        className="pointer-events-none absolute inset-0"
-        style={{
-          background:
-            "linear-gradient(105deg, transparent 30%, rgba(255,255,255,0.18) 48%, transparent 60%)",
-        }}
-      />
+      {/* animated shimmer sweep */}
+      <span className="sash-shimmer-strip" aria-hidden />
       {!readOnly && (
-        <span className="pointer-events-none absolute right-2 top-2 flex h-9 w-9 items-center justify-center rounded-full bg-orange/90 text-base text-white shadow group-hover:scale-110">
+        <span
+          className={`pointer-events-none absolute right-2 top-2 flex h-9 w-9 items-center justify-center rounded-full bg-orange/90 text-base text-white shadow transition-transform duration-200 group-hover:scale-110 ${!json ? "animate-pulse-ring" : ""}`}
+        >
           ✎
         </span>
       )}

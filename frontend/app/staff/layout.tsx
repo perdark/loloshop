@@ -50,7 +50,7 @@ function StaffShell({ children }: { children: React.ReactNode }) {
           </span>
         </header>
 
-        <main className="p-4 lg:p-8">{children}</main>
+        <main className="p-4 lg:p-8 animate-fade-page-in">{children}</main>
       </div>
     </div>
   );

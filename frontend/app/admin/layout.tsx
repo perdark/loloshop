@@ -40,7 +40,7 @@ export default function AdminLayout({
           <span className="font-display text-lg font-bold text-ink">لولو شوب</span>
         </header>
 
-        <main className="p-4 lg:p-8">{children}</main>
+        <main className="p-4 lg:p-8 animate-fade-page-in">{children}</main>
       </div>
     </div>
   );

@@ -9,6 +9,7 @@ const verifyLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 10 });
 
 router.post('/register', otpLimit, c.register);
 router.post('/login', loginLimit, c.login);
+router.post('/login-verify', verifyLimit, c.loginVerifyOtp);
 router.get('/me', authRequired, c.me);
 router.post('/verify-otp', verifyLimit, c.postVerifyOtp);
 router.post('/resend-otp', otpLimit, c.resendOtp);

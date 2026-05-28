@@ -145,7 +145,8 @@ export default function DesignPage() {
 
   return (
     <div className="mx-auto min-h-screen max-w-4xl bg-cream">
-      <header className="bg-brand-gradient px-4 py-5 text-center text-cream">
+      <header className="relative overflow-hidden bg-brand-gradient px-4 py-5 text-center text-cream">
+        <div className="sash-shimmer-strip" aria-hidden />
         <p className="font-script text-3xl leading-none text-orange-ink">lolo shop</p>
         <h1 className="mt-1 font-display text-xl">صمّم وشاحك</h1>
       </header>
@@ -182,9 +183,9 @@ export default function DesignPage() {
         </p>
       )}
 
-      <main className="px-4 pb-36 pt-2">
+      <main className="px-4 pb-36 pt-2 animate-page-in">
         {step === 1 && (
-          <section className="relative mx-auto max-w-md space-y-5 pb-24">
+          <section key="step-1" className="animate-step-in relative mx-auto max-w-md space-y-5 pb-24">
             <Link href="/" className="inline-block text-sm text-orange-ink hover:underline">
               ← المنتجات
             </Link>
@@ -227,7 +228,7 @@ export default function DesignPage() {
         )}
 
         {step === 2 && !editingSide && (
-          <section className="space-y-4">
+          <section key="step-2" className="animate-step-in space-y-4">
             <SashGownPreview
               sashColor={sashColor}
               leftJson={leftJson}
@@ -260,7 +261,7 @@ export default function DesignPage() {
         )}
 
         {step === 3 && (
-          <section className="space-y-6">
+          <section key="step-3" className="animate-step-in space-y-6">
             <DesignPreview
               sashColor={sashColor}
               leftJson={leftJson}

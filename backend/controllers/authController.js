@@ -40,7 +40,7 @@ async function register(req, res) {
      VALUES ($1, $2, $3, $4, $5, 'approved')`,
     [u.rows[0].id, name, university_name || null, department || null, gender || null]
   );
-  await createOtp(phone);
+  await createOtp(phone, 'verify');
   res.status(201).json({ data: { user_id: u.rows[0].id, otp_required: true } });
 }
 
@@ -61,10 +61,28 @@ async function login(req, res) {
   if (!ok) {
     return res.status(401).json({ error: 'بيانات خاطئة', code: 'ERR_INVALID_CREDENTIALS' });
   }
-  const token = signToken(user);
+  await createOtp(phone, 'login');
+  res.json({ otp_required: true, phone });
+}
+
+async function loginVerifyOtp(req, res) {
+  const { phone, code } = req.body;
+  if (!phone || !code) {
+    return res.status(400).json({ error: 'بيانات ناقصة', code: 'ERR_VALIDATION' });
+  }
+  const ok = await verifyOtp(phone, code, 'login');
+  if (!ok) return res.status(400).json({ error: 'الرمز خاطئ أو منتهي', code: 'ERR_INVALID_OTP' });
+  // Completing login OTP proves phone ownership — mark verified and return token.
+  const { rows } = await query(
+    `UPDATE users SET phone_verified = TRUE WHERE phone = $1
+     RETURNING id, name, phone, email, role, phone_verified`,
+    [phone]
+  );
+  if (!rows.length) return res.status(404).json({ error: 'المستخدم غير موجود', code: 'ERR_NOT_FOUND' });
+  const token = signToken(rows[0]);
   res.json({
     token,
-    user: { id: user.id, name: user.name, role: user.role, phone_verified: user.phone_verified },
+    user: { id: rows[0].id, name: rows[0].name, role: rows[0].role, phone_verified: rows[0].phone_verified },
   });
 }
 
@@ -77,7 +95,7 @@ async function postVerifyOtp(req, res) {
   if (!phone || !code) {
     return res.status(400).json({ error: 'بيانات ناقصة', code: 'ERR_VALIDATION' });
   }
-  const ok = await verifyOtp(phone, code);
+  const ok = await verifyOtp(phone, code, 'verify');
   if (!ok) return res.status(400).json({ error: 'الرمز خاطئ أو منتهي', code: 'ERR_INVALID_OTP' });
   const { rows } = await query(
     `UPDATE users SET phone_verified = TRUE WHERE phone = $1 RETURNING id, name, phone, email, role, phone_verified`,
@@ -89,9 +107,12 @@ async function postVerifyOtp(req, res) {
 }
 
 async function resendOtp(req, res) {
-  const { phone } = req.body;
+  const { phone, purpose = 'verify' } = req.body;
   if (!phone) return res.status(400).json({ error: 'بيانات ناقصة', code: 'ERR_VALIDATION' });
-  const { expires_in } = await createOtp(phone);
+  if (!['verify', 'login'].includes(purpose)) {
+    return res.status(400).json({ error: 'بيانات ناقصة', code: 'ERR_VALIDATION' });
+  }
+  const { expires_in } = await createOtp(phone, purpose);
   res.json({ sent: true, expires_in });
 }
 
@@ -130,4 +151,4 @@ async function resetPassword(req, res) {
   res.json({ reset: true });
 }
 
-module.exports = { register, login, me, postVerifyOtp, resendOtp, forgotPassword, resetPassword };
+module.exports = { register, login, loginVerifyOtp, me, postVerifyOtp, resendOtp, forgotPassword, resetPassword };
