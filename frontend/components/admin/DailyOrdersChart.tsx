@@ -57,7 +57,7 @@ export function DailyOrdersChart({ data }: DailyOrdersChartProps) {
               >
                 {/* Count label above the bar */}
                 <span
-                  className={`text-[11px] font-bold tabular-nums ${peak ? "text-[#f47b42]" : "text-[var(--shop-muted)]"}`}
+                  className={`text-[11px] font-bold tabular-nums ${peak ? "text-orange-ink" : "text-[var(--shop-muted)]"}`}
                   style={{ fontFamily: "var(--font-amiri)" }}
                 >
                   {toArabic(d.count)}
@@ -65,13 +65,14 @@ export function DailyOrdersChart({ data }: DailyOrdersChartProps) {
 
                 {/* Bar track */}
                 <div
-                  className="w-full rounded-sm bg-[#faebd7]"
+                  className="w-full rounded-sm bg-ink/[0.06]"
                   style={{ height: `${TRACK_H}px` }}
                   aria-hidden
                 >
-                  {/* Filled portion — grows from bottom via margin-top trick */}
+                  {/* Filled portion — grows from bottom via margin-top trick.
+                      Only the peak day earns orange; the rest stay quiet ink. */}
                   <div
-                    className={`w-full rounded-sm transition-all duration-500 ${peak ? "bg-[#f47b42]" : "bg-[#ffb100]/70"}`}
+                    className={`w-full rounded-sm transition-all duration-500 ${peak ? "bg-orange-ink" : "bg-ink/20"}`}
                     style={{
                       height: `${barH}px`,
                       marginTop: `${TRACK_H - barH}px`,
@@ -82,7 +83,7 @@ export function DailyOrdersChart({ data }: DailyOrdersChartProps) {
                 {/* Date label below the bar */}
                 <span
                   dir="ltr"
-                  className={`mt-1 whitespace-nowrap text-[10px] ${peak ? "font-bold text-[#f47b42]" : "text-[var(--shop-muted)]"}`}
+                  className={`mt-1 whitespace-nowrap text-[10px] ${peak ? "font-bold text-orange-ink" : "text-[var(--shop-muted)]"}`}
                 >
                   {formatDateShort(d.date)}
                 </span>
