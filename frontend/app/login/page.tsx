@@ -241,6 +241,12 @@ export default function LoginPage() {
                 نسيت كلمة المرور؟
               </Link>
             </p>
+            <p className="text-center text-sm text-ink-soft">
+              ليس لديك حساب؟{" "}
+              <Link href="/register" className="font-medium text-orange-ink underline-offset-2 hover:underline">
+                أنشئ حساباً
+              </Link>
+            </p>
           </form>
         </div>
 
