@@ -56,7 +56,7 @@ export default function ForgotPasswordPage() {
       }
 
       // Step 2: verify OTP + set the new password.
-      if (code.trim().length < 4) {
+      if (code.trim().length < 6) {
         setPhoneError("أدخل الرمز المكوّن من 6 أرقام");
         return;
       }
@@ -100,10 +100,13 @@ export default function ForgotPasswordPage() {
     <AuthCard title="استعادة كلمة المرور">
       {sent ? (
         <div className="text-center">
-          <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full border border-green-200 bg-green-50 text-3xl shadow-[var(--shadow-soft)]">
-            📧
+          {/* Envelope icon — line SVG in palette colours, no emoji */}
+          <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full border border-ink/12 bg-[var(--shop-sink)] text-orange-ink shadow-[var(--shadow-soft)]">
+            <svg viewBox="0 0 24 24" fill="none" strokeWidth={1.5} stroke="currentColor" className="h-8 w-8" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25H4.5a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0l-9.75 6.75L2.25 6.75" />
+            </svg>
           </div>
-          <p className="text-ink/70">
+          <p className="text-ink-soft">
             إذا كان البريد مسجّلاً لدينا، ستصلك رسالة برابط إعادة التعيين.
           </p>
           <Link
@@ -168,18 +171,18 @@ export default function ForgotPasswordPage() {
                     className={[
                       "min-h-11 min-w-0 flex-1 rounded-xl border bg-white px-3.5 py-2.5 text-ink outline-none transition-colors placeholder:text-ink/55",
                       "focus:border-orange-ink focus:ring-2 focus:ring-orange-ink/20",
-                      phoneError ? "border-red-500" : "border-ink/15",
+                      phoneError ? "border-danger" : "border-ink/15",
                     ].join(" ")}
                   />
                 </div>
-                {phoneError && <p id="fp-phone-error" className="text-xs text-red-600" role="alert">{phoneError}</p>}
+                {phoneError && <p id="fp-phone-error" className="text-xs text-danger" role="alert">{phoneError}</p>}
                 <p className="text-xs text-[var(--shop-muted)]">سيصلك رمز عبر واتساب لإعادة التعيين</p>
               </div>
             ) : (
               <>
-                <p className="text-sm text-ink/70">
+                <p className="text-sm text-ink-soft">
                   أدخل الرمز الذي وصلك عبر واتساب على الرقم{" "}
-                  <span dir="ltr" className="font-semibold">+964{phone}</span> وكلمة المرور الجديدة.
+                  <span dir="ltr" className="font-semibold text-ink">+964{phone}</span> وكلمة المرور الجديدة.
                 </p>
                 <Input
                   label="رمز التحقق"
@@ -197,7 +200,7 @@ export default function ForgotPasswordPage() {
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                 />
-                {phoneError && <p className="text-xs text-red-600" role="alert">{phoneError}</p>}
+                {phoneError && <p className="text-xs text-danger" role="alert">{phoneError}</p>}
                 <button
                   type="button"
                   onClick={() => { setPhoneStep("request"); setCode(""); setNewPassword(""); setPhoneError(""); }}

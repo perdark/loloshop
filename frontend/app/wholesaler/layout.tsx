@@ -33,7 +33,7 @@ export default function WholesalerLayout({
           <button
             type="button"
             onClick={handleLogout}
-            className="min-h-11 rounded-xl px-4 text-sm font-medium text-ink/70 transition-colors hover:bg-ink/5"
+            className="min-h-11 rounded-xl px-4 text-sm font-medium text-ink-soft transition-colors hover:bg-ink/5"
           >
             خروج
           </button>
@@ -59,13 +59,13 @@ export default function WholesalerLayout({
                 className={`relative flex min-h-13 flex-1 flex-col items-center justify-center gap-1 rounded-xl py-1.5 text-sm font-semibold transition-all duration-200 ${
                   active
                     ? "bg-orange/10 text-orange-ink"
-                    : "text-ink-soft hover:text-ink/80"
+                    : "text-ink-soft hover:text-ink"
                 }`}
               >
                 {active && (
                   <span
                     aria-hidden
-                    className="absolute -top-px h-1 w-8 rounded-full bg-brand-gradient"
+                    className="absolute -top-px h-0.5 w-6 rounded-full bg-orange-ink"
                   />
                 )}
                 {item.label}

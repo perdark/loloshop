@@ -95,7 +95,7 @@ export function VerifyOtpForm() {
           autoComplete="tel"
         />
         <div>
-          <p className="mb-3 text-center text-sm font-medium text-ink/70">رمز التحقق المكوّن من ٦ أرقام</p>
+          <p className="mb-3 text-center text-sm font-medium text-ink-soft">رمز التحقق المكوّن من ٦ أرقام</p>
           <div className="flex justify-center gap-2" dir="ltr" onPaste={handleDigitPaste}>
             {digits.map((d, i) => (
               <input
@@ -116,14 +116,14 @@ export function VerifyOtpForm() {
                 className={[
                   "h-12 w-10 rounded-xl border text-center text-xl font-bold text-ink outline-none transition-colors duration-150",
                   "focus:border-orange-ink focus:ring-2 focus:ring-orange-ink/20",
-                  otpError ? "border-red-400 bg-red-50" : d ? "border-orange-ink bg-orange-ink/5" : "border-ink/20 bg-white",
+                  otpError ? "border-danger bg-danger/5" : d ? "border-orange-ink bg-orange-ink/5" : "border-ink/20 bg-beige",
                   loading ? "opacity-50" : "",
                 ].join(" ")}
               />
             ))}
           </div>
           {otpError && (
-            <p id="verify-otp-error" role="alert" className="mt-2 text-center text-xs text-red-600">
+            <p id="verify-otp-error" role="alert" className="mt-2 text-center text-xs text-danger">
               {otpError}
             </p>
           )}

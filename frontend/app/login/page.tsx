@@ -208,11 +208,11 @@ export default function LoginPage() {
                   className={[
                     "min-h-11 min-w-0 flex-1 rounded-xl border bg-white px-3.5 py-2.5 text-ink outline-none transition-colors placeholder:text-ink/55",
                     "focus:border-orange-ink focus:ring-2 focus:ring-orange-ink/20",
-                    errors.phone ? "border-red-500" : "border-ink/15",
+                    errors.phone ? "border-danger" : "border-ink/15",
                   ].join(" ")}
                 />
               </div>
-              {errors.phone && <p id="phone-error" className="text-xs text-red-600" role="alert">{errors.phone}</p>}
+              {errors.phone && <p id="phone-error" className="text-xs text-danger" role="alert">{errors.phone}</p>}
             </div>
             <Input
               label="كلمة المرور"
@@ -288,14 +288,14 @@ export default function LoginPage() {
                     className={[
                       "h-12 w-10 rounded-md border text-center text-xl font-bold text-ink outline-none transition-colors duration-150",
                       "focus:border-orange-ink focus:ring-2 focus:ring-orange-ink/20",
-                      otpError ? "border-red-400 bg-red-50" : d ? "border-orange-ink bg-orange-ink/5" : "border-ink/15 bg-beige",
+                      otpError ? "border-danger bg-danger/5" : d ? "border-orange-ink bg-orange-ink/5" : "border-ink/15 bg-beige",
                       otpLoading ? "opacity-50" : "",
                     ].join(" ")}
                   />
                 ))}
               </div>
               {otpError && (
-                <p id="otp-error" role="alert" className="mt-2 text-center text-xs text-red-600">
+                <p id="otp-error" role="alert" className="mt-2 text-center text-xs text-danger">
                   {otpError}
                 </p>
               )}
