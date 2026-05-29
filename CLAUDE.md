@@ -6,8 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Backend (`backend/`):
 - `npm run dev` — Express API w/ nodemon on :4000
 - `npm start` — production (PM2 runs this)
-- `npm run migrate` — apply `db/schema.sql` via `psql $DATABASE_URL`
-- `npm run seed` — seed data (`seed.js`)
+- `npm run migrate` — `node migrate.js`: applies `db/schema.sql` (idempotent) via `pg` Pool, with Neon cold-start retry. NOT psql.
+- `npm run migrate:file <path>` — apply a single numbered migration from `db/migrations/00N_*.sql`.
+- `npm run seed` / `npm run seed:v2` — seed data (`seed.js` / `seed-v2.js`).
 
 Frontend (`frontend/`):
 - `npm run dev` — Next.js on :3000
@@ -27,9 +28,9 @@ No test suite exists. No root-level scripts — run commands inside `backend/` o
 Two separate apps, no shared package. Frontend talks to backend over HTTP.
 
 **Backend** (`backend/`) — classic Express layering:
-- `server.js` mounts routers under `/api/*` (auth, join, admin, wholesaler, notifications, products, designs, fonts).
-- `routes/*` → `controllers/*` (logic) → `lib/db.js` (`query` + `tx` transaction helper, use `tx` for order creation).
-- `middleware/auth.js`: `authRequired` (JWT Bearer → loads `req.user` from DB), `requireRole(...roles)`, `signToken`. JWT carries `{sub, role, name}`.
+- `server.js` mounts routers under `/api/*` (auth, join, admin, orders, batches, staff, wholesaler, notifications, products, catalog, designs, fonts). Hardened with `helmet` + `express-rate-limit`.
+- `routes/*` → `controllers/*` (logic) → `lib/db.js` (`query` + `tx` transaction helper, use `tx` for order creation; both retry Neon cold-start failures).
+- `middleware/auth.js`: `authRequired` (JWT Bearer → loads `req.user` from DB), `requireRole(...roles)`, `optionalAuth` (token optional → anon allowed, used by public catalog/configurator for retail pricing), `signToken`. JWT carries `{sub, role, name}`; passwords hashed with `bcrypt`.
 - `lib/`: `otp.js` (Zentramsg WhatsApp OTP), `email.js` (nodemailer SMTP), `upload.js` (multer → `/uploads/{logos,images,fonts}`).
 - All error responses: `{ error: <Arabic msg>, code: 'ERR_*' }`. Uploads served static at `/uploads`.
 
@@ -43,6 +44,7 @@ Two separate apps, no shared package. Frontend talks to backend over HTTP.
 - `PLAN.md` — features broken into self-contained tasks; read before starting a feature.
 - `PROGRESS.md` — what's done/next; **update after every task**.
 - `API.md` — endpoint reference. `open.md` — answered open questions.
+- `PRODUCT.md` — product/catalog model. `DESIGN.md` — design-system/brand spec (see also `.impeccable.md`).
 
 ## What is LoloShop?
 An e-commerce + design platform for graduation sashes (أوشحة تخرج) and graduation robes (روبات تخرج).
@@ -50,9 +52,9 @@ Students design their own sash online, wholesalers manage groups of students, ad
 Brand: @loloshop96 on Instagram.
 
 ## Stack
-- **Frontend:** Next.js 14 (App Router) + Tailwind CSS
-- **Backend:** Node.js + Express
-- **Database:** PostgreSQL
+- **Frontend:** Next.js 16 (App Router) + React 19 + Tailwind v4 (see version facts above)
+- **Backend:** Node.js + Express 5
+- **Database:** PostgreSQL (Neon in dev)
 - **Canvas Editor:** Fabric.js v6 (sash flat 2D designer)
 - **Hosting:** VPS — Nginx + PM2
 - **Storage:** Local VPS disk (`/uploads`)
