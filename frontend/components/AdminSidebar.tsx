@@ -12,7 +12,6 @@ const navItems: {
   href: string;
   label: string;
   exact: boolean;
-  disabled?: boolean;
 }[] = [
   { href: "/admin", label: "لوحة التحكم", exact: true },
   { href: "/admin/orders", label: "الطلبات", exact: false },
@@ -21,7 +20,6 @@ const navItems: {
   { href: "/admin/hero-slides", label: "شريط الواجهة", exact: false },
   { href: "/admin/batches", label: "الدفعات", exact: false },
   { href: "/admin/staff", label: "الموظفون", exact: false },
-  { href: "#", label: "الإعدادات", exact: false, disabled: true },
 ];
 
 interface AdminSidebarProps {
@@ -121,35 +119,20 @@ export function AdminSidebar({ user, open, onClose }: AdminSidebarProps) {
       </div>
 
       <nav className="relative flex-1 space-y-1 px-3 py-4">
-        {navItems.map((item) =>
-          item.disabled ? (
-            <button
-              key={item.label}
-              type="button"
-              disabled
-              aria-disabled="true"
-              className="flex min-h-11 w-full items-center justify-between rounded-xl px-3 py-2.5 text-sm text-cream/50 cursor-not-allowed"
-            >
-              <span>{item.label}</span>
-              <span className="rounded-full bg-cream/10 px-2 py-0.5 text-xs text-cream/60">
-                قريباً
-              </span>
-            </button>
-          ) : (
-            <Link
-              key={item.href}
-              href={item.href}
-              onClick={onClose}
-              className={`block min-h-11 rounded-xl px-3 py-2.5 text-sm transition-colors duration-200 ${
-                isActive(item.href, item.exact)
-                  ? "bg-cream/12 font-semibold text-cream"
-                  : "text-cream/70 hover:bg-cream/8 hover:text-cream"
-              }`}
-            >
-              {item.label}
-            </Link>
-          )
-        )}
+        {navItems.map((item) => (
+          <Link
+            key={item.href}
+            href={item.href}
+            onClick={onClose}
+            className={`block min-h-11 rounded-xl px-3 py-2.5 text-sm transition-colors duration-200 ${
+              isActive(item.href, item.exact)
+                ? "bg-cream/12 font-semibold text-cream"
+                : "text-cream/70 hover:bg-cream/8 hover:text-cream"
+            }`}
+          >
+            {item.label}
+          </Link>
+        ))}
       </nav>
 
       <div className="relative border-t border-cream/10 px-5 py-4">

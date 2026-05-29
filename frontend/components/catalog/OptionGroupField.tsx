@@ -75,11 +75,11 @@ export function OptionGroupField({
 
       {(group.hintAr || group.imageUrl) && (
         <div className="mb-3 rounded-xl border border-ink/8 bg-cream/60 p-2.5">
-          <p className="text-[11px] font-medium text-ink/45">
+          <p className="text-[11px] font-medium text-[var(--shop-muted)]">
             صورة توضيحية من الأدمن
           </p>
           {group.hintAr && (
-            <p className="mt-1 text-xs text-ink/60">{group.hintAr}</p>
+            <p className="mt-1 text-xs text-ink-soft">{group.hintAr}</p>
           )}
           {group.imageUrl && (
             <div className="relative mt-2 h-32 w-full overflow-hidden rounded-lg bg-peach/40">
@@ -127,7 +127,7 @@ export function OptionGroupField({
                         className="h-10 w-10 rounded-full shadow-[var(--shadow-soft)] ring-1 ring-ink/15"
                         style={{ background: hex }}
                       />
-                      <span className="text-[10px] font-medium text-ink/80">{opt.labelAr}</span>
+                      <span className="text-[10px] font-medium text-muted">{opt.labelAr}</span>
                     </label>
                   );
                 })}
@@ -168,7 +168,7 @@ export function OptionGroupField({
               const sel = group.options.find((o) => o.id === value);
               return sel?.imageUrl ? (
                 <div className="mt-2 rounded-xl border border-ink/8 bg-cream/60 p-2.5">
-                  <p className="text-[11px] font-medium text-ink/45">
+                  <p className="text-[11px] font-medium text-[var(--shop-muted)]">
                     توضيح للخيار: {sel.labelAr}
                   </p>
                   <div className="relative mt-2 h-28 w-full overflow-hidden rounded-lg bg-peach/40">
@@ -237,7 +237,7 @@ export function OptionGroupField({
             +
           </button>
           {group.maxSelect && (
-            <span className="text-xs text-ink/50">حد أقصى {group.maxSelect}</span>
+            <span className="text-xs text-[var(--shop-muted)]">حد أقصى {group.maxSelect}</span>
           )}
         </div>
       )}

@@ -70,7 +70,7 @@ function SashPanel({
     return (
       <div className="flex flex-col items-center gap-1" style={{ transform: `rotate(${tilt}deg)`, transformOrigin: "top center" }}>
         {inner}
-        <span className="text-xs text-ink/60">{SIDE_LABEL[side]}</span>
+        <span className="text-xs text-ink-soft">{SIDE_LABEL[side]}</span>
       </div>
     );
   }

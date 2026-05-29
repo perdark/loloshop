@@ -20,14 +20,28 @@ function statusLabel(s: StudentApprovalStatus): string {
   return "بانتظار الموافقة";
 }
 
+/**
+ * Status pill classes — palette-only, no green/red/amber/emerald/rose.
+ * - approved  → active peak: orange tint
+ * - rejected  → danger brick
+ * - pending   → neutral default
+ */
 function statusPillClass(s: StudentApprovalStatus): string {
-  if (s === "approved") return "bg-emerald-100 text-emerald-700";
-  if (s === "rejected") return "bg-rose-100 text-rose-700";
-  return "bg-amber-100 text-amber-700";
+  if (s === "approved")
+    return "bg-orange-ink/10 text-orange-ink";
+  if (s === "rejected")
+    return "border border-danger/40 bg-danger/10 text-danger";
+  return "border border-line bg-[var(--shop-sink)] text-ink-soft";
 }
 
 function completionLabel(isCompleted: boolean): string {
   return isCompleted ? "مكتمل" : "غير مكتمل";
+}
+
+function completionPillClass(isCompleted: boolean): string {
+  return isCompleted
+    ? "bg-orange/15 text-orange-ink"
+    : "border border-line bg-[var(--shop-sink)] text-[var(--shop-muted)]";
 }
 
 const PAGE_SIZE = 25;
@@ -35,18 +49,27 @@ const PAGE_SIZE = 25;
 export default function WholesalerStudentsPage() {
   const [rows, setRows] = useState<WholesalerStudentRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [status, setStatus] = useState<"" | StudentApprovalStatus>("");
   const [completion, setCompletion] = useState<CompletionFilter>("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
 
+  function fetchStudents(s: "" | StudentApprovalStatus) {
+    setLoading(true);
+    setLoadError(false);
+    getWholesalerStudents({ status: s })
+      .then(setRows)
+      .catch((err) => {
+        setLoadError(true);
+        toast.error(getApiErrorMessage(err, "تعذر تحميل الطلاب"));
+      })
+      .finally(() => setLoading(false));
+  }
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- refetch on filter change
-    setLoading(true);
-    getWholesalerStudents({ status })
-      .then(setRows)
-      .catch((err) => toast.error(getApiErrorMessage(err, "تعذر تحميل الطلاب")))
-      .finally(() => setLoading(false));
+    fetchStudents(status);
   }, [status]);
 
   // reset page whenever filters change (adjust state during render — no effect)
@@ -85,16 +108,28 @@ export default function WholesalerStudentsPage() {
 
   if (loading) return <PageLoader />;
 
+  if (loadError) {
+    return (
+      <div className="space-y-4">
+        <BackLink />
+        <EmptyState
+          title="تعذر تحميل الطلاب"
+          message="تحقق من الاتصال ثم حاول مجدداً."
+          action={
+            <Button variant="ghost" onClick={() => fetchStudents(status)}>
+              إعادة المحاولة
+            </Button>
+          }
+        />
+      </div>
+    );
+  }
+
   return (
-    <div dir="rtl" lang="ar" className="space-y-4">
+    <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="section-heading font-display text-xl font-bold text-ink">الطلاب</h1>
-        <Link
-          href="/wholesaler"
-          className="inline-flex min-h-11 items-center text-sm font-medium text-orange-ink hover:underline"
-        >
-          ← رجوع
-        </Link>
+        <h1 className="section-heading font-display-ar text-xl font-bold text-ink">الطلاب</h1>
+        <BackLink />
       </div>
 
       <div className="grid grid-cols-3 gap-3">
@@ -103,7 +138,7 @@ export default function WholesalerStudentsPage() {
         <StatCard label="تصميم مكتمل" value={String(stats.completed)} accent="profit" />
       </div>
 
-      <section className="surface-card rounded-2xl p-3.5 space-y-3">
+      <section className="surface-card space-y-3 rounded-2xl p-3.5">
         {/* Name search */}
         <Input
           type="search"
@@ -114,33 +149,33 @@ export default function WholesalerStudentsPage() {
           aria-label="بحث باسم الطالب"
         />
 
-        {/* Approval status filter */}
+        {/* Filters */}
         <div>
           <p className="mb-2 text-sm font-medium text-ink">تصفية</p>
           <div className="flex flex-wrap gap-2">
-            {[
+            {([
               { id: "", label: "الكل" },
               { id: "pending_approval", label: "بانتظار" },
               { id: "approved", label: "موافق" },
               { id: "rejected", label: "مرفوض" },
-            ].map((o) => (
+            ] as const).map((o) => (
               <Button
                 key={o.id}
-                variant={status === (o.id as "" | StudentApprovalStatus) ? "primary" : "ghost"}
+                variant={status === o.id ? "primary" : "ghost"}
                 onClick={() => setStatus(o.id as "" | StudentApprovalStatus)}
               >
                 {o.label}
               </Button>
             ))}
-            <span className="mx-1 h-11 w-px bg-ink/10" aria-hidden />
-            {[
+            <span className="mx-1 h-11 w-px bg-line" aria-hidden />
+            {([
               { id: "", label: "الكل" },
               { id: "completed", label: "مكتمل" },
               { id: "not_completed", label: "غير مكتمل" },
-            ].map((o) => (
+            ] as const).map((o) => (
               <Button
                 key={o.id}
-                variant={completion === (o.id as CompletionFilter) ? "primary" : "ghost"}
+                variant={completion === o.id ? "primary" : "ghost"}
                 onClick={() => setCompletion(o.id as CompletionFilter)}
               >
                 {o.label}
@@ -151,7 +186,7 @@ export default function WholesalerStudentsPage() {
       </section>
 
       {filtered.length === 0 ? (
-        <EmptyState message="لا يوجد طلاب" />
+        <EmptyState message={search ? "لا توجد نتائج لهذا البحث" : "لا يوجد طلاب"} />
       ) : (
         <>
           <ul className="space-y-3">
@@ -159,29 +194,23 @@ export default function WholesalerStudentsPage() {
               <li key={s.id} className="surface-card card-lift rounded-2xl p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="truncate font-display font-bold text-ink">{s.name}</p>
-                    <p className="mt-0.5 text-sm tabular-nums text-ink/60" dir="ltr">
+                    <p className="truncate font-display-ar font-bold text-ink">{s.name}</p>
+                    <p className="mt-0.5 text-sm tabular-nums text-ink-soft" dir="ltr">
                       {s.phone}
                     </p>
-                    <p className="mt-1 text-xs text-ink/50">
+                    <p className="mt-1 text-xs text-[var(--shop-muted)]">
                       {s.universityName || "—"}
                       {s.department ? ` — ${s.department}` : ""}
                     </p>
                   </div>
                   <div className="flex shrink-0 flex-col items-end gap-2">
                     <span
-                      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusPillClass(
-                        s.status
-                      )}`}
+                      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusPillClass(s.status)}`}
                     >
                       {statusLabel(s.status)}
                     </span>
                     <span
-                      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
-                        s.isCompleted
-                          ? "bg-orange/15 text-orange-ink"
-                          : "bg-ink/5 text-ink/60"
-                      }`}
+                      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${completionPillClass(s.isCompleted)}`}
                     >
                       {completionLabel(s.isCompleted)}
                     </span>
@@ -194,7 +223,7 @@ export default function WholesalerStudentsPage() {
           {/* Pagination */}
           {totalPages > 1 && (
             <div className="flex items-center justify-between gap-3 pt-1 text-sm">
-              <span className="text-ink/60">
+              <span className="text-ink-soft">
                 {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} من {filtered.length}
               </span>
               <div className="flex gap-2">
@@ -220,5 +249,16 @@ export default function WholesalerStudentsPage() {
         </>
       )}
     </div>
+  );
+}
+
+function BackLink() {
+  return (
+    <Link
+      href="/wholesaler"
+      className="inline-flex min-h-11 items-center text-sm font-medium text-orange-ink hover:underline"
+    >
+      ← رجوع
+    </Link>
   );
 }

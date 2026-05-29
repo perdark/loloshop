@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
 import { getFabric } from "@/lib/fabric-loader";
 import { loadPanelOntoCanvas } from "@/lib/render-sash-panel";
+import { SASH_COLOR_HEX } from "@/lib/designer-colors";
 
 const SashGownPreview = dynamic(
   () =>
@@ -31,6 +32,10 @@ function ReadOnlyPanel({
   const canvasElRef = useRef<HTMLCanvasElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fabricRef = useRef<any>(null);
+
+  // Resolve the fabric color vars so the .sash-stage wrapper reads as real fabric
+  const fabricColors =
+    SASH_COLOR_HEX[sashColor ?? "أبيض"] ?? SASH_COLOR_HEX["أبيض"];
 
   useEffect(() => {
     return () => {
@@ -81,8 +86,19 @@ function ReadOnlyPanel({
   }, [json, sashColor, width, height, fontsUsed]);
 
   return (
-    <div className="flex flex-col items-center gap-2.5">
-      <div className="overflow-hidden rounded-2xl bg-cream p-1.5 shadow-[var(--shadow-card)] ring-1 ring-ink/10">
+    <div className="flex flex-col items-center gap-3">
+      {/* .sash-stage gives the panel real fabric texture: selvedge gradient,
+          stitch line, woven-overlay and pointed hem — parity with TextEditor */}
+      <div
+        className="sash-stage"
+        style={
+          {
+            "--sash-fabric-light": fabricColors.light,
+            "--sash-fabric-base": fabricColors.base,
+            "--sash-fabric-dark": fabricColors.dark,
+          } as React.CSSProperties
+        }
+      >
         <div className="overflow-hidden rounded-xl">
           <canvas ref={canvasElRef} />
         </div>
@@ -117,7 +133,7 @@ export function DesignViewer({
   return (
     <div className="space-y-4" aria-label="معاينة التصميم">
       <div className="flex justify-center">
-        <div className="inline-flex gap-1 rounded-full border border-ink/10 bg-beige/60 p-1">
+        <div className="inline-flex gap-1 rounded-full border border-line bg-surface-sink p-1">
           <Button
             size="sm"
             variant={view === "gown" ? "primary" : "ghost"}

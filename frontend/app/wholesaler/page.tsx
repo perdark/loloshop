@@ -161,13 +161,10 @@ export default function WholesalerDashboardPage() {
 
   return (
     <div className="space-y-6">
-      <section className="bg-hero-rich relative overflow-hidden rounded-3xl p-6 text-center text-cream shadow-[var(--shadow-float)]">
-        <span
-          aria-hidden
-          className="pointer-events-none absolute -end-10 -top-12 h-40 w-40 rounded-full bg-orange/20 blur-3xl"
-        />
-        <p className="relative text-sm font-medium text-cream/75">الموعد النهائي</p>
-        <p className="relative mt-2 font-display text-4xl font-bold tracking-tight text-cream">
+      {/* Deadline hero — flat ink-toned surface, no orange blobs */}
+      <section className="rounded-3xl bg-ink p-6 text-center">
+        <p className="text-sm font-medium text-cream/70">الموعد النهائي</p>
+        <p className="mt-2 font-display-ar text-4xl font-bold tracking-tight text-cream">
           {formatDateIQ(dashboard.deadline)}
         </p>
       </section>
@@ -179,23 +176,23 @@ export default function WholesalerDashboardPage() {
       </div>
 
       {(dashboard.commissionRate ?? 0) > 0 && (
-        <section className="surface-card relative overflow-hidden rounded-2xl p-5 text-center">
-          <span
-            aria-hidden
-            className="absolute inset-x-0 top-0 h-1 bg-brand-gradient"
-          />
-          <p className="text-xs font-medium text-ink/60">
+        <section className="surface-card rounded-2xl p-5 text-center">
+          <p className="text-xs font-medium text-[var(--shop-muted)]">
             عمولتك المستحقة ({dashboard.commissionRate}%)
           </p>
-          <p className="mt-1.5 font-display text-3xl font-bold text-gradient-brand" dir="ltr">
+          <p className="mt-1.5 font-display text-3xl font-bold text-ink" dir="ltr">
             {formatIQD(dashboard.earnedCommission ?? 0)}
           </p>
         </section>
       )}
 
+      {/* Referral URL — legible, no gradients */}
       <section className="surface-card rounded-2xl p-5">
         <p className="mb-2 text-sm font-semibold text-ink">رابط الدعوة</p>
-        <p className="break-all rounded-xl bg-beige/70 px-3 py-2.5 text-xs text-ink/60" dir="ltr">
+        <p
+          className="break-all rounded-xl border border-line bg-[var(--shop-sink)] px-3 py-2.5 text-xs text-ink-soft"
+          dir="ltr"
+        >
           {joinUrl}
         </p>
         <div className="mt-3 flex gap-2">
@@ -204,16 +201,16 @@ export default function WholesalerDashboardPage() {
             href={whatsappShare}
             target="_blank"
             rel="noopener noreferrer"
-            className="btn-shine flex min-h-11 flex-1 items-center justify-center rounded-xl bg-brand-gradient px-4 text-sm font-semibold text-white shadow-[var(--shadow-soft)] transition-transform active:scale-[0.98]"
+            className="btn-shine flex min-h-11 flex-1 items-center justify-center rounded-full bg-orange-ink px-4 text-sm font-semibold text-white shadow-[var(--shadow-soft)] transition-transform active:scale-[0.98]"
           >
-            مشاركة عبر واتساب
+            مشاركة واتساب
           </a>
         </div>
       </section>
 
       <section className="surface-card rounded-2xl p-5">
         <p className="mb-1 text-sm font-semibold text-ink">تصميم الوشاح للطلاب</p>
-        <p className="mb-3 text-xs text-ink/60">
+        <p className="mb-3 text-xs text-ink-soft">
           حدّد الجانب الذي يصمّمه الطلاب وارسم الجانب الآخر مسبقاً.
         </p>
         <Button variant="ghost" fullWidth onClick={openSashConfig}>
@@ -223,11 +220,11 @@ export default function WholesalerDashboardPage() {
 
       <section className="pb-28">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="section-heading font-display text-lg font-bold text-ink">
+          <h2 className="section-heading font-display-ar text-lg font-bold text-ink">
             طلاب بانتظار الموافقة
           </h2>
           {pending.length > 0 && (
-            <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm font-medium text-ink/70">
+            <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm font-medium text-ink-soft">
               <input
                 type="checkbox"
                 className="size-4 accent-orange"
@@ -258,18 +255,20 @@ export default function WholesalerDashboardPage() {
                     aria-label={`تحديد ${student.fullName}`}
                   />
                   <div className="min-w-0 flex-1">
-                    <p className="font-display font-bold text-ink">{student.fullName}</p>
-                    <p className="text-sm text-ink/60" dir="ltr">
+                    <p className="font-display-ar font-bold text-ink">{student.fullName}</p>
+                    <p className="text-sm text-ink-soft" dir="ltr">
                       {student.phone}
                     </p>
-                    <p className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-beige/70 px-2 py-0.5 text-xs text-ink/50">
+                    <p className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-[var(--shop-sink)] px-2 py-0.5 text-xs text-[var(--shop-muted)]">
                       {formatDateShort(student.createdAt)}
                     </p>
                   </div>
-                  <span className="inline-flex shrink-0 items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-700">
+                  {/* Neutral "بانتظار" pill — no amber */}
+                  <span className="inline-flex shrink-0 items-center rounded-full border border-line bg-[var(--shop-sink)] px-2.5 py-1 text-xs font-medium text-ink-soft">
                     بانتظار
                   </span>
                 </div>
+                {/* Tidy 2-button row — approve primary, reject danger, both ≥44px */}
                 <div className="mt-4 flex gap-2">
                   <Button
                     fullWidth
@@ -297,7 +296,7 @@ export default function WholesalerDashboardPage() {
       </section>
 
       {selected.size > 0 && (
-        <div className="surface-glass fixed inset-x-0 bottom-0 z-40 border-t border-ink/10 p-4 shadow-[var(--shadow-float)]">
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-cream p-4 shadow-[var(--shadow-float)]">
           <div className="mx-auto flex max-w-md items-center gap-2">
             <span className="inline-flex shrink-0 items-center rounded-full bg-orange/10 px-3 py-1.5 text-sm font-semibold text-orange-ink">
               {selected.size} محدد
@@ -307,7 +306,7 @@ export default function WholesalerDashboardPage() {
               onClick={handleBulkApprove}
               loading={bulkBusy}
             >
-              موافقة الجماعية
+              موافقة جماعية
             </Button>
             <Button
               variant="danger"
@@ -351,7 +350,7 @@ export default function WholesalerDashboardPage() {
           </>
         }
       >
-        <p className="text-sm text-ink/70">
+        <p className="text-sm text-ink-soft">
           هل تريد رفض {reject?.label}؟ لا يمكن التراجع عن هذا الإجراء.
         </p>
       </Modal>

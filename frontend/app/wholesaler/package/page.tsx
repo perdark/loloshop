@@ -12,24 +12,23 @@ import { formatIQD } from "@/lib/format";
 import type { CatalogOption } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
 import { PageLoader } from "@/components/ui/Spinner";
-
-const BATCH_STORAGE_KEY = "loloshop_wholesaler_batch_id";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 export default function WholesalerPackagePage() {
   const router = useRouter();
-  const [packages, setPackages] = useState<Awaited<ReturnType<typeof listPackages>>>(
-    []
-  );
+  const [packages, setPackages] = useState<Awaited<ReturnType<typeof listPackages>>>([]);
   const [selected, setSelected] = useState<
     Awaited<ReturnType<typeof listPackages>>[number] | null
   >(null);
   const [capOptions, setCapOptions] = useState<CatalogOption[]>([]);
   const [capOptionId, setCapOptionId] = useState("");
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(false);
     try {
       const pkgs = await listPackages();
       setPackages(pkgs);
@@ -55,6 +54,7 @@ export default function WholesalerPackagePage() {
         setCapOptionId(defaultCap);
       }
     } catch (e) {
+      setLoadError(true);
       toast.error(getApiErrorMessage(e, "تعذر تحميل الباقات"));
     } finally {
       setLoading(false);
@@ -85,15 +85,7 @@ export default function WholesalerPackagePage() {
     }
     setSubmitting(true);
     try {
-      const batchId =
-        typeof window !== "undefined"
-          ? localStorage.getItem(BATCH_STORAGE_KEY) ?? undefined
-          : undefined;
-      await confirmPackage({
-        packageId: selected.id,
-        capOptionId,
-        batchId,
-      });
+      await confirmPackage({ packageId: selected.id, capOptionId });
       toast.success("تم اعتماد الباقة");
       router.push("/wholesaler");
     } catch (e) {
@@ -105,23 +97,39 @@ export default function WholesalerPackagePage() {
 
   if (loading) return <PageLoader />;
 
+  if (loadError) {
+    return (
+      <div className="space-y-4">
+        <BackLink />
+        <EmptyState
+          title="تعذر تحميل الباقات"
+          message="تحقق من الاتصال ثم حاول مجدداً."
+          action={
+            <Button variant="ghost" onClick={load}>
+              إعادة المحاولة
+            </Button>
+          }
+        />
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-6 pb-8" dir="rtl" lang="ar">
-      <Link href="/wholesaler" className="inline-flex min-h-11 items-center text-sm font-medium text-orange-ink hover:underline">
-        ← لوحة الممثل
-      </Link>
+    <div className="space-y-6 pb-8">
+      <BackLink />
 
       <div>
-        <h1 className="section-heading font-display text-2xl font-bold text-ink">باقات التخرج</h1>
-        <p className="mt-2 text-sm text-ink/60">
+        <h1 className="section-heading font-display-ar text-2xl font-bold text-ink">باقات التخرج</h1>
+        <p className="mt-2 text-sm text-ink-soft">
           مستوى الباقة يعتمد على نوع الوشاح — القبعة قابلة للتبديل بشكل مستقل
         </p>
       </div>
 
       {packages.length === 0 ? (
-        <div className="surface-card rounded-2xl p-5 text-center text-sm text-ink/60">
-          لا توجد باقات متاحة حالياً
-        </div>
+        <EmptyState
+          title="لا توجد باقات"
+          message="لا توجد باقات متاحة حالياً، تواصل مع المسؤول."
+        />
       ) : (
         <div className="space-y-3">
           {packages.map((pkg) => {
@@ -136,7 +144,7 @@ export default function WholesalerPackagePage() {
                 }`}
               >
                 {pkg.imageUrl && (
-                  <div className="relative mb-3 aspect-[16/9] overflow-hidden rounded-xl bg-peach/30">
+                  <div className="relative mb-3 aspect-[16/9] overflow-hidden rounded-xl bg-[var(--shop-sink)]">
                     <Image
                       src={pkg.imageUrl}
                       alt={pkg.nameAr}
@@ -149,8 +157,8 @@ export default function WholesalerPackagePage() {
                 )}
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
-                    <p className="font-display font-bold text-ink">{pkg.nameAr}</p>
-                    <p className="mt-1 inline-flex items-center gap-1 rounded-full bg-beige/70 px-2 py-0.5 text-xs text-ink/60">
+                    <p className="font-display-ar font-bold text-ink">{pkg.nameAr}</p>
+                    <p className="mt-1 inline-flex items-center gap-1 rounded-full bg-[var(--shop-sink)] px-2 py-0.5 text-xs text-[var(--shop-muted)]">
                       وشاح: {pkg.sashTypeLabel || "—"}
                     </p>
                   </div>
@@ -160,7 +168,8 @@ export default function WholesalerPackagePage() {
                     </span>
                   )}
                 </div>
-                <p className="mt-2.5 font-display text-xl font-bold text-gradient-brand" dir="ltr">
+                {/* Price in ink — not gradient text */}
+                <p className="mt-2.5 font-display text-xl font-bold text-ink" dir="ltr">
                   {formatIQD(pkg.price)}
                 </p>
               </button>
@@ -181,7 +190,7 @@ export default function WholesalerPackagePage() {
                   className={`flex min-h-11 cursor-pointer items-center gap-2.5 rounded-xl border px-3 py-2 text-sm transition-colors ${
                     isChecked
                       ? "border-orange/50 bg-orange/5 text-ink"
-                      : "border-ink/10 bg-beige/40 text-ink/70 hover:border-orange/30"
+                      : "border-line bg-[var(--shop-sink)] text-ink-soft hover:border-orange/30"
                   }`}
                 >
                   <input
@@ -193,7 +202,7 @@ export default function WholesalerPackagePage() {
                   />
                   <span className="font-medium">{opt.labelAr}</span>
                   {opt.id === selected.defaultCapOptionId && (
-                    <span className="me-auto rounded-full bg-beige/70 px-2 py-0.5 text-xs text-ink/50">
+                    <span className="me-auto rounded-full bg-[var(--shop-sink)] px-2 py-0.5 text-xs text-[var(--shop-muted)]">
                       افتراضي
                     </span>
                   )}
@@ -201,26 +210,44 @@ export default function WholesalerPackagePage() {
               );
             })}
           </div>
-          <p className="mt-3 rounded-xl bg-beige/70 px-3 py-2 text-xs text-ink/60">
+          <p className="mt-3 rounded-xl border border-line bg-[var(--shop-sink)] px-3 py-2 text-xs text-ink-soft">
             الوشاح: {selected.sashTypeLabel || "—"} — السعر ثابت للباقة
           </p>
           <Button
             fullWidth
             className="mt-4"
             disabled={submitting || !capOptionId}
+            loading={submitting}
             onClick={handleConfirm}
           >
-            {submitting ? "جاري الاعتماد…" : "اعتماد الباقة"}
+            اعتماد الباقة
           </Button>
         </section>
       )}
 
       {selected && capOptions.length === 0 && (
-        <div className="surface-card rounded-2xl p-5 text-center text-sm text-ink/60">
-          تعذر تحميل خيارات القبعة
-        </div>
+        <EmptyState
+          title="تعذر تحميل خيارات القبعة"
+          message="تعذر جلب خيارات القبعة. حاول مجدداً أو تواصل مع المسؤول."
+          action={
+            <Button variant="ghost" onClick={load}>
+              إعادة المحاولة
+            </Button>
+          }
+        />
       )}
     </div>
+  );
+}
+
+function BackLink() {
+  return (
+    <Link
+      href="/wholesaler"
+      className="inline-flex min-h-11 items-center text-sm font-medium text-orange-ink hover:underline"
+    >
+      ← لوحة الممثل
+    </Link>
   );
 }
 

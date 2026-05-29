@@ -157,7 +157,8 @@ export function SpotlightReel() {
                 alt={s.title}
                 fill
                 priority={i === 0}
-                sizes="(max-width: 512px) 100vw, 512px"
+                loading={i === 0 ? "eager" : "lazy"}
+                sizes="(max-width: 32rem) 100vw, 32rem"
                 className={`object-cover ${on ? "animate-kenburns" : ""}`}
               />
               <div

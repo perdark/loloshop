@@ -30,9 +30,11 @@ const SLUG_RE = /^[a-z0-9-]+$/;
 export default function AdminWholesalersPage() {
   const [wholesalers, setWholesalers] = useState<AdminWholesaler[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [extendOpen, setExtendOpen] = useState(false);
   const [commissionOpen, setCommissionOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<AdminWholesaler | null>(null);
   const [sashOpen, setSashOpen] = useState(false);
   const [sashConfig, setSashConfig] = useState<WholesalerSashConfig | null>(null);
   const [sashLoading, setSashLoading] = useState(false);
@@ -53,11 +55,13 @@ export default function AdminWholesalersPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setFetchError(false);
     try {
       const data = await getAdminWholesalers();
       setWholesalers(data);
     } catch {
       toast.error("تعذر تحميل الممثلين");
+      setFetchError(true);
     } finally {
       setLoading(false);
     }
@@ -196,7 +200,17 @@ export default function AdminWholesalersPage() {
       />
 
       {loading ? (
-        <PageLoader />
+        <div className="space-y-3 animate-fade-page-in" aria-hidden>
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="skeleton h-36 w-full rounded-2xl" />
+          ))}
+        </div>
+      ) : fetchError ? (
+        <div className="rounded-2xl border border-danger/25 bg-[var(--shop-sink)] px-6 py-10 text-center">
+          <p className="text-base font-semibold text-ink">تعذر تحميل الممثلين</p>
+          <p className="mt-1 text-sm text-ink-soft">تحقق من اتصالك ثم أعد المحاولة.</p>
+          <Button className="mt-4" onClick={load}>إعادة المحاولة</Button>
+        </div>
       ) : wholesalers.length === 0 ? (
         <EmptyState message="لا يوجد ممثلون" />
       ) : (
@@ -209,24 +223,24 @@ export default function AdminWholesalersPage() {
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
                   <h3 className="font-display text-lg font-bold text-ink">{w.name}</h3>
-                  <p className="text-sm text-ink/60" dir="ltr">{w.phone}</p>
+                  <p className="text-sm text-ink-soft" dir="ltr">{w.phone}</p>
                   <p className="mt-2 text-sm">
-                    <span className="text-ink/50">الطلاب: </span>
+                    <span className="text-[var(--shop-muted)]">الطلاب: </span>
                     <span className="font-medium tabular-nums text-ink">{w.studentCount}</span>
                     <span className="mx-2 text-ink/30">|</span>
-                    <span className="text-ink/50">الموعد: </span>
+                    <span className="text-[var(--shop-muted)]">الموعد: </span>
                     {formatDateIQ(w.deadline)}
                   </p>
                   <p className="mt-1 text-sm">
-                    <span className="text-ink/50">العمولة: </span>
+                    <span className="text-[var(--shop-muted)]">العمولة: </span>
                     <span className="tabular-nums">{w.commissionRate}%</span>
                     <span className="mx-2 text-ink/30">|</span>
-                    <span className="text-ink/50">المستحق: </span>
+                    <span className="text-[var(--shop-muted)]">المستحق: </span>
                     <span className="font-semibold tabular-nums text-orange-ink" dir="ltr">
                       {formatIQD(w.earnedCommission ?? 0)}
                     </span>
                   </p>
-                  <p className="mt-2 break-all rounded-lg bg-ink/[0.04] px-2.5 py-1.5 text-xs text-ink/55" dir="ltr">
+                  <p className="mt-2 break-all rounded-lg bg-ink/[0.04] px-2.5 py-1.5 text-xs text-ink-soft" dir="ltr">
                     {w.referralUrl || getJoinUrl(w.referralCode)}
                   </p>
                 </div>
@@ -268,26 +282,8 @@ export default function AdminWholesalersPage() {
                     إعدادات الوشاح
                   </Button>
                   <Button
-                    variant="ghost"
-                    className="text-red-600"
-                    onClick={async () => {
-                      if (
-                        !window.confirm(
-                          "هل أنت متأكد من حذف هذا الممثل؟ سيتم إلغاء ربط الطلاب به."
-                        )
-                      ) {
-                        return;
-                      }
-                      try {
-                        await deleteWholesaler(w.id);
-                        toast.success("تم حذف الممثل");
-                        load();
-                      } catch (err) {
-                        toast.error(
-                          getApiErrorMessage(err, "تعذر حذف الممثل")
-                        );
-                      }
-                    }}
+                    variant="danger"
+                    onClick={() => setDeleteTarget(w)}
                   >
                     حذف
                   </Button>
@@ -353,14 +349,19 @@ export default function AdminWholesalersPage() {
             error={errors.referralCode}
             dir="ltr"
           />
-          <Input
-            label="الموعد النهائي"
-            type="date"
-            autoComplete="off"
-            value={deadline}
-            onChange={(e) => setDeadline(e.target.value)}
-            error={errors.deadline}
-          />
+          <div dir="rtl" className="flex flex-col gap-1">
+            <label className="text-xs font-semibold text-muted">الموعد النهائي</label>
+            <input
+              type="date"
+              autoComplete="off"
+              value={deadline}
+              onChange={(e) => setDeadline(e.target.value)}
+              className="min-h-11 w-full rounded-xl border border-line bg-beige px-3 py-2 text-end text-sm text-ink focus:border-orange-ink focus:outline-none focus:ring-2 focus:ring-orange-ink/15"
+            />
+            {errors.deadline && (
+              <p className="text-xs text-danger">{errors.deadline}</p>
+            )}
+          </div>
           <Input
             label="نسبة العمولة (%)"
             type="number"
@@ -415,12 +416,15 @@ export default function AdminWholesalersPage() {
           </>
         }
       >
-        <Input
-          label="الموعد النهائي الجديد"
-          type="date"
-          value={newDeadline}
-          onChange={(e) => setNewDeadline(e.target.value)}
-        />
+        <div dir="rtl" className="flex flex-col gap-1">
+          <label className="text-xs font-semibold text-muted">الموعد النهائي الجديد</label>
+          <input
+            type="date"
+            value={newDeadline}
+            onChange={(e) => setNewDeadline(e.target.value)}
+            className="min-h-11 w-full rounded-xl border border-line bg-beige px-3 py-2 text-end text-sm text-ink focus:border-orange-ink focus:outline-none focus:ring-2 focus:ring-orange-ink/15"
+          />
+        </div>
       </Modal>
 
       <Modal
@@ -438,6 +442,42 @@ export default function AdminWholesalersPage() {
             onSave={handleSashSave}
           />
         )}
+      </Modal>
+
+      {/* ── Confirm: delete wholesaler ── */}
+      <Modal
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        title="تأكيد حذف الممثل"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setDeleteTarget(null)}>إلغاء</Button>
+            <Button
+              variant="danger"
+              loading={submitting}
+              onClick={async () => {
+                if (!deleteTarget) return;
+                setSubmitting(true);
+                try {
+                  await deleteWholesaler(deleteTarget.id);
+                  toast.success("تم حذف الممثل");
+                  setDeleteTarget(null);
+                  load();
+                } catch (err) {
+                  toast.error(getApiErrorMessage(err, "تعذر حذف الممثل"));
+                } finally {
+                  setSubmitting(false);
+                }
+              }}
+            >
+              حذف «{deleteTarget?.name}»
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-ink-soft">
+          سيُحذف حساب الممثل «{deleteTarget?.name}» نهائياً وسيُلغى ربط الطلاب به. لا يمكن التراجع.
+        </p>
       </Modal>
     </div>
   );

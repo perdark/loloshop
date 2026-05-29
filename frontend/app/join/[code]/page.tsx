@@ -7,7 +7,23 @@ import { joinWithCode } from "@/lib/wholesaler";
 import { getApiErrorMessage } from "@/lib/api";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
-import { BrandMark } from "@/components/ui/BrandLogo";
+import { AuthCard } from "@/components/auth/AuthCard";
+
+// Inline checkmark — warm brick on cream surface, no emoji, no gradient fill.
+function CheckIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      strokeWidth={2}
+      stroke="currentColor"
+      className="h-8 w-8"
+      aria-hidden="true"
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+    </svg>
+  );
+}
 
 export default function JoinPage() {
   const params = useParams();
@@ -59,146 +75,99 @@ export default function JoinPage() {
 
   if (submitted) {
     return (
-      <div
-        className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-hero-rich px-4 py-10"
-        dir="rtl"
-        lang="ar"
-      >
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -top-24 -end-24 h-72 w-72 rounded-full bg-orange/20 blur-3xl"
-        />
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -bottom-28 -start-20 h-80 w-80 rounded-full bg-peach/40 blur-3xl"
-        />
-        <div className="relative w-full max-w-md rounded-3xl border border-white/60 bg-white p-8 text-center shadow-[var(--shadow-pop)] animate-auth-card-in">
-          <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-brand-gradient text-3xl text-white shadow-[var(--shadow-float)]">
-            ✓
+      <AuthCard title="طلبك قيد المراجعة">
+        <div className="flex flex-col items-center gap-4 py-2 text-center">
+          {/* Quiet success mark — warm ink circle with a line-SVG check */}
+          <div className="flex h-16 w-16 items-center justify-center rounded-full border border-ink/12 bg-[var(--shop-sink)] text-orange-ink">
+            <CheckIcon />
           </div>
-          <h1 className="font-display text-2xl font-bold text-ink">
-            طلبك بانتظار موافقة الممثل
-          </h1>
-          <p className="mt-3 text-sm text-ink/60">
-            سنُعلمك داخل التطبيق عند الموافقة على حسابك
+          <p className="text-sm text-ink-soft">
+            سنُعلمك داخل التطبيق عند موافقة الممثل على حسابك.
           </p>
         </div>
-      </div>
+      </AuthCard>
     );
   }
 
   return (
-    <div
-      className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-hero-rich px-4 py-10"
-      dir="rtl"
-      lang="ar"
-    >
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -top-24 -end-24 h-72 w-72 rounded-full bg-orange/20 blur-3xl"
-      />
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -bottom-28 -start-20 h-80 w-80 rounded-full bg-peach/40 blur-3xl"
-      />
-      <div className="relative w-full max-w-md overflow-hidden rounded-3xl border border-white/60 bg-white shadow-[var(--shadow-pop)] animate-auth-card-in">
-        <div className="relative overflow-hidden bg-ink px-6 py-7 text-center">
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-x-0 -top-16 mx-auto h-32 w-32 rounded-full bg-orange/30 blur-2xl"
-          />
-          <span
-            aria-hidden
-            className="relative mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-brand-gradient text-2xl shadow-[var(--shadow-float)]"
-          >
-            🎓
-          </span>
-          <BrandMark size={88} />
-          <p className="relative mt-1 font-display text-lg font-semibold text-cream">لولو شوب</p>
-          <p className="relative mt-1.5 text-sm text-cream/70">التسجيل عبر دعوة الممثل</p>
-          <p className="relative mt-1 inline-block rounded-full bg-cream/10 px-3 py-0.5 text-xs text-cream/60" dir="ltr">
-            {code}
-          </p>
-        </div>
-
-        <form
-          onSubmit={handleSubmit}
-          className="px-6 py-7 sm:px-8"
-        >
-          <Input
-            label="الاسم الثلاثي"
-            placeholder="الاسم + اسم الأب + الجد"
-            value={form.full_name_third}
-            onChange={(e) =>
-              setForm({ ...form, full_name_third: e.target.value })
-            }
-            error={errors.full_name_third}
-          />
-          <div className="mt-4">
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="join-phone" className="text-sm font-medium text-ink">رقم الهاتف</label>
-              <div className="flex items-stretch gap-2" dir="ltr">
-                <span className="inline-flex select-none items-center rounded-xl border border-ink/15 bg-beige px-3 text-sm font-semibold text-ink">+964</span>
-                <input
-                  id="join-phone"
-                  type="tel"
-                  inputMode="numeric"
-                  autoComplete="tel"
-                  value={form.phone}
-                  onChange={(e) => setForm({ ...form, phone: e.target.value.replace(/\D/g, "") })}
-                  placeholder="7XX XXX XXXX"
-                  aria-invalid={!!errors.phone}
-                  aria-describedby={errors.phone ? "join-phone-error" : undefined}
-                  className={[
-                    "min-h-11 min-w-0 flex-1 rounded-xl border bg-white px-3.5 py-2.5 text-ink outline-none transition-colors placeholder:text-ink/55",
-                    "focus:border-orange-ink focus:ring-2 focus:ring-orange-ink/20",
-                    errors.phone ? "border-red-500" : "border-ink/15",
-                  ].join(" ")}
-                />
-              </div>
-              {errors.phone && <p id="join-phone-error" className="text-xs text-red-600" role="alert">{errors.phone}</p>}
-            </div>
-          </div>
-          <div className="mt-4">
-            <Input
-              label="البريد الإلكتروني"
-              type="email"
-              value={form.email}
-              onChange={(e) => setForm({ ...form, email: e.target.value })}
-              error={errors.email}
-            />
-          </div>
-          <div className="mt-4">
-            <Input
-              label="كلمة المرور"
-              type="password"
-              value={form.password}
-              onChange={(e) => setForm({ ...form, password: e.target.value })}
-              error={errors.password}
-            />
-          </div>
-          <div className="mt-4">
-            <Input
-              label="تأكيد كلمة المرور"
-              type="password"
-              value={form.confirmPassword}
-              onChange={(e) =>
-                setForm({ ...form, confirmPassword: e.target.value })
-              }
-              error={errors.confirmPassword}
-            />
-          </div>
-          <div className="mt-6">
-            <Button type="submit" fullWidth loading={loading}>
-              إرسال الطلب
-            </Button>
-          </div>
-        </form>
+    <AuthCard title="التسجيل بدعوة الممثل">
+      {/* Invite code badge — a quiet inset strip, not a dark header block */}
+      <div className="mb-6 rounded-[12px] border border-ink/10 bg-[var(--shop-sink)] px-4 py-3 text-center">
+        <p className="text-xs text-[var(--shop-muted)]">رمز الدعوة</p>
+        <p className="mt-0.5 font-mono text-sm font-semibold tracking-widest text-ink" dir="ltr">
+          {code}
+        </p>
       </div>
 
-      <p className="relative mt-6 text-center text-xs text-ink-soft">
-        أوشحة وروبات التخرج · @loloshop96
-      </p>
-    </div>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <Input
+          label="الاسم الثلاثي"
+          placeholder="الاسم + اسم الأب + الجد"
+          value={form.full_name_third}
+          onChange={(e) => setForm({ ...form, full_name_third: e.target.value })}
+          error={errors.full_name_third}
+        />
+
+        {/* Phone — country-code prefix kept in LTR slot */}
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="join-phone" className="text-sm font-medium text-ink">رقم الهاتف</label>
+          <div className="flex items-stretch gap-2" dir="ltr">
+            <span className="inline-flex select-none items-center rounded-xl border border-line bg-beige px-3 text-sm font-semibold text-ink">
+              +964
+            </span>
+            <input
+              id="join-phone"
+              type="tel"
+              inputMode="numeric"
+              autoComplete="tel"
+              value={form.phone}
+              onChange={(e) => setForm({ ...form, phone: e.target.value.replace(/\D/g, "") })}
+              placeholder="7XX XXX XXXX"
+              aria-invalid={!!errors.phone}
+              aria-describedby={errors.phone ? "join-phone-error" : undefined}
+              className={[
+                "min-h-11 min-w-0 flex-1 rounded-xl border bg-beige px-3.5 py-2.5 text-ink outline-none transition-colors placeholder:text-ink/55",
+                "focus:border-orange-ink focus:ring-2 focus:ring-orange-ink/20",
+                errors.phone ? "border-danger" : "border-line",
+              ].join(" ")}
+            />
+          </div>
+          {errors.phone && (
+            <p id="join-phone-error" className="text-xs text-danger" role="alert">
+              {errors.phone}
+            </p>
+          )}
+        </div>
+
+        <Input
+          label="البريد الإلكتروني"
+          type="email"
+          value={form.email}
+          onChange={(e) => setForm({ ...form, email: e.target.value })}
+          error={errors.email}
+          autoComplete="email"
+        />
+        <Input
+          label="كلمة المرور"
+          type="password"
+          value={form.password}
+          onChange={(e) => setForm({ ...form, password: e.target.value })}
+          error={errors.password}
+          autoComplete="new-password"
+        />
+        <Input
+          label="تأكيد كلمة المرور"
+          type="password"
+          value={form.confirmPassword}
+          onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })}
+          error={errors.confirmPassword}
+          autoComplete="new-password"
+        />
+
+        <Button type="submit" fullWidth loading={loading}>
+          إرسال الطلب
+        </Button>
+      </form>
+    </AuthCard>
   );
 }

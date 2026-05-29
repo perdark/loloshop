@@ -27,7 +27,7 @@ export default function AdminLayout({
       />
 
       <div className="lg:ms-64">
-        <header className="surface-glass sticky top-0 z-20 flex items-center gap-3 border-b border-ink/10 px-4 py-3 lg:hidden">
+        <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-ink/10 bg-[var(--shop-paper)] px-4 py-3 lg:hidden">
           <button
             type="button"
             onClick={() => setSidebarOpen(true)}
@@ -42,7 +42,7 @@ export default function AdminLayout({
           <span className="font-display text-base font-bold text-ink">لولو شوب</span>
         </header>
 
-        <main className="p-4 lg:p-8 animate-fade-page-in">{children}</main>
+        <main className="mx-auto w-full max-w-6xl p-4 lg:p-8 animate-fade-page-in">{children}</main>
       </div>
     </div>
   );

@@ -10,7 +10,7 @@ colors:
   surface-sink: "#f5f0e6"
   ink: "#1a1a1a"
   ink-soft: "#33302b"
-  muted: "#8a8377"
+  muted: "#6b6356"
   line: "#e3ddd0"
 typography:
   display:
@@ -114,13 +114,13 @@ A neutral-luxury foundation of warm paper and ink, with a single disciplined bur
 - **Surface Sink** (`#f5f0e6`): Recessed/alt sections and section banding, a half step below paper for tonal depth.
 - **Ink** (`#1a1a1a`): Primary text, dark surfaces, headings.
 - **Soft Ink** (`#33302b`): Body and secondary text. The default reading color on paper.
-- **Muted** (`#8a8377`): Labels, captions, metadata, placeholder text at large/label sizes only.
+- **Muted** (`#6b6356`): Labels, captions, metadata, placeholder text at large/label sizes only. (~4.6:1 on paper — AA. The older `#8a8377` failed AA and is superseded.)
 - **Line** (`#e3ddd0`): Hairline borders and dividers, warm-tinted, never gray-cold.
 
 ### Named Rules
 **The Earned Orange Rule.** Burnt orange appears on ≤10% of any screen and only at action or emotional peaks. Ink and paper carry everything else. Its rarity is the power; flood it and the brand dies.
 
-**The Body-Is-Soft-Ink Rule.** Body copy is Soft Ink (`#33302b`) on paper, never Muted (`#8a8377`). Muted clears AA only at label/large sizes; using it for body text fails contrast. When in doubt, darken toward ink.
+**The Body-Is-Soft-Ink Rule.** Body copy is Soft Ink (`#33302b`) on paper, never Muted (`#6b6356`). Muted is a label/large-text color; using it for body text fails contrast. When in doubt, darken toward ink.
 
 ## 3. Typography
 
@@ -202,6 +202,6 @@ The Fabric.js customization canvas is the soul of the product and must feel prem
 - **Don't** put scrims over product photos to force a "designed" look — caption below the image instead.
 - **Don't** use gradient text or the banned `.text-gradient-brand`; emphasize with weight and size in solid ink/orange.
 - **Don't** use glassmorphism as a default, or any colored side-stripe border >1px.
-- **Don't** set body text in Muted (`#8a8377`) — it fails AA at body size; that's a label/large-text color only.
+- **Don't** set body text in Muted (`#6b6356`) — that's a label/large-text color only; body copy is Soft Ink.
 - **Don't** tint shadows orange; keep them ink-toned and soft.
 - **Don't** set the warm paper as a near-white you call "cream" and then flood orange on top; orange is earned, not ambient.

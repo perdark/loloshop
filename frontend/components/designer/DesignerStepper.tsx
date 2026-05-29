@@ -26,22 +26,26 @@ export function DesignerStepper({ step }: DesignerStepperProps) {
                   done
                     ? "bg-ink text-cream scale-100"
                     : active
-                    ? "bg-orange text-ink ring-2 ring-orange ring-offset-2 ring-offset-cream scale-110 shadow-md"
-                    : "bg-ink/10 text-ink/40 scale-100"
+                    ? "bg-orange-ink text-cream ring-2 ring-orange-ink ring-offset-2 ring-offset-cream scale-105"
+                    : "bg-surface-sink text-muted scale-100"
                 }`}
               >
-                {done ? "✓" : s.num}
+                {done ? (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="m5 13 4 4L19 7" />
+                  </svg>
+                ) : s.num}
               </div>
               {i < STEPS.length - 1 && (
                 <span
-                  className={`hidden h-px w-4 transition-colors duration-500 sm:inline sm:w-8 ${done ? "bg-orange" : "bg-ink/20"}`}
+                  className={`hidden h-px w-4 transition-colors duration-500 sm:inline sm:w-8 ${done ? "bg-orange-ink" : "bg-line"}`}
                   aria-hidden
                 />
               )}
             </div>
             <span
               className={`text-center text-xs leading-tight sm:text-sm ${
-                active ? "font-semibold text-ink" : "text-ink/60"
+                active ? "font-semibold text-ink" : done ? "text-ink-soft" : "text-muted"
               }`}
             >
               <span className="sm:hidden">{s.shortLabel}</span>

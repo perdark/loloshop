@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { getApiErrorMessage } from "@/lib/api";
 import { getHeroSlides, getShopFeed } from "@/lib/catalog";
@@ -129,42 +129,65 @@ export default function StudentHomePage() {
   const showPackages = hasPackages && filter === "all";
 
   return (
-    <div className="space-y-12">
+    <div className="space-y-0">
       <ShopCover slide={heroSlide} />
 
-      {/* Brand story — feel the house (handmade · milestone · made to order)
-          before the catalog. Renders even when the store is empty. */}
-      <AtelierStory />
-      <MilestoneStory />
-      <DesignProcess />
+      {/* ── Brand story band 1: The atelier — full paper, generous padding ── */}
+      <section className="py-14 sm:py-20">
+        <div className="scroll-reveal">
+          <AtelierStory />
+        </div>
+      </section>
+
+      {/* ── Brand story band 2: Milestone gallery — recessed surface-sink ── */}
+      <section className="full-bleed bg-[var(--shop-sink)] py-14 sm:py-20">
+        <div className="mx-auto max-w-2xl px-4 sm:px-6 scroll-reveal-soft">
+          <MilestoneStory />
+        </div>
+      </section>
+
+      {/* ── Brand story band 3: Design process — back on paper ── */}
+      <section className="py-14 sm:py-20">
+        <div className="scroll-reveal">
+          <DesignProcess />
+        </div>
+      </section>
+
+      {/* ── Catalog separator ── */}
+      <div className="full-bleed h-px bg-line" aria-hidden />
+
+      {/* ── Catalog area — padded section so it breathes like a page turn ── */}
+      <section className="space-y-12 py-12 sm:py-16">
 
       {/* Whole catalog still empty — the cover and designer carry the page. */}
       {!hasAnyProduct && !hasPackages ? (
-        <section className="flex flex-col items-center gap-3 rounded-card border border-dashed border-orange/25 bg-[var(--shop-sink)] px-6 py-14 text-center">
+        <div className="flex flex-col items-center gap-3 rounded-card border border-dashed border-orange/25 bg-[var(--shop-sink)] px-6 py-14 text-center">
           <p className="font-script text-3xl leading-none text-orange-ink">lolo</p>
           <p className="max-w-[32ch] text-sm font-medium text-ink-soft">
-            المتجر يجهّز لموسم التخرّج 🎓 تابعونا على إنستغرام @loloshop96
+            المتجر يجهّز لموسم التخرّج — تابعونا على إنستغرام @loloshop96
           </p>
-        </section>
+        </div>
       ) : (
         <>
           {/* Packages first — the full graduation look */}
           {showPackages && (
-            <section className="space-y-4">
+            <div className="scroll-reveal space-y-4">
               <SectionHeading
                 title="إطلالات كاملة"
                 note="الروب والوشاح والقبعة، مجموعة واحدة"
               />
-              <div className="grid grid-cols-2 gap-x-4 gap-y-7">
+              <div className="grid grid-cols-2 gap-x-4 gap-y-7 md:grid-cols-3 md:gap-x-6 md:gap-y-10 lg:grid-cols-4">
                 {feed.packages.map((pkg) => (
-                  <PackageTile key={pkg.id} pkg={pkg} />
+                  <div key={pkg.id} className="scroll-reveal">
+                    <PackageTile pkg={pkg} />
+                  </div>
                 ))}
               </div>
-            </section>
+            </div>
           )}
 
           {/* The collection — chips filter, tiles read like catalog pages */}
-          <section className="space-y-5">
+          <div className="scroll-reveal space-y-5">
             <SectionHeading
               title="القطع"
               note={`${allProducts.length} قطعة لموسمك`}
@@ -198,10 +221,12 @@ export default function StudentHomePage() {
             {visibleProducts.length > 0 ? (
               <div
                 key={filter}
-                className="animate-fade-page-in grid grid-cols-2 gap-x-4 gap-y-7"
+                className="animate-fade-page-in grid grid-cols-2 gap-x-4 gap-y-7 md:grid-cols-3 md:gap-x-6 md:gap-y-10 lg:grid-cols-4"
               >
                 {visibleProducts.map((p) => (
-                  <ProductTile key={p.id} product={p} />
+                  <div key={p.id} className="scroll-reveal">
+                    <ProductTile product={p} />
+                  </div>
                 ))}
               </div>
             ) : (
@@ -218,27 +243,76 @@ export default function StudentHomePage() {
                 </button>
               </div>
             )}
-          </section>
+          </div>
         </>
       )}
 
-      {/* Quiet, human close */}
-      <footer className="mt-2 border-t border-ink/10 pt-8">
-        <p className="font-script text-2xl leading-none text-orange-ink">لولو شوب</p>
-        <p className="mt-3 max-w-[40ch] text-sm leading-relaxed text-ink-soft">
-          تدفع نقداً وقت ما يوصلك — مثل ما تعوّدنا. أي سؤال؟ راسلنا على إنستغرام{" "}
-          <a
-            href="https://instagram.com/loloshop96"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="font-semibold text-orange-ink underline underline-offset-2"
-          >
-            @loloshop96
-          </a>
-          .
-        </p>
+      </section>
+
+      {/* Quiet, human close — full-bleed on sink so it breathes as a colophon */}
+      <footer className="full-bleed bg-[var(--shop-sink)] mt-0 border-t border-line px-4 py-10 sm:px-6">
+        <div className="mx-auto max-w-2xl text-center">
+          <p className="font-script text-3xl leading-none text-orange-ink">lolo shop</p>
+          <p className="mt-4 max-w-[40ch] text-sm leading-relaxed text-ink-soft mx-auto">
+            تدفع نقداً وقت ما يوصلك — مثل ما تعوّدنا. أي سؤال؟ راسلنا على إنستغرام{" "}
+            <a
+              href="https://instagram.com/loloshop96"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold text-orange-ink underline underline-offset-2"
+            >
+              @loloshop96
+            </a>
+            .
+          </p>
+          <p className="mt-4 text-xs text-[var(--shop-muted)]">الدفع نقداً عند الاستلام</p>
+        </div>
       </footer>
     </div>
+  );
+}
+
+/**
+ * Choreographed heading — enters with a mask-reveal (translateY + opacity)
+ * via IntersectionObserver + the .reveal / .reveal-in CSS pair from globals.css.
+ * Content is visible by default (no hidden initial state unless JS + IO fires).
+ * prefers-reduced-motion: the transition is 0ms so it snaps rather than animates.
+ */
+function RevealHeading({
+  children,
+  as: Tag = "h2",
+  className = "",
+}: {
+  children: React.ReactNode;
+  as?: "h1" | "h2" | "h3";
+  className?: string;
+}) {
+  const ref = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.classList.add("reveal");
+    const io = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          el.classList.add("reveal-in");
+          io.disconnect();
+        }
+      },
+      { threshold: 0.15 }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
+  return (
+    <Tag
+      ref={ref as React.RefObject<HTMLHeadingElement>}
+      className={className}
+    >
+      {children}
+    </Tag>
   );
 }
 
@@ -246,7 +320,12 @@ export default function StudentHomePage() {
 function SectionHeading({ title, note }: { title: string; note?: string }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
-      <h2 className="font-display text-xl font-bold leading-tight text-ink">{title}</h2>
+      <RevealHeading
+        as="h2"
+        className="font-display-ar text-xl font-bold leading-tight text-ink"
+      >
+        {title}
+      </RevealHeading>
       {note && (
         <span className="shrink-0 text-xs font-medium text-[var(--shop-muted)]">{note}</span>
       )}

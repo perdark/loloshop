@@ -25,14 +25,16 @@ function PhotoCover({ slide }: { slide: HeroSlide }) {
 
   return (
     <section className="full-bleed -mt-6 relative isolate overflow-hidden">
-      <div className="relative h-[78svh] max-h-[660px] min-h-[440px] w-full">
+      {/* parallax-frame + parallax-photo: photo drifts gently as the page scrolls,
+          giving the cover depth without a separate JS handler */}
+      <div className="parallax-frame relative h-[78svh] max-h-[660px] min-h-[440px] w-full">
         <Image
           src={slide.imageUrl}
           alt={title}
           fill
           priority
           sizes="100vw"
-          className="animate-kenburns object-cover"
+          className="parallax-photo animate-kenburns object-cover"
         />
         {/* Legibility veil — anchored to the lower edge where the type sits, so
             the photograph stays clean above it. */}
@@ -65,18 +67,58 @@ function PhotoCover({ slide }: { slide: HeroSlide }) {
 
 function TypeCover() {
   return (
-    <section className="pt-1">
-      <span aria-hidden className="block h-px w-12 bg-orange-ink/40" />
-      <h1 className="mt-5 text-balance font-display text-[clamp(2rem,9vw,3.1rem)] font-bold leading-[1.06] text-ink">
-        لحظة تخرّجك،
-        <br />
-        مصمّمة على ذوقك
-      </h1>
-      <p className="mt-4 max-w-[39ch] text-[0.95rem] leading-relaxed text-ink-soft">
-        أوشحة وروبات وقبعات تخرّج، وتجربة تصميم وشاحك بنفسك — بتفاصيل تليق بيومٍ لا
-        يتكرّر.
-      </p>
-      <CoverCta label="صمّم وشاحك" href={DESIGN_HREF} />
+    <section className="full-bleed -mt-6 relative isolate flex min-h-[82svh] items-center overflow-hidden bg-warm-veil px-5">
+      {/* Oversized script flourish drifting in the back — cinematic depth. */}
+      <span
+        aria-hidden
+        className="animate-sash-float pointer-events-none absolute -start-[8%] top-1/2 -z-10 -translate-y-1/2 select-none font-script leading-none text-orange/[0.07] text-[42vw]"
+      >
+        lolo
+      </span>
+
+      <div className="mx-auto w-full max-w-6xl">
+        <p
+          dir="ltr"
+          className="mb-4 font-display text-xs italic tracking-[0.25em] text-orange-ink/80"
+          style={{ animation: "hero-line 0.7s cubic-bezier(0.16,1,0.3,1) both" }}
+        >
+          LOLO SHOP · graduation lookbook
+        </p>
+        <h1 className="text-balance font-display-ar text-[clamp(2.5rem,11vw,6rem)] font-bold leading-[1.04] text-ink">
+          <span
+            className="block"
+            style={{ animation: "hero-line 0.8s cubic-bezier(0.16,1,0.3,1) 0.08s both" }}
+          >
+            لحظة تخرّجك،
+          </span>
+          <span
+            className="block"
+            style={{ animation: "hero-line 0.8s cubic-bezier(0.16,1,0.3,1) 0.22s both" }}
+          >
+            مصمّمة على ذوقك
+          </span>
+        </h1>
+        <p
+          className="mt-5 max-w-[42ch] text-base leading-relaxed text-ink-soft sm:text-lg"
+          style={{ animation: "hero-line 0.8s cubic-bezier(0.16,1,0.3,1) 0.36s both" }}
+        >
+          أوشحة وروبات وقبعات تخرّج، وتجربة تصميم وشاحك بنفسك — بتفاصيل تليق بيومٍ لا
+          يتكرّر.
+        </p>
+        <div style={{ animation: "hero-line 0.8s cubic-bezier(0.16,1,0.3,1) 0.5s both" }}>
+          <CoverCta label="صمّم وشاحك" href={DESIGN_HREF} />
+        </div>
+      </div>
+
+      {/* Quiet scroll cue. */}
+      <span
+        aria-hidden
+        className="absolute inset-x-0 bottom-6 mx-auto flex w-full justify-center text-orange-ink/45 motion-reduce:hidden"
+      >
+        <svg className="animate-bounce h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 5v14M5 12l7 7 7-7" />
+        </svg>
+      </span>
     </section>
   );
 }

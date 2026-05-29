@@ -37,6 +37,8 @@ import type {
 } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
 import { PageLoader } from "@/components/ui/Spinner";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { Modal } from "@/components/ui/Modal";
 
 const INPUT_TYPE_LABELS: Record<CatalogInputType, string> = {
   single_select: "اختيار واحد",
@@ -119,10 +121,16 @@ export default function AdminProductsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [product, setProduct] = useState<CatalogProduct | null>(null);
   const [loadingList, setLoadingList] = useState(true);
+  const [listError, setListError] = useState(false);
   const [loadingProduct, setLoadingProduct] = useState(false);
   const [previewRole, setPreviewRole] = useState<PriceRole>("retail");
   const [previewSel, setPreviewSel] = useState<OptionSelection>({});
   const [savingId, setSavingId] = useState<string | null>(null);
+
+  // Confirm-delete modals (replaces window.confirm)
+  const [deleteProductTarget, setDeleteProductTarget] = useState<{ id: string; name: string } | null>(null);
+  const [deleteGroupTarget, setDeleteGroupTarget] = useState<{ id: string; name: string } | null>(null);
+  const [deleteOptionTarget, setDeleteOptionTarget] = useState<{ id: string; name: string } | null>(null);
 
   // Inline create-product form
   const [newOpen, setNewOpen] = useState(false);
@@ -144,12 +152,14 @@ export default function AdminProductsPage() {
 
   const loadList = useCallback(async (selectAfter?: string) => {
     setLoadingList(true);
+    setListError(false);
     try {
       const list = await listCatalogProductsAdmin();
       setSummaries(list);
       setSelectedId((cur) => selectAfter ?? cur ?? list[0]?.id ?? null);
     } catch (e) {
       toast.error(getApiErrorMessage(e, "تعذر تحميل الكتالوج"));
+      setListError(true);
     } finally {
       setLoadingList(false);
     }
@@ -234,18 +244,24 @@ export default function AdminProductsPage() {
     }
   }
 
-  async function handleDeleteProduct() {
+  function handleDeleteProduct() {
     if (!product) return;
     if (childrenOf(product.id).length) {
       toast.error("احذف المنتجات الفرعية أولاً");
       return;
     }
-    if (!window.confirm(`حذف «${product.nameAr}»؟ سيُخفى من المتجر.`)) return;
+    setDeleteProductTarget({ id: product.id, name: product.nameAr });
+  }
+
+  async function confirmDeleteProduct() {
+    if (!deleteProductTarget) return;
+    const { id } = deleteProductTarget;
+    setDeleteProductTarget(null);
     setSavingId("delete-product");
     try {
-      await deleteCatalogProduct(product.id);
+      await deleteCatalogProduct(id);
       toast.success("تم حذف المنتج");
-      const next = summaries.find((s) => s.id !== product.id)?.id ?? null;
+      const next = summaries.find((s) => s.id !== id)?.id ?? null;
       setSelectedId(next);
       await loadList(next ?? undefined);
     } catch (e) {
@@ -253,6 +269,21 @@ export default function AdminProductsPage() {
     } finally {
       setSavingId(null);
     }
+  }
+
+  async function confirmDeleteGroup() {
+    if (!deleteGroupTarget) return;
+    const { id } = deleteGroupTarget;
+    setDeleteGroupTarget(null);
+    await run(id, () => deleteCatalogGroup(id));
+    await loadList();
+  }
+
+  async function confirmDeleteOption() {
+    if (!deleteOptionTarget) return;
+    const { id } = deleteOptionTarget;
+    setDeleteOptionTarget(null);
+    await run(id, () => deleteCatalogOption(id));
   }
 
   async function handleCreateGroup() {
@@ -326,7 +357,33 @@ export default function AdminProductsPage() {
     }
   }
 
-  if (loadingList) return <PageLoader />;
+  if (loadingList) return (
+    <div dir="rtl" lang="ar" className="space-y-6 animate-fade-page-in">
+      <div className="skeleton h-8 w-48" />
+      <div className="grid gap-8 lg:grid-cols-[256px_1fr_300px]">
+        <div className="skeleton h-64 w-full rounded-2xl" />
+        <div className="space-y-4">
+          <div className="skeleton h-12 w-full rounded-2xl" />
+          <div className="skeleton h-40 w-full rounded-2xl" />
+          <div className="skeleton h-32 w-full rounded-2xl" />
+        </div>
+        <div className="skeleton h-64 w-full rounded-2xl" />
+      </div>
+    </div>
+  );
+
+  if (listError) return (
+    <div dir="rtl" lang="ar" className="space-y-4">
+      <header className="mb-9 border-b border-ink/15 pb-6">
+        <h1 className="font-display text-4xl font-bold leading-[1.05] tracking-tight text-ink lg:text-5xl">كتالوج المنتجات</h1>
+      </header>
+      <div className="rounded-2xl border border-danger/25 bg-[var(--shop-sink)] px-6 py-10 text-center">
+        <p className="text-base font-semibold text-ink">تعذر تحميل الكتالوج</p>
+        <p className="mt-1 text-sm text-ink-soft">تحقق من اتصالك ثم أعد المحاولة.</p>
+        <Button className="mt-4" onClick={() => loadList()}>إعادة المحاولة</Button>
+      </div>
+    </div>
+  );
 
   return (
     <div dir="rtl" lang="ar" className="animate-page-in">
@@ -439,9 +496,7 @@ export default function AdminProductsPage() {
               );
             })}
             {!parents.length && (
-              <p className="py-6 text-center text-sm text-[var(--shop-muted)]">
-                لا توجد منتجات بعد
-              </p>
+              <EmptyState message="لا توجد منتجات بعد — أضف منتجاً للبدء." />
             )}
           </nav>
         </aside>
@@ -449,8 +504,11 @@ export default function AdminProductsPage() {
         {/* ── Editor ── */}
         <section className="min-w-0">
           {loadingProduct || !product ? (
-            <div className="rounded-2xl bg-beige p-8 shadow-[var(--shadow-soft)]">
-              <PageLoader />
+            <div className="space-y-4 animate-fade-page-in" aria-hidden>
+              <div className="skeleton h-10 w-64 rounded-xl" />
+              <div className="skeleton h-36 w-full rounded-2xl" />
+              <div className="skeleton h-24 w-full rounded-2xl" />
+              <div className="skeleton h-48 w-full rounded-2xl" />
             </div>
           ) : (
             <div className="space-y-8">
@@ -490,7 +548,7 @@ export default function AdminProductsPage() {
                   type="button"
                   onClick={handleDeleteProduct}
                   disabled={savingId === "delete-product"}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-ink/15 px-3.5 py-2 text-sm font-medium text-ink-soft transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500 disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-danger/30 px-3.5 py-2 text-sm font-medium text-danger transition-colors hover:bg-danger hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-danger disabled:opacity-50"
                 >
                   {TrashIcon} حذف المنتج
                 </button>
@@ -602,13 +660,7 @@ export default function AdminProductsPage() {
                         )
                       }
                       onDeleteGroup={() => {
-                        if (
-                          window.confirm(`حذف مجموعة «${group.nameAr}» وكل خياراتها؟`)
-                        ) {
-                          run(group.id, () => deleteCatalogGroup(group.id)).then(
-                            () => loadList()
-                          );
-                        }
+                        setDeleteGroupTarget({ id: group.id, name: group.nameAr });
                       }}
                       onGroupImage={handleGroupImage}
                       onCommitOptionPrice={commitOptionPrice}
@@ -623,8 +675,7 @@ export default function AdminProductsPage() {
                         )
                       }
                       onDeleteOption={(optId, label) => {
-                        if (window.confirm(`حذف الخيار «${label}»؟`))
-                          run(optId, () => deleteCatalogOption(optId));
+                        setDeleteOptionTarget({ id: optId, name: label });
                       }}
                       onLockOption={(optId) =>
                         run(
@@ -812,6 +863,63 @@ export default function AdminProductsPage() {
           )}
         </aside>
       </div>
+
+      {/* ── Confirm: delete product ── */}
+      <Modal
+        open={!!deleteProductTarget}
+        onClose={() => setDeleteProductTarget(null)}
+        title="تأكيد حذف المنتج"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setDeleteProductTarget(null)}>إلغاء</Button>
+            <Button variant="danger" onClick={confirmDeleteProduct} loading={savingId === "delete-product"}>
+              حذف «{deleteProductTarget?.name}»
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-ink-soft">
+          سيُحذف المنتج «{deleteProductTarget?.name}» نهائياً ويختفي من المتجر. لا يمكن التراجع.
+        </p>
+      </Modal>
+
+      {/* ── Confirm: delete group ── */}
+      <Modal
+        open={!!deleteGroupTarget}
+        onClose={() => setDeleteGroupTarget(null)}
+        title="تأكيد حذف المجموعة"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setDeleteGroupTarget(null)}>إلغاء</Button>
+            <Button variant="danger" onClick={confirmDeleteGroup}>
+              حذف «{deleteGroupTarget?.name}»
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-ink-soft">
+          ستُحذف مجموعة «{deleteGroupTarget?.name}» وجميع خياراتها. لا يمكن التراجع.
+        </p>
+      </Modal>
+
+      {/* ── Confirm: delete option ── */}
+      <Modal
+        open={!!deleteOptionTarget}
+        onClose={() => setDeleteOptionTarget(null)}
+        title="تأكيد حذف الخيار"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setDeleteOptionTarget(null)}>إلغاء</Button>
+            <Button variant="danger" onClick={confirmDeleteOption}>
+              حذف «{deleteOptionTarget?.name}»
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-ink-soft">
+          سيُحذف الخيار «{deleteOptionTarget?.name}» نهائياً. لا يمكن التراجع.
+        </p>
+      </Modal>
     </div>
   );
 }
@@ -941,7 +1049,7 @@ function GroupBlock({
             type="button"
             onClick={onDeleteGroup}
             disabled={busy}
-            className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs text-ink/45 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+            className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs text-muted transition-colors hover:bg-danger/10 hover:text-danger disabled:opacity-50"
           >
             {TrashIcon} حذف المجموعة
           </button>
@@ -1092,7 +1200,7 @@ function GroupBlock({
                   type="button"
                   onClick={() => onDeleteOption(opt.id, opt.labelAr)}
                   disabled={savingId === opt.id}
-                  className="rounded-full p-1.5 text-ink/40 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                  className="rounded-full p-1.5 text-muted transition-colors hover:bg-danger/10 hover:text-danger disabled:opacity-50"
                   aria-label={`حذف ${opt.labelAr}`}
                 >
                   {TrashIcon}

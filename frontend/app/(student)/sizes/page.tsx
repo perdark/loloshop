@@ -30,7 +30,7 @@ export default function SizesPage() {
         </div>
 
         <div
-          className="overflow-x-auto rounded-2xl shadow-[var(--shadow-card)] ring-1 ring-orange/10"
+          className="overflow-x-auto rounded-2xl ring-1 ring-orange/10"
           role="region"
           aria-label="جدول مقاسات الروب"
           tabIndex={0}
@@ -56,39 +56,39 @@ export default function SizesPage() {
             <tbody>
               <tr className="bg-beige">
                 <td className="px-4 py-3 font-bold text-orange-ink">S</td>
-                <td className="px-4 py-3 tabular-nums text-ink/80">155–165</td>
-                <td className="px-4 py-3 tabular-nums text-ink/80">86–92</td>
-                <td className="px-4 py-3 tabular-nums text-ink/80">50–65</td>
+                <td className="px-4 py-3 tabular-nums text-ink-soft">155–165</td>
+                <td className="px-4 py-3 tabular-nums text-ink-soft">86–92</td>
+                <td className="px-4 py-3 tabular-nums text-ink-soft">50–65</td>
               </tr>
               <tr className="bg-cream">
                 <td className="px-4 py-3 font-bold text-orange-ink">M</td>
-                <td className="px-4 py-3 tabular-nums text-ink/80">163–170</td>
-                <td className="px-4 py-3 tabular-nums text-ink/80">94–100</td>
-                <td className="px-4 py-3 tabular-nums text-ink/80">65–80</td>
+                <td className="px-4 py-3 tabular-nums text-ink-soft">163–170</td>
+                <td className="px-4 py-3 tabular-nums text-ink-soft">94–100</td>
+                <td className="px-4 py-3 tabular-nums text-ink-soft">65–80</td>
               </tr>
               <tr className="bg-beige">
                 <td className="px-4 py-3 font-bold text-orange-ink">L</td>
-                <td className="px-4 py-3 tabular-nums text-ink/80">168–175</td>
-                <td className="px-4 py-3 tabular-nums text-ink/80">102–108</td>
-                <td className="px-4 py-3 tabular-nums text-ink/80">78–95</td>
+                <td className="px-4 py-3 tabular-nums text-ink-soft">168–175</td>
+                <td className="px-4 py-3 tabular-nums text-ink-soft">102–108</td>
+                <td className="px-4 py-3 tabular-nums text-ink-soft">78–95</td>
               </tr>
               <tr className="bg-cream">
                 <td className="px-4 py-3 font-bold text-orange-ink">XL</td>
-                <td className="px-4 py-3 tabular-nums text-ink/80">173–180</td>
-                <td className="px-4 py-3 tabular-nums text-ink/80">110–116</td>
-                <td className="px-4 py-3 tabular-nums text-ink/80">90–110</td>
+                <td className="px-4 py-3 tabular-nums text-ink-soft">173–180</td>
+                <td className="px-4 py-3 tabular-nums text-ink-soft">110–116</td>
+                <td className="px-4 py-3 tabular-nums text-ink-soft">90–110</td>
               </tr>
               <tr className="bg-beige">
                 <td className="px-4 py-3 font-bold text-orange-ink">XXL</td>
-                <td className="px-4 py-3 tabular-nums text-ink/80">178–185</td>
-                <td className="px-4 py-3 tabular-nums text-ink/80">118–124</td>
-                <td className="px-4 py-3 tabular-nums text-ink/80">105+</td>
+                <td className="px-4 py-3 tabular-nums text-ink-soft">178–185</td>
+                <td className="px-4 py-3 tabular-nums text-ink-soft">118–124</td>
+                <td className="px-4 py-3 tabular-nums text-ink-soft">105+</td>
               </tr>
             </tbody>
           </table>
         </div>
 
-        <p className="mt-3 rounded-xl bg-peach/40 px-4 py-3 text-sm text-ink/70">
+        <p className="mt-3 rounded-xl bg-peach/40 px-4 py-3 text-sm text-ink-soft">
           القياسات تقريبية — إذا كنت بين مقاسين اختر الأكبر
         </p>
       </section>
@@ -104,22 +104,22 @@ export default function SizesPage() {
             className="h-px flex-1 bg-gradient-to-l from-transparent via-orange/25 to-orange/40"
           />
         </div>
-        <div className="surface-card space-y-3 rounded-2xl p-5">
+        <div className="space-y-3 rounded-2xl border border-line bg-surface p-5">
           <div className="flex items-start gap-2.5">
             <span aria-hidden className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-brand-gradient" />
-            <p className="text-sm text-ink/80">
+            <p className="text-sm text-ink-soft">
               قياس موحد يناسب معظم الرؤوس
             </p>
           </div>
           <div className="flex items-start gap-2.5">
             <span aria-hidden className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-brand-gradient" />
-            <p className="text-sm text-ink/80">
+            <p className="text-sm text-ink-soft">
               محيط الرأس المناسب: <span className="font-semibold tabular-nums text-ink">54–60 سم</span>
             </p>
           </div>
           <div className="flex items-start gap-2.5">
             <span aria-hidden className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-brand-gradient" />
-            <p className="text-sm text-ink/80">
+            <p className="text-sm text-ink-soft">
               يمكن ضبط الحجم عبر الشريط الداخلي
             </p>
           </div>
@@ -129,7 +129,7 @@ export default function SizesPage() {
       {/* WhatsApp note */}
       <section className="rounded-2xl border border-orange/30 bg-orange/5 p-5 ring-1 ring-orange/10">
         <p className="font-display text-base font-bold text-ink">هل تحتاج مقاساً مخصصاً؟</p>
-        <p className="mt-1.5 text-sm leading-relaxed text-ink/70">
+        <p className="mt-1.5 text-sm leading-relaxed text-ink-soft">
           تواصل معنا عبر واتساب وسنساعدك في اختيار المقاس المناسب.
         </p>
         <a
@@ -141,7 +141,7 @@ export default function SizesPage() {
       </section>
 
       {/* Footer note */}
-      <p className="text-center text-xs text-ink/50">
+      <p className="text-center text-xs text-[var(--shop-muted)]">
         الدفع نقداً عند الاستلام — لا دفع إلكتروني
       </p>
     </div>

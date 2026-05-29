@@ -13,7 +13,7 @@ interface Props {
 export function DesignPreview({ sashColor, leftJson, rightJson, fontsUsed }: Props) {
   return (
     <div className="space-y-2">
-      <p className="text-center text-sm text-ink/60">معاينة كما سيُلبس على الوشاح</p>
+      <p className="text-center text-sm text-ink-soft">معاينة كما سيُلبس على الوشاح</p>
       <SashGownPreview
         sashColor={sashColor}
         leftJson={leftJson}

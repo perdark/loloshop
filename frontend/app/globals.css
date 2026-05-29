@@ -8,25 +8,31 @@
      Keep --color-orange for large fills/buttons only. */
   --color-orange-ink: #c2410c;
 
+  /* Danger: warm, ink-leaning brick — never candy red (DESIGN.md: no red floods).
+     ~5.6:1 on paper, AA for text + borders. Used as accent, not a fill at rest. */
+  --color-danger: #a3372a;
+
   /* --- Soft accents --- */
   --color-peach: #ffdab9;
   --color-blush: #ffe4e1;
 
-  /* --- Backgrounds --- */
-  --color-cream: #faebd7;
-  --color-beige: #f5f5dc;
+  /* --- Backgrounds: "Graduation Lookbook" — warm paper + ink (DESIGN.md) --- */
+  --color-cream: #faf4ea;        /* warm paper — page canvas */
+  --color-beige: #fffdfa;        /* raised surface — cards, sheets, inputs */
+  --color-surface: #fffdfa;      /* semantic alias of beige */
+  --color-surface-sink: #f5f0e6; /* recessed bands — half a step below paper */
 
   /* --- Ink / text --- */
   --color-ink: #1a1a1a;
-  --color-ink-soft: #333333;
-  /* WCAG floor: white text on --color-cream (#faebd7) requires ≥4.5:1.
-     --color-ink/65 opacity lands at ~5.08:1 — that is the minimum opacity for
-     body copy. Never use ink below /65 on cream for real text (labels, captions).
-     Icon-only / decorative chrome is exempt. */
+  --color-ink-soft: #33302b;     /* warm soft ink — default body reading color */
+  --color-muted: #6b6356;        /* labels / metadata only — ~4.6:1 on paper (AA) */
+  /* WCAG: body copy is --color-ink-soft on paper (passes AA). --color-muted is a
+     label/large-text color only — never set body text in muted. */
 
-  /* --- Neutrals --- */
-  --color-neutral: #e0e0e0;
-  --color-neutral-dark: #bdbdbd;
+  /* --- Neutrals (warm-tinted, never cold gray) --- */
+  --color-line: #e3ddd0;         /* hairline borders / dividers */
+  --color-neutral: #e3ddd0;      /* back-compat alias → line */
+  --color-neutral-dark: #c9c0b0;
 
   /* --- Back-compat aliases --- */
   /* NOTE: --color-amber was the old stale value (#ff8c00) from brand-tokens.css.
@@ -43,15 +49,22 @@
   --font-display-ar: var(--font-amiri), serif; /* explicit Arabic display — Amiri only */
   --font-script: var(--font-great-vibes), cursive;
 
-  /* --- Elevation: warm-tinted shadows (utilities shadow-soft / shadow-card / shadow-float / shadow-pop) --- */
-  --shadow-soft: 0 1px 2px rgba(26, 26, 26, 0.04), 0 1px 3px rgba(26, 26, 26, 0.06);
-  --shadow-card: 0 2px 6px -2px rgba(26, 26, 26, 0.08), 0 6px 18px -8px rgba(194, 65, 12, 0.14);
-  --shadow-float: 0 8px 24px -10px rgba(194, 65, 12, 0.22), 0 2px 8px -4px rgba(26, 26, 26, 0.08);
-  --shadow-pop: 0 18px 48px -18px rgba(194, 65, 12, 0.36), 0 6px 16px -8px rgba(26, 26, 26, 0.12);
+  /* --- Elevation: ink-toned shadows only (DESIGN.md "Ink-Not-Orange Shadow Rule") --- */
+  --shadow-soft: 0 1px 2px rgba(26, 26, 26, 0.05), 0 1px 3px rgba(26, 26, 26, 0.07);
+  --shadow-card: 0 2px 8px -3px rgba(26, 26, 26, 0.10), 0 12px 30px -16px rgba(26, 26, 26, 0.14);
+  --shadow-float: 0 10px 26px -12px rgba(26, 26, 26, 0.18), 0 3px 10px -5px rgba(26, 26, 26, 0.10);
+  --shadow-pop: 0 22px 52px -22px rgba(26, 26, 26, 0.30), 0 8px 20px -10px rgba(26, 26, 26, 0.14);
 
   /* --- Radii --- */
   --radius-card: 1.25rem;
   --radius-pill: 9999px;
+}
+
+/* Lookbook custom props resolvable everywhere (not only under .shop-paper),
+   since admin/wholesaler/staff now inherit the unified palette globally. */
+:root {
+  --shop-sink: var(--color-surface-sink);
+  --shop-muted: var(--color-muted);
 }
 
 /* ── Student storefront: "The Graduation Lookbook" palette ──
@@ -134,26 +147,25 @@
 .hover-lift:hover { transform: translateY(-2px); box-shadow: var(--shadow-float); }
 .hover-lift:active { transform: translateY(0); }
 
-/* Warm gradient text — for hero numerals / accents */
+/* DESIGN.md bans gradient text — neutralized to solid burnt orange so existing
+   usages stay compliant without breaking. Emphasize with weight/size, not gradient. */
 .text-gradient-brand {
-  background-image: linear-gradient(120deg, var(--color-orange-ink), var(--color-orange) 55%, var(--color-orange-light));
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  color: var(--color-orange-ink);
 }
 
 /* Premium raised surface used by cards / panels */
 .surface-card {
-  background: linear-gradient(180deg, #fffdfa, var(--color-beige));
-  border: 1px solid rgba(194, 65, 12, 0.10);
+  background: linear-gradient(180deg, var(--color-surface), var(--color-beige));
+  border: 1px solid var(--color-line);
   box-shadow: var(--shadow-card);
 }
 
-/* Frosted sticky bars */
+/* Sticky bars — near-opaque warm surface, not default glassmorphism (DESIGN.md).
+   Light blur only; heavy backdrop-filter is costly on low-end Android. */
 .surface-glass {
-  background: color-mix(in srgb, var(--color-beige) 82%, transparent);
-  backdrop-filter: blur(12px) saturate(1.1);
-  -webkit-backdrop-filter: blur(12px) saturate(1.1);
+  background: color-mix(in srgb, var(--color-surface) 92%, transparent);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
 }
 
 /* Richer hero gradient with depth (overrides flat for hero use).
@@ -235,6 +247,12 @@ body {
   font-family: var(--font-display);
 }
 
+/* Arabic display — Amiri only, for calligraphic headings at large scale.
+   Use this on Arabic h1/h2 so they never fall back to Playfair (no Arabic glyphs). */
+.font-display-ar {
+  font-family: var(--font-display-ar);
+}
+
 .font-script {
   font-family: var(--font-script);
 }
@@ -268,6 +286,11 @@ body {
   from { opacity: 0; transform: translateY(24px) scale(0.97); }
   to   { opacity: 1; transform: translateY(0) scale(1); }
 }
+/* Hero headline — lines rise like an opening title card. */
+@keyframes hero-line {
+  from { opacity: 0; transform: translateY(0.55em); }
+  to   { opacity: 1; transform: none; }
+}
 
 .animate-page-in {
   animation: page-slide-up 0.38s cubic-bezier(0.22, 1, 0.36, 1) both;
@@ -294,6 +317,62 @@ body {
 .reveal-in {
   opacity: 1;
   transform: none;
+}
+/* No-JS / reduced-motion safety: the IntersectionObserver-driven .reveal starts
+   at opacity:0, so it must never strand content invisible when JS is disabled or
+   the user prefers reduced motion. (The .scroll-reveal variants are pure CSS
+   scroll-timeline and need no JS, so they're already safe.) */
+@media (prefers-reduced-motion: reduce) {
+  .reveal { opacity: 1; transform: none; transition: none; }
+}
+@media (scripting: none) {
+  .reveal { opacity: 1; transform: none; }
+}
+
+/* ─── Scroll-driven cinematic motion (Stage M) ───
+   Native CSS scroll-driven animations: GPU, NO JavaScript (ideal for low-end
+   Android), and they auto-stagger because each element enters the viewport at
+   a different scroll position. Guarded by @supports so unsupported browsers
+   simply show content (never invisible), and fully disabled under reduced-motion. */
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    /* Sections + tiles rise and settle as they scroll into view. */
+    .scroll-reveal {
+      animation: sr-rise linear both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 42%;
+      will-change: opacity, transform;
+    }
+    /* A gentler variant for large hero blocks. */
+    .scroll-reveal-soft {
+      animation: sr-fade linear both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 30%;
+    }
+    /* Editorial photo parallax — image drifts within an overflow-hidden frame
+       across the whole time it's in view. Pair with .parallax-frame. */
+    .parallax-photo {
+      animation: sr-parallax linear both;
+      animation-timeline: view();
+      animation-range: cover;
+      will-change: transform;
+    }
+  }
+}
+.parallax-frame {
+  overflow: hidden;
+}
+@keyframes sr-rise {
+  from { opacity: 0; transform: translateY(42px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes sr-fade {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes sr-parallax {
+  from { transform: translateY(-7%) scale(1.12); }
+  to   { transform: translateY(7%) scale(1.12); }
 }
 
 /* Slow living-photo drift for editorial hero tiles — reads as video */
@@ -386,6 +465,52 @@ html {
 }
 .gradcap-tassel {
   animation: gradcap-swing 1.8s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+/* ─── Sash editing stage: make the canvas read as real embroidered fabric ───
+   Wraps the Fabric canvas in a fabric selvedge (gradient = chosen sash color),
+   an embroidered stitch line, a woven-texture + sheen overlay, and a soft hem
+   tail. Decorative only — the canvas content (text) is inset by the padding so
+   nothing the student types is ever clipped. Colors come from --sash-fabric-*. */
+.sash-stage {
+  display: inline-block;
+  position: relative;
+  padding: 16px;
+  border-radius: 12px;
+  background: linear-gradient(
+    150deg,
+    var(--sash-fabric-light, #f3efe6),
+    var(--sash-fabric-base, #e7e1d4) 55%,
+    var(--sash-fabric-dark, #cfc7b5)
+  );
+  box-shadow: var(--shadow-float);
+  /* soft hem tail at the bottom — reads as a sash point, only cuts the selvedge */
+  clip-path: polygon(0 0, 100% 0, 100% 94%, 50% 100%, 0 94%);
+}
+/* embroidered stitch line just inside the selvedge */
+.sash-stage::before {
+  content: "";
+  position: absolute;
+  inset: 8px;
+  border: 1.5px dashed color-mix(in srgb, var(--sash-fabric-light, #fff) 65%, #fff);
+  border-radius: 8px;
+  opacity: 0.55;
+  pointer-events: none;
+}
+/* woven texture + diagonal sheen across the whole fabric */
+.sash-stage::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.04) 0 2px, transparent 2px 4px),
+    linear-gradient(115deg, rgba(255, 255, 255, 0.12), transparent 42%);
+  mix-blend-mode: overlay;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sash-stage::after { background: none; }
 }
 
 /* ─── Sash designer effects ─── */

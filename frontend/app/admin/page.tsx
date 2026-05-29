@@ -30,7 +30,7 @@ function Money({ amount, className = "" }: { amount: number; className?: string 
   return (
     <span dir="ltr" className={`tabular-nums ${className}`}>
       {num}
-      <span className="ms-1.5 align-baseline text-[0.42em] font-semibold tracking-wide text-ink/45">
+      <span className="ms-1.5 align-baseline text-[0.42em] font-semibold tracking-wide text-[var(--shop-muted)]">
         د.ع
       </span>
     </span>

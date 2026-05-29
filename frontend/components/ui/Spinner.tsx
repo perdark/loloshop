@@ -14,7 +14,7 @@ export function PageLoader() {
   return (
     <div className="flex min-h-[40vh] flex-col items-center justify-center gap-4">
       <GradCapLoader size={64} />
-      <p className="text-xs font-medium tracking-wide text-ink/45">جارٍ التحميل…</p>
+      <p className="text-xs font-medium tracking-wide text-[var(--shop-muted)]">جارٍ التحميل…</p>
     </div>
   );
 }

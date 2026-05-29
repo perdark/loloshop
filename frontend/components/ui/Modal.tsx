@@ -79,26 +79,25 @@ export function Modal({ open, onClose, title, children, footer, descriptionId }:
     >
       <div
         ref={dialogRef}
-        className="animate-auth-card-in w-full max-w-md overflow-hidden rounded-3xl bg-cream shadow-[var(--shadow-pop)] ring-1 ring-orange/10"
+        className="animate-auth-card-in w-full max-w-md overflow-hidden rounded-3xl bg-cream shadow-[var(--shadow-pop)] ring-1 ring-line"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         {...(descriptionId ? { "aria-describedby": descriptionId } : {})}
       >
-        <div className="relative border-b border-ink/10 bg-beige/60 px-5 py-4">
-          <span aria-hidden className="absolute inset-x-0 top-0 h-0.5 bg-brand-gradient" />
+        <div className="border-b border-line bg-surface-sink px-5 py-4">
           <h2 id={titleId} className="font-display text-xl font-bold text-ink">
             {title}
           </h2>
         </div>
         <div className="px-5 py-4">{children}</div>
         {footer !== undefined ? (
-          <div className="flex gap-2 border-t border-ink/10 px-5 py-4">
+          <div className="flex gap-2 border-t border-line px-5 py-4">
             {footer}
           </div>
         ) : (
-          <div className="border-t border-ink/10 px-5 py-4">
+          <div className="border-t border-line px-5 py-4">
             <Button variant="ghost" fullWidth onClick={onClose}>
               إغلاق
             </Button>

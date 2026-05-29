@@ -26,7 +26,7 @@ export function DesignerToolsAside({
         onClick={onToggle}
         aria-expanded={open}
         aria-controls={panelId}
-        className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-ink/15 bg-beige px-4 text-sm font-semibold text-ink transition-colors hover:bg-[var(--shop-sink)] sm:hidden"
+        className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-line bg-beige px-4 text-sm font-semibold text-ink transition-colors hover:bg-[var(--shop-sink)] sm:hidden"
       >
         <svg
           width="16"

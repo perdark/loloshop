@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -9,7 +10,6 @@ import { DesignViewer } from "@/components/staff/DesignViewer";
 import { ExportPngButton } from "@/components/staff/ExportPngButton";
 import { PdfExportButton } from "@/components/staff/PdfExportButton";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { PageLoader } from "@/components/ui/Spinner";
 import { Button } from "@/components/ui/Button";
 import { ORDER_STATUS_LABELS } from "@/lib/constants";
 import { formatDateIQ } from "@/lib/format";
@@ -57,10 +57,12 @@ export default function StaffOrderDetailPage() {
   // Font catalogue — needed to map font IDs to display names (all Google Fonts currently)
   const [fontCatalogue, setFontCatalogue] = useState<FontDef[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setFetchError(false);
     try {
       const o = await getStaffOrderById(orderId);
       if (!o) {
@@ -80,6 +82,7 @@ export default function StaffOrderDetailPage() {
       setFontCatalogue(fonts);
     } catch {
       toast.error("تعذر تحميل تفاصيل الطلب");
+      setFetchError(true);
     } finally {
       setLoading(false);
     }
@@ -105,9 +108,37 @@ export default function StaffOrderDetailPage() {
     }
   }
 
-  // Show spinner only while the order itself is loading — design null is handled inline
-  if (loading || !order) {
-    return <PageLoader />;
+  // Content-shaped skeleton while loading
+  if (loading) {
+    return (
+      <div dir="rtl" lang="ar" className="space-y-6 animate-fade-page-in" aria-hidden>
+        <div className="skeleton h-5 w-32 rounded-full" />
+        <div className="skeleton h-9 w-56 rounded-xl" />
+        <div className="grid gap-6 lg:grid-cols-2">
+          <div className="skeleton h-96 rounded-3xl" />
+          <div className="space-y-4">
+            <div className="skeleton h-40 rounded-2xl" />
+            <div className="skeleton h-32 rounded-2xl" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Error state with retry
+  if (fetchError || !order) {
+    return (
+      <div dir="rtl" lang="ar" className="space-y-4">
+        <Link href="/staff" className="inline-flex min-h-[44px] items-center gap-1 text-sm font-medium text-orange-ink hover:text-orange">
+          <span aria-hidden>→</span> العودة للطلبات
+        </Link>
+        <div className="rounded-2xl border border-[var(--color-danger)]/25 bg-[var(--shop-sink)] px-6 py-10 text-center">
+          <p className="text-base font-semibold text-ink">تعذر تحميل تفاصيل الطلب</p>
+          <p className="mt-1 text-sm text-ink-soft">تحقق من اتصالك ثم أعد المحاولة.</p>
+          <Button className="mt-4" onClick={load}>إعادة المحاولة</Button>
+        </div>
+      </div>
+    );
   }
 
   const exportInput = design
@@ -126,13 +157,13 @@ export default function StaffOrderDetailPage() {
     order.status === "design_complete" || order.status === "staff_review";
 
   return (
-    <div>
+    <div dir="rtl" lang="ar">
       <div className="mb-4">
         <Link
           href="/staff"
-          className="inline-flex text-sm font-medium text-orange-ink hover:underline"
+          className="inline-flex min-h-[44px] items-center gap-1 text-sm font-medium text-orange-ink transition-colors hover:text-orange"
         >
-          ← العودة للطلبات
+          <span aria-hidden>→</span> العودة للطلبات
         </Link>
       </div>
 
@@ -143,7 +174,7 @@ export default function StaffOrderDetailPage() {
 
       <div className="grid gap-6 lg:grid-cols-2 lg:gap-8">
         {/* ── Design preview panel ── */}
-        <section className="rounded-3xl border border-ink/10 bg-white p-4 shadow-[var(--shadow-card)] lg:p-6">
+        <section className="rounded-3xl border border-line bg-surface p-4 shadow-[var(--shadow-card)] lg:p-6">
           <h2 className="section-heading mb-4 font-display text-lg font-bold text-ink">
             معاينة التصميم
           </h2>
@@ -170,63 +201,62 @@ export default function StaffOrderDetailPage() {
               )}
             </>
           ) : (
-            <div className="flex min-h-48 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-ink/20 bg-cream/50 p-6 text-center">
-              <span className="text-2xl" aria-hidden="true">🎨</span>
-              <p className="text-sm font-medium text-ink/70">لا يوجد تصميم محفوظ بعد</p>
-              <p className="text-xs text-ink/45">لم يكمل الطالب تصميم الوشاح حتى الآن</p>
+            <div className="flex min-h-48 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-line bg-surface-sink p-6 text-center">
+              <p className="text-sm font-medium text-ink-soft">لا يوجد تصميم محفوظ بعد</p>
+              <p className="text-xs text-muted">لم يكمل الطالب تصميم الوشاح حتى الآن</p>
             </div>
           )}
         </section>
 
         {/* ── Student data + attachments ── */}
         <section className="space-y-4">
-          <article className="rounded-2xl border border-ink/10 bg-white p-5 shadow-[var(--shadow-soft)]">
+          <article className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
             <h2 className="font-display text-lg font-bold text-ink">
               بيانات الطالب
             </h2>
             <dl className="mt-4 space-y-2.5 text-sm">
               {/* Phone comes from design row; fall back gracefully if no design */}
               {design?.phone && (
-                <div className="flex justify-between gap-4 border-b border-ink/5 pb-2.5">
-                  <dt className="text-ink/50">الهاتف</dt>
+                <div className="flex justify-between gap-4 border-b border-line pb-2.5">
+                  <dt className="text-muted">الهاتف</dt>
                   <dd dir="ltr">{design.phone}</dd>
                 </div>
               )}
-              <div className="flex justify-between gap-4 border-b border-ink/5 pb-2.5">
-                <dt className="text-ink/50">الجامعة</dt>
+              <div className="flex justify-between gap-4 border-b border-line pb-2.5">
+                <dt className="text-muted">الجامعة</dt>
                 <dd className="font-medium text-ink">
                   {design?.university_name || order.universityName || "—"}
                 </dd>
               </div>
-              <div className="flex justify-between gap-4 border-b border-ink/5 pb-2.5">
-                <dt className="text-ink/50">القسم</dt>
+              <div className="flex justify-between gap-4 border-b border-line pb-2.5">
+                <dt className="text-muted">القسم</dt>
                 <dd className="font-medium text-ink">
                   {design?.department || order.department || "—"}
                 </dd>
               </div>
               {design?.sash_color && (
-                <div className="flex justify-between gap-4 border-b border-ink/5 pb-2.5">
-                  <dt className="text-ink/50">لون الوشاح</dt>
+                <div className="flex justify-between gap-4 border-b border-line pb-2.5">
+                  <dt className="text-muted">لون الوشاح</dt>
                   <dd className="font-medium text-ink">{design.sash_color}</dd>
                 </div>
               )}
               <div className="flex justify-between gap-4">
-                <dt className="text-ink/50">تاريخ الطلب</dt>
+                <dt className="text-muted">تاريخ الطلب</dt>
                 <dd className="font-medium text-ink">{formatDateIQ(order.createdAt)}</dd>
               </div>
             </dl>
           </article>
 
           {design?.notes && (
-            <article className="rounded-2xl border border-orange/30 bg-orange/5 p-5 shadow-[var(--shadow-soft)]">
+            <article className="rounded-2xl border border-orange-ink/20 bg-orange-ink/5 p-5 shadow-[var(--shadow-soft)]">
               <h3 className="text-sm font-semibold text-orange-ink">ملاحظات الطالب</h3>
-              <p className="mt-2 text-sm text-ink/80">{design.notes}</p>
+              <p className="mt-2 text-sm text-ink-soft">{design.notes}</p>
             </article>
           )}
 
           {/* ── Fonts used — with download links ── */}
           {design?.fonts_used && design.fonts_used.length > 0 && (
-            <article className="rounded-2xl border border-ink/10 bg-white p-5 shadow-[var(--shadow-soft)]">
+            <article className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
               <h3 className="mb-3 text-sm font-semibold text-ink">الخطوط المستخدمة</h3>
               <ul className="space-y-2">
                 {design.fonts_used.map((fontId) => {
@@ -238,12 +268,12 @@ export default function StaffOrderDetailPage() {
                   const downloadHref = meta?.file_url || googleFontsPageUrl(fontId);
                   return (
                     <li key={fontId} className="flex items-center justify-between gap-2 text-sm">
-                      <span className="text-ink/80" dir="ltr">{displayName}</span>
+                      <span className="text-ink-soft" dir="ltr">{displayName}</span>
                       <a
                         href={downloadHref}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="min-h-[44px] inline-flex items-center rounded-lg bg-cream px-3 py-1 text-xs font-medium text-orange-ink hover:bg-orange/10 transition-colors"
+                        className="inline-flex min-h-[44px] items-center rounded-lg border border-orange-ink/25 bg-surface-sink px-3 py-1 text-xs font-medium text-orange-ink transition-colors hover:bg-orange-ink/10"
                         aria-label={`تنزيل خط ${displayName} من Google Fonts`}
                       >
                         تنزيل الخط
@@ -257,24 +287,31 @@ export default function StaffOrderDetailPage() {
 
           {breakdown && <StaffOrderBreakdown detail={breakdown} />}
 
-          {/* ── Attachments with explicit download buttons ── */}
+          {/* ── Attachments: next/image thumbnails + raw /uploads download links ── */}
           {(logoUrl || extraUrl) && (
-            <article className="rounded-2xl border border-ink/10 bg-white p-5 shadow-[var(--shadow-soft)]">
+            <article className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
               <h3 className="mb-3 text-sm font-semibold text-ink">المرفقات</h3>
               <div className="flex flex-col gap-6 sm:flex-row">
                 {logoUrl && (
                   <div className="flex flex-col gap-2">
-                    <p className="text-xs text-ink/50">شعار الجامعة</p>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={logoUrl}
-                      alt="شعار الجامعة"
-                      className="max-h-40 rounded-xl border border-ink/10 bg-cream object-contain shadow-[var(--shadow-soft)]"
-                    />
+                    <p className="text-xs text-muted">شعار الجامعة</p>
+                    {/* Thumbnail via next/image for correct lazy + sizing; download uses raw URL */}
+                    <div className="relative h-40 w-40 overflow-hidden rounded-xl border border-line bg-surface-sink">
+                      <Image
+                        src={logoUrl}
+                        alt="شعار الجامعة"
+                        fill
+                        sizes="160px"
+                        className="object-contain"
+                        loading="lazy"
+                        unoptimized
+                      />
+                    </div>
+                    {/* Raw /uploads download — do NOT route through next/image */}
                     <a
                       href={logoUrl}
                       download
-                      className="mt-1 min-h-[44px] inline-flex items-center justify-center rounded-xl border border-orange/40 bg-cream px-4 py-2 text-sm font-medium text-orange-ink hover:bg-orange/10 transition-colors"
+                      className="mt-1 inline-flex min-h-[44px] items-center justify-center rounded-xl border border-orange-ink/30 bg-surface-sink px-4 py-2 text-sm font-medium text-orange-ink transition-colors hover:bg-orange-ink/10"
                     >
                       تنزيل الشعار
                     </a>
@@ -282,17 +319,23 @@ export default function StaffOrderDetailPage() {
                 )}
                 {extraUrl && (
                   <div className="flex flex-col gap-2">
-                    <p className="text-xs text-ink/50">صورة إضافية</p>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={extraUrl}
-                      alt="صورة إضافية"
-                      className="max-h-40 rounded-xl border border-ink/10 bg-cream object-contain shadow-[var(--shadow-soft)]"
-                    />
+                    <p className="text-xs text-muted">صورة إضافية</p>
+                    <div className="relative h-40 w-40 overflow-hidden rounded-xl border border-line bg-surface-sink">
+                      <Image
+                        src={extraUrl}
+                        alt="صورة إضافية"
+                        fill
+                        sizes="160px"
+                        className="object-contain"
+                        loading="lazy"
+                        unoptimized
+                      />
+                    </div>
+                    {/* Raw /uploads download — do NOT route through next/image */}
                     <a
                       href={extraUrl}
                       download
-                      className="mt-1 min-h-[44px] inline-flex items-center justify-center rounded-xl border border-orange/40 bg-cream px-4 py-2 text-sm font-medium text-orange-ink hover:bg-orange/10 transition-colors"
+                      className="mt-1 inline-flex min-h-[44px] items-center justify-center rounded-xl border border-orange-ink/30 bg-surface-sink px-4 py-2 text-sm font-medium text-orange-ink transition-colors hover:bg-orange-ink/10"
                     >
                       تنزيل الصورة
                     </a>
@@ -302,7 +345,7 @@ export default function StaffOrderDetailPage() {
             </article>
           )}
 
-          <article className="rounded-2xl border border-ink/10 bg-white p-5 shadow-[var(--shadow-soft)]">
+          <article className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
             <h3 className="mb-4 text-sm font-semibold text-ink">إجراءات</h3>
             <div className="flex flex-col gap-2">
               {canStartPrint && (

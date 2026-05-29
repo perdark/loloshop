@@ -87,7 +87,7 @@ export function StudentNav() {
 
   return (
     <header
-      className={`animate-nav-in surface-glass sticky top-0 z-40 border-b border-orange/10 transition-[translate] duration-300 ease-out ${
+      className={`animate-nav-in sticky top-0 z-40 border-b border-line bg-cream/97 shadow-[var(--shadow-soft)] transition-[translate] duration-300 ease-out ${
         hidden ? "-translate-y-full" : "translate-y-0"
       }`}
       style={{ viewTransitionName: "student-header" }}
@@ -144,7 +144,7 @@ export function StudentNav() {
                 className={`inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-pill px-3.5 text-sm font-semibold transition-all duration-200 active:scale-95 ${
                   active
                     ? "bg-brand-gradient text-white shadow-[var(--shadow-soft)]"
-                    : "text-ink/65 hover:bg-beige hover:text-orange-ink"
+                    : "text-ink-soft hover:bg-beige hover:text-orange-ink"
                 }`}
               >
                 <svg

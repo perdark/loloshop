@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
-import { PageLoader } from "@/components/ui/Spinner";
 import { getApiErrorMessage } from "@/lib/api";
 import { uploadCatalogImage } from "@/lib/catalog";
 import {
@@ -33,8 +32,10 @@ const EMPTY = {
 export default function AdminHeroSlidesPage() {
   const [rows, setRows] = useState<HeroSlide[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(false);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<HeroSlide | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<HeroSlide | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [form, setForm] = useState({ ...EMPTY });
@@ -42,10 +43,12 @@ export default function AdminHeroSlidesPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setFetchError(false);
     try {
       setRows(await listHeroSlidesAdmin());
     } catch (err) {
       toast.error(getApiErrorMessage(err, "تعذر تحميل الشرائح"));
+      setFetchError(true);
     } finally {
       setLoading(false);
     }
@@ -131,18 +134,47 @@ export default function AdminHeroSlidesPage() {
     }
   }
 
-  async function remove(s: HeroSlide) {
-    if (!confirm(`حذف الشريحة "${s.title}"؟`)) return;
+  function remove(s: HeroSlide) {
+    setDeleteTarget(s);
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    const target = deleteTarget;
+    setDeleteTarget(null);
     try {
-      await deleteHeroSlide(s.id);
-      toast.success("تم الحذف");
+      await deleteHeroSlide(target.id);
+      toast.success("تم حذف الشريحة");
       load();
     } catch (err) {
       toast.error(getApiErrorMessage(err, "تعذر الحذف"));
     }
   }
 
-  if (loading) return <PageLoader />;
+  if (loading) return (
+    <div dir="rtl" lang="ar" className="space-y-6 animate-fade-page-in">
+      <div className="skeleton h-9 w-40" />
+      <div className="space-y-3">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="skeleton h-24 w-full rounded-2xl" />
+        ))}
+      </div>
+    </div>
+  );
+
+  if (fetchError) return (
+    <div dir="rtl" lang="ar" className="space-y-4">
+      <PageHeader
+        title="شريط الواجهة"
+        subtitle="الصور والشرائح المتحركة في صفحة الطلاب الرئيسية"
+      />
+      <div className="rounded-2xl border border-danger/25 bg-[var(--shop-sink)] px-6 py-10 text-center">
+        <p className="text-base font-semibold text-ink">تعذر تحميل الشرائح</p>
+        <p className="mt-1 text-sm text-ink-soft">تحقق من اتصالك ثم أعد المحاولة.</p>
+        <Button className="mt-4" onClick={load}>إعادة المحاولة</Button>
+      </div>
+    </div>
+  );
 
   return (
     <div dir="rtl" lang="ar">
@@ -171,8 +203,8 @@ export default function AdminHeroSlidesPage() {
               />
               <div className="min-w-0 flex-1">
                 <p className="truncate font-display font-bold text-ink">{s.title}</p>
-                {s.kicker && <p className="truncate text-xs text-ink/55">{s.kicker}</p>}
-                <p className="mt-1 flex items-center gap-2 text-xs text-ink/45">
+                {s.kicker && <p className="truncate text-xs text-ink-soft">{s.kicker}</p>}
+                <p className="mt-1 flex items-center gap-2 text-xs text-[var(--shop-muted)]">
                   <span>ترتيب {s.sort}</span>
                   {s.ctaLabel && <span>· زر: {s.ctaLabel}</span>}
                   {!s.active && <span className="font-semibold text-orange-ink">مخفية</span>}
@@ -214,7 +246,7 @@ export default function AdminHeroSlidesPage() {
                   className="h-24 w-20 rounded-lg object-cover ring-1 ring-ink/10"
                 />
               ) : (
-                <div className="grid h-24 w-20 place-items-center rounded-lg bg-beige text-xs text-ink/40 ring-1 ring-ink/10">
+                <div className="grid h-24 w-20 place-items-center rounded-lg bg-beige text-xs text-[var(--shop-muted)] ring-1 ring-ink/10">
                   لا صورة
                 </div>
               )}
@@ -236,7 +268,7 @@ export default function AdminHeroSlidesPage() {
                 >
                   {form.imageUrl ? "تغيير الصورة" : "رفع صورة"}
                 </Button>
-                <p className="mt-1 text-xs text-ink/45">يفضّل صورة عمودية عالية الجودة.</p>
+                <p className="mt-1 text-xs text-[var(--shop-muted)]">يفضّل صورة عمودية عالية الجودة.</p>
               </div>
             </div>
           </div>
@@ -265,7 +297,7 @@ export default function AdminHeroSlidesPage() {
               onChange={(e) => setForm({ ...form, accent: e.target.value })}
               className="h-9 w-12 rounded border border-ink/15 bg-transparent"
             />
-            <span className="text-xs text-ink/50" dir="ltr">{form.accent}</span>
+            <span className="text-xs text-[var(--shop-muted)]" dir="ltr">{form.accent}</span>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -291,6 +323,25 @@ export default function AdminHeroSlidesPage() {
             onChange={(e) => setForm({ ...form, sort: Number(e.target.value) })}
           />
         </div>
+      </Modal>
+
+      {/* ── Confirm: delete hero slide ── */}
+      <Modal
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        title="تأكيد حذف الشريحة"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setDeleteTarget(null)}>إلغاء</Button>
+            <Button variant="danger" onClick={confirmDelete}>
+              حذف «{deleteTarget?.title}»
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-ink-soft">
+          ستُحذف الشريحة «{deleteTarget?.title}» نهائياً من شريط الواجهة. لا يمكن التراجع.
+        </p>
       </Modal>
     </div>
   );
