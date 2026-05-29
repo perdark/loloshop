@@ -28,18 +28,48 @@ const greatVibes = Great_Vibes({
 });
 
 export const metadata: Metadata = {
-  title: "لولو شوب — أوشحة وروبات التخرج",
-  description: "صمم وشاح تخرجك مع لولو شوب",
+  title: {
+    default: "لولو شوب — أوشحة وروبات التخرج",
+    template: "%s · لولو شوب",
+  },
+  description:
+    "صمم وشاح تخرجك أو روبك الخاص مع لولو شوب — أزياء التخرج الفاخرة للجامعات العراقية.",
+  applicationName: "لولو شوب",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
     title: "لولو شوب",
   },
+  icons: {
+    icon: [
+      { url: "/icons/icon-192.svg", sizes: "192x192", type: "image/svg+xml" },
+      { url: "/icons/icon-512.svg", sizes: "512x512", type: "image/svg+xml" },
+    ],
+    apple: [{ url: "/icons/icon-192.svg", sizes: "192x192", type: "image/svg+xml" }],
+  },
+  openGraph: {
+    type: "website",
+    locale: "ar_IQ",
+    siteName: "لولو شوب",
+    title: "لولو شوب — أوشحة وروبات التخرج",
+    description:
+      "صمم وشاح تخرجك أو روبك الخاص مع لولو شوب — أزياء التخرج الفاخرة للجامعات العراقية.",
+    images: [
+      {
+        url: "/gown-sash.png",
+        width: 1402,
+        height: 1122,
+        alt: "لولو شوب — أوشحة وروبات التخرج",
+      },
+    ],
+  },
 };
 
 export const viewport: Viewport = {
-  themeColor: "#f47b42",
+  themeColor: "#faf4ea",
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default function RootLayout({

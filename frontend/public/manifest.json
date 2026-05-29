@@ -1,13 +1,13 @@
 {
-  "name": "لولو شوب",
+  "name": "لولو شوب — تصميم أوشحة وروبات التخرج",
   "short_name": "لولو شوب",
-  "description": "أوشحة وروبات التخرج",
+  "description": "صمم وشاح تخرجك أو روبك الخاص مع لولو شوب — أزياء التخرج الفاخرة للجامعات العراقية.",
   "lang": "ar",
   "dir": "rtl",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#FAF7F0",
-  "theme_color": "#0B1E3F",
+  "background_color": "#faf4ea",
+  "theme_color": "#c2410c",
   "icons": [
     {
       "src": "/icons/icon-192.svg",
