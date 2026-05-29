@@ -19,7 +19,7 @@ export function PriceBreakdown({
       <p className="mb-3 text-sm font-semibold text-ink">تفاصيل السعر</p>
       <ul className="space-y-2.5 text-sm">
         {lines.map((line) => (
-          <li key={line.key} className="flex justify-between gap-2 text-ink/75">
+          <li key={line.key} className="flex justify-between gap-2 text-ink-soft">
             <span>{line.label}</span>
             <span className="tabular-nums" dir="ltr">
               {formatIQD(line.amount)}

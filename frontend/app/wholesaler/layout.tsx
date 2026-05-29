@@ -27,7 +27,7 @@ export default function WholesalerLayout({
 
   return (
     <div className="min-h-screen bg-cream" dir="rtl" lang="ar">
-      <header className="surface-glass sticky top-0 z-20 border-b border-ink/10">
+      <header className="sticky top-0 z-20 border-b border-line bg-cream shadow-[var(--shadow-soft)]">
         <div className="mx-auto flex max-w-md items-center justify-between px-4 py-3.5">
           <h1 className="font-display text-lg font-bold text-ink">لوحة الممثل</h1>
           <button
@@ -42,7 +42,7 @@ export default function WholesalerLayout({
 
       <main className="mx-auto max-w-md px-4 py-5 pb-28 animate-page-in">{children}</main>
 
-      <nav className="surface-glass fixed bottom-0 inset-x-0 z-20 border-t border-ink/10 pb-[env(safe-area-inset-bottom)]" aria-label="التنقل الرئيسي">
+      <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-cream pb-[env(safe-area-inset-bottom)] shadow-[var(--shadow-pop)]" aria-label="التنقل الرئيسي">
         <div className="mx-auto flex max-w-md px-2 py-1.5">
           {[
             { href: "/wholesaler", label: "الرئيسية" },

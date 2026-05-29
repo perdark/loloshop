@@ -296,7 +296,7 @@ export default function WholesalerDashboardPage() {
       </section>
 
       {selected.size > 0 && (
-        <div className="surface-glass fixed inset-x-0 bottom-0 z-40 border-t border-line p-4 shadow-[var(--shadow-float)]">
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-cream p-4 shadow-[var(--shadow-float)]">
           <div className="mx-auto flex max-w-md items-center gap-2">
             <span className="inline-flex shrink-0 items-center rounded-full bg-orange/10 px-3 py-1.5 text-sm font-semibold text-orange-ink">
               {selected.size} محدد

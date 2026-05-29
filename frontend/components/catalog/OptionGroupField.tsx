@@ -127,7 +127,7 @@ export function OptionGroupField({
                         className="h-10 w-10 rounded-full shadow-[var(--shadow-soft)] ring-1 ring-ink/15"
                         style={{ background: hex }}
                       />
-                      <span className="text-[10px] font-medium text-ink/80">{opt.labelAr}</span>
+                      <span className="text-[10px] font-medium text-muted">{opt.labelAr}</span>
                     </label>
                   );
                 })}

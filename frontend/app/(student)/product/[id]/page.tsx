@@ -316,7 +316,7 @@ export default function StudentProductPage() {
       </div>
 
       {product.type !== "sash" && (
-        <div className="surface-glass fixed inset-x-0 bottom-0 z-30 border-t border-line px-4 py-3.5 shadow-[var(--shadow-float)]">
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-cream px-4 py-3.5 shadow-[var(--shadow-float)]">
           <div className="mx-auto max-w-5xl">
           {confirmed ? (
             <Button fullWidth variant="secondary" onClick={() => router.push("/")}>

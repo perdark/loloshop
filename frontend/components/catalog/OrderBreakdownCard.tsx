@@ -28,7 +28,7 @@ export function OrderBreakdownCard({
           return (
             <li key={`${line.label}-${i}`} className="space-y-2">
               <div className="flex justify-between gap-2">
-                <span className="text-ink/75">{line.label}</span>
+                <span className="text-ink-soft">{line.label}</span>
                 <span className="tabular-nums" dir="ltr">
                   {formatIQD(line.price)}
                 </span>

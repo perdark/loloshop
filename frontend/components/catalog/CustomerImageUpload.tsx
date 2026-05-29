@@ -57,7 +57,7 @@ export function CustomerImageUpload({
             صورة توضيحية من الأدمن (للتوجيه فقط)
           </p>
           {group.hintAr && (
-            <p className="mt-1 text-xs text-ink/70">{group.hintAr}</p>
+            <p className="mt-1 text-xs text-ink-soft">{group.hintAr}</p>
           )}
           {hintUrl && (
             <div className="relative mt-2 h-28 w-full overflow-hidden rounded-lg bg-peach/30">
