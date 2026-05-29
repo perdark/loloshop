@@ -15,7 +15,7 @@ export function OrderBreakdownCard({
   title = "تفاصيل السعر (من الخادم)",
 }: OrderBreakdownCardProps) {
   return (
-    <div className="rounded-2xl border border-orange/30 bg-orange/5 p-5 shadow-[var(--shadow-card)] ring-1 ring-orange/10">
+    <div className="rounded-2xl border border-orange/30 bg-orange/5 p-5 ring-1 ring-orange/10">
       <p className="mb-3 inline-flex items-center gap-1.5 text-sm font-semibold text-ink">
         <span aria-hidden className="h-2 w-2 rounded-full bg-brand-gradient" />
         {title}

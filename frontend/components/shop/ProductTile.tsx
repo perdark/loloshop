@@ -13,7 +13,7 @@ export function ProductTile({ product }: { product: ShopProductCard }) {
   return (
     <Link href={`/product/${product.id}`} className="group block">
       <figure
-        className="relative aspect-[3/4] overflow-hidden rounded-[10px] bg-beige shadow-[var(--shadow-soft)] ring-1 ring-ink/10"
+        className="relative aspect-[3/4] overflow-hidden rounded-[10px] bg-beige ring-1 ring-ink/10 transition-shadow duration-300 group-hover:shadow-[var(--shadow-float)]"
         style={{ viewTransitionName: productImageVT(product.id) }}
       >
         {product.imageUrl ? (
@@ -22,7 +22,7 @@ export function ProductTile({ product }: { product: ShopProductCard }) {
             alt={product.nameAr}
             fill
             className="object-cover transition-transform duration-[900ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:scale-[1.045]"
-            sizes="(max-width: 512px) 50vw, 240px"
+            sizes="(max-width: 639px) 44vw, (max-width: 1023px) 30vw, 22vw"
           />
         ) : (
           <div className="flex h-full items-center justify-center font-script text-4xl text-orange-ink/25">
@@ -56,26 +56,27 @@ export function ProductTile({ product }: { product: ShopProductCard }) {
 export function PackageTile({ pkg }: { pkg: ShopPackageCard }) {
   return (
     <article className="group block">
-      <figure className="relative aspect-[4/5] overflow-hidden rounded-[10px] bg-beige shadow-[var(--shadow-soft)] ring-1 ring-ink/10">
+      <figure className="relative aspect-[4/5] overflow-hidden rounded-[10px] bg-beige ring-1 ring-ink/10 transition-shadow duration-300 group-hover:shadow-[var(--shadow-float)]">
         {pkg.imageUrl ? (
           <Image
             src={pkg.imageUrl}
             alt={pkg.nameAr}
             fill
             className="object-cover transition-transform duration-[900ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:scale-[1.045]"
-            sizes="(max-width: 512px) 50vw, 240px"
+            sizes="(max-width: 639px) 44vw, (max-width: 1023px) 30vw, 22vw"
           />
         ) : (
           <div className="flex h-full items-center justify-center font-script text-4xl text-orange-ink/25">
             باكج
           </div>
         )}
-        <span className="absolute end-2.5 top-2.5 rounded-full bg-cream/90 px-2.5 py-1 font-display text-[10px] font-semibold tracking-wide text-orange-ink ring-1 ring-orange/20 backdrop-blur-sm">
-          إطلالة كاملة
-        </span>
       </figure>
 
       <figcaption className="px-0.5 pt-2.5">
+        {/* Badge lives below the photo — never scrims the garment photography */}
+        <span className="mb-1.5 inline-block rounded-full border border-orange-ink/20 px-2.5 py-0.5 font-display text-[10px] font-semibold tracking-wide text-orange-ink">
+          إطلالة كاملة
+        </span>
         <h3 className="line-clamp-1 font-display text-[0.95rem] font-semibold leading-tight text-ink">
           {pkg.nameAr}
         </h3>

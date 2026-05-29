@@ -16,13 +16,14 @@ export function AtelierStory() {
       className="grid items-center gap-6 lg:grid-cols-2 lg:gap-12"
     >
       <figure className="m-0">
-        <div className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl">
+        <div className="parallax-frame relative aspect-[4/3] w-full overflow-hidden rounded-2xl">
           <Image
             src="/lookbook/detail-flatlay.jpg"
             alt="تفاصيل وشاح تخرّج مطرّز يدوياً على طاولة الورشة"
             fill
             sizes="(min-width: 1024px) 48vw, 100vw"
-            className="object-cover parallax-photo"
+            loading="lazy"
+            className="parallax-photo object-cover"
           />
         </div>
         <figcaption className="mt-2.5 text-xs text-[var(--shop-muted)]">
@@ -72,13 +73,14 @@ export function MilestoneStory() {
         {LOOKS.map((look) => (
           <li key={look.src} className="list-none">
             <figure className="m-0">
-              <div className="relative aspect-[3/4] w-full overflow-hidden rounded-xl">
+              <div className="parallax-frame relative aspect-[3/4] w-full overflow-hidden rounded-xl">
                 <Image
                   src={look.src}
                   alt={look.caption}
                   fill
                   sizes="(min-width: 640px) 30vw, 45vw"
-                  className="object-cover parallax-photo"
+                  loading="lazy"
+                  className="parallax-photo object-cover"
                 />
               </div>
               <figcaption className="mt-2 text-xs text-[var(--shop-muted)]">

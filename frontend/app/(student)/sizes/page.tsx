@@ -30,7 +30,7 @@ export default function SizesPage() {
         </div>
 
         <div
-          className="overflow-x-auto rounded-2xl shadow-[var(--shadow-card)] ring-1 ring-orange/10"
+          className="overflow-x-auto rounded-2xl ring-1 ring-orange/10"
           role="region"
           aria-label="جدول مقاسات الروب"
           tabIndex={0}
@@ -104,7 +104,7 @@ export default function SizesPage() {
             className="h-px flex-1 bg-gradient-to-l from-transparent via-orange/25 to-orange/40"
           />
         </div>
-        <div className="surface-card space-y-3 rounded-2xl p-5">
+        <div className="space-y-3 rounded-2xl border border-line bg-surface p-5">
           <div className="flex items-start gap-2.5">
             <span aria-hidden className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-brand-gradient" />
             <p className="text-sm text-ink/80">

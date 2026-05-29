@@ -25,14 +25,16 @@ function PhotoCover({ slide }: { slide: HeroSlide }) {
 
   return (
     <section className="full-bleed -mt-6 relative isolate overflow-hidden">
-      <div className="relative h-[78svh] max-h-[660px] min-h-[440px] w-full">
+      {/* parallax-frame + parallax-photo: photo drifts gently as the page scrolls,
+          giving the cover depth without a separate JS handler */}
+      <div className="parallax-frame relative h-[78svh] max-h-[660px] min-h-[440px] w-full">
         <Image
           src={slide.imageUrl}
           alt={title}
           fill
           priority
           sizes="100vw"
-          className="animate-kenburns object-cover"
+          className="parallax-photo animate-kenburns object-cover"
         />
         {/* Legibility veil — anchored to the lower edge where the type sits, so
             the photograph stays clean above it. */}

@@ -45,7 +45,7 @@ export function ProductMediaGallery({
   return (
     <div className="space-y-3">
       <div
-        className="group relative aspect-[4/3] overflow-hidden rounded-2xl bg-beige shadow-[var(--shadow-card)] ring-1 ring-orange/10"
+        className="group relative aspect-[4/3] overflow-hidden rounded-2xl bg-beige ring-1 ring-orange/10 transition-shadow duration-300 hover:shadow-[var(--shadow-float)]"
         style={heroVT}
       >
         {hero && (
@@ -78,6 +78,7 @@ export function ProductMediaGallery({
                 src={resolveCatalogMediaUrl(url) || url}
                 alt=""
                 fill
+                loading="lazy"
                 className="object-cover"
                 unoptimized
               />
