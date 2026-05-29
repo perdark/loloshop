@@ -87,6 +87,8 @@ export default function DesignPage() {
     persist,
     registerFonts,
     fontsUsed,
+    gender,
+    pickGender,
   } = draft;
 
   if (authLoading || bootLoading) {
@@ -100,7 +102,7 @@ export default function DesignPage() {
   if (bootError) {
     return (
       <div className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-4 bg-cream p-6 text-center">
-        <p className="text-ink/80">{bootError}</p>
+        <p className="text-ink-soft">{bootError}</p>
         <Button variant="primary" onClick={() => window.location.reload()}>
           إعادة المحاولة
         </Button>
@@ -111,10 +113,10 @@ export default function DesignPage() {
   if (studentStatus && studentStatus !== "approved") {
     return (
       <div className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-4 bg-cream p-6 text-center">
-        <h1 className="font-display text-2xl text-ink">
+        <h1 className="font-display-ar text-2xl text-ink">
           {studentStatus === "rejected" ? "تم رفض طلبك" : "بانتظار موافقة الممثل"}
         </h1>
-        <p className="text-ink/70">
+        <p className="text-ink-soft">
           {studentStatus === "rejected"
             ? "تواصل مع الممثل لمعرفة السبب"
             : "سيتمكن الممثل من الموافقة على حسابك قريباً. سيتم إعلامك."}
@@ -129,13 +131,13 @@ export default function DesignPage() {
   if (completedLocked) {
     return (
       <div className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-4 bg-cream p-6 text-center">
-        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-orange/15 text-orange-ink">
+        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-surface-sink text-orange-ink">
           <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <path d="m5 13 4 4L19 7" />
           </svg>
         </div>
-        <h1 className="font-display text-2xl text-ink">تم تأكيد تصميمك</h1>
-        <p className="text-ink/70">
+        <h1 className="font-display-ar text-2xl text-ink">تم تأكيد تصميمك</h1>
+        <p className="text-ink-soft">
           لا يمكنك تعديل التصميم بعد التأكيد. تواصل مع الإدارة عند الحاجة.
         </p>
         <Button variant="primary" onClick={() => router.push("/")}>
@@ -149,10 +151,9 @@ export default function DesignPage() {
 
   return (
     <div className="mx-auto min-h-screen max-w-4xl bg-cream">
-      <header className="relative overflow-hidden bg-brand-gradient px-4 py-5 text-center text-cream">
-        <div className="sash-shimmer-strip" aria-hidden />
-        <BrandMark size={64} className="mb-2" />
-        <h1 className="mt-1 font-display text-xl">صمّم وشاحك</h1>
+      <header className="flex items-center gap-3 border-b border-line bg-surface px-4 py-3">
+        <BrandMark size={40} />
+        <h1 className="font-display-ar text-xl font-semibold text-ink">صمّم وشاحك</h1>
       </header>
 
       <div aria-live="polite" className="sr-only">
@@ -164,7 +165,7 @@ export default function DesignPage() {
       {saveFailed && !editingSide && (
         <div
           role="alert"
-          className="mx-4 mt-2 flex items-center justify-between gap-3 rounded-xl border border-orange/40 bg-orange/10 px-4 py-3 text-sm text-ink"
+          className="mx-4 mt-2 flex items-center justify-between gap-3 rounded-xl border border-danger/30 bg-danger/8 px-4 py-3 text-sm text-ink"
         >
           <span>لم يُحفظ — تحقق من الاتصال</span>
           <Button
@@ -195,6 +196,32 @@ export default function DesignPage() {
             </Link>
             {!product && (
               <p className="p-6 text-center text-ink-soft">لا يوجد وشاح متاح حالياً</p>
+            )}
+            {/* Gender selector — shown when gender is unknown.
+                Gender gates which option groups are visible and prevents
+                a restricted product from silently showing wrong options. */}
+            {product && gender === null && (
+              <div className="rounded-2xl border border-line bg-surface p-4">
+                <p className="mb-3 text-sm font-semibold text-ink">
+                  حدّد جنسك لعرض الخيارات المناسبة
+                </p>
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => pickGender("male")}
+                    className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-line bg-cream px-4 text-sm font-medium text-ink-soft transition-colors hover:border-orange-ink hover:text-orange-ink"
+                  >
+                    ذكر
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => pickGender("female")}
+                    className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-line bg-cream px-4 text-sm font-medium text-ink-soft transition-colors hover:border-orange-ink hover:text-orange-ink"
+                  >
+                    أنثى
+                  </button>
+                </div>
+              </div>
             )}
             {sortedGroups.map((group) => {
               const optionId = getSelectedOptionId(group, selection);
@@ -235,7 +262,7 @@ export default function DesignPage() {
           <section key="step-2" className="animate-step-in space-y-4">
             {editableSide && (
               <p
-                className="mx-auto max-w-md rounded-xl border border-orange/30 bg-orange/10 px-4 py-2.5 text-center text-sm text-ink/80"
+                className="mx-auto max-w-md rounded-xl border border-line bg-surface px-4 py-2.5 text-center text-sm text-ink-soft"
                 role="note"
               >
                 {editableSide === "left"
@@ -257,12 +284,12 @@ export default function DesignPage() {
             />
 
             {!editableSide && (
-              <label className="mx-auto flex max-w-md items-center gap-2 text-sm text-ink/70">
+              <label className="mx-auto flex max-w-md items-center gap-2 text-sm text-ink-soft">
                 <input
                   type="checkbox"
                   checked={singleSideOnly}
                   onChange={(e) => setSingleSideOnly(e.target.checked)}
-                  className="accent-orange"
+                  className="accent-orange-ink"
                 />
                 تصميم جانب واحد فقط
               </label>
@@ -304,7 +331,7 @@ export default function DesignPage() {
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 rows={3}
-                className="w-full rounded-lg border border-ink/20 bg-beige p-3 text-sm"
+                className="w-full rounded-lg border border-line bg-beige p-3 text-sm text-ink placeholder:text-muted"
                 placeholder="مثال: اللون الذهبي أبرز ما يمكن"
               />
             </div>
@@ -313,7 +340,7 @@ export default function DesignPage() {
       </main>
 
       <div
-        className={`fixed bottom-0 left-1/2 z-40 w-full max-w-4xl -translate-x-1/2 border-t border-neutral bg-beige px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] ${editingSide ? "hidden" : ""}`}
+        className={`fixed bottom-0 left-1/2 z-40 w-full max-w-4xl -translate-x-1/2 border-t border-line bg-surface px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] ${editingSide ? "hidden" : ""}`}
       >
         <div className="mx-auto flex max-w-md gap-2">
           {step === 1 && (
@@ -420,7 +447,7 @@ export default function DesignPage() {
         }
       >
         <div id="confirm-design-desc" className="space-y-4">
-          <p className="text-sm text-ink/70">
+          <p className="text-sm text-ink-soft">
             السعر الإجمالي{" "}
             <span className="font-semibold text-orange-ink">
               {new Intl.NumberFormat("ar-IQ").format(preview.total)} د.ع
@@ -437,7 +464,7 @@ export default function DesignPage() {
             />
           </div>
           {product && preview.lines.length > 0 && (
-            <ul className="max-h-32 space-y-1 overflow-y-auto text-xs text-ink/70">
+            <ul className="max-h-32 space-y-1 overflow-y-auto text-xs text-ink-soft">
               {preview.lines.map((line) => (
                 <li key={line.label} className="flex justify-between gap-2">
                   <span>{line.label}</span>

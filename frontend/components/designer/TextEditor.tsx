@@ -188,6 +188,7 @@ export function TextEditor({
   const [toolsOpen, setToolsOpen] = useState(true);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
+  const [canvasPopped, setCanvasPopped] = useState(false);
   const usedFontsRef = useRef<Set<string>>(new Set());
   const autoOpenedRef = useRef(false);
   // Undo/redo: snapshots of canvas JSON. restoringRef suppresses recording
@@ -196,7 +197,7 @@ export function TextEditor({
   const restoringRef = useRef(false);
 
   const sideLabel =
-    side === "left" ? "جانب الاسم (اليسار)" : "جانب الجامعة (اليمين)";
+    side === "left" ? "جانب الاسم" : "جانب الجامعة";
 
   // Fabric tones for the editing stage so the canvas reads as the chosen sash.
   const sashFabric = SASH_COLOR_HEX[sashColor] || SASH_COLOR_HEX["أبيض"];
@@ -324,7 +325,15 @@ export function TextEditor({
         setCanUndo(history.index > 0);
         setCanRedo(false);
       };
-      canvas.on("object:added", snapshot);
+      canvas.on("object:added", () => {
+        snapshot();
+        // Tactile pop: flash the sash stage when a new element is added.
+        // Triggers animate-edit-pop for 350ms then clears.
+        if (!restoringRef.current) {
+          setCanvasPopped(true);
+          setTimeout(() => setCanvasPopped(false), 350);
+        }
+      });
       canvas.on("object:modified", snapshot);
       canvas.on("object:removed", snapshot);
 
@@ -680,13 +689,13 @@ export function TextEditor({
       aria-modal="true"
       aria-labelledby={titleId}
     >
-      <header className="flex items-center justify-between gap-3 border-b border-white/10 bg-ink px-4 py-3 text-cream">
+      <header className="flex items-center justify-between gap-3 border-b border-line bg-surface px-4 py-3 text-ink">
         <div className="flex min-w-0 items-center gap-2.5">
           <span
-            className="hidden h-2 w-2 shrink-0 rounded-full bg-orange-light sm:block"
+            className="hidden h-2 w-2 shrink-0 rounded-full bg-orange-ink sm:block"
             aria-hidden
           />
-          <h2 id={titleId} className="truncate font-display text-lg">
+          <h2 id={titleId} className="font-display-ar truncate text-lg font-semibold text-ink">
             {sideLabel}
           </h2>
         </div>
@@ -697,7 +706,7 @@ export function TextEditor({
                 type="button"
                 onClick={undo}
                 disabled={!canUndo}
-                className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-cream/90 transition-colors hover:bg-white/10 disabled:opacity-25"
+                className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-ink transition-colors hover:bg-surface-sink disabled:opacity-25"
                 aria-label="تراجع"
                 title="تراجع (Ctrl+Z)"
               >
@@ -707,20 +716,20 @@ export function TextEditor({
                 type="button"
                 onClick={redo}
                 disabled={!canRedo}
-                className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-cream/90 transition-colors hover:bg-white/10 disabled:opacity-25"
+                className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-ink transition-colors hover:bg-surface-sink disabled:opacity-25"
                 aria-label="إعادة"
                 title="إعادة (Ctrl+Shift+Z)"
               >
                 {IconRedo}
               </button>
-              <span className="mx-1 h-6 w-px bg-white/15" aria-hidden />
+              <span className="mx-1 h-6 w-px bg-line" aria-hidden />
             </>
           )}
           <button
             ref={closeRef}
             type="button"
             onClick={onClose}
-            className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-cream/90 transition-colors hover:bg-white/10"
+            className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-ink transition-colors hover:bg-surface-sink"
             aria-label="إغلاق"
           >
             {IconClose}
@@ -734,14 +743,14 @@ export function TextEditor({
             ref={mainRef}
             className="flex min-h-[min(48vh,320px)] flex-1 flex-col items-center justify-center gap-4 sm:min-h-0 sm:justify-start"
           >
-            <p className="max-w-md px-1 text-center text-sm leading-relaxed text-ink/70">
+            <p className="max-w-md px-1 text-center text-sm leading-relaxed text-ink-soft">
               اكتب وزخرِف عبر «إضافة نص»، ثم رتّب العناصر على لوحة الوشاح.
             </p>
             {/* Tailoring-table stage: the canvas rests inside a real sash of the
                 chosen fabric color — selvedge, stitch line, weave + hem tail. */}
             <div className="flex w-full flex-col items-center rounded-2xl bg-[var(--shop-sink)] p-4 sm:p-6">
               <div
-                className="sash-stage"
+                className={`sash-stage ${canvasPopped ? "animate-edit-pop" : ""}`}
                 style={
                   {
                     "--sash-fabric-light": sashFabric.light,
@@ -787,20 +796,20 @@ export function TextEditor({
             </Button>
 
             {/* Logo & extra images */}
-            <details className="rounded-xl border border-ink/10 bg-beige p-3">
+            <details className="rounded-xl border border-line bg-beige p-3">
               <summary className="cursor-pointer select-none text-sm font-semibold text-ink">
                 شعار وصور إضافية
               </summary>
               <div className="mt-3 grid grid-cols-2 gap-2">
                 <label
                   htmlFor={logoInputId}
-                  className={`inline-flex min-h-11 w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-ink/15 px-4 py-2.5 text-sm font-semibold text-ink transition-colors hover:bg-[var(--shop-sink)] ${uploading ? "pointer-events-none opacity-50" : ""}`}
+                  className={`inline-flex min-h-11 w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-line px-4 py-2.5 text-sm font-semibold text-ink transition-colors hover:bg-[var(--shop-sink)] ${uploading ? "pointer-events-none opacity-50" : ""}`}
                 >
                   {uploading ? <Spinner /> : <>{IconLogo} شعار</>}
                 </label>
                 <label
                   htmlFor={imageInputId}
-                  className={`inline-flex min-h-11 w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-ink/15 px-4 py-2.5 text-sm font-semibold text-ink transition-colors hover:bg-[var(--shop-sink)] ${uploading ? "pointer-events-none opacity-50" : ""}`}
+                  className={`inline-flex min-h-11 w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-line px-4 py-2.5 text-sm font-semibold text-ink transition-colors hover:bg-[var(--shop-sink)] ${uploading ? "pointer-events-none opacity-50" : ""}`}
                 >
                   {uploading ? <Spinner /> : <>{IconImage} صورة</>}
                 </label>
@@ -823,7 +832,7 @@ export function TextEditor({
             </details>
 
             {/* Selected element — the instrument tray */}
-            <div className="rounded-xl border border-ink/10 bg-beige p-4">
+            <div className="rounded-xl border border-line bg-beige p-4">
               <p className="mb-3 text-sm font-semibold text-ink">العنصر المحدد</p>
 
               {/* Font picker — change the selected text's face in place */}
@@ -842,8 +851,8 @@ export function TextEditor({
                       style={{ fontFamily: fontFamilyFor(f.id) }}
                       className={`shrink-0 min-h-11 rounded-lg border px-3 py-2 text-lg leading-none transition-colors disabled:opacity-30 ${
                         activeFontId === f.id
-                          ? "border-orange bg-orange/10 ring-1 ring-orange text-ink"
-                          : "border-ink/15 bg-cream text-ink hover:border-orange/60"
+                          ? "border-orange-ink bg-orange-ink/8 ring-1 ring-orange-ink text-ink"
+                          : "border-line bg-cream text-ink hover:border-neutral-dark"
                       }`}
                     >
                       {f.name_ar}
@@ -854,7 +863,7 @@ export function TextEditor({
 
               <div className="flex flex-wrap items-center gap-2">
                 <div
-                  className="inline-flex items-center rounded-full border border-ink/15 bg-cream"
+                  className="inline-flex items-center rounded-full border border-line bg-cream"
                   role="group"
                   aria-label="حجم النص"
                 >
@@ -888,7 +897,7 @@ export function TextEditor({
                   type="button"
                   onClick={toggleBold}
                   disabled={!activeIsText || !boldSupported(activeFontId)}
-                  className="flex min-h-11 min-w-11 items-center justify-center rounded-full border border-ink/15 bg-cream font-display text-base font-bold text-ink transition-colors hover:bg-[var(--shop-sink)] disabled:opacity-30"
+                  className="flex min-h-11 min-w-11 items-center justify-center rounded-full border border-line bg-cream font-display text-base font-bold text-ink transition-colors hover:bg-[var(--shop-sink)] disabled:opacity-30"
                   aria-label="غامق"
                   title={
                     activeIsText && !boldSupported(activeFontId)
@@ -902,7 +911,7 @@ export function TextEditor({
                   type="button"
                   onClick={deleteActive}
                   disabled={!hasSelection}
-                  className="ms-auto inline-flex min-h-11 items-center gap-1.5 rounded-full border border-ink/15 px-4 text-sm font-medium text-ink-soft transition-colors hover:border-danger/40 hover:bg-danger/10 hover:text-danger disabled:opacity-30"
+                  className="ms-auto inline-flex min-h-11 items-center gap-1.5 rounded-full border border-line px-4 text-sm font-medium text-ink-soft transition-colors hover:border-danger/40 hover:bg-danger/10 hover:text-danger disabled:opacity-30"
                 >
                   {IconTrash} حذف
                 </button>
@@ -911,7 +920,7 @@ export function TextEditor({
               {/* Alignment + line spacing — essential for multi-line Arabic */}
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <div
-                  className="inline-flex items-center rounded-full border border-ink/15 bg-cream"
+                  className="inline-flex items-center rounded-full border border-line bg-cream"
                   role="group"
                   aria-label="محاذاة النص"
                 >
@@ -929,7 +938,7 @@ export function TextEditor({
                       aria-label={it.label}
                       title={it.label}
                       className={`flex min-h-11 min-w-11 items-center justify-center rounded-full transition-colors disabled:opacity-30 ${
-                        activeAlign === it.a ? "bg-orange/15 text-orange-ink" : "text-ink hover:bg-[var(--shop-sink)]"
+                        activeAlign === it.a ? "bg-surface-sink text-orange-ink" : "text-ink hover:bg-[var(--shop-sink)]"
                       }`}
                     >
                       <Glyph>
@@ -939,7 +948,7 @@ export function TextEditor({
                   ))}
                 </div>
                 <div
-                  className="inline-flex items-center rounded-full border border-ink/15 bg-cream"
+                  className="inline-flex items-center rounded-full border border-line bg-cream"
                   role="group"
                   aria-label="تباعد الأسطر"
                 >
@@ -991,7 +1000,7 @@ export function TextEditor({
         )}
       </div>
 
-      <footer className="flex gap-2 border-t border-ink/10 bg-cream p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+      <footer className="flex gap-2 border-t border-line bg-surface p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
         <Button variant="ghost" fullWidth onClick={onClose}>
           إلغاء
         </Button>

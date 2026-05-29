@@ -361,10 +361,6 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
 
   function goToCanvas() {
     if (!product) return;
-    if (!gender) {
-      toast.error("اختر جنسك من صفحة المتجر أولاً");
-      return;
-    }
     const err = validateSelection(product, selection, gender);
     if (err) return toast.error(err);
     const imgErr = validateCustomerImages(product, selection, customerImages);
@@ -385,10 +381,6 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
 
   async function confirmDesign(): Promise<boolean> {
     if (!product) return false;
-    if (!gender) {
-      toast.error("يجب تحديد الجنس في ملفك");
-      return false;
-    }
     const err = validateSelection(product, selection, gender);
     if (err) {
       toast.error(err);
@@ -446,6 +438,11 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
     if (changed) setFontsUsed(Array.from(usedFontsRef.current));
   }
 
+  function pickGender(g: "male" | "female") {
+    setGender(g);
+    try { localStorage.setItem(GENDER_KEY, g); } catch { /* private mode */ }
+  }
+
   return {
     router,
     bootLoading,
@@ -454,6 +451,7 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
     completedLocked,
     editException,
     gender,
+    pickGender,
     product,
     selection,
     customerImages,

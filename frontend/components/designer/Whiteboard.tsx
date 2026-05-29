@@ -291,14 +291,14 @@ export function Whiteboard({ side, fonts, onApply, onClose }: Props) {
       aria-modal="true"
       aria-labelledby="whiteboard-title"
     >
-      <header className="flex items-center justify-between border-b border-ink/10 bg-ink px-4 py-3 text-cream">
-        <h2 id="whiteboard-title" className="font-display text-lg">
+      <header className="flex items-center justify-between border-b border-line bg-surface px-4 py-3">
+        <h2 id="whiteboard-title" className="font-display-ar text-lg font-semibold text-ink">
           لوحة النص — {sideLabel}
         </h2>
         <button
           type="button"
           onClick={onClose}
-          className="flex min-h-11 min-w-11 items-center justify-center rounded hover:bg-cream/10"
+          className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-ink transition-colors hover:bg-surface-sink"
           aria-label="إغلاق"
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
@@ -331,7 +331,7 @@ export function Whiteboard({ side, fonts, onApply, onClose }: Props) {
           panelId="whiteboard-tools"
           desktopWidthClass="sm:w-80"
         >
-          <div className="rounded-xl border border-ink/10 bg-beige/60 p-3 shadow-sm">
+          <div className="rounded-xl border border-line bg-beige/60 p-3">
             <p className="mb-2 text-sm font-semibold text-ink">أضف نصاً</p>
             <p className="mb-2 text-xs text-ink-soft">{SIDE_HINT[side]}</p>
             <textarea
@@ -348,8 +348,8 @@ export function Whiteboard({ side, fonts, onApply, onClose }: Props) {
             </Button>
           </div>
 
-          <div className="rounded-xl border border-ink/10 bg-cream p-3 shadow-sm">
-            <p className="mb-1 text-xs font-semibold text-ink/70">حركات — اضغط ثم اسحبها لأي مكان</p>
+          <div className="rounded-xl border border-line bg-cream p-3">
+            <p className="mb-1 text-xs font-semibold text-muted">حركات — اضغط ثم اسحبها لأي مكان</p>
             <div className="flex flex-wrap gap-1.5">
               {TASHKEEL.map((t) => (
                 <button
@@ -358,20 +358,20 @@ export function Whiteboard({ side, fonts, onApply, onClose }: Props) {
                   title={t.tip}
                   aria-label={t.tip}
                   onClick={() => addGlyph(t.ch, true)}
-                  className="flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-ink/15 bg-cream text-lg text-ink hover:border-orange hover:bg-orange/10"
+                  className="flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-line bg-cream text-lg text-ink transition-colors hover:border-neutral-dark hover:bg-surface-sink"
                 >
                   {"ـ" + t.ch}
                 </button>
               ))}
             </div>
-            <p className="mb-1 mt-3 text-xs font-semibold text-ink/70">زخرفة — اضغط ثم اسحبها لأي مكان</p>
+            <p className="mb-1 mt-3 text-xs font-semibold text-muted">زخرفة — اضغط ثم اسحبها لأي مكان</p>
             <div className="flex flex-wrap gap-1.5">
               {ORNAMENTS.map((o) => (
                 <button
                   key={o}
                   type="button"
                   onClick={() => addGlyph(o, false)}
-                  className="flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-ink/15 bg-cream text-lg text-orange-ink hover:border-orange hover:bg-orange/10"
+                  className="flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-line bg-cream text-lg text-ink-soft transition-colors hover:border-neutral-dark hover:bg-surface-sink"
                 >
                   {o}
                 </button>
@@ -379,7 +379,7 @@ export function Whiteboard({ side, fonts, onApply, onClose }: Props) {
             </div>
           </div>
 
-          <div className="rounded-xl border border-ink/10 bg-cream p-3 shadow-sm">
+          <div className="rounded-xl border border-line bg-cream p-3">
             <p className="mb-2 text-sm font-semibold text-ink">الخط</p>
             {fonts.length === 0 ? (
               <p className="mb-2 text-sm text-[var(--shop-muted)]">جاري تحميل الخطوط…</p>
@@ -394,8 +394,8 @@ export function Whiteboard({ side, fonts, onApply, onClose }: Props) {
                     style={{ fontFamily: fontFamilyFor(f.id) }}
                     className={`shrink-0 min-h-11 rounded-lg border px-3 py-2 text-lg leading-none transition-colors ${
                       currentFont === f.id
-                        ? "border-orange bg-orange/10 ring-1 ring-orange text-ink"
-                        : "border-ink/15 bg-cream text-ink hover:border-orange/60"
+                        ? "border-orange-ink bg-orange-ink/8 ring-1 ring-orange-ink text-ink"
+                        : "border-line bg-cream text-ink hover:border-neutral-dark"
                     }`}
                   >
                     {f.name_ar}
@@ -406,7 +406,7 @@ export function Whiteboard({ side, fonts, onApply, onClose }: Props) {
             <p className="mb-2 text-sm font-semibold text-ink">الحجم</p>
             <div className="flex items-center gap-2">
               <Button variant="ghost" onClick={() => changeSize(-2)}>−</Button>
-              <span className="min-w-10 text-center text-sm text-ink/70">{fontSize}</span>
+              <span className="min-w-10 text-center text-sm text-ink-soft">{fontSize}</span>
               <Button variant="ghost" onClick={() => changeSize(2)}>+</Button>
               <Button
                 variant="ghost"
@@ -424,7 +424,7 @@ export function Whiteboard({ side, fonts, onApply, onClose }: Props) {
                   key={c}
                   type="button"
                   onClick={() => changeColor(c)}
-                  className={`h-11 w-11 rounded-full ring-1 ring-ink/20 ${textColor === c ? "ring-2 ring-orange" : ""}`}
+                  className={`h-11 w-11 rounded-full transition-transform hover:scale-110 ${textColor === c ? "ring-2 ring-offset-2 ring-orange-ink scale-110" : "ring-1 ring-ink/20"}`}
                   style={{ background: c }}
                   aria-label={`لون ${c}`}
                 />
@@ -434,7 +434,7 @@ export function Whiteboard({ side, fonts, onApply, onClose }: Props) {
         </DesignerToolsAside>
       </div>
 
-      <footer className="flex gap-2 border-t border-ink/10 bg-cream p-3">
+      <footer className="flex gap-2 border-t border-line bg-surface p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
         <Button variant="ghost" fullWidth onClick={onClose}>إلغاء</Button>
         <Button variant="primary" fullWidth onClick={apply} disabled={!ready}>
           تطبيق على الوشاح
