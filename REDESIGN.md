@@ -4,6 +4,18 @@ Master backlog from the verified multi-agent audit (102 findings, 5 critical / 4
 Bar: agency portfolio piece judged by 50+ businessmen. Spec source of truth: `DESIGN.md`.
 **Tracking:** check items as done. Update after every task.
 
+## ▶ Status — resume here
+- **Branch:** `redesign/design-system` (not merged to main, not deployed). Dev server: `localhost:3000`.
+- **Done (7 commits, ~50/102 findings, tsc clean):**
+  - Stage 0/A — unified palette + ink shadows + killed banned legacy; rebuilt shared primitives (Button/Input/Select/EmptyState); `--color-danger`, `.font-display-ar`.
+  - Stage 1 — sash editor renders as real fabric (`.sash-stage`).
+  - Stage 2/M — storefront unlocked from 512px cage → editorial grids; cinematic hero; scroll-reveal + parallax (CSS `view()` timeline, no JS); product detail 2-col + AA CTA + de-orange.
+  - a11y — AA contrast sweep across ~50 files (`ink/40-60` → `ink-soft`/muted).
+  - admin — chart recolor + main max-width.
+  - auth + wholesaler — onto the unified system (join rewrite, danger token, real empty/error states).
+- **Next (highest ROI remaining):** delete dead scrim components (`ShopProductCard`/`ShopPackageCard`/`ShopProductHeroCard`) + `ProductTile` `sizes`; designer chrome de-orange; **error/loading/empty trio** on remaining admin/staff lists; native LTR date pickers + RTL chevrons; `قريباً` nav stub; `window.confirm` → modal; then Phase 6 verify + `security-review`.
+- **To resume:** read this file + `git log --oneline 4d88655..HEAD`, then continue the unchecked items below.
+
 ## Stage M — Cinematic motion & scroll choreography (NEW — the "video/presentation" feel)
 The motion primitives already exist in `globals.css` (`.reveal`, `ken-burns`, view-transitions, splash, sash shimmer) but are barely wired up; the 512px storefront cage also kills the reveal grids on desktop. Goal: the site plays like a fashion film as you scroll.
 - [x] **Scroll-choreography system** — `.scroll-reveal`/`.scroll-reveal-soft`/`.parallax-photo` via CSS `animation-timeline: view()` (GPU, no JS); `@supports` fallback shows content; reduced-motion off. Verified: opacity ramps 0→1 on scroll. ✅
@@ -46,13 +58,17 @@ The motion primitives already exist in `globals.css` (`.reveal`, `ken-burns`, vi
 - [ ] `StaffSidebar` brand-gradient side-stripe + orange blur blob; filter chips as full primary Buttons → quiet chips
 
 ### Phase 3 — Wholesaler & auth — 17 findings
-- [ ] `join/[code]/page.tsx` — off-spec (hero flood, dark ink header, gradient circles, blur orbs) → shared `AuthCard` language
+- [x] `join/[code]/page.tsx` — rebuilt onto shared `AuthCard` paper+ink (removed hero flood/dark header/gradient orbs/emoji) ✅
+- [x] `AuthCard` Arabic headings → `font-display-ar`; added `<main>` landmark ✅
+- [x] auth red error floods → warm danger token (login/join/forgot/verify) ✅
+- [x] forgot-password OTP guard `<4` → `<6` (matches 6-digit copy) ✅
+- [x] wholesaler status pills emerald/rose/amber → neutral/orange-ink/danger scheme ✅
+- [x] wholesaler batch: silent `list[0]` bind → explicit choice + EmptyState for zero-student ✅
+- [x] wholesaler real empty/error states (batch/package/students) ✅
 - [ ] designer gender-gate dead-end → in-place gender control / clear path
-- [ ] native `type=date` LTR pickers (4 spots: admin orders + wholesalers) → RTL-correct custom date input
-- [ ] reversed prev/next chevrons in RTL pagination (wholesaler/staff/admin)
-- [ ] status pills hardcode emerald/rose/amber → shared status token
-- [ ] batch page: silent `list[0].id` localStorage bind → explicit choice + empty state for zero-student batch
-- [ ] remove orphan `/verify-otp` duplicate flow; emoji success icons → real icons
+- [ ] native `type=date` LTR pickers (admin orders + wholesalers) → RTL date input *(admin: Terminal-2 lane)*
+- [ ] reversed prev/next chevrons in RTL pagination *(admin/staff: Terminal-2 lane)*
+- [x] emoji success icons → line SVGs (auth) ✅ ; `/verify-otp` confirmed orphan (left, noted)
 
 ### Phase 4 — Admin & staff shells — 14 findings
 - [ ] `admin/layout.tsx main` — add max-width + editorial grid (kill skinny full-width bars + empty void)
