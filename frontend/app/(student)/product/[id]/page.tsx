@@ -137,35 +137,42 @@ export default function StudentProductPage() {
 
   return (
     <div className="pb-28">
-      <div className="space-y-6">
-        <div>
-          <Link
-            href="/shop"
-            className="inline-flex min-h-11 items-center gap-1 text-sm font-semibold text-orange-ink transition-colors hover:text-orange"
-          >
-            <span aria-hidden>→</span>
-            المنتجات
-          </Link>
-          <h1 className="mt-2 font-display text-2xl font-bold text-ink">
-            {product.nameAr}
-          </h1>
-          {product.description && (
-            <p className="mt-1.5 text-sm leading-relaxed text-ink-soft">
-              {product.description}
-            </p>
-          )}
+      {/* Editorial product layout: sticky gallery beside the options on desktop,
+          single calm column on phones. */}
+      <div className="mx-auto max-w-5xl lg:grid lg:grid-cols-2 lg:items-start lg:gap-10">
+        {/* Left — title + gallery (sticky on desktop) */}
+        <div className="space-y-5 lg:sticky lg:top-24">
+          <div>
+            <Link
+              href="/shop"
+              className="inline-flex min-h-11 items-center gap-1 text-sm font-semibold text-orange-ink transition-colors hover:text-ink"
+            >
+              <span aria-hidden>→</span>
+              المنتجات
+            </Link>
+            <h1 className="mt-2 font-display-ar text-[clamp(1.6rem,4vw,2.4rem)] font-bold leading-tight text-ink">
+              {product.nameAr}
+            </h1>
+            {product.description && (
+              <p className="mt-2 text-sm leading-relaxed text-ink-soft">
+                {product.description}
+              </p>
+            )}
+          </div>
+
+          <ProductMediaGallery
+            nameAr={product.nameAr}
+            imageUrl={product.imageUrl}
+            images={product.images}
+            productId={id}
+          />
         </div>
 
-        <ProductMediaGallery
-          nameAr={product.nameAr}
-          imageUrl={product.imageUrl}
-          images={product.images}
-          productId={id}
-        />
-
+        {/* Right — options, price, action */}
+        <div className="mt-6 space-y-6 lg:mt-0">
         {!gender && (
-          <div className="flex items-start gap-2.5 rounded-2xl border border-orange/30 bg-orange/5 p-3.5 text-sm leading-relaxed text-ink/70 ring-1 ring-orange/10">
-            <span aria-hidden className="mt-1 h-2 w-2 shrink-0 rounded-full bg-brand-gradient" />
+          <div className="flex items-start gap-2.5 rounded-2xl border border-line bg-[var(--shop-sink)] p-3.5 text-sm leading-relaxed text-ink-soft">
+            <span aria-hidden className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-orange-ink" />
             اختر جنسك من صفحة المنتجات لتفعيل الفلترة (مثلاً الشال للإناث).
           </div>
         )}
@@ -214,7 +221,7 @@ export default function StudentProductPage() {
           <div className="space-y-2">
             <button
               type="button"
-              className="btn-shine flex min-h-12 w-full items-center justify-center gap-2 rounded-pill bg-brand-gradient font-display text-base font-bold text-white shadow-[var(--shadow-pop)] transition-transform hover:scale-[1.01] active:scale-100"
+              className="btn-shine flex min-h-12 w-full items-center justify-center gap-2 rounded-pill bg-orange-ink font-display text-base font-bold text-white shadow-[var(--shadow-float)] transition-transform duration-200 hover:-translate-y-0.5 active:translate-y-0"
               onClick={() => {
                 sessionStorage.setItem(
                   "loloshop_sash_preset",
@@ -230,11 +237,12 @@ export default function StudentProductPage() {
             </p>
           </div>
         )}
+        </div>
       </div>
 
       {product.type !== "sash" && (
-        <div className="surface-glass fixed inset-x-0 bottom-0 z-30 border-t border-orange/10 px-4 py-3.5 shadow-[var(--shadow-float)]">
-          <div className="mx-auto max-w-lg">
+        <div className="surface-glass fixed inset-x-0 bottom-0 z-30 border-t border-line px-4 py-3.5 shadow-[var(--shadow-float)]">
+          <div className="mx-auto max-w-5xl">
           {confirmed ? (
             <Button fullWidth variant="secondary" onClick={() => router.push("/shop")}>
               متابعة التسوق

@@ -33,8 +33,8 @@ The motion primitives already exist in `globals.css` (`.reveal`, `ken-burns`, vi
 - [x] font picker chips already set in own typeface (`fontFamily` per chip) — was a screenshot artifact ✅
 - [x] designer delete button off-palette red → danger token ✅
 - [ ] strip ambient orange across designer chrome/header/tashkeel/ornament/font chips; gold/navy thread swatches are product data (keep)
-- [ ] `product/[id]/page.tsx` — orange is ambient on every fieldset/divider/breakdown/upload/bullet → earned ≤10%
-- [ ] larger Amiri headings; remove header orange gradient + shimmer overuse
+- [x] `product/[id]/page.tsx` — 2-col editorial layout (sticky gallery + options); gradient CTA → solid `orange-ink` (AA fix); orange-flooded gender banner → neutral sink; Amiri title; de-orange bottom bar ✅
+- [ ] larger Amiri headings; remove header orange gradient + shimmer overuse (designer chrome)
 
 ### Phase 2 — Storefront / shop layout — 18 findings
 - [x] `(student)/layout.tsx` — unlocked from `max-w-lg`; responsive `md:max-w-3xl lg:max-w-6xl` so editorial grids engage on desktop ✅
