@@ -184,7 +184,7 @@ export default function WholesalerDashboardPage() {
             aria-hidden
             className="absolute inset-x-0 top-0 h-1 bg-brand-gradient"
           />
-          <p className="text-xs font-medium text-ink/60">
+          <p className="text-xs font-medium text-[var(--shop-muted)]">
             عمولتك المستحقة ({dashboard.commissionRate}%)
           </p>
           <p className="mt-1.5 font-display text-3xl font-bold text-gradient-brand" dir="ltr">
@@ -195,7 +195,7 @@ export default function WholesalerDashboardPage() {
 
       <section className="surface-card rounded-2xl p-5">
         <p className="mb-2 text-sm font-semibold text-ink">رابط الدعوة</p>
-        <p className="break-all rounded-xl bg-beige/70 px-3 py-2.5 text-xs text-ink/60" dir="ltr">
+        <p className="break-all rounded-xl bg-beige/70 px-3 py-2.5 text-xs text-ink-soft" dir="ltr">
           {joinUrl}
         </p>
         <div className="mt-3 flex gap-2">
@@ -213,7 +213,7 @@ export default function WholesalerDashboardPage() {
 
       <section className="surface-card rounded-2xl p-5">
         <p className="mb-1 text-sm font-semibold text-ink">تصميم الوشاح للطلاب</p>
-        <p className="mb-3 text-xs text-ink/60">
+        <p className="mb-3 text-xs text-ink-soft">
           حدّد الجانب الذي يصمّمه الطلاب وارسم الجانب الآخر مسبقاً.
         </p>
         <Button variant="ghost" fullWidth onClick={openSashConfig}>
@@ -259,10 +259,10 @@ export default function WholesalerDashboardPage() {
                   />
                   <div className="min-w-0 flex-1">
                     <p className="font-display font-bold text-ink">{student.fullName}</p>
-                    <p className="text-sm text-ink/60" dir="ltr">
+                    <p className="text-sm text-ink-soft" dir="ltr">
                       {student.phone}
                     </p>
-                    <p className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-beige/70 px-2 py-0.5 text-xs text-ink/50">
+                    <p className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-beige/70 px-2 py-0.5 text-xs text-[var(--shop-muted)]">
                       {formatDateShort(student.createdAt)}
                     </p>
                   </div>

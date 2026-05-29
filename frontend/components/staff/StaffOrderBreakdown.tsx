@@ -65,7 +65,7 @@ export function StaffOrderBreakdown({ detail }: StaffOrderBreakdownProps) {
         </span>
       </div>
       {withPhotos.length === 0 && (
-        <p className="mt-2 text-xs text-ink/45">
+        <p className="mt-2 text-xs text-[var(--shop-muted)]">
           لا توجد صور مرفوعة من الزبون لهذا الطلب.
         </p>
       )}

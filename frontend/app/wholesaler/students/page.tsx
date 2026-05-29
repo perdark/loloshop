@@ -160,10 +160,10 @@ export default function WholesalerStudentsPage() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="truncate font-display font-bold text-ink">{s.name}</p>
-                    <p className="mt-0.5 text-sm tabular-nums text-ink/60" dir="ltr">
+                    <p className="mt-0.5 text-sm tabular-nums text-ink-soft" dir="ltr">
                       {s.phone}
                     </p>
-                    <p className="mt-1 text-xs text-ink/50">
+                    <p className="mt-1 text-xs text-[var(--shop-muted)]">
                       {s.universityName || "—"}
                       {s.department ? ` — ${s.department}` : ""}
                     </p>
@@ -180,7 +180,7 @@ export default function WholesalerStudentsPage() {
                       className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
                         s.isCompleted
                           ? "bg-orange/15 text-orange-ink"
-                          : "bg-ink/5 text-ink/60"
+                          : "bg-ink/5 text-[var(--shop-muted)]"
                       }`}
                     >
                       {completionLabel(s.isCompleted)}
@@ -194,7 +194,7 @@ export default function WholesalerStudentsPage() {
           {/* Pagination */}
           {totalPages > 1 && (
             <div className="flex items-center justify-between gap-3 pt-1 text-sm">
-              <span className="text-ink/60">
+              <span className="text-ink-soft">
                 {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} من {filtered.length}
               </span>
               <div className="flex gap-2">

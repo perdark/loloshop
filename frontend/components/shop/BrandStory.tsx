@@ -22,7 +22,7 @@ export function AtelierStory() {
             alt="تفاصيل وشاح تخرّج مطرّز يدوياً على طاولة الورشة"
             fill
             sizes="(min-width: 1024px) 48vw, 100vw"
-            className="object-cover"
+            className="object-cover parallax-photo"
           />
         </div>
         <figcaption className="mt-2.5 text-xs text-[var(--shop-muted)]">
@@ -33,7 +33,7 @@ export function AtelierStory() {
       <div className="max-w-md">
         <h2
           id="atelier-title"
-          className="text-balance font-display text-[clamp(1.75rem,5vw,2.6rem)] font-bold leading-tight text-ink"
+          className="text-balance font-display-ar text-[clamp(1.75rem,5vw,2.6rem)] font-bold leading-tight text-ink"
         >
           نحيكها بأيدينا، غرزة غرزة
         </h2>
@@ -59,7 +59,7 @@ export function MilestoneStory() {
       <div className="max-w-md">
         <h2
           id="milestone-title"
-          className="text-balance font-display text-[clamp(1.6rem,4.5vw,2.4rem)] font-bold leading-tight text-ink"
+          className="text-balance font-display-ar text-[clamp(1.6rem,4.5vw,2.4rem)] font-bold leading-tight text-ink"
         >
           لِلحظةٍ تنتظرها سنوات
         </h2>
@@ -78,7 +78,7 @@ export function MilestoneStory() {
                   alt={look.caption}
                   fill
                   sizes="(min-width: 640px) 30vw, 45vw"
-                  className="object-cover"
+                  className="object-cover parallax-photo"
                 />
               </div>
               <figcaption className="mt-2 text-xs text-[var(--shop-muted)]">

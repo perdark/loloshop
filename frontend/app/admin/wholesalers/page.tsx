@@ -209,24 +209,24 @@ export default function AdminWholesalersPage() {
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
                   <h3 className="font-display text-lg font-bold text-ink">{w.name}</h3>
-                  <p className="text-sm text-ink/60" dir="ltr">{w.phone}</p>
+                  <p className="text-sm text-ink-soft" dir="ltr">{w.phone}</p>
                   <p className="mt-2 text-sm">
-                    <span className="text-ink/50">الطلاب: </span>
+                    <span className="text-[var(--shop-muted)]">الطلاب: </span>
                     <span className="font-medium tabular-nums text-ink">{w.studentCount}</span>
                     <span className="mx-2 text-ink/30">|</span>
-                    <span className="text-ink/50">الموعد: </span>
+                    <span className="text-[var(--shop-muted)]">الموعد: </span>
                     {formatDateIQ(w.deadline)}
                   </p>
                   <p className="mt-1 text-sm">
-                    <span className="text-ink/50">العمولة: </span>
+                    <span className="text-[var(--shop-muted)]">العمولة: </span>
                     <span className="tabular-nums">{w.commissionRate}%</span>
                     <span className="mx-2 text-ink/30">|</span>
-                    <span className="text-ink/50">المستحق: </span>
+                    <span className="text-[var(--shop-muted)]">المستحق: </span>
                     <span className="font-semibold tabular-nums text-orange-ink" dir="ltr">
                       {formatIQD(w.earnedCommission ?? 0)}
                     </span>
                   </p>
-                  <p className="mt-2 break-all rounded-lg bg-ink/[0.04] px-2.5 py-1.5 text-xs text-ink/55" dir="ltr">
+                  <p className="mt-2 break-all rounded-lg bg-ink/[0.04] px-2.5 py-1.5 text-xs text-ink-soft" dir="ltr">
                     {w.referralUrl || getJoinUrl(w.referralCode)}
                   </p>
                 </div>

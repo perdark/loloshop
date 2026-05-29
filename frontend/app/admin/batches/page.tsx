@@ -41,9 +41,9 @@ export default function AdminBatchesPage() {
                   <div>
                     <p className="font-display text-base font-bold text-ink transition-colors group-hover:text-orange-ink">{b.nameAr}</p>
                     {b.wholesalerName && (
-                      <p className="text-sm text-ink/60">{b.wholesalerName}</p>
+                      <p className="text-sm text-ink-soft">{b.wholesalerName}</p>
                     )}
-                    <p className="mt-1 text-xs text-ink/50">
+                    <p className="mt-1 text-xs text-[var(--shop-muted)]">
                       الموعد: {formatDateIQ(b.deadline)} · <span className="tabular-nums">{b.orderCount}</span> طلب
                     </p>
                   </div>

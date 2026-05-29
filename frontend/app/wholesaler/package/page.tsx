@@ -113,13 +113,13 @@ export default function WholesalerPackagePage() {
 
       <div>
         <h1 className="section-heading font-display text-2xl font-bold text-ink">باقات التخرج</h1>
-        <p className="mt-2 text-sm text-ink/60">
+        <p className="mt-2 text-sm text-ink-soft">
           مستوى الباقة يعتمد على نوع الوشاح — القبعة قابلة للتبديل بشكل مستقل
         </p>
       </div>
 
       {packages.length === 0 ? (
-        <div className="surface-card rounded-2xl p-5 text-center text-sm text-ink/60">
+        <div className="surface-card rounded-2xl p-5 text-center text-sm text-ink-soft">
           لا توجد باقات متاحة حالياً
         </div>
       ) : (
@@ -150,7 +150,7 @@ export default function WholesalerPackagePage() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <p className="font-display font-bold text-ink">{pkg.nameAr}</p>
-                    <p className="mt-1 inline-flex items-center gap-1 rounded-full bg-beige/70 px-2 py-0.5 text-xs text-ink/60">
+                    <p className="mt-1 inline-flex items-center gap-1 rounded-full bg-beige/70 px-2 py-0.5 text-xs text-[var(--shop-muted)]">
                       وشاح: {pkg.sashTypeLabel || "—"}
                     </p>
                   </div>
@@ -193,7 +193,7 @@ export default function WholesalerPackagePage() {
                   />
                   <span className="font-medium">{opt.labelAr}</span>
                   {opt.id === selected.defaultCapOptionId && (
-                    <span className="me-auto rounded-full bg-beige/70 px-2 py-0.5 text-xs text-ink/50">
+                    <span className="me-auto rounded-full bg-beige/70 px-2 py-0.5 text-xs text-[var(--shop-muted)]">
                       افتراضي
                     </span>
                   )}
@@ -201,7 +201,7 @@ export default function WholesalerPackagePage() {
               );
             })}
           </div>
-          <p className="mt-3 rounded-xl bg-beige/70 px-3 py-2 text-xs text-ink/60">
+          <p className="mt-3 rounded-xl bg-beige/70 px-3 py-2 text-xs text-ink-soft">
             الوشاح: {selected.sashTypeLabel || "—"} — السعر ثابت للباقة
           </p>
           <Button
@@ -216,7 +216,7 @@ export default function WholesalerPackagePage() {
       )}
 
       {selected && capOptions.length === 0 && (
-        <div className="surface-card rounded-2xl p-5 text-center text-sm text-ink/60">
+        <div className="surface-card rounded-2xl p-5 text-center text-sm text-ink-soft">
           تعذر تحميل خيارات القبعة
         </div>
       )}

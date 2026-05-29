@@ -54,7 +54,7 @@ export default function StaffWholesalersPage() {
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <p className="truncate font-display text-base font-bold text-ink">{w.name}</p>
-                  <p className="text-sm text-ink/60" dir="ltr">
+                  <p className="text-sm text-ink-soft" dir="ltr">
                     {w.phone}
                   </p>
                 </div>
@@ -66,7 +66,7 @@ export default function StaffWholesalersPage() {
                     className={`rounded-full px-2.5 py-1 ${
                       w.pending_count > 0
                         ? "bg-orange/15 font-medium text-orange-ink"
-                        : "bg-ink/5 text-ink/60"
+                        : "bg-ink/5 text-[var(--shop-muted)]"
                     }`}
                   >
                     بانتظار: {w.pending_count}

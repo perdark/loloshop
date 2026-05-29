@@ -21,7 +21,7 @@ const TextEditor = dynamic(
     loading: () => (
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-cream px-6">
         <Spinner />
-        <p className="text-center text-sm text-ink/60">جارٍ فتح المحرّر…</p>
+        <p className="text-center text-sm text-ink-soft">جارٍ فتح المحرّر…</p>
       </div>
     ),
   }

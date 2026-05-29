@@ -830,7 +830,7 @@ export function TextEditor({
               <p className="mb-2 text-xs font-medium text-[var(--shop-muted)]">الخط</p>
               <div className="mb-4 flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
                 {fonts.length === 0 ? (
-                  <span className="text-xs text-ink/40">جاري التحميل…</span>
+                  <span className="text-xs text-[var(--shop-muted)]">جاري التحميل…</span>
                 ) : (
                   fonts.map((f) => (
                     <button

@@ -7,7 +7,7 @@ export default function Loading() {
       className="flex min-h-[60vh] flex-col items-center justify-center gap-4"
     >
       <GradCapLoader size={72} />
-      <p className="text-xs font-medium tracking-wide text-ink/45">
+      <p className="text-xs font-medium tracking-wide text-[var(--shop-muted)]">
         جارٍ التحميل…
       </p>
     </div>

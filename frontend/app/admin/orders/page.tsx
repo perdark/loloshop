@@ -18,7 +18,7 @@ type SortKey = "profit" | "cost" | "price" | null;
 type SortDir = "asc" | "desc";
 
 function profitColor(profit: number | null | undefined): string {
-  if (profit == null) return "text-ink/60";
+  if (profit == null) return "text-ink-soft";
   return profit < 0 ? "text-rose-700" : "text-emerald-700";
 }
 
@@ -191,7 +191,7 @@ export default function AdminOrdersPage() {
           >
             <table className="w-full min-w-[880px] text-sm">
               <thead className="sticky top-0 z-10">
-                <tr className="border-b border-ink/10 bg-ink/[0.04] text-right text-xs uppercase tracking-wide text-ink/60">
+                <tr className="border-b border-ink/10 bg-ink/[0.04] text-right text-xs uppercase tracking-wide text-[var(--shop-muted)]">
                   <th className="px-4 py-3 font-semibold">الاسم الكامل</th>
                   <th className="px-4 py-3 font-semibold">المنتج</th>
                   {/* Fix 3: sortable price header */}
@@ -304,20 +304,20 @@ export default function AdminOrdersPage() {
                 className="surface-card card-lift rounded-2xl p-4"
               >
                 <p className="font-semibold text-ink">{order.studentName}</p>
-                <p className="mt-1 text-sm text-ink/60">
+                <p className="mt-1 text-sm text-ink-soft">
                   {order.productName} · {order.wholesalerName ?? "—"}
                 </p>
                 <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
                   <div>
-                    <span className="text-ink/50">السعر: </span>
+                    <span className="text-[var(--shop-muted)]">السعر: </span>
                     <span className="tabular-nums" dir="ltr">{formatIQD(order.price)}</span>
                   </div>
                   <div>
-                    <span className="text-ink/50">التكلفة: </span>
+                    <span className="text-[var(--shop-muted)]">التكلفة: </span>
                     <span className="tabular-nums" dir="ltr">{order.cost != null ? formatIQD(order.cost) : "—"}</span>
                   </div>
                   <div className="col-span-2">
-                    <span className="text-ink/50">الربح: </span>
+                    <span className="text-[var(--shop-muted)]">الربح: </span>
                     {/* Fix 1 (mobile): profit color driven by value */}
                     <span
                       className={`font-semibold tabular-nums ${profitColor(order.profit)}`}
@@ -328,7 +328,7 @@ export default function AdminOrdersPage() {
                   </div>
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-ink/10 pt-3">
-                  <span className="text-sm text-ink/50">تعديل التكلفة:</span>
+                  <span className="text-sm text-[var(--shop-muted)]">تعديل التكلفة:</span>
                   {/* Fix 4 + Fix 5 (mobile): digits-only input, aria-label */}
                   <Input
                     type="text"
@@ -348,7 +348,7 @@ export default function AdminOrdersPage() {
                     حفظ
                   </Button>
                 </div>
-                <p className="mt-2 text-xs text-ink/50">
+                <p className="mt-2 text-xs text-[var(--shop-muted)]">
                   {ORDER_STATUS_LABELS[order.status]} · {formatDateShort(order.createdAt)}
                 </p>
               </article>
@@ -361,15 +361,15 @@ export default function AdminOrdersPage() {
               </p>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <span className="text-ink/50">السعر: </span>
+                  <span className="text-[var(--shop-muted)]">السعر: </span>
                   <span className="tabular-nums" dir="ltr">{formatIQD(totalPrice)}</span>
                 </div>
                 <div>
-                  <span className="text-ink/50">التكلفة: </span>
+                  <span className="text-[var(--shop-muted)]">التكلفة: </span>
                   <span className="tabular-nums" dir="ltr">{formatIQD(totalCost)}</span>
                 </div>
                 <div className="col-span-2">
-                  <span className="text-ink/50">الربح: </span>
+                  <span className="text-[var(--shop-muted)]">الربح: </span>
                   <span
                     className={`font-semibold tabular-nums ${profitColor(totalProfit)}`}
                     dir="ltr"

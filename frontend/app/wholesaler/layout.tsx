@@ -59,7 +59,7 @@ export default function WholesalerLayout({
                 className={`relative flex min-h-13 flex-1 flex-col items-center justify-center gap-1 rounded-xl py-1.5 text-sm font-semibold transition-all duration-200 ${
                   active
                     ? "bg-orange/10 text-orange-ink"
-                    : "text-ink/50 hover:text-ink/80"
+                    : "text-ink-soft hover:text-ink/80"
                 }`}
               >
                 {active && (

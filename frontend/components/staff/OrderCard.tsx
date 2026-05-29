@@ -29,11 +29,11 @@ export function OrderCard({ order }: OrderCardProps) {
           <h3 className="truncate font-display text-base font-bold text-ink">
             {order.studentName}
           </h3>
-          <p className="mt-1 text-sm text-ink/60">
+          <p className="mt-1 text-sm text-ink-soft">
             {order.universityName || "—"}
             {order.department ? ` · ${order.department}` : ""}
           </p>
-          <p className="mt-1 text-xs text-ink/50">{order.productName}</p>
+          <p className="mt-1 text-xs text-[var(--shop-muted)]">{order.productName}</p>
         </div>
         <span
           className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${badge}`}
@@ -41,7 +41,7 @@ export function OrderCard({ order }: OrderCardProps) {
           {ORDER_STATUS_LABELS[order.status]}
         </span>
       </div>
-      <p className="mt-3 border-t border-ink/5 pt-3 text-xs text-ink/40">
+      <p className="mt-3 border-t border-ink/5 pt-3 text-xs text-[var(--shop-muted)]">
         {formatDateShort(order.createdAt)}
       </p>
     </Link>

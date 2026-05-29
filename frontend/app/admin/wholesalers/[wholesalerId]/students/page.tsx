@@ -138,7 +138,7 @@ export default function AdminWholesalerStudentsPage() {
           className="absolute bottom-1 start-0 top-1 w-1 rounded-full bg-brand-gradient"
         />
         <h1 className="font-display text-2xl font-bold leading-tight text-ink lg:text-3xl">طلاب الممثل</h1>
-        <p className="mt-1 text-sm text-ink/60">قائمة الطلاب وحالات الموافقة والاكتمال</p>
+        <p className="mt-1 text-sm text-ink-soft">قائمة الطلاب وحالات الموافقة والاكتمال</p>
       </div>
 
       <div className="grid grid-cols-3 gap-3">
@@ -159,7 +159,7 @@ export default function AdminWholesalerStudentsPage() {
         />
 
         <div className="space-y-2">
-          <p className="text-xs font-medium text-ink/60">حالة الموافقة</p>
+          <p className="text-xs font-medium text-[var(--shop-muted)]">حالة الموافقة</p>
           <div className="flex flex-wrap gap-2">
             {[
               { id: "", label: "الكل" },
@@ -180,7 +180,7 @@ export default function AdminWholesalerStudentsPage() {
         </div>
 
         <div className="space-y-2">
-          <p className="text-xs font-medium text-ink/60">حالة الاكتمال</p>
+          <p className="text-xs font-medium text-[var(--shop-muted)]">حالة الاكتمال</p>
           <div className="flex flex-wrap gap-2">
             {[
               { id: "", label: "الكل" },
@@ -207,7 +207,7 @@ export default function AdminWholesalerStudentsPage() {
           <div className="surface-card overflow-x-auto rounded-2xl">
             <table className="w-full min-w-[640px] text-sm">
               <thead className="sticky top-0 z-10">
-                <tr className="border-b border-ink/10 bg-ink/[0.04] text-right text-xs uppercase tracking-wide text-ink/60">
+                <tr className="border-b border-ink/10 bg-ink/[0.04] text-right text-xs uppercase tracking-wide text-[var(--shop-muted)]">
                   <th className="px-4 py-3 font-semibold">الاسم</th>
                   <th className="px-4 py-3 font-semibold">الهاتف</th>
                   <th className="px-4 py-3 font-semibold">الحالة</th>
@@ -238,7 +238,7 @@ export default function AdminWholesalerStudentsPage() {
                         className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
                           s.isCompleted
                             ? "bg-emerald-500/12 text-emerald-700"
-                            : "bg-ink/[0.06] text-ink/60"
+                            : "bg-ink/[0.06] text-[var(--shop-muted)]"
                         }`}
                       >
                         {s.isCompleted ? "مكتمل" : "غير مكتمل"}
@@ -265,7 +265,7 @@ export default function AdminWholesalerStudentsPage() {
           {/* Pagination */}
           {totalPages > 1 && (
             <div className="flex items-center justify-between gap-3 pt-1 text-sm">
-              <span className="text-ink/60">
+              <span className="text-ink-soft">
                 {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} من {filtered.length}
               </span>
               <div className="flex gap-2">

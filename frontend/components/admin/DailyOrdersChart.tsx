@@ -57,7 +57,7 @@ export function DailyOrdersChart({ data }: DailyOrdersChartProps) {
               >
                 {/* Count label above the bar */}
                 <span
-                  className={`text-[11px] font-bold tabular-nums ${peak ? "text-[#f47b42]" : "text-ink/50"}`}
+                  className={`text-[11px] font-bold tabular-nums ${peak ? "text-[#f47b42]" : "text-[var(--shop-muted)]"}`}
                   style={{ fontFamily: "var(--font-amiri)" }}
                 >
                   {toArabic(d.count)}

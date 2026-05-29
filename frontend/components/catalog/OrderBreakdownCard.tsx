@@ -35,7 +35,7 @@ export function OrderBreakdownCard({
               </div>
               {photo && (
                 <div>
-                  <p className="mb-1 text-[11px] text-ink/50">
+                  <p className="mb-1 text-[11px] text-[var(--shop-muted)]">
                     صورة من الزبون
                   </p>
                   <div className="relative h-24 w-full overflow-hidden rounded-xl border border-orange/15 bg-white">
@@ -59,7 +59,7 @@ export function OrderBreakdownCard({
           {formatIQD(total)}
         </span>
       </div>
-      <p className="mt-2 text-xs text-ink/50">الدفع نقداً عند الاستلام</p>
+      <p className="mt-2 text-xs text-[var(--shop-muted)]">الدفع نقداً عند الاستلام</p>
     </div>
   );
 }

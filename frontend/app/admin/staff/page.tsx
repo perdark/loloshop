@@ -119,10 +119,10 @@ export default function AdminStaffPage() {
                   </span>
                   <div>
                     <p className="font-semibold text-ink">{u.name}</p>
-                    <p className="text-sm text-ink/60" dir="ltr">
+                    <p className="text-sm text-ink-soft" dir="ltr">
                       {u.phone}
                     </p>
-                    {u.email && <p className="text-xs text-ink/50">{u.email}</p>}
+                    {u.email && <p className="text-xs text-[var(--shop-muted)]">{u.email}</p>}
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">

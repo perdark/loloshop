@@ -941,7 +941,7 @@ function GroupBlock({
             type="button"
             onClick={onDeleteGroup}
             disabled={busy}
-            className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs text-ink/45 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+            className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs text-[var(--shop-muted)] transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
           >
             {TrashIcon} حذف المجموعة
           </button>

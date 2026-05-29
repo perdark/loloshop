@@ -173,7 +173,7 @@ export default function ForgotPasswordPage() {
                   />
                 </div>
                 {phoneError && <p id="fp-phone-error" className="text-xs text-red-600" role="alert">{phoneError}</p>}
-                <p className="text-xs text-ink/50">سيصلك رمز عبر واتساب لإعادة التعيين</p>
+                <p className="text-xs text-[var(--shop-muted)]">سيصلك رمز عبر واتساب لإعادة التعيين</p>
               </div>
             ) : (
               <>

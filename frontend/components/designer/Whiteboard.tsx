@@ -319,7 +319,7 @@ export function Whiteboard({ side, fonts, onApply, onClose }: Props) {
               </div>
             )}
             <canvas ref={canvasElRef} className="rounded-md shadow-lg ring-1 ring-ink/10" />
-            <p className="mt-2 text-center text-xs text-ink/50">
+            <p className="mt-2 text-center text-xs text-[var(--shop-muted)]">
               اسحب أي عنصر لأي مكان • اسحب الزوايا للتكبير والتدوير
             </p>
           </div>
@@ -333,7 +333,7 @@ export function Whiteboard({ side, fonts, onApply, onClose }: Props) {
         >
           <div className="rounded-xl border border-ink/10 bg-beige/60 p-3 shadow-sm">
             <p className="mb-2 text-sm font-semibold text-ink">أضف نصاً</p>
-            <p className="mb-2 text-xs text-ink/60">{SIDE_HINT[side]}</p>
+            <p className="mb-2 text-xs text-ink-soft">{SIDE_HINT[side]}</p>
             <textarea
               value={text}
               onChange={(e) => setText(e.target.value)}
@@ -382,7 +382,7 @@ export function Whiteboard({ side, fonts, onApply, onClose }: Props) {
           <div className="rounded-xl border border-ink/10 bg-cream p-3 shadow-sm">
             <p className="mb-2 text-sm font-semibold text-ink">الخط</p>
             {fonts.length === 0 ? (
-              <p className="mb-2 text-sm text-ink/50">جاري تحميل الخطوط…</p>
+              <p className="mb-2 text-sm text-[var(--shop-muted)]">جاري تحميل الخطوط…</p>
             ) : (
               <div className="mb-3 flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
                 {fonts.map((f) => (

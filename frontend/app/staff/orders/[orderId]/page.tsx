@@ -173,7 +173,7 @@ export default function StaffOrderDetailPage() {
             <div className="flex min-h-48 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-ink/20 bg-cream/50 p-6 text-center">
               <span className="text-2xl" aria-hidden="true">🎨</span>
               <p className="text-sm font-medium text-ink/70">لا يوجد تصميم محفوظ بعد</p>
-              <p className="text-xs text-ink/45">لم يكمل الطالب تصميم الوشاح حتى الآن</p>
+              <p className="text-xs text-[var(--shop-muted)]">لم يكمل الطالب تصميم الوشاح حتى الآن</p>
             </div>
           )}
         </section>
@@ -188,30 +188,30 @@ export default function StaffOrderDetailPage() {
               {/* Phone comes from design row; fall back gracefully if no design */}
               {design?.phone && (
                 <div className="flex justify-between gap-4 border-b border-ink/5 pb-2.5">
-                  <dt className="text-ink/50">الهاتف</dt>
+                  <dt className="text-[var(--shop-muted)]">الهاتف</dt>
                   <dd dir="ltr">{design.phone}</dd>
                 </div>
               )}
               <div className="flex justify-between gap-4 border-b border-ink/5 pb-2.5">
-                <dt className="text-ink/50">الجامعة</dt>
+                <dt className="text-[var(--shop-muted)]">الجامعة</dt>
                 <dd className="font-medium text-ink">
                   {design?.university_name || order.universityName || "—"}
                 </dd>
               </div>
               <div className="flex justify-between gap-4 border-b border-ink/5 pb-2.5">
-                <dt className="text-ink/50">القسم</dt>
+                <dt className="text-[var(--shop-muted)]">القسم</dt>
                 <dd className="font-medium text-ink">
                   {design?.department || order.department || "—"}
                 </dd>
               </div>
               {design?.sash_color && (
                 <div className="flex justify-between gap-4 border-b border-ink/5 pb-2.5">
-                  <dt className="text-ink/50">لون الوشاح</dt>
+                  <dt className="text-[var(--shop-muted)]">لون الوشاح</dt>
                   <dd className="font-medium text-ink">{design.sash_color}</dd>
                 </div>
               )}
               <div className="flex justify-between gap-4">
-                <dt className="text-ink/50">تاريخ الطلب</dt>
+                <dt className="text-[var(--shop-muted)]">تاريخ الطلب</dt>
                 <dd className="font-medium text-ink">{formatDateIQ(order.createdAt)}</dd>
               </div>
             </dl>
@@ -264,7 +264,7 @@ export default function StaffOrderDetailPage() {
               <div className="flex flex-col gap-6 sm:flex-row">
                 {logoUrl && (
                   <div className="flex flex-col gap-2">
-                    <p className="text-xs text-ink/50">شعار الجامعة</p>
+                    <p className="text-xs text-[var(--shop-muted)]">شعار الجامعة</p>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={logoUrl}
@@ -282,7 +282,7 @@ export default function StaffOrderDetailPage() {
                 )}
                 {extraUrl && (
                   <div className="flex flex-col gap-2">
-                    <p className="text-xs text-ink/50">صورة إضافية</p>
+                    <p className="text-xs text-[var(--shop-muted)]">صورة إضافية</p>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={extraUrl}

@@ -79,7 +79,7 @@ export default function JoinPage() {
           <h1 className="font-display text-2xl font-bold text-ink">
             طلبك بانتظار موافقة الممثل
           </h1>
-          <p className="mt-3 text-sm text-ink/60">
+          <p className="mt-3 text-sm text-ink-soft">
             سنُعلمك داخل التطبيق عند الموافقة على حسابك
           </p>
         </div>

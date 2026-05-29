@@ -150,7 +150,7 @@ export default function StudentProductPage() {
             {product.nameAr}
           </h1>
           {product.description && (
-            <p className="mt-1.5 text-sm leading-relaxed text-ink/60">
+            <p className="mt-1.5 text-sm leading-relaxed text-ink-soft">
               {product.description}
             </p>
           )}
@@ -225,7 +225,7 @@ export default function StudentProductPage() {
             >
               صمّم وشاحك واطلبه
             </button>
-            <p className="text-center text-xs text-ink/50">
+            <p className="text-center text-xs text-[var(--shop-muted)]">
               اختيار اللون والنوع والسعر يتم داخل المصمّم
             </p>
           </div>

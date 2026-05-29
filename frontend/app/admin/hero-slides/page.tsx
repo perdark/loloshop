@@ -171,8 +171,8 @@ export default function AdminHeroSlidesPage() {
               />
               <div className="min-w-0 flex-1">
                 <p className="truncate font-display font-bold text-ink">{s.title}</p>
-                {s.kicker && <p className="truncate text-xs text-ink/55">{s.kicker}</p>}
-                <p className="mt-1 flex items-center gap-2 text-xs text-ink/45">
+                {s.kicker && <p className="truncate text-xs text-ink-soft">{s.kicker}</p>}
+                <p className="mt-1 flex items-center gap-2 text-xs text-[var(--shop-muted)]">
                   <span>ترتيب {s.sort}</span>
                   {s.ctaLabel && <span>· زر: {s.ctaLabel}</span>}
                   {!s.active && <span className="font-semibold text-orange-ink">مخفية</span>}
@@ -214,7 +214,7 @@ export default function AdminHeroSlidesPage() {
                   className="h-24 w-20 rounded-lg object-cover ring-1 ring-ink/10"
                 />
               ) : (
-                <div className="grid h-24 w-20 place-items-center rounded-lg bg-beige text-xs text-ink/40 ring-1 ring-ink/10">
+                <div className="grid h-24 w-20 place-items-center rounded-lg bg-beige text-xs text-[var(--shop-muted)] ring-1 ring-ink/10">
                   لا صورة
                 </div>
               )}
@@ -236,7 +236,7 @@ export default function AdminHeroSlidesPage() {
                 >
                   {form.imageUrl ? "تغيير الصورة" : "رفع صورة"}
                 </Button>
-                <p className="mt-1 text-xs text-ink/45">يفضّل صورة عمودية عالية الجودة.</p>
+                <p className="mt-1 text-xs text-[var(--shop-muted)]">يفضّل صورة عمودية عالية الجودة.</p>
               </div>
             </div>
           </div>
@@ -265,7 +265,7 @@ export default function AdminHeroSlidesPage() {
               onChange={(e) => setForm({ ...form, accent: e.target.value })}
               className="h-9 w-12 rounded border border-ink/15 bg-transparent"
             />
-            <span className="text-xs text-ink/50" dir="ltr">{form.accent}</span>
+            <span className="text-xs text-[var(--shop-muted)]" dir="ltr">{form.accent}</span>
           </div>
 
           <div className="grid grid-cols-2 gap-3">

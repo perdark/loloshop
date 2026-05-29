@@ -90,7 +90,7 @@ export function AdminProductMedia({
           {mainSrc ? (
             <Image src={mainSrc} alt="" fill className="object-cover" unoptimized />
           ) : (
-            <span className="flex h-full items-center justify-center text-xs text-ink/40">
+            <span className="flex h-full items-center justify-center text-xs text-[var(--shop-muted)]">
               لا صورة
             </span>
           )}
@@ -146,7 +146,7 @@ export function AdminProductMedia({
             onBlur={(e) => saveSort(Number(e.target.value) || 0)}
           />
         </label>
-        <span className="text-xs text-ink/50">
+        <span className="text-xs text-[var(--shop-muted)]">
           {summary.imageCount} صورة في المعرض
         </span>
       </div>

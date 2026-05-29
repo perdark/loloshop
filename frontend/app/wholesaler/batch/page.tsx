@@ -100,11 +100,11 @@ export default function WholesalerBatchPage() {
               aria-hidden
               className="absolute inset-x-0 top-0 h-1 bg-brand-gradient"
             />
-            <p className="text-xs font-medium text-ink/60">مجموع الدفعة</p>
+            <p className="text-xs font-medium text-[var(--shop-muted)]">مجموع الدفعة</p>
             <p className="mt-1.5 font-display text-3xl font-bold text-gradient-brand" dir="ltr">
               {formatIQD(batch.grandTotal)}
             </p>
-            <p className="mt-1 text-xs text-ink/50">{batch.students.length} طالب</p>
+            <p className="mt-1 text-xs text-[var(--shop-muted)]">{batch.students.length} طالب</p>
           </section>
 
           <section>
@@ -120,7 +120,7 @@ export default function WholesalerBatchPage() {
                   <div className="min-w-0 flex-1">
                     <p className="font-display font-bold text-ink">{s.name}</p>
                     {s.fullNameThird && (
-                      <p className="mt-0.5 text-xs text-ink/60">{s.fullNameThird}</p>
+                      <p className="mt-0.5 text-xs text-ink-soft">{s.fullNameThird}</p>
                     )}
                   </div>
                   <span className="shrink-0 rounded-full bg-orange/10 px-3 py-1.5 text-sm font-bold text-orange-ink" dir="ltr">

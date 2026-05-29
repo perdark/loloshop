@@ -90,7 +90,7 @@ export function SplashIntro() {
         className="animate-splash-sub mt-6 h-1 w-16 rounded-pill bg-brand-gradient"
       />
 
-      <span className="animate-splash-sub absolute bottom-8 text-xs font-medium text-ink/40">
+      <span className="animate-splash-sub absolute bottom-8 text-xs font-medium text-[var(--shop-muted)]">
         اضغط للتخطّي
       </span>
     </div>

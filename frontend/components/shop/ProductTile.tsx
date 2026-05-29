@@ -36,7 +36,7 @@ export function ProductTile({ product }: { product: ShopProductCard }) {
           {product.nameAr}
         </h3>
         <p className="mt-1 flex items-baseline gap-1.5" dir="ltr">
-          <span className="text-[10px] font-medium tracking-wide text-ink/40">
+          <span className="text-[10px] font-medium tracking-wide text-[var(--shop-muted)]">
             يبدأ من
           </span>
           <span className="text-sm font-semibold tabular-nums text-ink/85">
@@ -79,7 +79,7 @@ export function PackageTile({ pkg }: { pkg: ShopPackageCard }) {
         <h3 className="line-clamp-1 font-display text-[0.95rem] font-semibold leading-tight text-ink">
           {pkg.nameAr}
         </h3>
-        <p className="mt-0.5 text-xs text-ink/45">روب + وشاح + قبعة</p>
+        <p className="mt-0.5 text-xs text-[var(--shop-muted)]">روب + وشاح + قبعة</p>
         <p className="mt-1 text-sm font-semibold tabular-nums text-ink/85" dir="ltr">
           {formatIQD(pkg.price)}
         </p>

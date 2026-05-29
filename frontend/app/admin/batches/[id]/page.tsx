@@ -50,7 +50,7 @@ export default function AdminBatchDetailPage() {
           aria-hidden
           className="pointer-events-none absolute -end-8 -top-10 h-28 w-28 rounded-full bg-orange/10 blur-2xl"
         />
-        <p className="relative text-sm font-medium text-ink/55">مجموع الدفعة</p>
+        <p className="relative text-sm font-medium text-ink-soft">مجموع الدفعة</p>
         <p className="relative mt-1.5 font-display text-3xl font-bold tabular-nums text-orange-ink" dir="ltr">
           {formatIQD(batch.grandTotal)}
         </p>
@@ -59,7 +59,7 @@ export default function AdminBatchDetailPage() {
       <div className="surface-card overflow-x-auto rounded-2xl">
         <table className="w-full min-w-[36rem] text-sm">
           <thead className="sticky top-0 z-10">
-            <tr className="border-b border-ink/10 bg-ink/[0.04] text-right text-xs uppercase tracking-wide text-ink/60">
+            <tr className="border-b border-ink/10 bg-ink/[0.04] text-right text-xs uppercase tracking-wide text-[var(--shop-muted)]">
               <th className="px-4 py-3 font-semibold">الاسم</th>
               <th className="px-4 py-3 font-semibold">الاسم الثنائي</th>
               <th className="px-4 py-3 font-semibold">المجموع</th>
@@ -85,7 +85,7 @@ export default function AdminBatchDetailPage() {
                 </td>
                 <td
                   className={`px-4 py-3 font-semibold tabular-nums ${
-                    s.profit != null && s.profit > 0 ? "text-emerald-700" : "text-ink/60"
+                    s.profit != null && s.profit > 0 ? "text-emerald-700" : "text-ink-soft"
                   }`}
                   dir="ltr"
                 >

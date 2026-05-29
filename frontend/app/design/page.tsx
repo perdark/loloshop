@@ -28,7 +28,7 @@ const TextEditor = dynamic(
     loading: () => (
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-cream px-6">
         <Spinner />
-        <p className="text-center text-sm text-ink/60">جارٍ فتح المحرّر…</p>
+        <p className="text-center text-sm text-ink-soft">جارٍ فتح المحرّر…</p>
       </div>
     ),
   }
@@ -182,7 +182,7 @@ export default function DesignPage() {
       )}
 
       {step === 2 && !editingSide && (
-        <p className="px-4 pb-1 text-center text-sm text-ink/60">
+        <p className="px-4 pb-1 text-center text-sm text-ink-soft">
           اضغط على الوشاح في الصورة لتصميم كل جانب
         </p>
       )}
@@ -194,7 +194,7 @@ export default function DesignPage() {
               ← المنتجات
             </Link>
             {!product && (
-              <p className="p-6 text-center text-ink/60">لا يوجد وشاح متاح حالياً</p>
+              <p className="p-6 text-center text-ink-soft">لا يوجد وشاح متاح حالياً</p>
             )}
             {sortedGroups.map((group) => {
               const optionId = getSelectedOptionId(group, selection);
@@ -269,7 +269,7 @@ export default function DesignPage() {
             )}
 
             <div
-              className="mx-auto max-w-md text-center text-xs text-ink/50"
+              className="mx-auto max-w-md text-center text-xs text-[var(--shop-muted)]"
               aria-live="polite"
             >
               {saving

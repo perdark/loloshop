@@ -41,7 +41,7 @@ export function DesignerStepper({ step }: DesignerStepperProps) {
             </div>
             <span
               className={`text-center text-xs leading-tight sm:text-sm ${
-                active ? "font-semibold text-ink" : "text-ink/60"
+                active ? "font-semibold text-ink" : "text-ink-soft"
               }`}
             >
               <span className="sm:hidden">{s.shortLabel}</span>

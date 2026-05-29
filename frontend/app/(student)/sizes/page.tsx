@@ -141,7 +141,7 @@ export default function SizesPage() {
       </section>
 
       {/* Footer note */}
-      <p className="text-center text-xs text-ink/50">
+      <p className="text-center text-xs text-[var(--shop-muted)]">
         الدفع نقداً عند الاستلام — لا دفع إلكتروني
       </p>
     </div>

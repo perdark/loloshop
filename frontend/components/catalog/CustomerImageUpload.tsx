@@ -47,13 +47,13 @@ export function CustomerImageUpload({
         صورة مطلوبة منك
         <span className="text-orange-ink">*</span>
       </p>
-      <p className="mt-1 text-xs leading-relaxed text-ink/55">
+      <p className="mt-1 text-xs leading-relaxed text-ink-soft">
         ارفع صورة مرجعية للطباعة — يختلف عن صورة التوضيح من الأدمن أدناه.
       </p>
 
       {(group.hintAr || hintUrl) && (
         <div className="mt-3 rounded-xl border border-ink/10 bg-beige/80 p-2.5">
-          <p className="text-[11px] font-medium text-ink/50">
+          <p className="text-[11px] font-medium text-[var(--shop-muted)]">
             صورة توضيحية من الأدمن (للتوجيه فقط)
           </p>
           {group.hintAr && (
