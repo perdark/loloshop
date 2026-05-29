@@ -11,7 +11,6 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Select } from "@/components/ui/Select";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
-import { PageLoader } from "@/components/ui/Spinner";
 import { EmptyState } from "@/components/ui/EmptyState";
 
 type SortKey = "profit" | "cost" | "price" | null;
@@ -19,13 +18,26 @@ type SortDir = "asc" | "desc";
 
 function profitColor(profit: number | null | undefined): string {
   if (profit == null) return "text-ink-soft";
-  return profit < 0 ? "text-rose-700" : "text-emerald-700";
+  return profit < 0 ? "text-danger" : "text-ink";
+}
+
+/** Content-shaped skeleton for the orders table while loading. */
+function OrdersTableSkeleton() {
+  return (
+    <div className="space-y-3" aria-hidden>
+      <div className="skeleton h-10 w-full rounded-xl" />
+      {Array.from({ length: 5 }).map((_, i) => (
+        <div key={i} className="skeleton h-14 w-full rounded-xl" />
+      ))}
+    </div>
+  );
 }
 
 export default function AdminOrdersPage() {
   const [orders, setOrders] = useState<AdminOrder[]>([]);
   const [wholesalers, setWholesalers] = useState<AdminWholesaler[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(false);
   const [wholesalerId, setWholesalerId] = useState("");
   const [status, setStatus] = useState<OrderStatus | "">("");
   const [dateFrom, setDateFrom] = useState("");
@@ -37,6 +49,7 @@ export default function AdminOrdersPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setFetchError(false);
     try {
       const [ordersData, wholesalersData] = await Promise.all([
         getAdminOrders({
@@ -56,6 +69,7 @@ export default function AdminOrdersPage() {
       );
     } catch (e) {
       toast.error(getApiErrorMessage(e, "تعذر تحميل الطلبات"));
+      setFetchError(true);
     } finally {
       setLoading(false);
     }
@@ -156,18 +170,25 @@ export default function AdminOrdersPage() {
           value={status}
           onChange={(e) => setStatus(e.target.value as OrderStatus | "")}
         />
-        <Input
-          label="من تاريخ"
-          type="date"
-          value={dateFrom}
-          onChange={(e) => setDateFrom(e.target.value)}
-        />
-        <Input
-          label="إلى تاريخ"
-          type="date"
-          value={dateTo}
-          onChange={(e) => setDateTo(e.target.value)}
-        />
+        {/* RTL-aligned date input: wrapper dir=rtl + text-end keeps the native picker readable */}
+        <div dir="rtl" className="flex flex-col gap-1">
+          <label className="text-xs font-semibold text-muted">من تاريخ</label>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            className="min-h-11 w-full rounded-xl border border-line bg-beige px-3 py-2 text-end text-sm text-ink focus:border-orange-ink focus:outline-none focus:ring-2 focus:ring-orange-ink/15"
+          />
+        </div>
+        <div dir="rtl" className="flex flex-col gap-1">
+          <label className="text-xs font-semibold text-muted">إلى تاريخ</label>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            className="min-h-11 w-full rounded-xl border border-line bg-beige px-3 py-2 text-end text-sm text-ink focus:border-orange-ink focus:outline-none focus:ring-2 focus:ring-orange-ink/15"
+          />
+        </div>
         <div className="flex items-end sm:col-span-2 lg:col-span-4">
           <Button onClick={load} loading={loading}>
             تطبيق الفلاتر
@@ -176,9 +197,23 @@ export default function AdminOrdersPage() {
       </div>
 
       {loading ? (
-        <PageLoader />
+        <OrdersTableSkeleton />
+      ) : fetchError ? (
+        <div className="rounded-2xl border border-danger/25 bg-[var(--shop-sink)] px-6 py-10 text-center">
+          <p className="text-base font-semibold text-ink">تعذر تحميل الطلبات</p>
+          <p className="mt-1 text-sm text-ink-soft">تحقق من اتصالك ثم أعد المحاولة.</p>
+          <Button className="mt-4" onClick={load}>إعادة المحاولة</Button>
+        </div>
       ) : orders.length === 0 ? (
-        <EmptyState message="لا توجد طلبات مطابقة" />
+        <EmptyState
+          title="لا توجد طلبات"
+          message="لا توجد طلبات مطابقة للفلاتر المحددة."
+          action={
+            <Button variant="ghost" onClick={() => { setWholesalerId(""); setStatus(""); setDateFrom(""); setDateTo(""); }}>
+              مسح الفلاتر
+            </Button>
+          }
+        />
       ) : (
         <>
           {/* ── Desktop table ── */}
@@ -227,11 +262,11 @@ export default function AdminOrdersPage() {
                     className="border-b border-ink/5 transition-colors odd:bg-cream/40 last:border-0 hover:bg-peach/25"
                   >
                     <td className="px-4 py-3 font-medium text-ink">{order.studentName}</td>
-                    <td className="px-4 py-3 text-ink/80">
+                    <td className="px-4 py-3 text-ink-soft">
                       {order.productName}
                     </td>
-                    <td className="px-4 py-3 tabular-nums text-ink/80" dir="ltr">{formatIQD(order.price)}</td>
-                    <td className="px-4 py-3 tabular-nums text-ink/80" dir="ltr">
+                    <td className="px-4 py-3 tabular-nums text-ink-soft" dir="ltr">{formatIQD(order.price)}</td>
+                    <td className="px-4 py-3 tabular-nums text-ink-soft" dir="ltr">
                       {order.cost != null ? formatIQD(order.cost) : "—"}
                     </td>
                     {/* Fix 1: profit color driven by value */}
@@ -242,11 +277,11 @@ export default function AdminOrdersPage() {
                       {order.profit != null ? formatIQD(order.profit) : "—"}
                     </td>
                     <td className="px-4 py-3">
-                      <span className="inline-flex rounded-full bg-ink/[0.06] px-2.5 py-1 text-xs font-medium text-ink/70">
+                      <span className="inline-flex rounded-full bg-ink/[0.06] px-2.5 py-1 text-xs font-medium text-muted">
                         {ORDER_STATUS_LABELS[order.status]}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-ink/70">{order.wholesalerName}</td>
+                    <td className="px-4 py-3 text-ink-soft">{order.wholesalerName}</td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap items-center gap-2">
                         {/* Fix 4 + Fix 5: digits-only input, aria-label */}
@@ -275,13 +310,13 @@ export default function AdminOrdersPage() {
               {/* Fix 2: totals footer row */}
               <tfoot>
                 <tr className="border-t-2 border-ink/20 bg-ink/[0.04] font-semibold text-sm">
-                  <td className="px-4 py-3 text-ink/70" colSpan={2}>
+                  <td className="px-4 py-3 text-muted" colSpan={2}>
                     الإجمالي ({sortedOrders.length} طلب)
                   </td>
-                  <td className="px-4 py-3 tabular-nums text-ink/80" dir="ltr">
+                  <td className="px-4 py-3 tabular-nums text-ink-soft" dir="ltr">
                     {formatIQD(totalPrice)}
                   </td>
-                  <td className="px-4 py-3 tabular-nums text-ink/80" dir="ltr">
+                  <td className="px-4 py-3 tabular-nums text-ink-soft" dir="ltr">
                     {formatIQD(totalCost)}
                   </td>
                   <td

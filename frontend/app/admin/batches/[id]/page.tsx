@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { toast } from "sonner";
@@ -8,22 +8,50 @@ import { BatchCountdown } from "@/components/catalog/BatchCountdown";
 import { getBatch } from "@/lib/batches";
 import { formatIQD } from "@/lib/format";
 import type { BatchDetail } from "@/lib/types";
-import { PageLoader } from "@/components/ui/Spinner";
+import { Button } from "@/components/ui/Button";
 
 export default function AdminBatchDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [batch, setBatch] = useState<BatchDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     if (!id) return;
+    setLoading(true);
+    setError(false);
     getBatch(id)
       .then(setBatch)
-      .catch(() => toast.error("تعذر تحميل الدفعة"))
+      .catch(() => { toast.error("تعذر تحميل الدفعة"); setError(true); })
       .finally(() => setLoading(false));
   }, [id]);
 
-  if (loading || !batch) return <PageLoader />;
+  useEffect(() => {
+    load();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
+  if (loading) return (
+    <div dir="rtl" lang="ar" className="space-y-6 animate-fade-page-in">
+      <div className="skeleton h-5 w-24 rounded-full" />
+      <div className="skeleton h-8 w-64" />
+      <div className="skeleton h-20 w-full rounded-2xl" />
+      <div className="skeleton h-64 w-full rounded-2xl" />
+    </div>
+  );
+
+  if (error || !batch) return (
+    <div dir="rtl" lang="ar" className="space-y-4">
+      <Link href="/admin/batches" className="inline-flex items-center gap-1 text-sm font-medium text-orange-ink hover:text-orange">
+        <span aria-hidden>←</span> الدفعات
+      </Link>
+      <div className="rounded-2xl border border-danger/25 bg-[var(--shop-sink)] px-6 py-10 text-center">
+        <p className="text-base font-semibold text-ink">تعذر تحميل الدفعة</p>
+        <p className="mt-1 text-sm text-ink-soft">تحقق من اتصالك ثم أعد المحاولة.</p>
+        <Button className="mt-4" onClick={load}>إعادة المحاولة</Button>
+      </div>
+    </div>
+  );
 
   return (
     <div dir="rtl" lang="ar" className="space-y-6">
@@ -37,21 +65,16 @@ export default function AdminBatchDetailPage() {
       <div className="relative ps-3.5">
         <span
           aria-hidden
-          className="absolute bottom-1 start-0 top-1 w-1 rounded-full bg-brand-gradient"
+          className="absolute bottom-1 start-0 top-1 w-1 rounded-full bg-orange-ink"
         />
         <h1 className="font-display text-2xl font-bold leading-tight text-ink lg:text-3xl">{batch.nameAr}</h1>
       </div>
 
       {batch.deadline && <BatchCountdown deadline={batch.deadline} />}
 
-      <div className="surface-card relative overflow-hidden rounded-2xl p-5 text-center">
-        <span aria-hidden className="absolute inset-x-0 top-0 h-1 bg-brand-gradient" />
-        <span
-          aria-hidden
-          className="pointer-events-none absolute -end-8 -top-10 h-28 w-28 rounded-full bg-orange/10 blur-2xl"
-        />
-        <p className="relative text-sm font-medium text-ink-soft">مجموع الدفعة</p>
-        <p className="relative mt-1.5 font-display text-3xl font-bold tabular-nums text-orange-ink" dir="ltr">
+      <div className="surface-card rounded-2xl border border-line p-5 text-center">
+        <p className="text-sm font-medium text-ink-soft">مجموع الدفعة</p>
+        <p className="mt-1.5 font-display text-3xl font-bold tabular-nums text-orange-ink" dir="ltr">
           {formatIQD(batch.grandTotal)}
         </p>
       </div>
@@ -74,18 +97,18 @@ export default function AdminBatchDetailPage() {
                 className="border-b border-ink/5 transition-colors odd:bg-cream/40 last:border-0 hover:bg-peach/25"
               >
                 <td className="px-4 py-3 font-medium text-ink">{s.name}</td>
-                <td className="px-4 py-3 text-ink/70">
+                <td className="px-4 py-3 text-ink-soft">
                   {s.fullNameThird || "—"}
                 </td>
-                <td className="px-4 py-3 tabular-nums text-ink/80" dir="ltr">
+                <td className="px-4 py-3 tabular-nums text-ink-soft" dir="ltr">
                   {formatIQD(s.total)}
                 </td>
-                <td className="px-4 py-3 tabular-nums text-ink/80" dir="ltr">
+                <td className="px-4 py-3 tabular-nums text-ink-soft" dir="ltr">
                   {s.cost != null ? formatIQD(s.cost) : "—"}
                 </td>
                 <td
                   className={`px-4 py-3 font-semibold tabular-nums ${
-                    s.profit != null && s.profit > 0 ? "text-emerald-700" : "text-ink-soft"
+                    s.profit != null && s.profit < 0 ? "text-danger" : "text-ink"
                   }`}
                   dir="ltr"
                 >

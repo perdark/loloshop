@@ -6,7 +6,6 @@ import { useParams } from "next/navigation";
 import { toast } from "sonner";
 import { api, getApiErrorMessage } from "@/lib/api";
 import type { OrderStatus, StudentApprovalStatus, WholesalerStudentRow } from "@/lib/types";
-import { PageLoader } from "@/components/ui/Spinner";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { StatCard } from "@/components/ui/StatCard";
 import { Button } from "@/components/ui/Button";
@@ -53,6 +52,8 @@ export default function AdminWholesalerStudentsPage() {
   const { wholesalerId } = useParams<{ wholesalerId: string }>();
   const [rows, setRows] = useState<WholesalerStudentRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
 
   // filter state
   const [search, setSearch] = useState("");
@@ -64,6 +65,7 @@ export default function AdminWholesalerStudentsPage() {
     if (!wholesalerId) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- initial fetch
     setLoading(true);
+    setFetchError(false);
     api
       .get<{ data: ApiRow[] }>(`/admin/wholesalers/${wholesalerId}/students`)
       .then(({ data }) => {
@@ -80,9 +82,12 @@ export default function AdminWholesalerStudentsPage() {
           }))
         );
       })
-      .catch((err) => toast.error(getApiErrorMessage(err, "تعذر تحميل الطلاب")))
+      .catch((err) => {
+        toast.error(getApiErrorMessage(err, "تعذر تحميل الطلاب"));
+        setFetchError(true);
+      })
       .finally(() => setLoading(false));
-  }, [wholesalerId]);
+  }, [wholesalerId, retryKey]);
 
   // reset page whenever filters change (adjust state during render — no effect)
   const filtersKey = `${search}|${statusFilter}|${completion}`;
@@ -121,7 +126,36 @@ export default function AdminWholesalerStudentsPage() {
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  if (loading) return <PageLoader />;
+  if (loading) return (
+    <div dir="rtl" lang="ar" className="space-y-5 animate-fade-page-in">
+      <div className="skeleton h-5 w-24 rounded-full" />
+      <div className="skeleton h-10 w-48" />
+      <div className="grid grid-cols-3 gap-3">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="skeleton h-20 rounded-2xl" />
+        ))}
+      </div>
+      <div className="skeleton h-64 w-full rounded-2xl" />
+    </div>
+  );
+
+  if (fetchError) return (
+    <div dir="rtl" lang="ar" className="space-y-5">
+      <Link
+        href="/admin/wholesalers"
+        className="inline-flex items-center gap-1 text-sm font-medium text-orange-ink transition-colors hover:text-orange"
+      >
+        <span aria-hidden>←</span> الممثلون
+      </Link>
+      <div className="rounded-2xl border border-danger/25 bg-[var(--shop-sink)] px-6 py-10 text-center">
+        <p className="text-base font-semibold text-ink">تعذر تحميل الطلاب</p>
+        <p className="mt-1 text-sm text-ink-soft">تحقق من اتصالك ثم أعد المحاولة.</p>
+        <Button className="mt-4" onClick={() => setRetryKey((k) => k + 1)}>
+          إعادة المحاولة
+        </Button>
+      </div>
+    </div>
+  );
 
   return (
     <div dir="rtl" lang="ar" className="space-y-5">
@@ -135,7 +169,7 @@ export default function AdminWholesalerStudentsPage() {
       <div className="relative ps-3.5">
         <span
           aria-hidden
-          className="absolute bottom-1 start-0 top-1 w-1 rounded-full bg-brand-gradient"
+          className="absolute bottom-1 start-0 top-1 w-[3px] rounded-full bg-orange-ink"
         />
         <h1 className="font-display text-2xl font-bold leading-tight text-ink lg:text-3xl">طلاب الممثل</h1>
         <p className="mt-1 text-sm text-ink-soft">قائمة الطلاب وحالات الموافقة والاكتمال</p>
@@ -223,13 +257,13 @@ export default function AdminWholesalerStudentsPage() {
                     className="border-b border-ink/5 transition-colors odd:bg-cream/40 last:border-0 hover:bg-peach/25"
                   >
                     <td className="px-4 py-3 font-medium text-ink">{s.name}</td>
-                    <td className="px-4 py-3 tabular-nums text-ink/70" dir="ltr">
+                    <td className="px-4 py-3 tabular-nums text-ink-soft" dir="ltr">
                       {s.phone}
                     </td>
-                    <td className="px-4 py-3 text-ink/70">
+                    <td className="px-4 py-3 text-ink-soft">
                       {statusLabel(s.status)}
                     </td>
-                    <td className="px-4 py-3 text-ink/70">
+                    <td className="px-4 py-3 text-ink-soft">
                       {s.universityName || "—"}
                       {s.department ? ` — ${s.department}` : ""}
                     </td>
@@ -237,8 +271,8 @@ export default function AdminWholesalerStudentsPage() {
                       <span
                         className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
                           s.isCompleted
-                            ? "bg-emerald-500/12 text-emerald-700"
-                            : "bg-ink/[0.06] text-[var(--shop-muted)]"
+                            ? "bg-orange-ink/10 text-orange-ink"
+                            : "bg-ink/[0.06] text-muted"
                         }`}
                       >
                         {s.isCompleted ? "مكتمل" : "غير مكتمل"}
@@ -262,22 +296,14 @@ export default function AdminWholesalerStudentsPage() {
             </table>
           </div>
 
-          {/* Pagination */}
+          {/* Pagination — RTL: next page is ← (forward in RTL), prev page is → */}
           {totalPages > 1 && (
             <div className="flex items-center justify-between gap-3 pt-1 text-sm">
               <span className="text-ink-soft">
                 {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} من {filtered.length}
               </span>
               <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={page === 1}
-                  onClick={() => setPage((p) => p - 1)}
-                  aria-label="الصفحة السابقة"
-                >
-                  ›
-                </Button>
+                {/* next page: goes to higher page number → RTL visually is ← */}
                 <Button
                   size="sm"
                   variant="ghost"
@@ -285,7 +311,17 @@ export default function AdminWholesalerStudentsPage() {
                   onClick={() => setPage((p) => p + 1)}
                   aria-label="الصفحة التالية"
                 >
-                  ‹
+                  ←
+                </Button>
+                {/* prev page: goes to lower page number → RTL visually is → */}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={page === 1}
+                  onClick={() => setPage((p) => p - 1)}
+                  aria-label="الصفحة السابقة"
+                >
+                  →
                 </Button>
               </div>
             </div>

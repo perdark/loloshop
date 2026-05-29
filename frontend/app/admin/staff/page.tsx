@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
-import { PageLoader } from "@/components/ui/Spinner";
 import { getApiErrorMessage } from "@/lib/api";
 import type { User } from "@/lib/types";
 import {
@@ -20,8 +19,10 @@ import {
 export default function AdminStaffPage() {
   const [rows, setRows] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
   const [selected, setSelected] = useState<User | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -34,11 +35,13 @@ export default function AdminStaffPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setFetchError(false);
     try {
       const data = await getAdminStaff();
       setRows(data);
     } catch (err) {
       toast.error(getApiErrorMessage(err, "تعذر تحميل الموظفين"));
+      setFetchError(true);
     } finally {
       setLoading(false);
     }
@@ -90,7 +93,27 @@ export default function AdminStaffPage() {
     }
   }
 
-  if (loading) return <PageLoader />;
+  if (loading) return (
+    <div dir="rtl" lang="ar" className="space-y-6 animate-fade-page-in">
+      <div className="skeleton h-9 w-40" />
+      <div className="space-y-3">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="skeleton h-20 w-full rounded-2xl" />
+        ))}
+      </div>
+    </div>
+  );
+
+  if (fetchError) return (
+    <div dir="rtl" lang="ar" className="space-y-4">
+      <PageHeader title="الموظفون" subtitle="إدارة حسابات الموظفين" />
+      <div className="rounded-2xl border border-danger/25 bg-[var(--shop-sink)] px-6 py-10 text-center">
+        <p className="text-base font-semibold text-ink">تعذر تحميل الموظفين</p>
+        <p className="mt-1 text-sm text-ink-soft">تحقق من اتصالك ثم أعد المحاولة.</p>
+        <Button className="mt-4" onClick={load}>إعادة المحاولة</Button>
+      </div>
+    </div>
+  );
 
   return (
     <div dir="rtl" lang="ar">
@@ -138,16 +161,7 @@ export default function AdminStaffPage() {
                   </Button>
                   <Button
                     variant="danger"
-                    onClick={async () => {
-                      if (!confirm(`حذف الموظف ${u.name}؟`)) return;
-                      try {
-                        await deleteStaff(u.id);
-                        toast.success("تم حذف الموظف");
-                        load();
-                      } catch (err) {
-                        toast.error(getApiErrorMessage(err, "تعذر حذف الموظف"));
-                      }
-                    }}
+                    onClick={() => setDeleteTarget(u)}
                   >
                     حذف
                   </Button>
@@ -224,6 +238,42 @@ export default function AdminStaffPage() {
           value={newPassword}
           onChange={(e) => setNewPassword(e.target.value)}
         />
+      </Modal>
+
+      {/* ── Confirm: delete staff ── */}
+      <Modal
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        title="تأكيد حذف الموظف"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setDeleteTarget(null)}>إلغاء</Button>
+            <Button
+              variant="danger"
+              loading={submitting}
+              onClick={async () => {
+                if (!deleteTarget) return;
+                setSubmitting(true);
+                try {
+                  await deleteStaff(deleteTarget.id);
+                  toast.success("تم حذف الموظف");
+                  setDeleteTarget(null);
+                  load();
+                } catch (err) {
+                  toast.error(getApiErrorMessage(err, "تعذر حذف الموظف"));
+                } finally {
+                  setSubmitting(false);
+                }
+              }}
+            >
+              حذف «{deleteTarget?.name}»
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-ink-soft">
+          سيُحذف حساب الموظف «{deleteTarget?.name}» نهائياً. لا يمكن التراجع.
+        </p>
       </Modal>
     </div>
   );
