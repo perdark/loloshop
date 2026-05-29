@@ -3,12 +3,23 @@ import { ORDER_STATUS_LABELS } from "@/lib/constants";
 import { formatDateShort } from "@/lib/format";
 import type { StaffOrder } from "@/lib/staff-types";
 
-const STATUS_COLORS: Partial<Record<string, string>> = {
-  design_complete: "bg-amber-100 text-amber-900",
-  staff_review: "bg-blue-100 text-blue-900",
-  printing: "bg-orange/15 text-orange-ink",
-  ready: "bg-emerald-100 text-emerald-900",
-  delivered: "bg-ink/10 text-ink",
+/**
+ * Status badge classes using only palette tokens (no raw amber/blue/emerald/red).
+ *
+ * Scheme:
+ *   - Active / in-progress states → orange-ink accent (warm, earned)
+ *   - Neutral / waiting states    → ink-soft on surface-sink (quiet)
+ *   - Delivered / done            → muted on surface-sink
+ *   - Cancelled / problem         → danger token (warm brick)
+ */
+const STATUS_BADGE: Partial<Record<string, string>> = {
+  design_complete: "bg-surface-sink text-orange-ink border border-orange-ink/30",
+  staff_review:    "bg-orange-ink/10 text-orange-ink border border-orange-ink/25",
+  printing:        "bg-orange-ink/15 text-orange-ink border border-orange-ink/30",
+  ready:           "bg-surface-sink text-ink-soft border border-line",
+  delivered:       "bg-surface-sink text-muted border border-line",
+  designing:       "bg-surface-sink text-ink-soft border border-line",
+  cancelled:       "bg-danger/8 text-danger border border-danger/25",
 };
 
 interface OrderCardProps {
@@ -16,13 +27,12 @@ interface OrderCardProps {
 }
 
 export function OrderCard({ order }: OrderCardProps) {
-  const badge =
-    STATUS_COLORS[order.status] || "bg-ink/10 text-ink";
+  const badge = STATUS_BADGE[order.status] ?? "bg-surface-sink text-ink-soft border border-line";
 
   return (
     <Link
       href={`/staff/orders/${order.id}`}
-      className="card-lift block h-full rounded-2xl border border-ink/10 bg-white p-4 shadow-[var(--shadow-soft)] transition-all hover:border-orange/40"
+      className="card-lift block h-full rounded-2xl border border-line bg-surface p-4 shadow-[var(--shadow-soft)] transition-all hover:border-orange-ink/30 hover:shadow-[var(--shadow-float)]"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
@@ -33,15 +43,15 @@ export function OrderCard({ order }: OrderCardProps) {
             {order.universityName || "—"}
             {order.department ? ` · ${order.department}` : ""}
           </p>
-          <p className="mt-1 text-xs text-[var(--shop-muted)]">{order.productName}</p>
+          <p className="mt-1 text-xs text-muted">{order.productName}</p>
         </div>
         <span
-          className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${badge}`}
+          className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${badge}`}
         >
           {ORDER_STATUS_LABELS[order.status]}
         </span>
       </div>
-      <p className="mt-3 border-t border-ink/5 pt-3 text-xs text-[var(--shop-muted)]">
+      <p className="mt-3 border-t border-line pt-3 text-xs text-muted">
         {formatDateShort(order.createdAt)}
       </p>
     </Link>

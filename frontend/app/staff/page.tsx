@@ -31,19 +31,33 @@ const FILTER_TITLES: Record<StaffListFilter, { title: string; subtitle: string }
     },
   };
 
+/** Content-shaped skeleton: mimics the order card grid */
+function OrderListSkeleton() {
+  return (
+    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3" aria-hidden>
+      {Array.from({ length: 6 }).map((_, i) => (
+        <div key={i} className="skeleton h-28 w-full rounded-2xl" />
+      ))}
+    </div>
+  );
+}
+
 function StaffOrdersContent() {
   const searchParams = useSearchParams();
   const filter = (searchParams.get("filter") || "all") as StaffListFilter;
   const [orders, setOrders] = useState<StaffOrder[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setFetchError(false);
     try {
       const data = await getStaffOrders(filter);
       setOrders(data);
     } catch {
       toast.error("تعذر تحميل الطلبات");
+      setFetchError(true);
     } finally {
       setLoading(false);
     }
@@ -57,7 +71,7 @@ function StaffOrdersContent() {
   const meta = FILTER_TITLES[filter] || FILTER_TITLES.all;
 
   return (
-    <div>
+    <div dir="rtl" lang="ar">
       <PageHeader
         title={meta.title}
         subtitle={meta.subtitle}
@@ -69,9 +83,15 @@ function StaffOrdersContent() {
       />
 
       {loading ? (
-        <PageLoader />
+        <OrderListSkeleton />
+      ) : fetchError ? (
+        <div className="rounded-2xl border border-[var(--color-danger)]/25 bg-[var(--shop-sink)] px-6 py-10 text-center">
+          <p className="text-base font-semibold text-ink">تعذر تحميل الطلبات</p>
+          <p className="mt-1 text-sm text-ink-soft">تحقق من اتصالك ثم أعد المحاولة.</p>
+          <Button className="mt-4" onClick={load}>إعادة المحاولة</Button>
+        </div>
       ) : orders.length === 0 ? (
-        <EmptyState message="لا توجد طلبات في هذه القائمة" />
+        <EmptyState message="لا توجد طلبات في هذه القائمة حالياً." />
       ) : (
         <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {orders.map((order) => (

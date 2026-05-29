@@ -25,11 +25,12 @@ function StaffShell({ children }: { children: React.ReactNode }) {
       </Suspense>
 
       <div className="lg:ms-64">
-        <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-ink/10 bg-cream/85 px-4 py-3 backdrop-blur-md lg:hidden">
+        {/* Mobile header — flat bg-cream (no backdrop-blur for low-end Android perf) */}
+        <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-line bg-cream px-4 py-3 lg:hidden">
           <button
             type="button"
             onClick={() => setSidebarOpen(true)}
-            className="flex h-11 w-11 items-center justify-center rounded-xl border border-ink/15 bg-white text-ink shadow-[var(--shadow-soft)] transition-colors hover:border-orange/40 hover:text-orange-ink"
+            className="flex h-11 w-11 items-center justify-center rounded-xl border border-line bg-surface text-ink shadow-[var(--shadow-soft)] transition-colors hover:border-orange-ink/40 hover:text-orange-ink"
             aria-label="فتح القائمة"
           >
             <svg
