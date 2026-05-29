@@ -12,14 +12,14 @@ interface StatCardProps {
 
 export function StatCard({ label, value, accent = "default", icon, hint }: StatCardProps) {
   return (
-    <div className="rounded-2xl border border-ink/10 bg-beige p-5">
-      <div className="flex items-center justify-between gap-3 border-b border-ink/10 pb-3">
+    <div className="rounded-2xl border border-line bg-beige p-5">
+      <div className="flex items-center justify-between gap-3 border-b border-line pb-3">
         <p className="text-sm font-medium text-ink-soft">{label}</p>
-        {icon && <span aria-hidden className="text-ink/35">{icon}</span>}
+        {icon && <span aria-hidden className="text-muted">{icon}</span>}
       </div>
       <p
         className={`mt-3 text-[2rem] font-bold leading-none tabular-nums ${
-          accent === "profit" ? "text-emerald-700" : "text-ink"
+          accent === "profit" ? "text-orange-ink" : "text-ink"
         }`}
       >
         {value}

@@ -318,6 +318,16 @@ body {
   opacity: 1;
   transform: none;
 }
+/* No-JS / reduced-motion safety: the IntersectionObserver-driven .reveal starts
+   at opacity:0, so it must never strand content invisible when JS is disabled or
+   the user prefers reduced motion. (The .scroll-reveal variants are pure CSS
+   scroll-timeline and need no JS, so they're already safe.) */
+@media (prefers-reduced-motion: reduce) {
+  .reveal { opacity: 1; transform: none; transition: none; }
+}
+@media (scripting: none) {
+  .reveal { opacity: 1; transform: none; }
+}
 
 /* ─── Scroll-driven cinematic motion (Stage M) ───
    Native CSS scroll-driven animations: GPU, NO JavaScript (ideal for low-end

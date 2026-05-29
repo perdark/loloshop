@@ -54,7 +54,7 @@ export function BrandLogo({
     <span className={`flex items-center gap-2.5 ${className}`}>
       <BrandMark size={size} priority={priority} />
       {withWordmark && (
-        <span className="font-display text-sm font-semibold tracking-wide text-ink/75">
+        <span className="font-display text-sm font-semibold tracking-wide text-ink-soft">
           لولو شوب — أزياء التخرج
         </span>
       )}
