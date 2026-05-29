@@ -95,4 +95,50 @@ export async function resendLoginOtp(phone: string): Promise<void> {
   }
 }
 
+// Open retail sign-up: creates a pre-approved student and sends a WhatsApp
+// verify OTP. Returns the new user id; caller then verifies the OTP.
+export async function register(body: {
+  name: string;
+  phone: string;
+  password: string;
+  email?: string;
+  gender?: "male" | "female";
+  university_name?: string;
+  department?: string;
+}): Promise<{ user_id: string; otp_required: boolean }> {
+  try {
+    const { data } = await api.post<{
+      data: { user_id: string; otp_required: boolean };
+    }>("/auth/register", body);
+    return data.data;
+  } catch (e) {
+    throw new Error(extractMessage(e, "تعذّر إنشاء الحساب"));
+  }
+}
+
+// Confirms the post-register OTP (purpose 'verify') and returns the auth token
+// so the caller can auto-login. Mirrors verifyOtp but surfaces the token.
+export async function verifyRegistrationOtp(
+  phone: string,
+  code: string
+): Promise<{ token: string }> {
+  try {
+    const { data } = await api.post<{ verified: boolean; token: string }>(
+      "/auth/verify-otp",
+      { phone, code }
+    );
+    return { token: data.token };
+  } catch (e) {
+    throw new Error(extractMessage(e, "رمز غير صحيح"));
+  }
+}
+
+export async function resendVerifyOtp(phone: string): Promise<void> {
+  try {
+    await api.post("/auth/resend-otp", { phone, purpose: "verify" });
+  } catch (e) {
+    throw new Error(extractMessage(e, "تعذّر إرسال الرمز"));
+  }
+}
+
 export { getApiErrorMessage };
