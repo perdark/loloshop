@@ -21,7 +21,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
           ref={ref}
           id={selectId}
           aria-invalid={error ? true : undefined}
-          className={`min-h-11 w-full appearance-none rounded-xl border bg-white bg-[length:1.1rem] bg-[position:left_0.85rem_center] bg-no-repeat py-2.5 pe-9 ps-3.5 text-ink shadow-[var(--shadow-soft)] outline-none transition-all duration-200 hover:border-orange/40 focus:border-orange focus:ring-4 focus:ring-orange/15 ${error ? "border-red-500" : "border-ink/15"} ${className}`}
+          className={`min-h-11 w-full appearance-none rounded-xl border bg-beige bg-[length:1.1rem] bg-[position:left_0.85rem_center] bg-no-repeat py-2.5 pe-9 ps-3.5 text-ink shadow-[var(--shadow-soft)] outline-none transition-colors duration-200 hover:border-ink/30 focus:border-orange-ink focus:ring-2 focus:ring-orange-ink/20 ${error ? "border-danger" : "border-line"} ${className}`}
           style={{
             backgroundImage:
               "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='%23c2410c' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E\")",
@@ -34,7 +34,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
             </option>
           ))}
         </select>
-        {error && <p className="text-xs text-red-600">{error}</p>}
+        {error && <p className="text-xs text-danger">{error}</p>}
       </div>
     );
   }

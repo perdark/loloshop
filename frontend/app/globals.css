@@ -8,25 +8,31 @@
      Keep --color-orange for large fills/buttons only. */
   --color-orange-ink: #c2410c;
 
+  /* Danger: warm, ink-leaning brick — never candy red (DESIGN.md: no red floods).
+     ~5.6:1 on paper, AA for text + borders. Used as accent, not a fill at rest. */
+  --color-danger: #a3372a;
+
   /* --- Soft accents --- */
   --color-peach: #ffdab9;
   --color-blush: #ffe4e1;
 
-  /* --- Backgrounds --- */
-  --color-cream: #faebd7;
-  --color-beige: #f5f5dc;
+  /* --- Backgrounds: "Graduation Lookbook" — warm paper + ink (DESIGN.md) --- */
+  --color-cream: #faf4ea;        /* warm paper — page canvas */
+  --color-beige: #fffdfa;        /* raised surface — cards, sheets, inputs */
+  --color-surface: #fffdfa;      /* semantic alias of beige */
+  --color-surface-sink: #f5f0e6; /* recessed bands — half a step below paper */
 
   /* --- Ink / text --- */
   --color-ink: #1a1a1a;
-  --color-ink-soft: #333333;
-  /* WCAG floor: white text on --color-cream (#faebd7) requires ≥4.5:1.
-     --color-ink/65 opacity lands at ~5.08:1 — that is the minimum opacity for
-     body copy. Never use ink below /65 on cream for real text (labels, captions).
-     Icon-only / decorative chrome is exempt. */
+  --color-ink-soft: #33302b;     /* warm soft ink — default body reading color */
+  --color-muted: #6b6356;        /* labels / metadata only — ~4.6:1 on paper (AA) */
+  /* WCAG: body copy is --color-ink-soft on paper (passes AA). --color-muted is a
+     label/large-text color only — never set body text in muted. */
 
-  /* --- Neutrals --- */
-  --color-neutral: #e0e0e0;
-  --color-neutral-dark: #bdbdbd;
+  /* --- Neutrals (warm-tinted, never cold gray) --- */
+  --color-line: #e3ddd0;         /* hairline borders / dividers */
+  --color-neutral: #e3ddd0;      /* back-compat alias → line */
+  --color-neutral-dark: #c9c0b0;
 
   /* --- Back-compat aliases --- */
   /* NOTE: --color-amber was the old stale value (#ff8c00) from brand-tokens.css.
@@ -43,15 +49,22 @@
   --font-display-ar: var(--font-amiri), serif; /* explicit Arabic display — Amiri only */
   --font-script: var(--font-great-vibes), cursive;
 
-  /* --- Elevation: warm-tinted shadows (utilities shadow-soft / shadow-card / shadow-float / shadow-pop) --- */
-  --shadow-soft: 0 1px 2px rgba(26, 26, 26, 0.04), 0 1px 3px rgba(26, 26, 26, 0.06);
-  --shadow-card: 0 2px 6px -2px rgba(26, 26, 26, 0.08), 0 6px 18px -8px rgba(194, 65, 12, 0.14);
-  --shadow-float: 0 8px 24px -10px rgba(194, 65, 12, 0.22), 0 2px 8px -4px rgba(26, 26, 26, 0.08);
-  --shadow-pop: 0 18px 48px -18px rgba(194, 65, 12, 0.36), 0 6px 16px -8px rgba(26, 26, 26, 0.12);
+  /* --- Elevation: ink-toned shadows only (DESIGN.md "Ink-Not-Orange Shadow Rule") --- */
+  --shadow-soft: 0 1px 2px rgba(26, 26, 26, 0.05), 0 1px 3px rgba(26, 26, 26, 0.07);
+  --shadow-card: 0 2px 8px -3px rgba(26, 26, 26, 0.10), 0 12px 30px -16px rgba(26, 26, 26, 0.14);
+  --shadow-float: 0 10px 26px -12px rgba(26, 26, 26, 0.18), 0 3px 10px -5px rgba(26, 26, 26, 0.10);
+  --shadow-pop: 0 22px 52px -22px rgba(26, 26, 26, 0.30), 0 8px 20px -10px rgba(26, 26, 26, 0.14);
 
   /* --- Radii --- */
   --radius-card: 1.25rem;
   --radius-pill: 9999px;
+}
+
+/* Lookbook custom props resolvable everywhere (not only under .shop-paper),
+   since admin/wholesaler/staff now inherit the unified palette globally. */
+:root {
+  --shop-sink: var(--color-surface-sink);
+  --shop-muted: var(--color-muted);
 }
 
 /* ── Student storefront: "The Graduation Lookbook" palette ──
@@ -134,26 +147,25 @@
 .hover-lift:hover { transform: translateY(-2px); box-shadow: var(--shadow-float); }
 .hover-lift:active { transform: translateY(0); }
 
-/* Warm gradient text — for hero numerals / accents */
+/* DESIGN.md bans gradient text — neutralized to solid burnt orange so existing
+   usages stay compliant without breaking. Emphasize with weight/size, not gradient. */
 .text-gradient-brand {
-  background-image: linear-gradient(120deg, var(--color-orange-ink), var(--color-orange) 55%, var(--color-orange-light));
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  color: var(--color-orange-ink);
 }
 
 /* Premium raised surface used by cards / panels */
 .surface-card {
-  background: linear-gradient(180deg, #fffdfa, var(--color-beige));
-  border: 1px solid rgba(194, 65, 12, 0.10);
+  background: linear-gradient(180deg, var(--color-surface), var(--color-beige));
+  border: 1px solid var(--color-line);
   box-shadow: var(--shadow-card);
 }
 
-/* Frosted sticky bars */
+/* Sticky bars — near-opaque warm surface, not default glassmorphism (DESIGN.md).
+   Light blur only; heavy backdrop-filter is costly on low-end Android. */
 .surface-glass {
-  background: color-mix(in srgb, var(--color-beige) 82%, transparent);
-  backdrop-filter: blur(12px) saturate(1.1);
-  -webkit-backdrop-filter: blur(12px) saturate(1.1);
+  background: color-mix(in srgb, var(--color-surface) 92%, transparent);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
 }
 
 /* Richer hero gradient with depth (overrides flat for hero use).
