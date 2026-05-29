@@ -286,6 +286,11 @@ body {
   from { opacity: 0; transform: translateY(24px) scale(0.97); }
   to   { opacity: 1; transform: translateY(0) scale(1); }
 }
+/* Hero headline — lines rise like an opening title card. */
+@keyframes hero-line {
+  from { opacity: 0; transform: translateY(0.55em); }
+  to   { opacity: 1; transform: none; }
+}
 
 .animate-page-in {
   animation: page-slide-up 0.38s cubic-bezier(0.22, 1, 0.36, 1) both;
@@ -312,6 +317,52 @@ body {
 .reveal-in {
   opacity: 1;
   transform: none;
+}
+
+/* ─── Scroll-driven cinematic motion (Stage M) ───
+   Native CSS scroll-driven animations: GPU, NO JavaScript (ideal for low-end
+   Android), and they auto-stagger because each element enters the viewport at
+   a different scroll position. Guarded by @supports so unsupported browsers
+   simply show content (never invisible), and fully disabled under reduced-motion. */
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    /* Sections + tiles rise and settle as they scroll into view. */
+    .scroll-reveal {
+      animation: sr-rise linear both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 42%;
+      will-change: opacity, transform;
+    }
+    /* A gentler variant for large hero blocks. */
+    .scroll-reveal-soft {
+      animation: sr-fade linear both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 30%;
+    }
+    /* Editorial photo parallax — image drifts within an overflow-hidden frame
+       across the whole time it's in view. Pair with .parallax-frame. */
+    .parallax-photo {
+      animation: sr-parallax linear both;
+      animation-timeline: view();
+      animation-range: cover;
+      will-change: transform;
+    }
+  }
+}
+.parallax-frame {
+  overflow: hidden;
+}
+@keyframes sr-rise {
+  from { opacity: 0; transform: translateY(42px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes sr-fade {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes sr-parallax {
+  from { transform: translateY(-7%) scale(1.12); }
+  to   { transform: translateY(7%) scale(1.12); }
 }
 
 /* Slow living-photo drift for editorial hero tiles — reads as video */

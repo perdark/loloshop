@@ -133,10 +133,16 @@ export default function StudentHomePage() {
       <ShopCover slide={heroSlide} />
 
       {/* Brand story — feel the house (handmade · milestone · made to order)
-          before the catalog. Renders even when the store is empty. */}
-      <AtelierStory />
-      <MilestoneStory />
-      <DesignProcess />
+          before the catalog. Each reveals like a film frame as it scrolls in. */}
+      <div className="scroll-reveal">
+        <AtelierStory />
+      </div>
+      <div className="scroll-reveal">
+        <MilestoneStory />
+      </div>
+      <div className="scroll-reveal">
+        <DesignProcess />
+      </div>
 
       {/* Whole catalog still empty — the cover and designer carry the page. */}
       {!hasAnyProduct && !hasPackages ? (
@@ -150,21 +156,23 @@ export default function StudentHomePage() {
         <>
           {/* Packages first — the full graduation look */}
           {showPackages && (
-            <section className="space-y-4">
+            <section className="scroll-reveal space-y-4">
               <SectionHeading
                 title="إطلالات كاملة"
                 note="الروب والوشاح والقبعة، مجموعة واحدة"
               />
-              <div className="grid grid-cols-2 gap-x-4 gap-y-7">
+              <div className="grid grid-cols-2 gap-x-4 gap-y-7 md:grid-cols-3 md:gap-x-6 md:gap-y-10 lg:grid-cols-4">
                 {feed.packages.map((pkg) => (
-                  <PackageTile key={pkg.id} pkg={pkg} />
+                  <div key={pkg.id} className="scroll-reveal">
+                    <PackageTile pkg={pkg} />
+                  </div>
                 ))}
               </div>
             </section>
           )}
 
           {/* The collection — chips filter, tiles read like catalog pages */}
-          <section className="space-y-5">
+          <section className="scroll-reveal space-y-5">
             <SectionHeading
               title="القطع"
               note={`${allProducts.length} قطعة لموسمك`}
@@ -198,10 +206,12 @@ export default function StudentHomePage() {
             {visibleProducts.length > 0 ? (
               <div
                 key={filter}
-                className="animate-fade-page-in grid grid-cols-2 gap-x-4 gap-y-7"
+                className="animate-fade-page-in grid grid-cols-2 gap-x-4 gap-y-7 md:grid-cols-3 md:gap-x-6 md:gap-y-10 lg:grid-cols-4"
               >
                 {visibleProducts.map((p) => (
-                  <ProductTile key={p.id} product={p} />
+                  <div key={p.id} className="scroll-reveal">
+                    <ProductTile product={p} />
+                  </div>
                 ))}
               </div>
             ) : (

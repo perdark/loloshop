@@ -4,6 +4,18 @@ Master backlog from the verified multi-agent audit (102 findings, 5 critical / 4
 Bar: agency portfolio piece judged by 50+ businessmen. Spec source of truth: `DESIGN.md`.
 **Tracking:** check items as done. Update after every task.
 
+## Stage M — Cinematic motion & scroll choreography (NEW — the "video/presentation" feel)
+The motion primitives already exist in `globals.css` (`.reveal`, `ken-burns`, view-transitions, splash, sash shimmer) but are barely wired up; the 512px storefront cage also kills the reveal grids on desktop. Goal: the site plays like a fashion film as you scroll.
+- [x] **Scroll-choreography system** — `.scroll-reveal`/`.scroll-reveal-soft`/`.parallax-photo` via CSS `animation-timeline: view()` (GPU, no JS); `@supports` fallback shows content; reduced-motion off. Verified: opacity ramps 0→1 on scroll. ✅
+- [x] **Cinematic hero** — full-bleed `min-h-82svh`, Amiri display, staggered line reveal, scroll cue, drifting script flourish. ✅
+- [x] **Per-section scroll reveals** — storefront story sections + tile grids reveal + auto-stagger on scroll. ✅
+- [ ] **Parallax depth** on lookbook photos (`.parallax-photo` util built; apply to hero photo + lookbook frames)
+- [ ] **Choreographed headings** — key Arabic headings reveal (mask/word-by-word), numbers count up
+- [ ] **Designer micro-motion** — tactile feedback on add/drag/select (sash float, edit-pop already exist)
+- [ ] **Presentation rhythm** — section pacing so scrolling feels like turning lookbook pages
+- [ ] Perf budget: transform/opacity only, test Slow-4G + 4× CPU on a phone; every effect has a `prefers-reduced-motion` off-state
+- [ ] (decision pending) scroll-snap "slide" sections / pinned scrub — see flavor choice
+
 ## Execution order (evidence-based, by ripple, not by screen)
 
 ### Stage A — Shared primitives (fix once, ripples to ~30-40% of findings)
@@ -25,8 +37,10 @@ Bar: agency portfolio piece judged by 50+ businessmen. Spec source of truth: `DE
 - [ ] larger Amiri headings; remove header orange gradient + shimmer overuse
 
 ### Phase 2 — Storefront / shop layout — 18 findings
-- [ ] `(student)/layout.tsx` — unlock from `max-w-lg` (512px) at every breakpoint → responsive md:/lg: container so story grids engage on desktop
+- [x] `(student)/layout.tsx` — unlocked from `max-w-lg`; responsive `md:max-w-3xl lg:max-w-6xl` so editorial grids engage on desktop ✅
+- [x] product + package + lookbook grids → responsive `md:grid-cols-3 lg:grid-cols-4` (was locked 2-col) ✅
 - [ ] enforce caption-below / no-scrim; **delete dead scrim landmines** `ShopProductCard`/`ShopPackageCard`/`ShopProductHeroCard`; drop on-photo glass badge
+- [ ] update `ProductTile` `sizes` to the real responsive column count (was hardcoded to 512 cap)
 - [ ] `ProductTile` `sizes` → real responsive column count (not hardcoded 512)
 - [ ] staff `OrderCard` + student pills — off-palette amber/blue/emerald/red candy chips → palette
 - [ ] `StaffSidebar` brand-gradient side-stripe + orange blur blob; filter chips as full primary Buttons → quiet chips
