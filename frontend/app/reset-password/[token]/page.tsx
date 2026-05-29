@@ -41,7 +41,7 @@ export default function ResetPasswordPage() {
   }
 
   return (
-    <AuthCard title="كلمة مرور جديدة">
+    <AuthCard title="كلمة مرور جديدة" subtitle="اختر كلمة مرور قوية لحسابك">
       <form onSubmit={handleSubmit} className="space-y-4">
         <Input
           label="كلمة المرور الجديدة"

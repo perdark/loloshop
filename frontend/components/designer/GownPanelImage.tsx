@@ -67,7 +67,9 @@ export function GownPanelImage({
     <img
       src={src}
       alt=""
-      className="pointer-events-none h-full w-full object-fill"
+      // object-contain (not fill): the sash hotspot box is far narrower than the
+      // rendered panel, and object-fill stretched text ~2.6× horizontally.
+      className="pointer-events-none h-full w-full object-contain"
       draggable={false}
     />
   );

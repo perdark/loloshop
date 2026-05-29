@@ -34,11 +34,17 @@ export async function listFonts(): Promise<FontDef[]> {
   return data.data;
 }
 
+export type SashSide = "left" | "right";
+
 export interface MyDesignResponse {
   data: DesignState | null;
   student_status: "pending_approval" | "approved" | "rejected" | null;
   student_gender?: "male" | "female" | null;
   edit_exception?: boolean;
+  /** Which side the student may edit; null = both editable (no lock). */
+  editable_sash_side?: SashSide | null;
+  /** Saved Fabric JSON for the locked side (rendered read-only). */
+  locked_side_design?: unknown | null;
 }
 
 export async function getMyDesign(): Promise<MyDesignResponse> {

@@ -1,3 +1,5 @@
+import { GradCapLoader } from "./GradCapLoader";
+
 export function Spinner({ className = "" }: { className?: string }) {
   return (
     <div
@@ -10,8 +12,9 @@ export function Spinner({ className = "" }: { className?: string }) {
 
 export function PageLoader() {
   return (
-    <div className="flex min-h-[40vh] items-center justify-center">
-      <Spinner className="h-10 w-10" />
+    <div className="flex min-h-[40vh] flex-col items-center justify-center gap-4">
+      <GradCapLoader size={64} />
+      <p className="text-xs font-medium tracking-wide text-ink/45">جارٍ التحميل…</p>
     </div>
   );
 }

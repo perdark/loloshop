@@ -1,9 +1,11 @@
 import { api } from "./api";
 import type {
+  CatalogInputType,
   CatalogOption,
   CatalogOptionGroup,
   CatalogProduct,
   CatalogProductSummary,
+  HeroSlide,
   PriceRole,
   ProductImage,
   ShopFeed,
@@ -58,6 +60,10 @@ function mapGroup(
       raw.requires_customer_image ?? raw.requiresCustomerImage
     ),
     inherited: Boolean((raw as Record<string, unknown>)._inherited ?? (raw as Record<string, unknown>).inherited ?? false),
+    lockedOptionId:
+      (raw.locked_option_id as string | null) ??
+      (raw.lockedOptionId as string | null) ??
+      null,
     options: opts.map(mapOption),
   };
 }
@@ -114,6 +120,7 @@ function mapProductFull(raw: Record<string, unknown>): CatalogProduct {
     customizable: Boolean(raw.customizable),
     active: raw.active !== false,
     featured: Boolean(raw.featured),
+    wholesalerOnly: Boolean(raw.wholesaler_only ?? raw.wholesalerOnly),
     sort: Number(raw.sort ?? 0),
     imageUrl: resolveCatalogMediaUrl(raw.image_url as string | null),
     images: gallery.map(mapProductImage),
@@ -137,6 +144,7 @@ function mapProductSummary(raw: Record<string, unknown>): CatalogProductSummary 
       null,
     active: raw.active !== false,
     featured: Boolean(raw.featured),
+    wholesalerOnly: Boolean(raw.wholesaler_only ?? raw.wholesalerOnly),
     sort: Number(raw.sort ?? 0),
     imageUrl: resolveCatalogMediaUrl(raw.image_url as string | null),
     groupCount: Number(raw.group_count ?? raw.groupCount ?? 0),
@@ -165,6 +173,29 @@ export async function getShopFeed(): Promise<ShopFeed> {
     packages,
     byType,
   };
+}
+
+export function mapHeroSlide(raw: Record<string, unknown>): HeroSlide {
+  return {
+    id: String(raw.id),
+    imageUrl: resolveCatalogMediaUrl(raw.image_url as string | null) || "",
+    kicker: (raw.kicker_ar as string | null) ?? null,
+    title: String(raw.title_ar ?? ""),
+    caption: (raw.caption_ar as string | null) ?? null,
+    accent: (raw.accent as string | null) ?? null,
+    ctaLabel: (raw.cta_label_ar as string | null) ?? null,
+    ctaHref: (raw.cta_href as string | null) ?? null,
+    sort: Number(raw.sort ?? 0),
+    active: raw.active === undefined ? undefined : !!raw.active,
+  };
+}
+
+/** Public home-slider slides (active only). */
+export async function getHeroSlides(): Promise<HeroSlide[]> {
+  const { data } = await api.get<{ data: Record<string, unknown>[] }>(
+    "/catalog/hero"
+  );
+  return (data.data || []).map(mapHeroSlide);
 }
 
 export async function listCatalogProductsAdmin(): Promise<
@@ -207,6 +238,46 @@ export async function updateCatalogProduct(
   await api.patch(`/catalog/products/${id}`, body);
 }
 
+/** Soft-deletes the product (backend sets active = FALSE to keep order history). */
+export async function deleteCatalogProduct(id: string): Promise<void> {
+  await api.delete(`/catalog/products/${id}`);
+}
+
+export async function createCatalogGroup(
+  productId: string,
+  body: {
+    name_ar: string;
+    input_type?: CatalogInputType;
+    required?: boolean;
+    max_select?: number | null;
+  }
+): Promise<{ id: string }> {
+  const { data } = await api.post<{ data: { id: string } }>(
+    `/catalog/products/${productId}/groups`,
+    body
+  );
+  return data.data;
+}
+
+export async function deleteCatalogGroup(groupId: string): Promise<void> {
+  await api.delete(`/catalog/groups/${groupId}`);
+}
+
+export async function createCatalogOption(
+  groupId: string,
+  body: { label_ar: string; price_delta?: number }
+): Promise<{ id: string }> {
+  const { data } = await api.post<{ data: { id: string } }>(
+    `/catalog/groups/${groupId}/options`,
+    body
+  );
+  return data.data;
+}
+
+export async function deleteCatalogOption(optionId: string): Promise<void> {
+  await api.delete(`/catalog/options/${optionId}`);
+}
+
 export async function setProductPriceRole(
   productId: string,
   role: PriceRole,
@@ -241,6 +312,28 @@ export async function setOptionPriceRole(
     role,
     price_delta: priceDelta,
   });
+}
+
+/** Lock a (child) product's option group to a single fixed option (student can't change it). */
+export async function lockGroupOption(
+  productId: string,
+  groupId: string,
+  optionId: string
+): Promise<void> {
+  await api.put(`/catalog/products/${productId}/lock-group-option`, {
+    group_id: groupId,
+    option_id: optionId,
+  });
+}
+
+/** Clear the lock on a product's option group. */
+export async function unlockGroupOption(
+  productId: string,
+  groupId: string
+): Promise<void> {
+  await api.delete(
+    `/catalog/products/${productId}/lock-group-option/${groupId}`
+  );
 }
 
 export async function uploadCatalogImage(file: File): Promise<string> {

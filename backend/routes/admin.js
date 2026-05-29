@@ -13,6 +13,8 @@ router.get('/wholesalers', c.listWholesalers);
 router.post('/wholesalers', c.createWholesaler);
 router.patch('/wholesalers/:id/deadline', c.updateDeadline);
 router.patch('/wholesalers/:id/commission', c.updateCommission);
+router.get('/wholesalers/:id/sash-config', c.getWholesalerSashConfig);
+router.put('/wholesalers/:id/sash-config', c.updateWholesalerSashConfig);
 router.get('/wholesalers/:id/students', c.wholesalerStudents);
 router.delete('/wholesalers/:id', c.deleteWholesaler);
 router.post('/students/:id/edit-exception', c.toggleEditException);

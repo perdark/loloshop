@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { toast } from "sonner";
@@ -8,6 +8,9 @@ import { api, getApiErrorMessage } from "@/lib/api";
 import type { OrderStatus, StudentApprovalStatus, WholesalerStudentRow } from "@/lib/types";
 import { PageLoader } from "@/components/ui/Spinner";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
 
 interface ApiRow {
   id: string;
@@ -42,10 +45,26 @@ function statusLabel(s: StudentApprovalStatus): string {
   return "بانتظار الموافقة";
 }
 
+function statusPillClass(s: StudentApprovalStatus): string {
+  if (s === "approved") return "bg-emerald-100 text-emerald-900";
+  if (s === "rejected") return "bg-red-100 text-red-800";
+  return "bg-amber-100 text-amber-900";
+}
+
+type CompletionFilter = "" | "completed" | "not_completed";
+
+const PAGE_SIZE = 25;
+
 export default function StaffWholesalerStudentsPage() {
   const { wholesalerId } = useParams<{ wholesalerId: string }>();
   const [rows, setRows] = useState<WholesalerStudentRow[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // filter state
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"" | StudentApprovalStatus>("");
+  const [completion, setCompletion] = useState<CompletionFilter>("");
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     if (!wholesalerId) return;
@@ -71,42 +90,125 @@ export default function StaffWholesalerStudentsPage() {
       .finally(() => setLoading(false));
   }, [wholesalerId]);
 
+  // reset page whenever filters change (adjust state during render — no effect)
+  const filtersKey = `${search}|${statusFilter}|${completion}`;
+  const [prevFiltersKey, setPrevFiltersKey] = useState(filtersKey);
+  if (prevFiltersKey !== filtersKey) {
+    setPrevFiltersKey(filtersKey);
+    setPage(1);
+  }
+
+  const filtered = useMemo(() => {
+    let out = rows;
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      out = out.filter((r) => r.name.toLowerCase().includes(q));
+    }
+    if (statusFilter) {
+      out = out.filter((r) => r.status === statusFilter);
+    }
+    if (completion) {
+      const wantCompleted = completion === "completed";
+      out = out.filter((r) => r.isCompleted === wantCompleted);
+    }
+    return out;
+  }, [rows, search, statusFilter, completion]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
   if (loading) return <PageLoader />;
 
   return (
-    <div dir="rtl" lang="ar" className="space-y-5">
-      <Link href="/staff/wholesalers" className="text-sm text-orange-ink hover:underline">
+    <div dir="rtl" lang="ar">
+      <Link href="/staff/wholesalers" className="mb-4 inline-flex text-sm font-medium text-orange-ink hover:underline">
         ← الممثلون
       </Link>
 
-      <h1 className="font-display text-2xl font-bold text-ink">طلاب الممثل</h1>
+      <PageHeader title="طلاب الممثل" subtitle="حالة الموافقة وإكمال الطلب لكل طالب" />
 
-      {rows.length === 0 ? (
+      {/* Search + filters */}
+      <div className="surface-card mb-4 space-y-3 rounded-2xl p-3.5">
+        <Input
+          type="search"
+          placeholder="بحث باسم الطالب…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="w-full"
+          aria-label="بحث باسم الطالب"
+        />
+
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-ink/60">حالة الموافقة</p>
+          <div className="flex flex-wrap gap-2">
+            {[
+              { id: "", label: "الكل" },
+              { id: "pending_approval", label: "بانتظار" },
+              { id: "approved", label: "موافق" },
+              { id: "rejected", label: "مرفوض" },
+            ].map((o) => (
+              <Button
+                key={o.id}
+                size="sm"
+                variant={statusFilter === (o.id as "" | StudentApprovalStatus) ? "primary" : "ghost"}
+                onClick={() => setStatusFilter(o.id as "" | StudentApprovalStatus)}
+              >
+                {o.label}
+              </Button>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-ink/60">حالة الاكتمال</p>
+          <div className="flex flex-wrap gap-2">
+            {[
+              { id: "", label: "الكل" },
+              { id: "completed", label: "مكتمل" },
+              { id: "not_completed", label: "غير مكتمل" },
+            ].map((o) => (
+              <Button
+                key={o.id}
+                size="sm"
+                variant={completion === (o.id as CompletionFilter) ? "primary" : "ghost"}
+                onClick={() => setCompletion(o.id as CompletionFilter)}
+              >
+                {o.label}
+              </Button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {filtered.length === 0 ? (
         <EmptyState message="لا يوجد طلاب" />
       ) : (
-        <div className="space-y-3">
-          {rows.map((s) => (
-            <article key={s.id} className="rounded-xl border border-ink/10 bg-white p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="font-semibold text-ink">{s.name}</p>
-                  <p className="text-sm text-ink/60" dir="ltr">
-                    {s.phone}
-                  </p>
-                  <p className="mt-1 text-xs text-ink/50">
-                    {s.universityName || "—"}
-                    {s.department ? ` — ${s.department}` : ""}
-                  </p>
-                </div>
-                <div className="text-left">
-                  <span className="inline-flex rounded-full bg-ink/5 px-2 py-1 text-xs text-ink/70">
-                    {statusLabel(s.status)}
-                  </span>
-                  <div className="mt-2">
+        <>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {paginated.map((s) => (
+              <article
+                key={s.id}
+                className="rounded-2xl border border-ink/10 bg-white p-4 shadow-[var(--shadow-soft)]"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-display text-base font-bold text-ink">{s.name}</p>
+                    <p className="text-sm text-ink/60" dir="ltr">
+                      {s.phone}
+                    </p>
+                    <p className="mt-1 text-xs text-ink/50">
+                      {s.universityName || "—"}
+                      {s.department ? ` — ${s.department}` : ""}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 flex-col items-end gap-1.5">
+                    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${statusPillClass(s.status)}`}>
+                      {statusLabel(s.status)}
+                    </span>
                     <span
-                      className={`inline-flex rounded-full px-2 py-1 text-xs ${
+                      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
                         s.isCompleted
-                          ? "bg-orange/10 text-orange-ink"
+                          ? "bg-orange/15 text-orange-ink"
                           : "bg-ink/5 text-ink/60"
                       }`}
                     >
@@ -114,12 +216,40 @@ export default function StaffWholesalerStudentsPage() {
                     </span>
                   </div>
                 </div>
+              </article>
+            ))}
+          </div>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="mt-4 flex items-center justify-between gap-3 text-sm">
+              <span className="text-ink/60">
+                {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} من {filtered.length}
+              </span>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={page === 1}
+                  onClick={() => setPage((p) => p - 1)}
+                  aria-label="الصفحة السابقة"
+                >
+                  ›
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={page === totalPages}
+                  onClick={() => setPage((p) => p + 1)}
+                  aria-label="الصفحة التالية"
+                >
+                  ‹
+                </Button>
               </div>
-            </article>
-          ))}
-        </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
 }
-

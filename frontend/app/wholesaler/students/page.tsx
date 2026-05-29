@@ -8,7 +8,9 @@ import { getApiErrorMessage } from "@/lib/api";
 import type { StudentApprovalStatus, WholesalerStudentRow } from "@/lib/types";
 import { PageLoader } from "@/components/ui/Spinner";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { StatCard } from "@/components/ui/StatCard";
 import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
 
 type CompletionFilter = "" | "completed" | "not_completed";
 
@@ -18,15 +20,25 @@ function statusLabel(s: StudentApprovalStatus): string {
   return "بانتظار الموافقة";
 }
 
+function statusPillClass(s: StudentApprovalStatus): string {
+  if (s === "approved") return "bg-emerald-100 text-emerald-700";
+  if (s === "rejected") return "bg-rose-100 text-rose-700";
+  return "bg-amber-100 text-amber-700";
+}
+
 function completionLabel(isCompleted: boolean): string {
   return isCompleted ? "مكتمل" : "غير مكتمل";
 }
+
+const PAGE_SIZE = 25;
 
 export default function WholesalerStudentsPage() {
   const [rows, setRows] = useState<WholesalerStudentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<"" | StudentApprovalStatus>("");
   const [completion, setCompletion] = useState<CompletionFilter>("");
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- refetch on filter change
@@ -37,11 +49,26 @@ export default function WholesalerStudentsPage() {
       .finally(() => setLoading(false));
   }, [status]);
 
+  // reset page whenever filters change (adjust state during render — no effect)
+  const filtersKey = `${search}|${status}|${completion}`;
+  const [prevFiltersKey, setPrevFiltersKey] = useState(filtersKey);
+  if (prevFiltersKey !== filtersKey) {
+    setPrevFiltersKey(filtersKey);
+    setPage(1);
+  }
+
   const filtered = useMemo(() => {
-    if (!completion) return rows;
-    const wantCompleted = completion === "completed";
-    return rows.filter((r) => r.isCompleted === wantCompleted);
-  }, [rows, completion]);
+    let out = rows;
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      out = out.filter((r) => r.name.toLowerCase().includes(q));
+    }
+    if (completion) {
+      const wantCompleted = completion === "completed";
+      out = out.filter((r) => r.isCompleted === wantCompleted);
+    }
+    return out;
+  }, [rows, search, completion]);
 
   const stats = useMemo(() => {
     let completed = 0;
@@ -53,92 +80,106 @@ export default function WholesalerStudentsPage() {
     return { total: rows.length, pending, completed };
   }, [rows]);
 
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
   if (loading) return <PageLoader />;
 
   return (
     <div dir="rtl" lang="ar" className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="font-display text-xl font-bold text-ink">الطلاب</h1>
-        <Link href="/wholesaler" className="text-sm text-orange-ink hover:underline">
+        <h1 className="section-heading font-display text-xl font-bold text-ink">الطلاب</h1>
+        <Link
+          href="/wholesaler"
+          className="inline-flex min-h-11 items-center text-sm font-medium text-orange-ink hover:underline"
+        >
           ← رجوع
         </Link>
       </div>
 
       <div className="grid grid-cols-3 gap-3">
-        <div className="rounded-xl border border-ink/10 bg-white p-4 text-center">
-          <p className="text-2xl font-bold text-ink">{stats.total}</p>
-          <p className="mt-1 text-xs text-ink/60">الكل</p>
-        </div>
-        <div className="rounded-xl border border-ink/10 bg-white p-4 text-center">
-          <p className="text-2xl font-bold text-orange-ink">{stats.pending}</p>
-          <p className="mt-1 text-xs text-ink/60">بانتظار الموافقة</p>
-        </div>
-        <div className="rounded-xl border border-ink/10 bg-white p-4 text-center">
-          <p className="text-2xl font-bold text-ink">{stats.completed}</p>
-          <p className="mt-1 text-xs text-ink/60">تصميم مكتمل</p>
-        </div>
+        <StatCard label="الكل" value={String(stats.total)} />
+        <StatCard label="بانتظار الموافقة" value={String(stats.pending)} />
+        <StatCard label="تصميم مكتمل" value={String(stats.completed)} accent="profit" />
       </div>
 
-      <section className="rounded-xl border border-ink/10 bg-white p-3">
-        <p className="mb-2 text-sm font-medium text-ink">تصفية</p>
-        <div className="flex flex-wrap gap-2">
-          {[
-            { id: "", label: "الكل" },
-            { id: "pending_approval", label: "بانتظار" },
-            { id: "approved", label: "موافق" },
-            { id: "rejected", label: "مرفوض" },
-          ].map((o) => (
-            <Button
-              key={o.id}
-              variant={status === (o.id as "" | StudentApprovalStatus) ? "primary" : "ghost"}
-              onClick={() => setStatus(o.id as "" | StudentApprovalStatus)}
-            >
-              {o.label}
-            </Button>
-          ))}
-          <span className="mx-1 h-11 w-px bg-ink/10" aria-hidden />
-          {[
-            { id: "", label: "الكل" },
-            { id: "completed", label: "مكتمل" },
-            { id: "not_completed", label: "غير مكتمل" },
-          ].map((o) => (
-            <Button
-              key={o.id}
-              variant={completion === (o.id as CompletionFilter) ? "primary" : "ghost"}
-              onClick={() => setCompletion(o.id as CompletionFilter)}
-            >
-              {o.label}
-            </Button>
-          ))}
+      <section className="surface-card rounded-2xl p-3.5 space-y-3">
+        {/* Name search */}
+        <Input
+          type="search"
+          placeholder="بحث باسم الطالب…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="w-full"
+          aria-label="بحث باسم الطالب"
+        />
+
+        {/* Approval status filter */}
+        <div>
+          <p className="mb-2 text-sm font-medium text-ink">تصفية</p>
+          <div className="flex flex-wrap gap-2">
+            {[
+              { id: "", label: "الكل" },
+              { id: "pending_approval", label: "بانتظار" },
+              { id: "approved", label: "موافق" },
+              { id: "rejected", label: "مرفوض" },
+            ].map((o) => (
+              <Button
+                key={o.id}
+                variant={status === (o.id as "" | StudentApprovalStatus) ? "primary" : "ghost"}
+                onClick={() => setStatus(o.id as "" | StudentApprovalStatus)}
+              >
+                {o.label}
+              </Button>
+            ))}
+            <span className="mx-1 h-11 w-px bg-ink/10" aria-hidden />
+            {[
+              { id: "", label: "الكل" },
+              { id: "completed", label: "مكتمل" },
+              { id: "not_completed", label: "غير مكتمل" },
+            ].map((o) => (
+              <Button
+                key={o.id}
+                variant={completion === (o.id as CompletionFilter) ? "primary" : "ghost"}
+                onClick={() => setCompletion(o.id as CompletionFilter)}
+              >
+                {o.label}
+              </Button>
+            ))}
+          </div>
         </div>
       </section>
 
       {filtered.length === 0 ? (
         <EmptyState message="لا يوجد طلاب" />
       ) : (
-        <ul className="space-y-3">
-          {filtered.map((s) => (
-            <li key={s.id} className="rounded-xl border border-ink/10 bg-white p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="font-semibold text-ink">{s.name}</p>
-                  <p className="text-sm text-ink/60" dir="ltr">
-                    {s.phone}
-                  </p>
-                  <p className="mt-1 text-xs text-ink/50">
-                    {s.universityName || "—"}
-                    {s.department ? ` — ${s.department}` : ""}
-                  </p>
-                </div>
-                <div className="text-left">
-                  <span className="inline-flex rounded-full bg-ink/5 px-2 py-1 text-xs text-ink/70">
-                    {statusLabel(s.status)}
-                  </span>
-                  <div className="mt-2">
+        <>
+          <ul className="space-y-3">
+            {paginated.map((s) => (
+              <li key={s.id} className="surface-card card-lift rounded-2xl p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-display font-bold text-ink">{s.name}</p>
+                    <p className="mt-0.5 text-sm tabular-nums text-ink/60" dir="ltr">
+                      {s.phone}
+                    </p>
+                    <p className="mt-1 text-xs text-ink/50">
+                      {s.universityName || "—"}
+                      {s.department ? ` — ${s.department}` : ""}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 flex-col items-end gap-2">
                     <span
-                      className={`inline-flex rounded-full px-2 py-1 text-xs ${
+                      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusPillClass(
+                        s.status
+                      )}`}
+                    >
+                      {statusLabel(s.status)}
+                    </span>
+                    <span
+                      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
                         s.isCompleted
-                          ? "bg-orange/10 text-orange-ink"
+                          ? "bg-orange/15 text-orange-ink"
                           : "bg-ink/5 text-ink/60"
                       }`}
                     >
@@ -146,12 +187,38 @@ export default function WholesalerStudentsPage() {
                     </span>
                   </div>
                 </div>
+              </li>
+            ))}
+          </ul>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between gap-3 pt-1 text-sm">
+              <span className="text-ink/60">
+                {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} من {filtered.length}
+              </span>
+              <div className="flex gap-2">
+                <Button
+                  variant="ghost"
+                  disabled={page === 1}
+                  onClick={() => setPage((p) => p - 1)}
+                  aria-label="الصفحة السابقة"
+                >
+                  ›
+                </Button>
+                <Button
+                  variant="ghost"
+                  disabled={page === totalPages}
+                  onClick={() => setPage((p) => p + 1)}
+                  aria-label="الصفحة التالية"
+                >
+                  ‹
+                </Button>
               </div>
-            </li>
-          ))}
-        </ul>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
 }
-

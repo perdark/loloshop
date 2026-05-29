@@ -26,10 +26,23 @@ export function DesignerToolsAside({
         onClick={onToggle}
         aria-expanded={open}
         aria-controls={panelId}
-        className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-orange/25 bg-orange/10 px-4 text-sm font-semibold text-ink transition-colors hover:bg-orange/15 sm:hidden"
+        className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-ink/15 bg-beige px-4 text-sm font-semibold text-ink transition-colors hover:bg-[var(--shop-sink)] sm:hidden"
       >
-        <span aria-hidden>{open ? "▲" : "▼"}</span>
-        {open ? "إخفاء الأدوات — توسيع الوشاح" : "إظهار الأدوات"}
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden
+          className={`transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+        >
+          <path d="m6 9 6 6 6-6" />
+        </svg>
+        {open ? "إخفاء الأدوات" : "إظهار الأدوات"}
       </button>
 
       <aside

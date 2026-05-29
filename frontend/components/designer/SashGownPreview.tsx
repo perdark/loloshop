@@ -27,6 +27,7 @@ function GownSash({
   sashColor,
   fontsUsed,
   readOnly,
+  locked,
   onClick,
 }: {
   side: "left" | "right";
@@ -34,9 +35,10 @@ function GownSash({
   sashColor: string;
   fontsUsed?: string[];
   readOnly?: boolean;
+  locked?: boolean;
   onClick?: (side: "left" | "right") => void;
 }) {
-  const showChip = !panelHasContent(json) && !readOnly;
+  const showChip = !panelHasContent(json) && !readOnly && !locked;
 
   const inner = (
     <span
@@ -58,23 +60,31 @@ function GownSash({
         />
       ) : null}
       {showChip ? (
-        <>
-          <span
-            className="pointer-events-none absolute inset-x-0 bottom-[8%] z-10 mx-auto max-w-[95%] rounded-full bg-ink/75 px-2 py-1 text-center text-[10px] leading-tight font-medium text-cream shadow-sm animate-sash-float"
-            aria-hidden
-          >
-            {SIDE_CHIP[side]}
-          </span>
-          {/* subtle shimmer on empty panel */}
-          <span className="sash-shimmer-strip" aria-hidden />
-        </>
+        <span
+          className="pointer-events-none absolute inset-x-0 bottom-[8%] z-10 mx-auto max-w-[95%] rounded-full bg-ink/75 px-2 py-1 text-center text-[10px] leading-tight font-medium text-cream shadow-sm"
+          aria-hidden
+        >
+          {SIDE_CHIP[side]}
+        </span>
+      ) : null}
+      {locked ? (
+        <span
+          className="pointer-events-none absolute right-1 top-1 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-ink/70 text-cream shadow-sm"
+          aria-hidden
+          title="جانب مُقفل"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="5" y="11" width="14" height="9" rx="1.5" />
+            <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+          </svg>
+        </span>
       ) : null}
     </span>
   );
 
   const style = hotspotCssStyle(side);
 
-  if (readOnly) {
+  if (readOnly || locked) {
     return <span style={style}>{inner}</span>;
   }
 
@@ -83,7 +93,7 @@ function GownSash({
       type="button"
       onClick={() => onClick?.(side)}
       aria-label={SIDE_LABEL[side]}
-      className={`group min-h-11 min-w-11 cursor-pointer transition-transform duration-200 hover:scale-[1.04] focus:outline-none focus-visible:ring-2 focus-visible:ring-orange ${!panelHasContent(json) ? "animate-pulse-ring" : ""}`}
+      className="group min-h-11 min-w-11 cursor-pointer transition-transform duration-200 hover:scale-[1.04] focus:outline-none focus-visible:ring-2 focus-visible:ring-orange"
       style={style}
     >
       {inner}
@@ -98,6 +108,8 @@ interface SashGownPreviewProps {
   fontsUsed?: string[];
   onClickSide?: (side: "left" | "right") => void;
   readOnly?: boolean;
+  /** When set, that single side is non-editable (shows a lock badge). */
+  lockedSide?: "left" | "right" | null;
 }
 
 export function SashGownPreview({
@@ -107,6 +119,7 @@ export function SashGownPreview({
   fontsUsed,
   onClickSide,
   readOnly = false,
+  lockedSide = null,
 }: SashGownPreviewProps) {
   return (
     <div
@@ -126,6 +139,7 @@ export function SashGownPreview({
         sashColor={sashColor}
         fontsUsed={fontsUsed}
         readOnly={readOnly}
+        locked={lockedSide === "left"}
         onClick={onClickSide}
       />
       <GownSash
@@ -134,6 +148,7 @@ export function SashGownPreview({
         sashColor={sashColor}
         fontsUsed={fontsUsed}
         readOnly={readOnly}
+        locked={lockedSide === "right"}
         onClick={onClickSide}
       />
     </div>

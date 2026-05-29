@@ -52,7 +52,7 @@ export default function StudentProductPage() {
   useEffect(() => {
     if (!id) return;
     getProductFull(id)
-      .then(setProduct) // eslint-disable-line react-hooks/set-state-in-effect -- async fetch
+      .then(setProduct)
       .catch(() => toast.error("تعذر تحميل المنتج"))
       .finally(() => setLoading(false));
   }, [id]);
@@ -136,22 +136,23 @@ export default function StudentProductPage() {
     .sort((a, b) => a.sort - b.sort);
 
   return (
-    <div className="mx-auto max-w-lg bg-cream pb-28">
-      <header className="border-b border-ink/10 bg-beige px-4 py-4">
-        <p className="font-script text-2xl text-orange">lolo shop</p>
-        <p className="font-display text-sm font-semibold text-ink">لولو شوب</p>
-      </header>
-
-      <div className="space-y-5 px-4 py-6">
+    <div className="pb-28">
+      <div className="space-y-6">
         <div>
-          <Link href="/shop" className="text-sm text-orange hover:underline">
-            ← المنتجات
+          <Link
+            href="/shop"
+            className="inline-flex min-h-11 items-center gap-1 text-sm font-semibold text-orange-ink transition-colors hover:text-orange"
+          >
+            <span aria-hidden>→</span>
+            المنتجات
           </Link>
           <h1 className="mt-2 font-display text-2xl font-bold text-ink">
             {product.nameAr}
           </h1>
           {product.description && (
-            <p className="mt-1 text-sm text-ink/60">{product.description}</p>
+            <p className="mt-1.5 text-sm leading-relaxed text-ink/60">
+              {product.description}
+            </p>
           )}
         </div>
 
@@ -159,10 +160,12 @@ export default function StudentProductPage() {
           nameAr={product.nameAr}
           imageUrl={product.imageUrl}
           images={product.images}
+          productId={id}
         />
 
         {!gender && (
-          <div className="rounded-xl border border-orange/40 bg-orange/5 p-3 text-sm text-ink/70">
+          <div className="flex items-start gap-2.5 rounded-2xl border border-orange/30 bg-orange/5 p-3.5 text-sm leading-relaxed text-ink/70 ring-1 ring-orange/10">
+            <span aria-hidden className="mt-1 h-2 w-2 shrink-0 rounded-full bg-brand-gradient" />
             اختر جنسك من صفحة المنتجات لتفعيل الفلترة (مثلاً الشال للإناث).
           </div>
         )}
@@ -181,6 +184,7 @@ export default function StudentProductPage() {
                 group={group}
                 selection={selection}
                 role={role}
+                lockedOptionId={group.lockedOptionId}
                 onChange={setGroupValue}
               />
               {needsImage && key && optionId && (
@@ -210,7 +214,7 @@ export default function StudentProductPage() {
           <div className="space-y-2">
             <button
               type="button"
-              className="flex min-h-12 w-full items-center justify-center rounded-xl bg-orange font-semibold text-white hover:bg-orange-light"
+              className="btn-shine flex min-h-12 w-full items-center justify-center gap-2 rounded-pill bg-brand-gradient font-display text-base font-bold text-white shadow-[var(--shadow-pop)] transition-transform hover:scale-[1.01] active:scale-100"
               onClick={() => {
                 sessionStorage.setItem(
                   "loloshop_sash_preset",
@@ -229,7 +233,8 @@ export default function StudentProductPage() {
       </div>
 
       {product.type !== "sash" && (
-        <div className="fixed bottom-0 left-0 right-0 border-t border-neutral bg-beige p-4">
+        <div className="surface-glass fixed inset-x-0 bottom-0 z-30 border-t border-orange/10 px-4 py-3.5 shadow-[var(--shadow-float)]">
+          <div className="mx-auto max-w-lg">
           {confirmed ? (
             <Button fullWidth variant="secondary" onClick={() => router.push("/shop")}>
               متابعة التسوق
@@ -244,6 +249,7 @@ export default function StudentProductPage() {
               تأكيد الطلب (نقداً)
             </Button>
           )}
+          </div>
         </div>
       )}
     </div>

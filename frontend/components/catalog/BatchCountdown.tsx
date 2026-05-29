@@ -33,10 +33,24 @@ export function BatchCountdown({ deadline }: BatchCountdownProps) {
   }, [deadline]);
 
   return (
-    <div className="rounded-2xl bg-brand-gradient p-5 text-center text-white shadow-sm">
-      <p className="text-sm opacity-90">الموعد النهائي للدفعة</p>
-      <p className="mt-1 font-display text-2xl font-bold">{formatDateIQ(deadline)}</p>
-      <p className="mt-3 text-lg font-semibold">{remaining}</p>
+    <div className="bg-hero-rich relative overflow-hidden rounded-3xl p-6 text-center text-white shadow-[var(--shadow-float)] ring-1 ring-orange/10">
+      <span
+        aria-hidden
+        className="pointer-events-none absolute -end-8 -top-8 h-32 w-32 rounded-full bg-orange-light/30 blur-3xl"
+      />
+      <span
+        aria-hidden
+        className="pointer-events-none absolute -bottom-10 -start-6 h-28 w-28 rounded-full bg-blush/40 blur-3xl"
+      />
+      <p className="relative inline-flex items-center gap-1.5 rounded-pill bg-white/15 px-3 py-1 text-xs font-bold tracking-wide backdrop-blur-sm">
+        الموعد النهائي للدفعة
+      </p>
+      <p className="relative mt-3 font-display text-2xl font-bold tabular-nums">
+        {formatDateIQ(deadline)}
+      </p>
+      <p className="relative mt-3 text-lg font-semibold tabular-nums text-white/90">
+        {remaining}
+      </p>
     </div>
   );
 }

@@ -20,11 +20,24 @@ async function getMyDesign(req, res) {
     `SELECT * FROM designs WHERE student_id = $1 ORDER BY updated_at DESC LIMIT 1`,
     [student.id]
   );
+
+  // Sash side lock — only for students tied to a wholesaler.
+  let sashLock = { editable_sash_side: null, locked_side_design: null };
+  if (student.wholesaler_id) {
+    const w = await query(
+      `SELECT editable_sash_side, locked_side_design FROM wholesalers WHERE id = $1`,
+      [student.wholesaler_id]
+    );
+    if (w.rows[0]) sashLock = w.rows[0];
+  }
+
   res.json({
     data: rows[0] || null,
     student_status: student.status,
     student_gender: student.gender || null,
     edit_exception: !!student.edit_exception,
+    editable_sash_side: sashLock.editable_sash_side,
+    locked_side_design: sashLock.locked_side_design,
   });
 }
 

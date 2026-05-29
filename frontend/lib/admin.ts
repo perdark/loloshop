@@ -1,4 +1,5 @@
 import { api } from "./api";
+import { mapHeroSlide } from "./catalog";
 import type {
   AdminAccounting,
   AdminAnalytics,
@@ -7,9 +8,44 @@ import type {
   AccountingRow,
   CreateWholesalerPayload,
   CreateWholesalerResult,
+  HeroSlide,
   OrderStatus,
   User,
 } from "./types";
+
+// ---------- Hero slider (home slides) ----------
+export interface HeroSlidePayload {
+  image_url: string;
+  kicker_ar?: string | null;
+  title_ar: string;
+  caption_ar?: string | null;
+  accent?: string | null;
+  cta_label_ar?: string | null;
+  cta_href?: string | null;
+  sort?: number;
+  active?: boolean;
+}
+
+export async function listHeroSlidesAdmin(): Promise<HeroSlide[]> {
+  const { data } = await api.get<{ data: Record<string, unknown>[] }>("/catalog/hero/all");
+  return (data.data || []).map(mapHeroSlide);
+}
+
+export async function createHeroSlide(payload: HeroSlidePayload): Promise<{ id: string }> {
+  const { data } = await api.post<{ data: { id: string } }>("/catalog/hero", payload);
+  return data.data;
+}
+
+export async function updateHeroSlide(
+  id: string,
+  payload: Partial<HeroSlidePayload>
+): Promise<void> {
+  await api.patch(`/catalog/hero/${id}`, payload);
+}
+
+export async function deleteHeroSlide(id: string): Promise<void> {
+  await api.delete(`/catalog/hero/${id}`);
+}
 
 interface ApiAnalytics {
   totals: {
@@ -178,6 +214,30 @@ export async function updateWholesalerCommission(
 ): Promise<void> {
   await api.patch(`/admin/wholesalers/${id}/commission`, {
     commission_rate: commissionRate,
+  });
+}
+
+export interface WholesalerSashConfig {
+  editable_sash_side: "left" | "right" | null;
+  locked_side_design: unknown | null;
+}
+
+export async function getWholesalerSashConfig(
+  id: string
+): Promise<WholesalerSashConfig> {
+  const { data } = await api.get<{ data: WholesalerSashConfig }>(
+    `/admin/wholesalers/${id}/sash-config`
+  );
+  return data.data;
+}
+
+export async function updateWholesalerSashConfig(
+  id: string,
+  config: WholesalerSashConfig
+): Promise<void> {
+  await api.put(`/admin/wholesalers/${id}/sash-config`, {
+    editable_sash_side: config.editable_sash_side,
+    locked_side_design: config.locked_side_design,
   });
 }
 

@@ -23,7 +23,20 @@ async function createOtp(phone, purpose = 'verify') {
   return { expires_in: TTL };
 }
 
+// Dev-only master OTP so local testing doesn't require reading the code from
+// logs. HARD-GATED to non-production: on the VPS (NODE_ENV=production) this is
+// never active and real OTP verification always applies. Override the code via
+// DEV_MASTER_OTP; set it to empty to disable even in dev.
+const DEV_MASTER_OTP =
+  process.env.NODE_ENV === 'production'
+    ? null
+    : process.env.DEV_MASTER_OTP ?? '111111';
+
 async function verifyOtp(phone, code, purpose = 'verify') {
+  if (DEV_MASTER_OTP && code === DEV_MASTER_OTP) {
+    console.log(`[OTP DEV] master code accepted for ${phone} (${purpose})`);
+    return true;
+  }
   const { rows } = await query(
     `SELECT id FROM otp_codes
      WHERE phone = $1 AND code = $2 AND purpose = $3 AND used = FALSE AND expires_at > NOW()

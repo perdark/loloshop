@@ -6,7 +6,7 @@ import type { StaffOrder } from "@/lib/staff-types";
 const STATUS_COLORS: Partial<Record<string, string>> = {
   design_complete: "bg-amber-100 text-amber-900",
   staff_review: "bg-blue-100 text-blue-900",
-  printing: "bg-purple-100 text-purple-900",
+  printing: "bg-orange/15 text-orange-ink",
   ready: "bg-emerald-100 text-emerald-900",
   delivered: "bg-ink/10 text-ink",
 };
@@ -22,11 +22,11 @@ export function OrderCard({ order }: OrderCardProps) {
   return (
     <Link
       href={`/staff/orders/${order.id}`}
-      className="block rounded-xl border border-ink/10 bg-white p-4 shadow-sm transition-shadow hover:shadow-md"
+      className="card-lift block h-full rounded-2xl border border-ink/10 bg-white p-4 shadow-[var(--shadow-soft)] transition-all hover:border-orange/40"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <h3 className="truncate font-semibold text-ink">
+          <h3 className="truncate font-display text-base font-bold text-ink">
             {order.studentName}
           </h3>
           <p className="mt-1 text-sm text-ink/60">
@@ -41,7 +41,7 @@ export function OrderCard({ order }: OrderCardProps) {
           {ORDER_STATUS_LABELS[order.status]}
         </span>
       </div>
-      <p className="mt-3 text-xs text-ink/40">
+      <p className="mt-3 border-t border-ink/5 pt-3 text-xs text-ink/40">
         {formatDateShort(order.createdAt)}
       </p>
     </Link>

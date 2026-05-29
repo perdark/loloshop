@@ -5,6 +5,11 @@ const apiHost = process.env.NEXT_PUBLIC_API_URL
   : "localhost";
 
 const nextConfig: NextConfig = {
+  experimental: {
+    // Wraps client route navigations in document.startViewTransition so
+    // CSS `view-transition-name` shared elements morph between pages.
+    viewTransition: true,
+  },
   images: {
     remotePatterns: [
       { protocol: "http", hostname: apiHost, pathname: "/uploads/**" },

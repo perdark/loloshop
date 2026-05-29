@@ -109,7 +109,7 @@ async function postVerifyOtp(req, res) {
 async function resendOtp(req, res) {
   const { phone, purpose = 'verify' } = req.body;
   if (!phone) return res.status(400).json({ error: 'بيانات ناقصة', code: 'ERR_VALIDATION' });
-  if (!['verify', 'login'].includes(purpose)) {
+  if (!['verify', 'login', 'reset'].includes(purpose)) {
     return res.status(400).json({ error: 'بيانات ناقصة', code: 'ERR_VALIDATION' });
   }
   const { expires_in } = await createOtp(phone, purpose);
@@ -132,6 +132,35 @@ async function forgotPassword(req, res) {
   res.json({ sent: true });
 }
 
+// Phone-based reset (WhatsApp OTP) — students log in by phone and may not recall
+// their email. Mirrors forgotPassword but uses an OTP with purpose 'reset'.
+async function forgotPasswordPhone(req, res) {
+  const { phone } = req.body;
+  if (!phone) return res.status(400).json({ error: 'بيانات ناقصة', code: 'ERR_VALIDATION' });
+  const { rows } = await query(`SELECT id FROM users WHERE phone = $1`, [phone]);
+  // Don't leak whether the phone is registered — always 200, only send if it exists.
+  if (rows.length) {
+    await createOtp(phone, 'reset');
+  }
+  res.json({ sent: true });
+}
+
+async function resetPasswordPhone(req, res) {
+  const { phone, code, password } = req.body;
+  if (!phone || !code || !password) {
+    return res.status(400).json({ error: 'بيانات ناقصة', code: 'ERR_VALIDATION' });
+  }
+  const ok = await verifyOtp(phone, code, 'reset');
+  if (!ok) return res.status(400).json({ error: 'الرمز خاطئ أو منتهي', code: 'ERR_INVALID_OTP' });
+  const hash = await bcrypt.hash(password, SALT_ROUNDS);
+  const { rows } = await query(
+    `UPDATE users SET password_hash = $1 WHERE phone = $2 RETURNING id`,
+    [hash, phone]
+  );
+  if (!rows.length) return res.status(404).json({ error: 'المستخدم غير موجود', code: 'ERR_NOT_FOUND' });
+  res.json({ reset: true });
+}
+
 async function resetPassword(req, res) {
   const { token, password } = req.body;
   if (!token || !password) {
@@ -151,4 +180,4 @@ async function resetPassword(req, res) {
   res.json({ reset: true });
 }
 
-module.exports = { register, login, loginVerifyOtp, me, postVerifyOtp, resendOtp, forgotPassword, resetPassword };
+module.exports = { register, login, loginVerifyOtp, me, postVerifyOtp, resendOtp, forgotPassword, resetPassword, forgotPasswordPhone, resetPasswordPhone };

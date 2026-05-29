@@ -13,7 +13,7 @@ export function StaffOrderBreakdown({ detail }: StaffOrderBreakdownProps) {
   const withPhotos = detail.breakdown.filter((l) => l.customerImageUrl);
 
   return (
-    <article className="rounded-xl border border-ink/10 bg-white p-5">
+    <article className="rounded-2xl border border-ink/10 bg-white p-5 shadow-[var(--shadow-soft)]">
       <h3 className="text-sm font-semibold text-ink">تفاصيل الطلب والسعر</h3>
       <ul className="mt-3 space-y-3 text-sm">
         {detail.breakdown.map((line, i) => (
@@ -42,6 +42,17 @@ export function StaffOrderBreakdown({ detail }: StaffOrderBreakdownProps) {
                     unoptimized
                   />
                 </div>
+                {/* Download the original upload file — use raw /uploads URL, not next/image re-encode */}
+                <a
+                  href={
+                    resolveCatalogMediaUrl(line.customerImageUrl) ||
+                    line.customerImageUrl
+                  }
+                  download
+                  className="mt-2 min-h-[44px] inline-flex w-full items-center justify-center rounded-xl border border-orange/40 bg-cream px-3 py-2 text-xs font-medium text-orange-ink hover:bg-orange/10 transition-colors"
+                >
+                  تنزيل الصورة
+                </a>
               </div>
             )}
           </li>

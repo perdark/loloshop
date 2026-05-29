@@ -33,6 +33,7 @@ export default function LoginPage() {
 
   // otp step
   const [digits, setDigits] = useState(["", "", "", "", "", ""]);
+  const [otpError, setOtpError] = useState("");
   const [otpLoading, setOtpLoading] = useState(false);
   const [countdown, setCountdown] = useState(RESEND_COOLDOWN);
   const [resending, setResending] = useState(false);
@@ -117,6 +118,7 @@ export default function LoginPage() {
 
   async function submitOtp(code: string) {
     setOtpLoading(true);
+    setOtpError("");
     try {
       const { token, user } = await loginVerifyOtp(phone.trim(), code);
       setToken(token);
@@ -124,7 +126,9 @@ export default function LoginPage() {
       toast.success(`مرحباً ${user.name} 🎉`);
       router.replace(ROLE_REDIRECT[user.role]);
     } catch (err) {
-      toast.error(getApiErrorMessage(err, "رمز غير صحيح"));
+      const msg = getApiErrorMessage(err, "رمز غير صحيح");
+      setOtpError(msg);
+      toast.error(msg);
       // clear digits on error
       setDigits(["", "", "", "", "", ""]);
       setTimeout(() => inputsRef.current[0]?.focus(), 50);
@@ -157,6 +161,7 @@ export default function LoginPage() {
         });
       }, 1000);
       setDigits(["", "", "", "", "", ""]);
+      setOtpError("");
       setTimeout(() => inputsRef.current[0]?.focus(), 50);
       toast.success("تم إرسال رمز جديد");
     } catch {
@@ -182,14 +187,33 @@ export default function LoginPage() {
           }}
         >
           <form onSubmit={handleCredentials} className="space-y-4">
-            <Input
-              label="رقم الهاتف"
-              type="tel"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              error={errors.phone}
-              autoComplete="tel"
-            />
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="phone-v2" className="text-sm font-medium text-ink">رقم الهاتف</label>
+              <div className="flex items-stretch gap-2" dir="ltr">
+                <span
+                  id="phone-country"
+                  aria-label="رمز الدولة العراق"
+                  className="inline-flex select-none items-center rounded-xl border border-ink/15 bg-beige px-3 text-sm font-semibold text-ink"
+                >+964</span>
+                <input
+                  id="phone-v2"
+                  type="tel"
+                  inputMode="numeric"
+                  autoComplete="tel"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value.replace(/\D/g, ""))}
+                  placeholder="7XX XXX XXXX"
+                  aria-invalid={!!errors.phone}
+                  aria-describedby={`phone-country${errors.phone ? " phone-error" : ""}`}
+                  className={[
+                    "min-h-11 min-w-0 flex-1 rounded-xl border bg-white px-3.5 py-2.5 text-ink outline-none transition-colors placeholder:text-ink/55",
+                    "focus:border-orange-ink focus:ring-2 focus:ring-orange-ink/20",
+                    errors.phone ? "border-red-500" : "border-ink/15",
+                  ].join(" ")}
+                />
+              </div>
+              {errors.phone && <p id="phone-error" className="text-xs text-red-600" role="alert">{errors.phone}</p>}
+            </div>
             <Input
               label="كلمة المرور"
               type="password"
@@ -201,7 +225,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-orange px-4 py-2.5 text-sm font-semibold text-white transition-all duration-200 hover:bg-orange-light active:scale-95 disabled:opacity-50"
+              className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-pill bg-orange-ink px-4 text-sm font-semibold text-white transition-[background-color,transform] duration-200 ease-out hover:bg-ink active:translate-y-px disabled:opacity-50 disabled:hover:bg-orange-ink"
             >
               {loading ? (
                 <>
@@ -213,7 +237,7 @@ export default function LoginPage() {
               )}
             </button>
             <p className="text-center text-sm">
-              <Link href="/forgot-password" className="text-orange-ink hover:underline">
+              <Link href="/forgot-password" className="font-medium text-orange-ink underline-offset-2 hover:underline">
                 نسيت كلمة المرور؟
               </Link>
             </p>
@@ -233,18 +257,15 @@ export default function LoginPage() {
           }}
         >
           <form onSubmit={handleOtpSubmit} className="space-y-5">
-            {/* WhatsApp hint */}
-            <div className="rounded-xl bg-green-50 border border-green-200 px-4 py-3 text-center text-sm text-green-800">
-              <span className="text-lg">📲</span>
-              <p className="mt-1 font-medium">
-                أُرسل رمز واتساب إلى
-              </p>
-              <p className="mt-0.5 font-bold tracking-widest" dir="ltr">{phone}</p>
+            {/* WhatsApp hint — a quiet paper inset, the copy names the channel */}
+            <div className="rounded-[12px] border border-ink/10 bg-cream px-4 py-3.5 text-center text-sm text-ink-soft">
+              <p>أُرسل رمز التحقق عبر واتساب إلى</p>
+              <p className="mt-1 font-bold tracking-widest text-ink" dir="ltr">+964 {phone}</p>
             </div>
 
             {/* OTP digit boxes */}
             <div>
-              <p className="mb-3 text-center text-sm font-medium text-ink/70">أدخل الرمز المكوّن من ٦ أرقام</p>
+              <p className="mb-3 text-center text-sm font-medium text-ink-soft">أدخل الرمز المكوّن من ٦ أرقام</p>
               <div
                 className="flex justify-center gap-2"
                 dir="ltr"
@@ -261,23 +282,30 @@ export default function LoginPage() {
                     disabled={otpLoading}
                     onChange={(e) => handleDigitChange(i, e.target.value)}
                     onKeyDown={(e) => handleKeyDown(i, e.key)}
+                    aria-label={`رقم ${i + 1}`}
+                    aria-describedby={otpError ? "otp-error" : undefined}
+                    aria-invalid={!!otpError || undefined}
                     className={[
-                      "h-12 w-10 rounded-xl border-2 text-center text-xl font-bold text-ink outline-none transition-all duration-150",
-                      "focus:border-orange focus:ring-2 focus:ring-orange/25 focus:scale-110",
-                      d ? "border-orange bg-orange/5" : "border-ink/20 bg-white",
+                      "h-12 w-10 rounded-md border text-center text-xl font-bold text-ink outline-none transition-colors duration-150",
+                      "focus:border-orange-ink focus:ring-2 focus:ring-orange-ink/20",
+                      otpError ? "border-red-400 bg-red-50" : d ? "border-orange-ink bg-orange-ink/5" : "border-ink/15 bg-beige",
                       otpLoading ? "opacity-50" : "",
                     ].join(" ")}
-                    aria-label={`رقم ${i + 1}`}
                   />
                 ))}
               </div>
+              {otpError && (
+                <p id="otp-error" role="alert" className="mt-2 text-center text-xs text-red-600">
+                  {otpError}
+                </p>
+              )}
             </div>
 
             {/* Submit button */}
             <button
               type="submit"
               disabled={otpLoading || digits.join("").length < 6}
-              className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-orange px-4 py-2.5 text-sm font-semibold text-white transition-all duration-200 hover:bg-orange-light active:scale-95 disabled:opacity-50"
+              className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-pill bg-orange-ink px-4 text-sm font-semibold text-white transition-[background-color,transform] duration-200 ease-out hover:bg-ink active:translate-y-px disabled:opacity-50 disabled:hover:bg-orange-ink"
             >
               {otpLoading ? (
                 <>
@@ -294,7 +322,7 @@ export default function LoginPage() {
               <button
                 type="button"
                 onClick={() => { setStep("credentials"); setDigits(["", "", "", "", "", ""]); }}
-                className="text-ink/50 hover:text-ink transition-colors"
+                className="text-ink-soft transition-colors hover:text-ink"
               >
                 ← تغيير الرقم
               </button>
@@ -302,7 +330,7 @@ export default function LoginPage() {
                 type="button"
                 onClick={handleResend}
                 disabled={countdown > 0 || resending}
-                className="text-orange hover:text-orange-light disabled:text-ink/40 disabled:cursor-not-allowed transition-colors font-medium"
+                className="font-medium text-orange-ink transition-colors hover:text-ink disabled:cursor-not-allowed disabled:text-ink/40"
               >
                 {resending
                   ? "جارٍ الإرسال…"

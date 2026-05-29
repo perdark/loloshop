@@ -250,6 +250,45 @@ async function deleteWholesaler(req, res) {
   });
   res.json({ data: { id } });
 }
+// ── Sash side lock config (per wholesaler) ──
+// editable_sash_side: 'left' | 'right' | null (null = both editable)
+// locked_side_design: Fabric JSON for the locked (non-editable) side.
+function validateSashSide(side) {
+  return side === null || side === 'left' || side === 'right';
+}
+
+async function getWholesalerSashConfig(req, res) {
+  const { id } = req.params;
+  const { rows } = await query(
+    `SELECT id, editable_sash_side, locked_side_design FROM wholesalers WHERE id = $1`,
+    [id]
+  );
+  if (!rows.length) return res.status(404).json({ error: 'غير موجود', code: 'ERR_NOT_FOUND' });
+  res.json({ data: rows[0] });
+}
+
+async function updateWholesalerSashConfig(req, res) {
+  const { id } = req.params;
+  const side = req.body.editable_sash_side ?? null;
+  if (!validateSashSide(side)) {
+    return res.status(400).json({ error: 'جانب غير صالح', code: 'ERR_VALIDATION' });
+  }
+  // When unlocking (side = null) we also clear the saved locked-side design.
+  const design = side === null ? null : (req.body.locked_side_design ?? null);
+  const { rows } = await query(
+    `UPDATE wholesalers SET editable_sash_side = $1, locked_side_design = $2
+     WHERE id = $3 RETURNING id, editable_sash_side, locked_side_design`,
+    [side, design, id]
+  );
+  if (!rows.length) return res.status(404).json({ error: 'غير موجود', code: 'ERR_NOT_FOUND' });
+  await query(
+    `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
+     VALUES ($1, 'update_sash_side', 'wholesaler', $2, $3)`,
+    [req.user.id, id, JSON.stringify({ editable_sash_side: side })]
+  );
+  res.json({ data: rows[0] });
+}
+
 async function wholesalerStudents(req, res) {
   const { id } = req.params;
   const { rows } = await query(
@@ -362,6 +401,7 @@ async function deleteStaff(req, res) {
 module.exports = {
   analytics, accounting, updateOrderCost,
   listWholesalers, createWholesaler, updateDeadline, updateCommission, deleteWholesaler,
+  getWholesalerSashConfig, updateWholesalerSashConfig,
   wholesalerStudents, toggleEditException,
   listStaff, createStaff, updateStaffPassword, deleteStaff,
 };

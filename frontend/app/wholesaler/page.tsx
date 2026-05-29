@@ -5,10 +5,14 @@ import { toast } from "sonner";
 import {
   approveStudent,
   bulkSetStudentStatus,
+  getMySashConfig,
   getPendingStudents,
   getWholesalerDashboard,
   rejectStudent,
+  updateMySashConfig,
+  type WholesalerSashConfig,
 } from "@/lib/wholesaler";
+import { SashSideLockEditor } from "@/components/designer/SashSideLockEditor";
 import { getApiErrorMessage } from "@/lib/api";
 import { formatDateIQ, formatDateShort, formatIQD, getJoinUrl } from "@/lib/format";
 import type { PendingStudent, WholesalerDashboard } from "@/lib/types";
@@ -16,6 +20,7 @@ import { CopyButton } from "@/components/ui/CopyButton";
 import { Button } from "@/components/ui/Button";
 import { PageLoader } from "@/components/ui/Spinner";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { StatCard } from "@/components/ui/StatCard";
 import { Modal } from "@/components/ui/Modal";
 
 export default function WholesalerDashboardPage() {
@@ -28,6 +33,10 @@ export default function WholesalerDashboardPage() {
   const [reject, setReject] = useState<
     { ids: string[]; label: string } | null
   >(null);
+  const [sashOpen, setSashOpen] = useState(false);
+  const [sashConfig, setSashConfig] = useState<WholesalerSashConfig | null>(null);
+  const [sashLoading, setSashLoading] = useState(false);
+  const [sashSaving, setSashSaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -96,6 +105,33 @@ export default function WholesalerDashboardPage() {
     }
   }
 
+  async function openSashConfig() {
+    setSashConfig(null);
+    setSashOpen(true);
+    setSashLoading(true);
+    try {
+      setSashConfig(await getMySashConfig());
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "تعذر تحميل إعدادات الوشاح"));
+      setSashOpen(false);
+    } finally {
+      setSashLoading(false);
+    }
+  }
+
+  async function handleSashSave(cfg: WholesalerSashConfig) {
+    setSashSaving(true);
+    try {
+      await updateMySashConfig(cfg);
+      toast.success("تم حفظ إعدادات الوشاح");
+      setSashOpen(false);
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "تعذر حفظ الإعدادات"));
+    } finally {
+      setSashSaving(false);
+    }
+  }
+
   async function confirmReject() {
     if (!reject) return;
     const { ids } = reject;
@@ -125,42 +161,41 @@ export default function WholesalerDashboardPage() {
 
   return (
     <div className="space-y-6">
-      <section className="rounded-2xl bg-ink p-6 text-center text-cream">
-        <p className="text-sm text-cream/70">الموعد النهائي</p>
-        <p className="mt-2 font-display text-3xl font-bold text-orange-ink">
+      <section className="bg-hero-rich relative overflow-hidden rounded-3xl p-6 text-center text-cream shadow-[var(--shadow-float)]">
+        <span
+          aria-hidden
+          className="pointer-events-none absolute -end-10 -top-12 h-40 w-40 rounded-full bg-orange/20 blur-3xl"
+        />
+        <p className="relative text-sm font-medium text-cream/75">الموعد النهائي</p>
+        <p className="relative mt-2 font-display text-4xl font-bold tracking-tight text-cream">
           {formatDateIQ(dashboard.deadline)}
         </p>
       </section>
 
       <div className="grid grid-cols-3 gap-3">
-        <div className="rounded-xl border border-ink/10 bg-white p-4 text-center">
-          <p className="text-2xl font-bold text-ink">{dashboard.studentCount}</p>
-          <p className="mt-1 text-xs text-ink/60">عدد الطلاب</p>
-        </div>
-        <div className="rounded-xl border border-ink/10 bg-white p-4 text-center">
-          <p className="text-2xl font-bold text-orange-ink">{dashboard.pendingCount}</p>
-          <p className="mt-1 text-xs text-ink/60">بانتظار الموافقة</p>
-        </div>
-        <div className="rounded-xl border border-ink/10 bg-white p-4 text-center">
-          <p className="text-2xl font-bold text-ink">{dashboard.completedDesigns}</p>
-          <p className="mt-1 text-xs text-ink/60">تصاميم مكتملة</p>
-        </div>
+        <StatCard label="عدد الطلاب" value={String(dashboard.studentCount)} />
+        <StatCard label="بانتظار الموافقة" value={String(dashboard.pendingCount)} />
+        <StatCard label="تصاميم مكتملة" value={String(dashboard.completedDesigns)} accent="profit" />
       </div>
 
       {(dashboard.commissionRate ?? 0) > 0 && (
-        <section className="rounded-xl border border-orange/30 bg-orange/5 p-4 text-center">
-          <p className="text-xs text-ink/60">
+        <section className="surface-card relative overflow-hidden rounded-2xl p-5 text-center">
+          <span
+            aria-hidden
+            className="absolute inset-x-0 top-0 h-1 bg-brand-gradient"
+          />
+          <p className="text-xs font-medium text-ink/60">
             عمولتك المستحقة ({dashboard.commissionRate}%)
           </p>
-          <p className="mt-1 font-display text-2xl font-bold text-orange-ink">
+          <p className="mt-1.5 font-display text-3xl font-bold text-gradient-brand" dir="ltr">
             {formatIQD(dashboard.earnedCommission ?? 0)}
           </p>
         </section>
       )}
 
-      <section className="rounded-xl border border-ink/10 bg-white p-4">
-        <p className="mb-2 text-sm font-medium text-ink">رابط الدعوة</p>
-        <p className="break-all text-xs text-ink/60" dir="ltr">
+      <section className="surface-card rounded-2xl p-5">
+        <p className="mb-2 text-sm font-semibold text-ink">رابط الدعوة</p>
+        <p className="break-all rounded-xl bg-beige/70 px-3 py-2.5 text-xs text-ink/60" dir="ltr">
           {joinUrl}
         </p>
         <div className="mt-3 flex gap-2">
@@ -169,20 +204,30 @@ export default function WholesalerDashboardPage() {
             href={whatsappShare}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex min-h-11 flex-1 items-center justify-center rounded-lg bg-orange px-4 text-sm font-semibold text-white"
+            className="btn-shine flex min-h-11 flex-1 items-center justify-center rounded-xl bg-brand-gradient px-4 text-sm font-semibold text-white shadow-[var(--shadow-soft)] transition-transform active:scale-[0.98]"
           >
             مشاركة عبر واتساب
           </a>
         </div>
       </section>
 
+      <section className="surface-card rounded-2xl p-5">
+        <p className="mb-1 text-sm font-semibold text-ink">تصميم الوشاح للطلاب</p>
+        <p className="mb-3 text-xs text-ink/60">
+          حدّد الجانب الذي يصمّمه الطلاب وارسم الجانب الآخر مسبقاً.
+        </p>
+        <Button variant="ghost" fullWidth onClick={openSashConfig}>
+          إعدادات الوشاح
+        </Button>
+      </section>
+
       <section className="pb-28">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="font-display text-lg font-bold text-ink">
+          <h2 className="section-heading font-display text-lg font-bold text-ink">
             طلاب بانتظار الموافقة
           </h2>
           {pending.length > 0 && (
-            <label className="flex cursor-pointer items-center gap-2 text-sm text-ink/70">
+            <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm font-medium text-ink/70">
               <input
                 type="checkbox"
                 className="size-4 accent-orange"
@@ -200,7 +245,9 @@ export default function WholesalerDashboardPage() {
             {pending.map((student) => (
               <li
                 key={student.id}
-                className="rounded-xl border border-ink/10 bg-white p-4"
+                className={`surface-card rounded-2xl p-4 transition-colors ${
+                  selected.has(student.id) ? "ring-2 ring-orange/40" : ""
+                }`}
               >
                 <div className="flex items-start gap-3">
                   <input
@@ -211,14 +258,17 @@ export default function WholesalerDashboardPage() {
                     aria-label={`تحديد ${student.fullName}`}
                   />
                   <div className="min-w-0 flex-1">
-                    <p className="font-semibold text-ink">{student.fullName}</p>
+                    <p className="font-display font-bold text-ink">{student.fullName}</p>
                     <p className="text-sm text-ink/60" dir="ltr">
                       {student.phone}
                     </p>
-                    <p className="mt-1 text-xs text-ink/40">
+                    <p className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-beige/70 px-2 py-0.5 text-xs text-ink/50">
                       {formatDateShort(student.createdAt)}
                     </p>
                   </div>
+                  <span className="inline-flex shrink-0 items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-700">
+                    بانتظار
+                  </span>
                 </div>
                 <div className="mt-4 flex gap-2">
                   <Button
@@ -247,9 +297,9 @@ export default function WholesalerDashboardPage() {
       </section>
 
       {selected.size > 0 && (
-        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-ink/10 bg-white/95 p-4 backdrop-blur">
+        <div className="surface-glass fixed inset-x-0 bottom-0 z-40 border-t border-ink/10 p-4 shadow-[var(--shadow-float)]">
           <div className="mx-auto flex max-w-md items-center gap-2">
-            <span className="text-sm font-medium text-ink">
+            <span className="inline-flex shrink-0 items-center rounded-full bg-orange/10 px-3 py-1.5 text-sm font-semibold text-orange-ink">
               {selected.size} محدد
             </span>
             <Button
@@ -304,6 +354,23 @@ export default function WholesalerDashboardPage() {
         <p className="text-sm text-ink/70">
           هل تريد رفض {reject?.label}؟ لا يمكن التراجع عن هذا الإجراء.
         </p>
+      </Modal>
+
+      <Modal
+        open={sashOpen}
+        onClose={() => (sashSaving ? null : setSashOpen(false))}
+        title="إعدادات الوشاح"
+      >
+        {sashLoading || !sashConfig ? (
+          <PageLoader />
+        ) : (
+          <SashSideLockEditor
+            editableSide={sashConfig.editable_sash_side}
+            lockedSideDesign={sashConfig.locked_side_design}
+            saving={sashSaving}
+            onSave={handleSashSave}
+          />
+        )}
       </Modal>
     </div>
   );

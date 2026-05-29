@@ -53,18 +53,18 @@ export default function WholesalerBatchPage() {
 
   if (!summaries.length) {
     return (
-      <div dir="rtl" lang="ar">
-        <EmptyState message="لا توجد دفعة نشطة" />
-        <Link href="/wholesaler" className="mt-4 block text-sm text-orange-ink">
-          العودة
+      <div className="space-y-4" dir="rtl" lang="ar">
+        <Link href="/wholesaler" className="inline-flex min-h-11 items-center text-sm font-medium text-orange-ink hover:underline">
+          ← لوحة الممثل
         </Link>
+        <EmptyState message="لا توجد دفعة نشطة" />
       </div>
     );
   }
 
   return (
     <div className="space-y-6 pb-8" dir="rtl" lang="ar">
-      <Link href="/wholesaler" className="text-sm text-orange-ink hover:underline">
+      <Link href="/wholesaler" className="inline-flex min-h-11 items-center text-sm font-medium text-orange-ink hover:underline">
         ← لوحة الممثل
       </Link>
 
@@ -75,10 +75,10 @@ export default function WholesalerBatchPage() {
               key={b.id}
               type="button"
               onClick={() => selectBatch(b.id)}
-              className={`rounded-lg border px-3 py-2 text-sm ${
+              className={`min-h-11 rounded-xl border px-4 py-2 text-sm font-medium transition-colors ${
                 batch?.id === b.id
-                  ? "border-orange bg-orange/10 text-orange-ink"
-                  : "border-ink/10 bg-white"
+                  ? "border-orange bg-orange/10 text-orange-ink shadow-[var(--shadow-soft)]"
+                  : "border-ink/10 bg-white text-ink/70 hover:border-orange/30"
               }`}
             >
               {b.nameAr}
@@ -89,35 +89,47 @@ export default function WholesalerBatchPage() {
 
       {batch && (
         <>
-          <h1 className="font-display text-xl font-bold text-ink">
+          <h1 className="section-heading font-display text-2xl font-bold text-ink">
             {batch.nameAr}
           </h1>
 
           {batch.deadline && <BatchCountdown deadline={batch.deadline} />}
 
-          <div className="rounded-xl border border-orange/30 bg-orange/5 p-4 text-center">
-            <p className="text-sm text-ink/70">مجموع الدفعة</p>
-            <p className="font-display text-2xl font-bold text-orange-ink" dir="ltr">
+          <section className="surface-card relative overflow-hidden rounded-2xl p-5 text-center">
+            <span
+              aria-hidden
+              className="absolute inset-x-0 top-0 h-1 bg-brand-gradient"
+            />
+            <p className="text-xs font-medium text-ink/60">مجموع الدفعة</p>
+            <p className="mt-1.5 font-display text-3xl font-bold text-gradient-brand" dir="ltr">
               {formatIQD(batch.grandTotal)}
             </p>
-          </div>
+            <p className="mt-1 text-xs text-ink/50">{batch.students.length} طالب</p>
+          </section>
 
-          <ul className="space-y-2">
-            {batch.students.map((s) => (
-              <li
-                key={s.id}
-                className="rounded-lg border border-ink/10 bg-white px-4 py-3 text-sm"
-              >
-                <p className="font-medium text-ink">{s.name}</p>
-                {s.fullNameThird && (
-                  <p className="text-xs text-ink/60">{s.fullNameThird}</p>
-                )}
-                <p className="mt-1 font-bold text-orange-ink" dir="ltr">
-                  {formatIQD(s.total)}
-                </p>
-              </li>
-            ))}
-          </ul>
+          <section>
+            <h2 className="section-heading mb-3 font-display text-lg font-bold text-ink">
+              طلاب الدفعة
+            </h2>
+            <ul className="space-y-3">
+              {batch.students.map((s) => (
+                <li
+                  key={s.id}
+                  className="surface-card card-lift flex items-center justify-between gap-3 rounded-2xl p-4"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="font-display font-bold text-ink">{s.name}</p>
+                    {s.fullNameThird && (
+                      <p className="mt-0.5 text-xs text-ink/60">{s.fullNameThird}</p>
+                    )}
+                  </div>
+                  <span className="shrink-0 rounded-full bg-orange/10 px-3 py-1.5 text-sm font-bold text-orange-ink" dir="ltr">
+                    {formatIQD(s.total)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
         </>
       )}
     </div>

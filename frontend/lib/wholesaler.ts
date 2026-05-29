@@ -122,6 +122,27 @@ export async function getWholesalerStudents(params?: {
   }));
 }
 
+export interface WholesalerSashConfig {
+  editable_sash_side: "left" | "right" | null;
+  locked_side_design: unknown | null;
+}
+
+export async function getMySashConfig(): Promise<WholesalerSashConfig> {
+  const { data } = await api.get<{ data: WholesalerSashConfig }>(
+    "/wholesaler/sash-config"
+  );
+  return data.data;
+}
+
+export async function updateMySashConfig(
+  config: WholesalerSashConfig
+): Promise<void> {
+  await api.put("/wholesaler/sash-config", {
+    editable_sash_side: config.editable_sash_side,
+    locked_side_design: config.locked_side_design,
+  });
+}
+
 export async function joinWithCode(
   code: string,
   payload: JoinPayload

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
+import { BrandMark } from "@/components/ui/BrandLogo";
 import { logout } from "@/lib/auth";
 import { toast } from "sonner";
 import type { StaffListFilter } from "@/lib/staff-types";
@@ -51,24 +52,38 @@ export function StaffSidebar({ user, open, onClose }: StaffSidebarProps) {
 
   const sidebar = (
     <aside className="flex h-full w-64 flex-col bg-ink text-cream">
-      <div className="border-b border-cream/10 px-5 py-6">
-        <p className="font-script text-2xl text-orange-ink">lolo shop</p>
-        <p className="font-display text-sm font-semibold text-cream/90">لولو شوب</p>
-        <p className="mt-1 text-xs text-cream/60">لوحة الموظف</p>
+      <div className="relative overflow-hidden border-b border-cream/10 px-5 py-6">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -top-10 -end-8 h-28 w-28 rounded-full bg-orange/25 blur-2xl"
+        />
+        <div className="relative flex items-center gap-3">
+          <BrandMark size={56} priority />
+          <div>
+            <p className="font-display text-base font-semibold text-cream/90">لولو شوب</p>
+            <p className="mt-0.5 text-xs text-cream/60">لوحة الموظف</p>
+          </div>
+        </div>
       </div>
 
       <nav className="flex-1 space-y-1 px-3 py-4">
         {navItems.map((item) => (
           <Link
-            key={item.filter}
+            key={item.href}
             href={item.href}
             onClick={onClose}
-            className={`block rounded-lg px-3 py-2.5 text-sm transition-colors ${
+            className={`group relative flex min-h-11 items-center rounded-xl px-3 py-2.5 text-sm transition-all duration-200 ${
               isActive(item)
-                ? "bg-orange/20 font-semibold text-orange-ink"
-                : "text-cream/80 hover:bg-cream/10"
+                ? "bg-orange/15 font-semibold text-cream"
+                : "text-cream/75 hover:bg-cream/10 hover:text-cream"
             }`}
           >
+            {isActive(item) && (
+              <span
+                aria-hidden
+                className="absolute bottom-2 end-0 top-2 w-1 rounded-full bg-brand-gradient"
+              />
+            )}
             {item.label}
           </Link>
         ))}
@@ -76,11 +91,11 @@ export function StaffSidebar({ user, open, onClose }: StaffSidebarProps) {
 
       <div className="border-t border-cream/10 px-5 py-4">
         <p className="truncate text-sm font-medium">{user.name}</p>
-        <p className="truncate text-xs text-cream/50">{user.phone}</p>
+        <p className="truncate text-xs text-cream/50" dir="ltr">{user.phone}</p>
         <button
           type="button"
           onClick={handleLogout}
-          className="mt-3 w-full rounded-lg border border-cream/20 py-2 text-sm text-cream/80 transition-colors hover:bg-cream/10"
+          className="mt-3 min-h-11 w-full rounded-xl border border-cream/20 py-2 text-sm text-cream/80 transition-colors hover:border-cream/40 hover:bg-cream/10"
         >
           تسجيل الخروج
         </button>
@@ -90,7 +105,7 @@ export function StaffSidebar({ user, open, onClose }: StaffSidebarProps) {
 
   return (
     <>
-      <div className="hidden lg:fixed lg:inset-y-0 lg:right-0 lg:z-30 lg:block">
+      <div className="hidden lg:fixed lg:inset-y-0 lg:start-0 lg:z-30 lg:block">
         {sidebar}
       </div>
 
@@ -101,7 +116,7 @@ export function StaffSidebar({ user, open, onClose }: StaffSidebarProps) {
             onClick={onClose}
             role="presentation"
           />
-          <div className="absolute inset-y-0 right-0 shadow-xl">{sidebar}</div>
+          <div className="absolute inset-y-0 start-0 shadow-xl">{sidebar}</div>
         </div>
       )}
     </>

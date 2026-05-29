@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
+import { BrandMark } from "@/components/ui/BrandLogo";
 import { logout } from "@/lib/auth";
 import { toast } from "sonner";
 import type { User } from "@/lib/types";
@@ -16,6 +18,7 @@ const navItems: {
   { href: "/admin/orders", label: "الطلبات", exact: false },
   { href: "/admin/wholesalers", label: "الممثلون", exact: false },
   { href: "/admin/products", label: "الكتالوج", exact: false },
+  { href: "/admin/hero-slides", label: "شريط الواجهة", exact: false },
   { href: "/admin/batches", label: "الدفعات", exact: false },
   { href: "/admin/staff", label: "الموظفون", exact: false },
   { href: "#", label: "الإعدادات", exact: false, disabled: true },
@@ -29,6 +32,69 @@ interface AdminSidebarProps {
 
 export function AdminSidebar({ user, open, onClose }: AdminSidebarProps) {
   const pathname = usePathname();
+  const onCloseRef = useRef(onClose);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  // Modal drawer accessibility: focus trap, Escape key, body scroll lock
+  useEffect(() => {
+    if (!open) return;
+
+    const prevFocus = document.activeElement as HTMLElement | null;
+    document.body.style.overflow = "hidden";
+
+    // Move focus into panel on open
+    requestAnimationFrame(() => {
+      const panel = panelRef.current;
+      if (!panel) return;
+      const focusable = panel.querySelector<HTMLElement>(
+        'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      );
+      focusable?.focus();
+    });
+
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        onCloseRef.current();
+        return;
+      }
+      if (e.key !== "Tab") return;
+
+      const panel = panelRef.current;
+      if (!panel) return;
+      const focusables = Array.from(
+        panel.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter((el) => !el.closest('[aria-hidden="true"]'));
+      if (focusables.length === 0) return;
+
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+
+      if (e.shiftKey) {
+        if (document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else {
+        if (document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    }
+
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = "";
+      prevFocus?.focus?.();
+    };
+  }, [open]);
 
   function handleLogout() {
     logout();
@@ -43,31 +109,41 @@ export function AdminSidebar({ user, open, onClose }: AdminSidebarProps) {
   }
 
   const sidebar = (
-    <aside className="flex h-full w-64 flex-col bg-ink text-cream">
-      <div className="border-b border-cream/10 px-5 py-6">
-        <p className="font-script text-2xl text-orange-ink">lolo shop</p>
-        <p className="font-display text-sm font-semibold text-cream/90">لولو شوب</p>
-        <p className="mt-1 text-xs text-cream/60">لوحة المدير</p>
+    <aside className="relative flex h-full w-64 flex-col overflow-hidden bg-ink text-cream">
+      <div className="relative border-b border-cream/10 px-5 py-6">
+        <div className="flex items-center gap-3">
+          <BrandMark size={56} priority />
+          <div>
+            <p className="font-display text-base font-semibold text-cream/90">لولو شوب</p>
+            <p className="text-xs tracking-wide text-cream/55">لوحة المدير</p>
+          </div>
+        </div>
       </div>
 
-      <nav className="flex-1 space-y-1 px-3 py-4">
+      <nav className="relative flex-1 space-y-1 px-3 py-4">
         {navItems.map((item) =>
           item.disabled ? (
-            <span
+            <button
               key={item.label}
-              className="block rounded-lg px-3 py-2.5 text-sm text-cream/30"
+              type="button"
+              disabled
+              aria-disabled="true"
+              className="flex min-h-11 w-full items-center justify-between rounded-xl px-3 py-2.5 text-sm text-cream/50 cursor-not-allowed"
             >
-              {item.label}
-            </span>
+              <span>{item.label}</span>
+              <span className="rounded-full bg-cream/10 px-2 py-0.5 text-xs text-cream/60">
+                قريباً
+              </span>
+            </button>
           ) : (
             <Link
               key={item.href}
               href={item.href}
               onClick={onClose}
-              className={`block rounded-lg px-3 py-2.5 text-sm transition-colors ${
+              className={`block min-h-11 rounded-xl px-3 py-2.5 text-sm transition-colors duration-200 ${
                 isActive(item.href, item.exact)
-                  ? "bg-orange/20 font-semibold text-orange-ink"
-                  : "text-cream/80 hover:bg-cream/10"
+                  ? "bg-cream/12 font-semibold text-cream"
+                  : "text-cream/70 hover:bg-cream/8 hover:text-cream"
               }`}
             >
               {item.label}
@@ -76,13 +152,13 @@ export function AdminSidebar({ user, open, onClose }: AdminSidebarProps) {
         )}
       </nav>
 
-      <div className="border-t border-cream/10 px-5 py-4">
+      <div className="relative border-t border-cream/10 px-5 py-4">
         <p className="truncate text-sm font-medium">{user.name}</p>
-        <p className="truncate text-xs text-cream/50">{user.phone}</p>
+        <p className="truncate text-xs text-cream/50" dir="ltr">{user.phone}</p>
         <button
           type="button"
           onClick={handleLogout}
-          className="mt-3 w-full rounded-lg border border-cream/20 py-2 text-sm text-cream/80 transition-colors hover:bg-cream/10"
+          className="mt-3 min-h-11 w-full rounded-xl border border-cream/20 py-2 text-sm text-cream/80 transition-colors hover:border-cream/40 hover:bg-cream/10 hover:text-cream"
         >
           تسجيل الخروج
         </button>
@@ -92,18 +168,26 @@ export function AdminSidebar({ user, open, onClose }: AdminSidebarProps) {
 
   return (
     <>
-      <div className="hidden lg:fixed lg:inset-y-0 lg:right-0 lg:z-30 lg:block">
+      <div className="hidden lg:fixed lg:inset-y-0 lg:start-0 lg:z-30 lg:block lg:shadow-[var(--shadow-float)]">
         {sidebar}
       </div>
 
       {open && (
         <div className="fixed inset-0 z-40 lg:hidden">
           <div
-            className="absolute inset-0 bg-ink/50"
+            className="absolute inset-0 bg-ink/60 backdrop-blur-sm animate-fade-page-in"
             onClick={onClose}
             role="presentation"
           />
-          <div className="absolute inset-y-0 right-0 shadow-xl">{sidebar}</div>
+          <div
+            ref={panelRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="قائمة التنقل"
+            className="absolute inset-y-0 start-0 shadow-[var(--shadow-pop)]"
+          >
+            {sidebar}
+          </div>
         </div>
       )}
     </>

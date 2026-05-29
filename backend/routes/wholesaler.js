@@ -10,5 +10,7 @@ router.get('/students', c.listStudents);
 router.post('/approve/:studentId', c.approve);
 router.post('/reject/:studentId', c.reject);
 router.post('/students/bulk', c.bulkSetStatus);
+router.get('/sash-config', c.getSashConfig);
+router.put('/sash-config', c.updateSashConfig);
 
 module.exports = router;

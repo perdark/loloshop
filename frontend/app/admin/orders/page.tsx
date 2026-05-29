@@ -14,6 +14,14 @@ import { Button } from "@/components/ui/Button";
 import { PageLoader } from "@/components/ui/Spinner";
 import { EmptyState } from "@/components/ui/EmptyState";
 
+type SortKey = "profit" | "cost" | "price" | null;
+type SortDir = "asc" | "desc";
+
+function profitColor(profit: number | null | undefined): string {
+  if (profit == null) return "text-ink/60";
+  return profit < 0 ? "text-rose-700" : "text-emerald-700";
+}
+
 export default function AdminOrdersPage() {
   const [orders, setOrders] = useState<AdminOrder[]>([]);
   const [wholesalers, setWholesalers] = useState<AdminWholesaler[]>([]);
@@ -24,6 +32,8 @@ export default function AdminOrdersPage() {
   const [dateTo, setDateTo] = useState("");
   const [costDraftById, setCostDraftById] = useState<Record<string, string>>({});
   const [savingCostId, setSavingCostId] = useState<string | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey>(null);
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -79,6 +89,43 @@ export default function AdminOrdersPage() {
     }
   }
 
+  // Fix 4: strip non-digits on input and write the cleaned integer back so
+  // what you see == what gets saved. IQD has no decimals.
+  function handleCostInput(orderId: string, raw: string) {
+    const digits = raw.replace(/[^\d]/g, "");
+    setCostDraftById((p) => ({ ...p, [orderId]: digits }));
+  }
+
+  // Fix 3: toggle sort key / direction
+  function handleSort(key: SortKey) {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("desc");
+    }
+  }
+
+  function sortArrow(key: SortKey) {
+    if (sortKey !== key) return <span className="ms-1 opacity-30">↕</span>;
+    return (
+      <span className="ms-1 opacity-80">{sortDir === "desc" ? "↓" : "↑"}</span>
+    );
+  }
+
+  const sortedOrders = sortKey
+    ? [...orders].sort((a, b) => {
+        const av = (a[sortKey] as number | null) ?? -Infinity;
+        const bv = (b[sortKey] as number | null) ?? -Infinity;
+        return sortDir === "asc" ? av - bv : bv - av;
+      })
+    : orders;
+
+  // Fix 2: totals for the current filtered (and sorted) set
+  const totalPrice = sortedOrders.reduce((s, o) => s + (o.price ?? 0), 0);
+  const totalCost = sortedOrders.reduce((s, o) => s + (o.cost ?? 0), 0);
+  const totalProfit = sortedOrders.reduce((s, o) => s + (o.profit ?? 0), 0);
+
   const wholesalerOptions = [
     { value: "", label: "كل الممثلين" },
     ...wholesalers.map((w) => ({ value: w.id, label: w.name })),
@@ -96,7 +143,7 @@ export default function AdminOrdersPage() {
     <div dir="rtl" lang="ar">
       <PageHeader title="الطلبات" subtitle="جميع طلبات الطلاب مع الأرباح" />
 
-      <div className="mb-6 grid gap-3 rounded-xl border border-ink/10 bg-white p-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="surface-card mb-6 grid gap-3 rounded-2xl p-4 sm:grid-cols-2 lg:grid-cols-4">
         <Select
           label="الممثل"
           options={wholesalerOptions}
@@ -134,53 +181,84 @@ export default function AdminOrdersPage() {
         <EmptyState message="لا توجد طلبات مطابقة" />
       ) : (
         <>
-          <div className="hidden overflow-x-auto rounded-xl border border-ink/10 bg-white md:block">
+          {/* ── Desktop table ── */}
+          {/* Fix 6: scroll wrapper is keyboard-focusable */}
+          <div
+            className="surface-card hidden overflow-x-auto rounded-2xl md:block"
+            tabIndex={0}
+            role="region"
+            aria-label="جدول الطلبات"
+          >
             <table className="w-full min-w-[880px] text-sm">
-              <thead>
-                <tr className="border-b border-ink/10 bg-ink/5 text-right">
-                  <th className="px-4 py-3 font-semibold text-ink">الاسم الكامل</th>
-                  <th className="px-4 py-3 font-semibold text-ink">المنتج</th>
-                  <th className="px-4 py-3 font-semibold text-ink">السعر</th>
-                  <th className="px-4 py-3 font-semibold text-ink">التكلفة</th>
-                  <th className="px-4 py-3 font-semibold text-ink">الربح</th>
-                  <th className="px-4 py-3 font-semibold text-ink">الحالة</th>
-                  <th className="px-4 py-3 font-semibold text-ink">الممثل</th>
-                  <th className="px-4 py-3 font-semibold text-ink">تعديل التكلفة</th>
+              <thead className="sticky top-0 z-10">
+                <tr className="border-b border-ink/10 bg-ink/[0.04] text-right text-xs uppercase tracking-wide text-ink/60">
+                  <th className="px-4 py-3 font-semibold">الاسم الكامل</th>
+                  <th className="px-4 py-3 font-semibold">المنتج</th>
+                  {/* Fix 3: sortable price header */}
+                  <th
+                    className="cursor-pointer select-none px-4 py-3 font-semibold hover:text-ink/90"
+                    onClick={() => handleSort("price")}
+                  >
+                    السعر {sortArrow("price")}
+                  </th>
+                  {/* Fix 3: sortable cost header */}
+                  <th
+                    className="cursor-pointer select-none px-4 py-3 font-semibold hover:text-ink/90"
+                    onClick={() => handleSort("cost")}
+                  >
+                    التكلفة {sortArrow("cost")}
+                  </th>
+                  {/* Fix 3: sortable profit header */}
+                  <th
+                    className="cursor-pointer select-none px-4 py-3 font-semibold hover:text-ink/90"
+                    onClick={() => handleSort("profit")}
+                  >
+                    الربح {sortArrow("profit")}
+                  </th>
+                  <th className="px-4 py-3 font-semibold">الحالة</th>
+                  <th className="px-4 py-3 font-semibold">الممثل</th>
+                  <th className="px-4 py-3 font-semibold">تعديل التكلفة</th>
                 </tr>
               </thead>
               <tbody>
-                {orders.map((order) => (
-                  <tr key={order.id} className="border-b border-ink/5 last:border-0">
-                    <td className="px-4 py-3">{order.studentName}</td>
-                    <td className="px-4 py-3">
+                {sortedOrders.map((order) => (
+                  <tr
+                    key={order.id}
+                    className="border-b border-ink/5 transition-colors odd:bg-cream/40 last:border-0 hover:bg-peach/25"
+                  >
+                    <td className="px-4 py-3 font-medium text-ink">{order.studentName}</td>
+                    <td className="px-4 py-3 text-ink/80">
                       {order.productName}
                     </td>
-                    <td className="px-4 py-3">{formatIQD(order.price)}</td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 tabular-nums text-ink/80" dir="ltr">{formatIQD(order.price)}</td>
+                    <td className="px-4 py-3 tabular-nums text-ink/80" dir="ltr">
                       {order.cost != null ? formatIQD(order.cost) : "—"}
                     </td>
-                    <td className="px-4 py-3 font-semibold text-emerald-700">
+                    {/* Fix 1: profit color driven by value */}
+                    <td
+                      className={`px-4 py-3 font-semibold tabular-nums ${profitColor(order.profit)}`}
+                      dir="ltr"
+                    >
                       {order.profit != null ? formatIQD(order.profit) : "—"}
                     </td>
-                    <td className="px-4 py-3 text-xs">
-                      {ORDER_STATUS_LABELS[order.status]}
+                    <td className="px-4 py-3">
+                      <span className="inline-flex rounded-full bg-ink/[0.06] px-2.5 py-1 text-xs font-medium text-ink/70">
+                        {ORDER_STATUS_LABELS[order.status]}
+                      </span>
                     </td>
                     <td className="px-4 py-3 text-ink/70">{order.wholesalerName}</td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap items-center gap-2">
+                        {/* Fix 4 + Fix 5: digits-only input, aria-label */}
                         <Input
                           type="text"
                           inputMode="numeric"
                           className="max-w-[8rem]"
                           value={costDraftById[order.id] ?? ""}
-                          onChange={(e) =>
-                            setCostDraftById((p) => ({
-                              ...p,
-                              [order.id]: e.target.value,
-                            }))
-                          }
+                          onChange={(e) => handleCostInput(order.id, e.target.value)}
                           placeholder="د.ع"
                           dir="ltr"
+                          aria-label="التكلفة"
                         />
                         <Button
                           className="min-h-9 px-3 py-2 text-xs"
@@ -194,14 +272,36 @@ export default function AdminOrdersPage() {
                   </tr>
                 ))}
               </tbody>
+              {/* Fix 2: totals footer row */}
+              <tfoot>
+                <tr className="border-t-2 border-ink/20 bg-ink/[0.04] font-semibold text-sm">
+                  <td className="px-4 py-3 text-ink/70" colSpan={2}>
+                    الإجمالي ({sortedOrders.length} طلب)
+                  </td>
+                  <td className="px-4 py-3 tabular-nums text-ink/80" dir="ltr">
+                    {formatIQD(totalPrice)}
+                  </td>
+                  <td className="px-4 py-3 tabular-nums text-ink/80" dir="ltr">
+                    {formatIQD(totalCost)}
+                  </td>
+                  <td
+                    className={`px-4 py-3 tabular-nums ${profitColor(totalProfit)}`}
+                    dir="ltr"
+                  >
+                    {formatIQD(totalProfit)}
+                  </td>
+                  <td colSpan={3} />
+                </tr>
+              </tfoot>
             </table>
           </div>
 
+          {/* ── Mobile cards ── */}
           <div className="space-y-3 md:hidden">
-            {orders.map((order) => (
+            {sortedOrders.map((order) => (
               <article
                 key={order.id}
-                className="rounded-xl border border-ink/10 bg-white p-4"
+                className="surface-card card-lift rounded-2xl p-4"
               >
                 <p className="font-semibold text-ink">{order.studentName}</p>
                 <p className="mt-1 text-sm text-ink/60">
@@ -210,34 +310,35 @@ export default function AdminOrdersPage() {
                 <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
                   <div>
                     <span className="text-ink/50">السعر: </span>
-                    {formatIQD(order.price)}
+                    <span className="tabular-nums" dir="ltr">{formatIQD(order.price)}</span>
                   </div>
                   <div>
                     <span className="text-ink/50">التكلفة: </span>
-                    {order.cost != null ? formatIQD(order.cost) : "—"}
+                    <span className="tabular-nums" dir="ltr">{order.cost != null ? formatIQD(order.cost) : "—"}</span>
                   </div>
                   <div className="col-span-2">
                     <span className="text-ink/50">الربح: </span>
-                    <span className="font-semibold text-emerald-700">
+                    {/* Fix 1 (mobile): profit color driven by value */}
+                    <span
+                      className={`font-semibold tabular-nums ${profitColor(order.profit)}`}
+                      dir="ltr"
+                    >
                       {order.profit != null ? formatIQD(order.profit) : "—"}
                     </span>
                   </div>
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-ink/10 pt-3">
                   <span className="text-sm text-ink/50">تعديل التكلفة:</span>
+                  {/* Fix 4 + Fix 5 (mobile): digits-only input, aria-label */}
                   <Input
                     type="text"
                     inputMode="numeric"
                     className="max-w-[7rem]"
                     value={costDraftById[order.id] ?? ""}
-                    onChange={(e) =>
-                      setCostDraftById((p) => ({
-                        ...p,
-                        [order.id]: e.target.value,
-                      }))
-                    }
+                    onChange={(e) => handleCostInput(order.id, e.target.value)}
                     placeholder="د.ع"
                     dir="ltr"
+                    aria-label="التكلفة"
                   />
                   <Button
                     className="min-h-9 px-3 py-2 text-xs"
@@ -252,6 +353,32 @@ export default function AdminOrdersPage() {
                 </p>
               </article>
             ))}
+
+            {/* Fix 2 (mobile): summary card */}
+            <div className="surface-card rounded-2xl border-2 border-ink/10 p-4 text-sm">
+              <p className="mb-3 font-semibold text-ink">
+                الإجمالي — {sortedOrders.length} طلب
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <span className="text-ink/50">السعر: </span>
+                  <span className="tabular-nums" dir="ltr">{formatIQD(totalPrice)}</span>
+                </div>
+                <div>
+                  <span className="text-ink/50">التكلفة: </span>
+                  <span className="tabular-nums" dir="ltr">{formatIQD(totalCost)}</span>
+                </div>
+                <div className="col-span-2">
+                  <span className="text-ink/50">الربح: </span>
+                  <span
+                    className={`font-semibold tabular-nums ${profitColor(totalProfit)}`}
+                    dir="ltr"
+                  >
+                    {formatIQD(totalProfit)}
+                  </span>
+                </div>
+              </div>
+            </div>
           </div>
         </>
       )}

@@ -80,13 +80,13 @@ export function AdminProductMedia({
   const mainSrc = resolveCatalogMediaUrl(product.imageUrl);
 
   return (
-    <section className="mb-6 rounded-xl border border-orange/20 bg-peach/20 p-4">
-      <h3 className="mb-3 font-display text-base font-bold text-ink">
+    <section className="mb-6 rounded-2xl border border-orange/20 bg-peach/20 p-4 shadow-[var(--shadow-soft)]">
+      <h3 className="section-heading mb-3 font-display text-base font-bold text-ink">
         الصور والعرض
       </h3>
 
       <div className="flex flex-wrap gap-4">
-        <div className="relative h-28 w-28 overflow-hidden rounded-lg bg-beige ring-1 ring-ink/10">
+        <div className="relative h-28 w-28 overflow-hidden rounded-xl bg-beige ring-1 ring-ink/10">
           {mainSrc ? (
             <Image src={mainSrc} alt="" fill className="object-cover" unoptimized />
           ) : (
@@ -96,7 +96,7 @@ export function AdminProductMedia({
           )}
         </div>
         <div className="flex flex-col gap-2 text-sm">
-          <label className="cursor-pointer text-orange-ink underline">
+          <label className="cursor-pointer font-medium text-orange-ink underline-offset-2 hover:underline">
             رفع صورة رئيسية
             <input
               type="file"
@@ -110,7 +110,7 @@ export function AdminProductMedia({
               }}
             />
           </label>
-          <label className="cursor-pointer text-orange-ink underline">
+          <label className="cursor-pointer font-medium text-orange-ink underline-offset-2 hover:underline">
             إضافة للمعرض
             <input
               type="file"
@@ -155,7 +155,7 @@ export function AdminProductMedia({
         <ul className="mt-4 flex flex-wrap gap-2">
           {product.images.map((img) => (
             <li key={img.id} className="relative">
-              <div className="relative h-16 w-16 overflow-hidden rounded-lg ring-1 ring-ink/10">
+              <div className="relative h-16 w-16 overflow-hidden rounded-xl ring-1 ring-ink/10">
                 <Image
                   src={resolveCatalogMediaUrl(img.url) || img.url}
                   alt=""

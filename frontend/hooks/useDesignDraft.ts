@@ -57,6 +57,9 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
   const [completedLocked, setCompletedLocked] = useState(false);
   const [editException, setEditException] = useState(false);
   const [gender, setGender] = useState<"male" | "female" | null>(null);
+  // Per-wholesaler sash side lock: which side the student may edit (null = both).
+  const [editableSide, setEditableSide] = useState<"left" | "right" | null>(null);
+  const lockedSideRef = useRef<unknown | null>(null);
 
   const [product, setProduct] = useState<CatalogProduct | null>(null);
   const [selection, setSelection] = useState<OptionSelection>({});
@@ -110,7 +113,12 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
   const canPreview =
     singleSideOnly || (!!leftJson && !!rightJson) || (!!leftJson && !!rightJson);
 
-  const previewReady = singleSideOnly
+  const previewReady = editableSide
+    ? // Locked: student only needs to design their editable side.
+      editableSide === "left"
+      ? !!leftJson
+      : !!rightJson
+    : singleSideOnly
     ? !!(leftJson || rightJson)
     : !!(leftJson && rightJson);
 
@@ -135,6 +143,14 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
 
         setEditException(!!my.edit_exception);
         setStudentStatus(my.student_status);
+
+        // Per-wholesaler sash side lock. The locked side = opposite of editable.
+        const editSide =
+          my.editable_sash_side === "left" || my.editable_sash_side === "right"
+            ? my.editable_sash_side
+            : null;
+        setEditableSide(editSide);
+        lockedSideRef.current = editSide ? (my.locked_side_design ?? null) : null;
 
         // Check for preset from product page (consumes it once)
         const preset = readSessionJson<{ productId: string; selections: OptionSelection }>(SASH_PRESET_KEY);
@@ -194,6 +210,13 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
             }
           }
 
+          // Enforce the locked side: force the admin/wholesaler default onto the
+          // side the student is NOT allowed to edit, overriding any saved content.
+          if (editSide && lockedSideRef.current) {
+            if (editSide === "left") setRightJson(lockedSideRef.current);
+            else setLeftJson(lockedSideRef.current);
+          }
+
           const hasCanvas = !!(my.data?.left_canvas || my.data?.right_canvas);
           let restoredStep: 1 | 2 | 3 = hasCanvas ? 2 : 1;
           const savedStepRaw =
@@ -242,11 +265,25 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
       if ((completedLocked && !editException) || !product) return;
       const seq = ++saveSeqRef.current;
       setSaving(true);
+      // Always persist the locked side's admin default so orders/staff get a
+      // complete sash even though the student never edits that side.
+      const lockedLeft = editableSide === "right" ? lockedSideRef.current : undefined;
+      const lockedRight = editableSide === "left" ? lockedSideRef.current : undefined;
       try {
         await saveDesign({
           sash_color: sashColor,
-          left_canvas: override && "left" in override ? override.left : leftJson,
-          right_canvas: override && "right" in override ? override.right : rightJson,
+          left_canvas:
+            lockedLeft !== undefined
+              ? lockedLeft
+              : override && "left" in override
+              ? override.left
+              : leftJson,
+          right_canvas:
+            lockedRight !== undefined
+              ? lockedRight
+              : override && "right" in override
+              ? override.right
+              : rightJson,
           logo_url: logoUrl,
           extra_image_url: extraImageUrl,
           fonts_used: Array.from(usedFontsRef.current),
@@ -279,6 +316,7 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
       logoUrl,
       extraImageUrl,
       notes,
+      editableSide,
     ]
   );
 
@@ -358,11 +396,13 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
     }
 
     setConfirming(true);
+    const lockedLeft = editableSide === "right" ? lockedSideRef.current : undefined;
+    const lockedRight = editableSide === "left" ? lockedSideRef.current : undefined;
     try {
       const { id: designId } = await saveDesign({
         sash_color: sashColor,
-        left_canvas: leftJson,
-        right_canvas: rightJson,
+        left_canvas: lockedLeft !== undefined ? lockedLeft : leftJson,
+        right_canvas: lockedRight !== undefined ? lockedRight : rightJson,
         logo_url: logoUrl,
         extra_image_url: extraImageUrl,
         fonts_used: Array.from(usedFontsRef.current),
@@ -437,6 +477,7 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
     confirming,
     singleSideOnly,
     setSingleSideOnly,
+    editableSide,
     sashColor,
     role,
     preview,

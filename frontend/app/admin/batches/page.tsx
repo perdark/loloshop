@@ -35,19 +35,19 @@ export default function AdminBatchesPage() {
             <li key={b.id}>
               <Link
                 href={`/admin/batches/${b.id}`}
-                className="block rounded-xl border border-ink/10 bg-white p-4 transition-shadow hover:shadow-md"
+                className="surface-card card-lift group block rounded-2xl p-4"
               >
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <p className="font-semibold text-ink">{b.nameAr}</p>
+                    <p className="font-display text-base font-bold text-ink transition-colors group-hover:text-orange-ink">{b.nameAr}</p>
                     {b.wholesalerName && (
                       <p className="text-sm text-ink/60">{b.wholesalerName}</p>
                     )}
                     <p className="mt-1 text-xs text-ink/50">
-                      الموعد: {formatDateIQ(b.deadline)} · {b.orderCount} طلب
+                      الموعد: {formatDateIQ(b.deadline)} · <span className="tabular-nums">{b.orderCount}</span> طلب
                     </p>
                   </div>
-                  <p className="font-bold text-orange-ink" dir="ltr">
+                  <p className="font-display text-lg font-bold tabular-nums text-orange-ink" dir="ltr">
                     {formatIQD(b.grandTotal)}
                   </p>
                 </div>
@@ -57,8 +57,11 @@ export default function AdminBatchesPage() {
         </ul>
       )}
 
-      <Link href="/admin" className="text-sm text-orange-ink hover:underline">
-        ← لوحة التحكم
+      <Link
+        href="/admin"
+        className="inline-flex items-center gap-1 text-sm font-medium text-orange-ink transition-colors hover:text-orange"
+      >
+        <span aria-hidden>←</span> لوحة التحكم
       </Link>
     </div>
   );

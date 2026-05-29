@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
 import { getFabric } from "@/lib/fabric-loader";
-import { fontFamilyFor, loadFont } from "@/lib/fonts-loader";
+import { boldSupported, fontFamilyFor, loadFont } from "@/lib/fonts-loader";
 import type { FontDef } from "@/lib/types";
 import { DesignerToolsAside } from "./DesignerToolsAside";
 
@@ -22,7 +22,9 @@ const TASHKEEL: { ch: string; tip: string }[] = [
   { ch: "ٍ", tip: "تنوين كسر" },
 ];
 const ORNAMENTS = ["۞", "❁", "✦", "★", "♦", "◈", "﴾", "﴿", "✿", "❖"];
-const TEXT_COLORS = ["#1a1a1a", "#ff8c00", "#7a1f2b", "#ffffff", "#c9a961", "#0b1e3f"];
+// Brand palette only — navy (#0b1e3f) and gold (#c9a961) removed; dark orange
+// corrected to brand token #f47b42 (was off-brand #ff8c00).
+const TEXT_COLORS = ["#1a1a1a", "#f47b42", "#7a1f2b", "#ffffff"];
 
 const SIDE_HINT: Record<"left" | "right", string> = {
   left: "اكتب اسمك بخط مناسب للتطريز",
@@ -30,15 +32,15 @@ const SIDE_HINT: Record<"left" | "right", string> = {
 };
 
 function defaultFontForSide(side: "left" | "right", fonts: FontDef[]): string {
-  if (side === "right") {
-    return fonts.find((f) => f.id === "amiri")?.id ?? "amiri";
-  }
-  return (
-    fonts.find((f) => f.id === "aref-ruqaa")?.id ??
-    fonts.find((f) => f.id === "lateef")?.id ??
-    "aref-ruqaa"
-  );
+  // Both sides default to Amiri — a legible classical naskh that renders cleanly
+  // at small sizes. Aref Ruqaa stays available in the picker for a calligraphic
+  // name, but is too heavy to be a safe default.
+  void side;
+  return fonts.find((f) => f.id === "amiri")?.id ?? "amiri";
 }
+
+const isTextType = (t?: string) =>
+  t === "i-text" || t === "text" || t === "IText" || t === "Textbox";
 
 interface Props {
   side: "left" | "right";
@@ -124,6 +126,21 @@ export function Whiteboard({ side, fonts, onApply, onClose }: Props) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  // Preload every catalog font in parallel so the picker can preview each name
+  // in its own face. Sequential loading was slow for large catalogs (8+ fonts).
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all(fonts.map((f) => loadFont(f).catch(() => {}))).then(() => {
+      if (!cancelled) {
+        // Trigger a re-render so the font picker buttons repaint with loaded faces.
+        fabricRef.current?.requestRenderAll?.();
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [fonts]);
+
   async function addText() {
     const canvas = fabricRef.current;
     const fabric = fabricLibRef.current;
@@ -146,18 +163,39 @@ export function Whiteboard({ side, fonts, onApply, onClose }: Props) {
       fill: textColor,
       direction: "rtl",
       textAlign: "center",
+      lineHeight: 1.25,
       editable: true,
     });
     canvas.add(obj);
     canvas.setActiveObject(obj);
-    canvas.renderAll();
+    // Re-measure once the webfont is truly ready so the glyph metrics (and the
+    // centered origin) are correct instead of the fallback font's.
+    await reflowAfterFont(obj);
+    canvas.requestRenderAll();
     setText("");
+  }
+
+  // Re-measure a text object after its font is loaded (Fabric v6 measures
+  // synchronously at creation, so without this it keeps the fallback metrics).
+  async function reflowAfterFont(obj: { initDimensions?: () => void; setCoords?: () => void }) {
+    if (typeof document !== "undefined" && document.fonts?.ready) {
+      try {
+        await document.fonts.ready;
+      } catch {
+        // ignore
+      }
+    }
+    obj.initDimensions?.();
+    obj.setCoords?.();
+    fabricRef.current?.requestRenderAll();
   }
 
   function addGlyph(glyph: string, isTashkeel: boolean) {
     const canvas = fabricRef.current;
     const fabric = fabricLibRef.current;
     if (!canvas || !fabric) return;
+    // Register the current font so onApply emits a complete fontsUsed list.
+    usedFontsRef.current.add(currentFont);
     const display = isTashkeel ? "ـ" + glyph : glyph;
     const n = placeCountRef.current++;
     const offset = (n % 6) * 22 - 55;
@@ -179,11 +217,7 @@ export function Whiteboard({ side, fonts, onApply, onClose }: Props) {
 
   function activeText() {
     const o = fabricRef.current?.getActiveObject();
-    const t = o?.type ?? "";
-    return o &&
-      (t === "i-text" || t === "text" || t === "IText" || t === "Textbox")
-      ? o
-      : null;
+    return o && isTextType(o?.type) ? o : null;
   }
 
   async function changeFont(id: string) {
@@ -194,7 +228,7 @@ export function Whiteboard({ side, fonts, onApply, onClose }: Props) {
     if (o) {
       o.set("fontFamily", fontFamilyFor(id));
       usedFontsRef.current.add(id);
-      fabricRef.current.renderAll();
+      await reflowAfterFont(o);
     }
   }
 
@@ -267,7 +301,9 @@ export function Whiteboard({ side, fonts, onApply, onClose }: Props) {
           className="flex min-h-11 min-w-11 items-center justify-center rounded hover:bg-cream/10"
           aria-label="إغلاق"
         >
-          ✕
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+            <path d="M18 6 6 18M6 6l12 12" />
+          </svg>
         </button>
       </header>
 
@@ -344,28 +380,42 @@ export function Whiteboard({ side, fonts, onApply, onClose }: Props) {
           </div>
 
           <div className="rounded-xl border border-ink/10 bg-cream p-3 shadow-sm">
-            <p className="mb-2 text-sm font-semibold text-ink">الخط والحجم</p>
-            <select
-              value={currentFont}
-              onChange={(e) => changeFont(e.target.value)}
-              disabled={!fonts.length}
-              className="mb-2 w-full rounded border border-ink/20 bg-cream px-2 py-2 text-sm"
-            >
-              {fonts.length === 0 ? (
-                <option value={currentFont}>جاري تحميل الخطوط…</option>
-              ) : (
-                fonts.map((f) => (
-                  <option key={f.id} value={f.id} style={{ fontFamily: fontFamilyFor(f.id) }}>
+            <p className="mb-2 text-sm font-semibold text-ink">الخط</p>
+            {fonts.length === 0 ? (
+              <p className="mb-2 text-sm text-ink/50">جاري تحميل الخطوط…</p>
+            ) : (
+              <div className="mb-3 flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+                {fonts.map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => changeFont(f.id)}
+                    aria-pressed={currentFont === f.id}
+                    style={{ fontFamily: fontFamilyFor(f.id) }}
+                    className={`shrink-0 min-h-11 rounded-lg border px-3 py-2 text-lg leading-none transition-colors ${
+                      currentFont === f.id
+                        ? "border-orange bg-orange/10 ring-1 ring-orange text-ink"
+                        : "border-ink/15 bg-cream text-ink hover:border-orange/60"
+                    }`}
+                  >
                     {f.name_ar}
-                  </option>
-                ))
-              )}
-            </select>
+                  </button>
+                ))}
+              </div>
+            )}
+            <p className="mb-2 text-sm font-semibold text-ink">الحجم</p>
             <div className="flex items-center gap-2">
               <Button variant="ghost" onClick={() => changeSize(-2)}>−</Button>
               <span className="min-w-10 text-center text-sm text-ink/70">{fontSize}</span>
               <Button variant="ghost" onClick={() => changeSize(2)}>+</Button>
-              <Button variant="ghost" onClick={toggleBold} disabled={!hasSelection}>B</Button>
+              <Button
+                variant="ghost"
+                onClick={toggleBold}
+                disabled={!hasSelection || !boldSupported(currentFont)}
+                title={!boldSupported(currentFont) ? "هذا الخط لا يدعم الغامق" : "غامق"}
+              >
+                B
+              </Button>
               <Button variant="danger" onClick={deleteActive} disabled={!hasSelection}>حذف</Button>
             </div>
             <div className="mt-3 flex flex-wrap gap-2">

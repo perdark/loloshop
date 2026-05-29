@@ -15,5 +15,7 @@ router.post('/verify-otp', verifyLimit, c.postVerifyOtp);
 router.post('/resend-otp', otpLimit, c.resendOtp);
 router.post('/forgot-password', otpLimit, c.forgotPassword);
 router.post('/reset-password', verifyLimit, c.resetPassword);
+router.post('/forgot-password-phone', otpLimit, c.forgotPasswordPhone);
+router.post('/reset-password-phone', verifyLimit, c.resetPasswordPhone);
 
 module.exports = router;

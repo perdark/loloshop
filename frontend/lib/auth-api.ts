@@ -62,6 +62,27 @@ export async function resetPassword(
   await api.post("/auth/reset-password", { token, password });
 }
 
+// Phone-based reset: send a WhatsApp OTP, then reset with phone + code + new password.
+export async function forgotPasswordByPhone(phone: string): Promise<void> {
+  try {
+    await api.post("/auth/forgot-password-phone", { phone });
+  } catch (e) {
+    throw new Error(extractMessage(e, "تعذّر إرسال الرمز"));
+  }
+}
+
+export async function resetPasswordByPhone(
+  phone: string,
+  code: string,
+  password: string
+): Promise<void> {
+  try {
+    await api.post("/auth/reset-password-phone", { phone, code, password });
+  } catch (e) {
+    throw new Error(extractMessage(e, "تعذّر إعادة تعيين كلمة المرور"));
+  }
+}
+
 export async function verifyOtp(phone: string, code: string): Promise<void> {
   await api.post("/auth/verify-otp", { phone, code });
 }

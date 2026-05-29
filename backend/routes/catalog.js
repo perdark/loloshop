@@ -7,15 +7,23 @@ const c = require('../controllers/catalogController');
 router.get('/shop', optionalAuth, c.getShop);                      // packages + products grouped by type
 router.get('/products/:id/full', optionalAuth, c.getProductFull);  // full config for configurator
 router.get('/packages', optionalAuth, c.listPackages);             // active packages for wholesaler students
+router.get('/hero', c.getHeroSlides);                              // active home-slider slides
 
 // Everything below is admin-only
 router.use(authRequired, requireRole('admin'));
+
+router.get('/hero/all', c.listHeroSlidesAdmin);
+router.post('/hero', c.createHeroSlide);
+router.patch('/hero/:id', c.updateHeroSlide);
+router.delete('/hero/:id', c.deleteHeroSlide);
 
 router.get('/products', c.listProductsAdmin);
 router.post('/products', c.createProduct);
 router.patch('/products/:id', c.updateProduct);
 router.delete('/products/:id', c.deleteProduct);
 router.put('/products/:id/price-role', c.setProductPriceRole);
+router.put('/products/:id/lock-group-option', c.lockGroupOption);
+router.delete('/products/:id/lock-group-option/:groupId', c.unlockGroupOption);
 router.post('/products/:id/groups', c.createGroup);
 router.post('/products/:id/images', c.addProductImage);
 router.delete('/images/:id', c.deleteProductImage);

@@ -15,9 +15,12 @@ export function OrderBreakdownCard({
   title = "تفاصيل السعر (من الخادم)",
 }: OrderBreakdownCardProps) {
   return (
-    <div className="rounded-xl border border-orange/30 bg-orange/5 p-4">
-      <p className="mb-3 text-sm font-semibold text-ink">{title}</p>
-      <ul className="space-y-2 text-sm">
+    <div className="rounded-2xl border border-orange/30 bg-orange/5 p-5 shadow-[var(--shadow-card)] ring-1 ring-orange/10">
+      <p className="mb-3 inline-flex items-center gap-1.5 text-sm font-semibold text-ink">
+        <span aria-hidden className="h-2 w-2 rounded-full bg-brand-gradient" />
+        {title}
+      </p>
+      <ul className="space-y-2.5 text-sm">
         {lines.map((line, i) => {
           const photo = line.customerImageUrl
             ? resolveCatalogMediaUrl(line.customerImageUrl)
@@ -25,15 +28,17 @@ export function OrderBreakdownCard({
           return (
             <li key={`${line.label}-${i}`} className="space-y-2">
               <div className="flex justify-between gap-2">
-                <span className="text-ink/80">{line.label}</span>
-                <span dir="ltr">{formatIQD(line.price)}</span>
+                <span className="text-ink/75">{line.label}</span>
+                <span className="tabular-nums" dir="ltr">
+                  {formatIQD(line.price)}
+                </span>
               </div>
               {photo && (
                 <div>
                   <p className="mb-1 text-[11px] text-ink/50">
                     صورة من الزبون
                   </p>
-                  <div className="relative h-24 w-full overflow-hidden rounded-md border border-ink/10 bg-white">
+                  <div className="relative h-24 w-full overflow-hidden rounded-xl border border-orange/15 bg-white">
                     <Image
                       src={photo}
                       alt=""
@@ -48,9 +53,9 @@ export function OrderBreakdownCard({
           );
         })}
       </ul>
-      <div className="mt-3 flex justify-between border-t border-orange/20 pt-3 font-bold">
+      <div className="mt-3.5 flex items-center justify-between border-t border-orange/20 pt-3.5 font-bold">
         <span>المجموع</span>
-        <span className="text-orange-ink" dir="ltr">
+        <span className="text-lg tabular-nums text-orange-ink" dir="ltr">
           {formatIQD(total)}
         </span>
       </div>

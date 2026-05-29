@@ -3,19 +3,26 @@
 import Image from "next/image";
 import { useState } from "react";
 import { resolveCatalogMediaUrl } from "@/lib/catalog";
+import { BrandMark } from "@/components/ui/BrandLogo";
+import { productImageVT } from "@/lib/view-transition";
 import type { ProductImage } from "@/lib/types";
 
 interface ProductMediaGalleryProps {
   nameAr: string;
   imageUrl: string | null;
   images: ProductImage[];
+  /** product id — names the hero so the storefront card morphs into it */
+  productId?: string | number;
 }
 
 export function ProductMediaGallery({
   nameAr,
   imageUrl,
   images,
+  productId,
 }: ProductMediaGalleryProps) {
+  const heroVT =
+    productId != null ? { viewTransitionName: productImageVT(productId) } : undefined;
   const gallery = [...images].sort((a, b) => a.sort - b.sort);
   const allUrls = [
     ...(imageUrl ? [imageUrl] : []),
@@ -26,21 +33,27 @@ export function ProductMediaGallery({
 
   if (!hero && allUrls.length === 0) {
     return (
-      <div className="flex aspect-[4/3] items-center justify-center rounded-xl bg-peach/40 text-ink/30">
-        لولو شوب
+      <div
+        className="flex aspect-[4/3] items-center justify-center rounded-2xl bg-peach/40"
+        style={heroVT}
+      >
+        <BrandMark size={64} className="opacity-30" />
       </div>
     );
   }
 
   return (
     <div className="space-y-3">
-      <div className="relative aspect-[4/3] overflow-hidden rounded-xl bg-beige ring-1 ring-ink/10">
+      <div
+        className="group relative aspect-[4/3] overflow-hidden rounded-2xl bg-beige shadow-[var(--shadow-card)] ring-1 ring-orange/10"
+        style={heroVT}
+      >
         {hero && (
           <Image
             src={resolveCatalogMediaUrl(hero) || hero}
             alt={nameAr}
             fill
-            className="object-cover"
+            className="object-cover transition-transform duration-500 group-hover:scale-105"
             priority
             unoptimized
           />
@@ -53,8 +66,12 @@ export function ProductMediaGallery({
               key={`${url}-${i}`}
               type="button"
               onClick={() => setActive(i)}
-              className={`relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border-2 transition-colors ${
-                active === i ? "border-orange" : "border-transparent opacity-70"
+              aria-label={`صورة ${i + 1}`}
+              aria-pressed={active === i}
+              className={`relative h-16 w-16 shrink-0 overflow-hidden rounded-xl border-2 transition-all ${
+                active === i
+                  ? "border-orange shadow-[var(--shadow-soft)]"
+                  : "border-transparent opacity-65 hover:opacity-100"
               }`}
             >
               <Image

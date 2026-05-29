@@ -13,6 +13,7 @@ import { SashGownPreview } from "@/components/designer/SashGownPreview";
 import { OptionGroupField } from "@/components/catalog/OptionGroupField";
 import { CustomerImageUpload } from "@/components/catalog/CustomerImageUpload";
 import { PriceBreakdown } from "@/components/catalog/PriceBreakdown";
+import { BrandMark } from "@/components/ui/BrandLogo";
 import { uploadDesignImage, uploadLogo } from "@/lib/designer";
 import {
   customerImageRequired,
@@ -73,6 +74,7 @@ export default function DesignPage() {
     confirming,
     singleSideOnly,
     setSingleSideOnly,
+    editableSide,
     sashColor,
     role,
     preview,
@@ -127,8 +129,10 @@ export default function DesignPage() {
   if (completedLocked) {
     return (
       <div className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-4 bg-cream p-6 text-center">
-        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-orange/15 text-3xl text-orange-ink">
-          ✓
+        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-orange/15 text-orange-ink">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="m5 13 4 4L19 7" />
+          </svg>
         </div>
         <h1 className="font-display text-2xl text-ink">تم تأكيد تصميمك</h1>
         <p className="text-ink/70">
@@ -147,7 +151,7 @@ export default function DesignPage() {
     <div className="mx-auto min-h-screen max-w-4xl bg-cream">
       <header className="relative overflow-hidden bg-brand-gradient px-4 py-5 text-center text-cream">
         <div className="sash-shimmer-strip" aria-hidden />
-        <p className="font-script text-3xl leading-none text-orange-ink">lolo shop</p>
+        <BrandMark size={64} className="mb-2" />
         <h1 className="mt-1 font-display text-xl">صمّم وشاحك</h1>
       </header>
 
@@ -229,23 +233,40 @@ export default function DesignPage() {
 
         {step === 2 && !editingSide && (
           <section key="step-2" className="animate-step-in space-y-4">
+            {editableSide && (
+              <p
+                className="mx-auto max-w-md rounded-xl border border-orange/30 bg-orange/10 px-4 py-2.5 text-center text-sm text-ink/80"
+                role="note"
+              >
+                {editableSide === "left"
+                  ? "يمكنك تصميم جانب الاسم فقط — الجانب الآخر مُعدّ مسبقاً من الممثل"
+                  : "يمكنك تصميم جانب الجامعة فقط — الجانب الآخر مُعدّ مسبقاً من الممثل"}
+              </p>
+            )}
             <SashGownPreview
               sashColor={sashColor}
               leftJson={leftJson}
               rightJson={rightJson}
               fontsUsed={fontsUsed}
-              onClickSide={(s) => setEditingSide(s)}
+              onClickSide={(s) => {
+                // Locked: ignore taps on the non-editable side.
+                if (editableSide && s !== editableSide) return;
+                setEditingSide(s);
+              }}
+              lockedSide={editableSide ? (editableSide === "left" ? "right" : "left") : null}
             />
 
-            <label className="mx-auto flex max-w-md items-center gap-2 text-sm text-ink/70">
-              <input
-                type="checkbox"
-                checked={singleSideOnly}
-                onChange={(e) => setSingleSideOnly(e.target.checked)}
-                className="accent-orange"
-              />
-              تصميم جانب واحد فقط
-            </label>
+            {!editableSide && (
+              <label className="mx-auto flex max-w-md items-center gap-2 text-sm text-ink/70">
+                <input
+                  type="checkbox"
+                  checked={singleSideOnly}
+                  onChange={(e) => setSingleSideOnly(e.target.checked)}
+                  className="accent-orange"
+                />
+                تصميم جانب واحد فقط
+              </label>
+            )}
 
             <div
               className="mx-auto max-w-md text-center text-xs text-ink/50"
@@ -341,7 +362,7 @@ export default function DesignPage() {
         </div>
       </div>
 
-      {editingSide && (
+      {editingSide && !(editableSide && editingSide !== editableSide) && (
         <div className="fixed inset-0 z-[200] flex min-h-0 flex-col bg-cream">
           <TextEditor
             open
@@ -406,7 +427,7 @@ export default function DesignPage() {
             </span>
             . لن تتمكن من تعديل التصميم بعد التأكيد.
           </p>
-          <div className="pointer-events-none scale-90">
+          <div className="pointer-events-none">
             <SashGownPreview
               sashColor={sashColor}
               leftJson={leftJson}

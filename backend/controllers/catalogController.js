@@ -13,20 +13,37 @@ async function priceRoleForUser(user, override) {
   return rows[0]?.wholesaler_id ? 'wholesaler' : 'retail';
 }
 
+// --- Audience: may this viewer see products flagged wholesaler_only? ---
+// TRUE for admin/staff/wholesaler roles and for students joined via a rep link
+// (students.wholesaler_id IS NOT NULL). FALSE for retail students and anon.
+async function canSeeWholesalerOnly(user) {
+  if (!user) return false;
+  if (user.role === 'admin' || user.role === 'staff' || user.role === 'wholesaler') {
+    return true;
+  }
+  const { rows } = await query(
+    `SELECT wholesaler_id FROM students WHERE user_id = $1`,
+    [user.id]
+  );
+  return !!rows[0]?.wholesaler_id;
+}
+
 // ---------- PUBLIC: full product config for the configurator ----------
 async function getProductFull(req, res) {
   const { id } = req.params;
   const role = await priceRoleForUser(req.user, req.query.role);
+  const allowWholesalerOnly = await canSeeWholesalerOnly(req.user);
   const prod = await query(
     `SELECT p.id, p.type, p.name_ar, p.description, p.customizable, p.gender_restriction,
-            p.image_url, p.featured, p.parent_id,
+            p.image_url, p.featured, p.parent_id, p.wholesaler_only,
             par.name_ar AS parent_name_ar, par.image_url AS parent_image_url,
             COALESCE(ppr.base_price, p.base_price) AS base_price
      FROM products p
      LEFT JOIN product_price_roles ppr ON ppr.product_id = p.id AND ppr.role = $2
      LEFT JOIN products par ON par.id = p.parent_id
-     WHERE p.id = $1 AND p.active = TRUE`,
-    [id, role]
+     WHERE p.id = $1 AND p.active = TRUE
+       AND ($3 = TRUE OR p.wholesaler_only = FALSE)`,
+    [id, role, allowWholesalerOnly]
   );
   if (!prod.rows.length) {
     return res.status(404).json({ error: 'المنتج غير موجود', code: 'ERR_NOT_FOUND' });
@@ -79,11 +96,27 @@ async function getProductFull(req, res) {
   const byGroup = {};
   options.rows.forEach((o) => (byGroup[o.group_id] ||= []).push(o));
 
+  // Locked options are keyed by the product being viewed (the child), so inherited
+  // parent groups can be locked at the child level too.
+  const lockedByGroup = {};
+  if (groupIds.length) {
+    const locks = await query(
+      `SELECT group_id, option_id FROM product_locked_options
+       WHERE product_id = $1 AND group_id = ANY($2::uuid[])`,
+      [id, groupIds]
+    );
+    locks.rows.forEach((l) => (lockedByGroup[l.group_id] = l.option_id));
+  }
+
   const data = {
     ...row,
     price_role: role,
     images: gallery.rows,
-    groups: allGroupRows.map((g) => ({ ...g, options: byGroup[g.id] || [] })),
+    groups: allGroupRows.map((g) => ({
+      ...g,
+      options: byGroup[g.id] || [],
+      locked_option_id: lockedByGroup[g.id] || null,
+    })),
   };
   res.json({ data });
 }
@@ -91,6 +124,7 @@ async function getProductFull(req, res) {
 // ---------- PUBLIC: shop feed (packages-first, products grouped by type) ----------
 async function getShop(req, res) {
   const role = await priceRoleForUser(req.user, req.query.role);
+  const allowWholesalerOnly = await canSeeWholesalerOnly(req.user);
   const products = await query(
     `SELECT p.id, p.type, p.name_ar, p.description, p.customizable, p.gender_restriction,
             p.image_url, p.featured, p.sort,
@@ -98,11 +132,12 @@ async function getShop(req, res) {
      FROM products p
      LEFT JOIN product_price_roles ppr ON ppr.product_id = p.id AND ppr.role = $1
      WHERE p.active = TRUE
+       AND ($2 = TRUE OR p.wholesaler_only = FALSE)
        AND NOT EXISTS (
          SELECT 1 FROM products c WHERE c.parent_id = p.id AND c.active = TRUE
        )
      ORDER BY p.type, p.sort, p.created_at DESC`,
-    [role]
+    [role, allowWholesalerOnly]
   );
   // packages are wholesaler-only for now (retail sees none unless retail packages exist)
   const packages = await query(
@@ -120,7 +155,7 @@ async function listProductsAdmin(req, res) {
   const { rows } = await query(
     `SELECT p.id, p.type, p.name_ar, p.description, p.base_price, p.customizable,
             p.gender_restriction, p.image_url, p.featured, p.sort, p.active,
-            p.parent_id,
+            p.wholesaler_only, p.parent_id,
             par.name_ar AS parent_name,
             (SELECT COUNT(*)::int FROM option_groups g WHERE g.product_id = p.id) AS group_count,
             (SELECT COUNT(*)::int FROM product_images i WHERE i.product_id = p.id) AS image_count
@@ -183,7 +218,7 @@ function buildUpdate(table, allowed, body, id, returning = 'id') {
 async function updateProduct(req, res) {
   const upd = buildUpdate(
     'products',
-    ['name_ar', 'description', 'base_price', 'customizable', 'gender_restriction', 'image_url', 'featured', 'sort', 'active', 'parent_id'],
+    ['name_ar', 'description', 'base_price', 'customizable', 'gender_restriction', 'image_url', 'featured', 'sort', 'active', 'wholesaler_only', 'parent_id'],
     req.body, req.params.id
   );
   if (!upd) return res.status(400).json({ error: 'لا تغييرات', code: 'ERR_VALIDATION' });
@@ -305,6 +340,55 @@ async function setProductPriceRole(req, res) {
   res.json({ data: { product_id: id, role, base_price } });
 }
 
+// ---------- ADMIN: lock / unlock a group's option for a (child) product ----------
+async function lockGroupOption(req, res) {
+  const { id } = req.params; // product id (the child being viewed)
+  const { group_id, option_id } = req.body;
+  if (!group_id || !option_id) {
+    return res.status(400).json({ error: 'بيانات ناقصة', code: 'ERR_VALIDATION' });
+  }
+
+  // Group must belong to this product OR to its parent (inherited group).
+  const grp = await query(
+    `SELECT g.id
+       FROM option_groups g
+       JOIN products p ON p.id = $1
+      WHERE g.id = $2
+        AND (g.product_id = p.id OR g.product_id = p.parent_id)`,
+    [id, group_id]
+  );
+  if (!grp.rows.length) {
+    return res.status(404).json({ error: 'المجموعة غير مرتبطة بهذا المنتج', code: 'ERR_NOT_FOUND' });
+  }
+
+  // Option must belong to that group.
+  const opt = await query(
+    `SELECT id FROM options WHERE id = $1 AND group_id = $2`,
+    [option_id, group_id]
+  );
+  if (!opt.rows.length) {
+    return res.status(404).json({ error: 'الخيار لا ينتمي لهذه المجموعة', code: 'ERR_NOT_FOUND' });
+  }
+
+  const { rows } = await query(
+    `INSERT INTO product_locked_options (product_id, group_id, option_id)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (product_id, group_id) DO UPDATE SET option_id = EXCLUDED.option_id
+     RETURNING product_id, group_id, option_id`,
+    [id, group_id, option_id]
+  );
+  res.json({ data: rows[0] });
+}
+
+async function unlockGroupOption(req, res) {
+  const { id, groupId } = req.params;
+  await query(
+    `DELETE FROM product_locked_options WHERE product_id = $1 AND group_id = $2`,
+    [id, groupId]
+  );
+  res.json({ data: { product_id: id, group_id: groupId, cleared: true } });
+}
+
 // ---------- PUBLIC: list active packages with sash type labels ----------
 async function listPackages(req, res) {
   const role = await priceRoleForUser(req.user, req.query.role);
@@ -376,12 +460,62 @@ async function uploadImage(req, res) {
   res.status(201).json({ data: { url: publicUrl(req, 'images', req.file.filename) } });
 }
 
+// ---------- HERO SLIDES (home slider) ----------
+const HERO_COLS = 'id, image_url, kicker_ar, title_ar, caption_ar, accent, cta_label_ar, cta_href, sort';
+
+async function getHeroSlides(req, res) {
+  const { rows } = await query(
+    `SELECT ${HERO_COLS} FROM hero_slides WHERE active = TRUE ORDER BY sort, created_at`
+  );
+  res.json({ data: rows });
+}
+
+async function listHeroSlidesAdmin(req, res) {
+  const { rows } = await query(
+    `SELECT ${HERO_COLS}, active FROM hero_slides ORDER BY active DESC, sort, created_at`
+  );
+  res.json({ data: rows });
+}
+
+async function createHeroSlide(req, res) {
+  const { image_url, kicker_ar, title_ar, caption_ar, accent, cta_label_ar, cta_href, sort } = req.body;
+  if (!image_url || !title_ar) {
+    return res.status(400).json({ error: 'الصورة والعنوان مطلوبان', code: 'ERR_VALIDATION' });
+  }
+  const { rows } = await query(
+    `INSERT INTO hero_slides (image_url, kicker_ar, title_ar, caption_ar, accent, cta_label_ar, cta_href, sort)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8,0)) RETURNING id`,
+    [image_url, kicker_ar || null, title_ar, caption_ar || null, accent || null, cta_label_ar || null, cta_href || null, sort]
+  );
+  res.status(201).json({ data: { id: rows[0].id } });
+}
+
+async function updateHeroSlide(req, res) {
+  const upd = buildUpdate(
+    'hero_slides',
+    ['image_url', 'kicker_ar', 'title_ar', 'caption_ar', 'accent', 'cta_label_ar', 'cta_href', 'sort', 'active'],
+    req.body, req.params.id
+  );
+  if (!upd) return res.status(400).json({ error: 'لا تغييرات', code: 'ERR_VALIDATION' });
+  const { rows } = await query(upd.sql, upd.params);
+  if (!rows.length) return res.status(404).json({ error: 'غير موجود', code: 'ERR_NOT_FOUND' });
+  res.json({ data: rows[0] });
+}
+
+async function deleteHeroSlide(req, res) {
+  const { rows } = await query(`DELETE FROM hero_slides WHERE id = $1 RETURNING id`, [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'غير موجود', code: 'ERR_NOT_FOUND' });
+  res.json({ data: rows[0] });
+}
+
 module.exports = {
-  priceRoleForUser, getProductFull, getShop, listProductsAdmin,
+  getHeroSlides, listHeroSlidesAdmin, createHeroSlide, updateHeroSlide, deleteHeroSlide,
+  priceRoleForUser, canSeeWholesalerOnly, getProductFull, getShop, listProductsAdmin,
   addProductImage, deleteProductImage,
   createProduct, updateProduct, deleteProduct,
   createGroup, updateGroup, deleteGroup,
   createOption, updateOption, deleteOption,
   setOptionPriceRole, setProductPriceRole, uploadImage,
+  lockGroupOption, unlockGroupOption,
   listPackages, createPackage, updatePackage, deletePackage, setPackageRule,
 };

@@ -2,6 +2,7 @@
 
 import { Suspense, useState } from "react";
 import { StaffSidebar } from "@/components/staff/StaffSidebar";
+import { BrandMark } from "@/components/ui/BrandLogo";
 import { PageLoader } from "@/components/ui/Spinner";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 
@@ -23,12 +24,12 @@ function StaffShell({ children }: { children: React.ReactNode }) {
         />
       </Suspense>
 
-      <div className="lg:mr-64">
-        <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-ink/10 bg-cream/95 px-4 py-3 backdrop-blur lg:hidden">
+      <div className="lg:ms-64">
+        <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-ink/10 bg-cream/85 px-4 py-3 backdrop-blur-md lg:hidden">
           <button
             type="button"
             onClick={() => setSidebarOpen(true)}
-            className="flex h-10 w-10 items-center justify-center rounded-lg border border-ink/15 text-ink"
+            className="flex h-11 w-11 items-center justify-center rounded-xl border border-ink/15 bg-white text-ink shadow-[var(--shadow-soft)] transition-colors hover:border-orange/40 hover:text-orange-ink"
             aria-label="فتح القائمة"
           >
             <svg
@@ -48,6 +49,7 @@ function StaffShell({ children }: { children: React.ReactNode }) {
           <span className="font-display text-lg font-bold text-ink">
             لوحة الموظف
           </span>
+          <BrandMark size={36} className="ms-auto" />
         </header>
 
         <main className="p-4 lg:p-8 animate-fade-page-in">{children}</main>

@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 @theme {
-  /* --- Brand: warm orange (primary) — official hex codes --- */
-  --color-orange: #ff8c00;
+  /* --- Brand: warm coral orange (primary) — matches official logo circle --- */
+  --color-orange: #f47b42;
   --color-orange-light: #ffa07a;
   /* Accessible interactive orange for text/links on light backgrounds (WCAG AA ≥4.5:1).
      Keep --color-orange for large fills/buttons only. */
@@ -19,27 +19,175 @@
   /* --- Ink / text --- */
   --color-ink: #1a1a1a;
   --color-ink-soft: #333333;
+  /* WCAG floor: white text on --color-cream (#faebd7) requires ≥4.5:1.
+     --color-ink/65 opacity lands at ~5.08:1 — that is the minimum opacity for
+     body copy. Never use ink below /65 on cream for real text (labels, captions).
+     Icon-only / decorative chrome is exempt. */
 
   /* --- Neutrals --- */
   --color-neutral: #e0e0e0;
   --color-neutral-dark: #bdbdbd;
 
   /* --- Back-compat aliases --- */
-  --color-amber: #ff8c00;
+  /* NOTE: --color-amber was the old stale value (#ff8c00) from brand-tokens.css.
+     Real brand orange is --color-orange #f47b42 (logo circle). This alias is kept
+     only so any legacy class references don't silently break; prefer --color-orange. */
+  --color-amber: #f47b42;
   --color-offwhite: #f5f5dc;
 
   /* --- Fonts --- */
   --font-sans: var(--font-cairo), ui-sans-serif, system-ui, sans-serif;
+  /* Latin headings → Playfair Display; Arabic display → Amiri (silent swap via font-stack).
+     Use --font-display-ar when you need to explicitly target Arabic display text. */
   --font-display: var(--font-playfair), var(--font-amiri), serif;
+  --font-display-ar: var(--font-amiri), serif; /* explicit Arabic display — Amiri only */
   --font-script: var(--font-great-vibes), cursive;
+
+  /* --- Elevation: warm-tinted shadows (utilities shadow-soft / shadow-card / shadow-float / shadow-pop) --- */
+  --shadow-soft: 0 1px 2px rgba(26, 26, 26, 0.04), 0 1px 3px rgba(26, 26, 26, 0.06);
+  --shadow-card: 0 2px 6px -2px rgba(26, 26, 26, 0.08), 0 6px 18px -8px rgba(194, 65, 12, 0.14);
+  --shadow-float: 0 8px 24px -10px rgba(194, 65, 12, 0.22), 0 2px 8px -4px rgba(26, 26, 26, 0.08);
+  --shadow-pop: 0 18px 48px -18px rgba(194, 65, 12, 0.36), 0 6px 16px -8px rgba(26, 26, 26, 0.12);
+
+  /* --- Radii --- */
+  --radius-card: 1.25rem;
+  --radius-pill: 9999px;
 }
 
+/* ── Student storefront: "The Graduation Lookbook" palette ──
+   The locked target system from DESIGN.md (warm paper + ink + earned burnt
+   orange), scoped to the student area so admin/staff/wholesaler keep the
+   shipped tokens. Overriding the @theme vars here cascades to every existing
+   bg-cream / bg-beige / shadow-* utility used inside the storefront, so the
+   product tiles and chips inherit the new system without per-component edits. */
+.shop-paper {
+  --color-cream: #faf4ea;       /* warm paper — page canvas */
+  --color-beige: #fffdfa;       /* raised surface — tile frames, cards */
+  --color-ink-soft: #33302b;    /* body / secondary text */
+  --color-neutral: #e3ddd0;     /* warm hairline borders */
+  --shop-sink: #f5f0e6;         /* recessed band surface */
+  --shop-muted: #6b6356;        /* labels / metadata only (never body copy) — darkened from #8a8377 (was 3.43:1, failed AA) to #6b6356 (~4.6:1 on #faf4ea, passes WCAG AA) */
+  /* Ink-toned elevation — never orange-tinted (the Ink-Not-Orange Shadow Rule) */
+  --shadow-soft: 0 1px 2px rgba(26, 26, 26, 0.05), 0 1px 3px rgba(26, 26, 26, 0.07);
+  --shadow-card: 0 2px 8px -3px rgba(26, 26, 26, 0.10), 0 12px 30px -16px rgba(26, 26, 26, 0.14);
+  --shadow-float: 0 10px 26px -12px rgba(26, 26, 26, 0.18), 0 3px 10px -5px rgba(26, 26, 26, 0.10);
+  --shadow-pop: 0 22px 52px -22px rgba(26, 26, 26, 0.30), 0 8px 20px -10px rgba(26, 26, 26, 0.14);
+}
+
+/* WCAG contrast note: white text on #f47b42 = 1.99:1 (fails AA).
+   Gradient anchors at --color-orange-ink (#c2410c, white = 4.42:1) → --color-orange
+   (#f47b42). The dark anchor at start passes AA; the light tail is decorative fill only.
+   For critical white text, place it visually over the darker (start) end of the gradient,
+   or use text-shadow: 0 1px 3px rgba(0,0,0,0.35) to lift contrast on the lighter tail. */
 .bg-brand-gradient {
   background-image: linear-gradient(
     135deg,
-    var(--color-orange),
-    var(--color-orange-light)
+    var(--color-orange-ink),
+    var(--color-orange)
   );
+}
+
+/* Soft warm surface for premium hero / section backdrops */
+.bg-warm-veil {
+  background-image:
+    radial-gradient(120% 90% at 85% 0%, rgba(255, 218, 185, 0.55), transparent 60%),
+    radial-gradient(110% 80% at 0% 100%, rgba(255, 228, 225, 0.5), transparent 55%),
+    linear-gradient(180deg, var(--color-beige), var(--color-cream));
+}
+
+/* Elegant decorative section heading: title + thin warm rule */
+.section-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.section-heading::after {
+  content: "";
+  flex: 1 1 auto;
+  height: 1px;
+  background: linear-gradient(
+    to left,
+    transparent,
+    rgba(194, 65, 12, 0.22)
+  );
+}
+
+/* Premium card hover lift */
+.card-lift {
+  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.25s ease;
+}
+.card-lift:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-float);
+}
+@media (hover: none) {
+  /* never leave a hover lift stuck on touch devices */
+  .card-lift:hover { transform: none; }
+}
+
+/* Generic interactive lift (buttons, tiles) */
+.hover-lift {
+  transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.2s ease;
+}
+.hover-lift:hover { transform: translateY(-2px); box-shadow: var(--shadow-float); }
+.hover-lift:active { transform: translateY(0); }
+
+/* Warm gradient text — for hero numerals / accents */
+.text-gradient-brand {
+  background-image: linear-gradient(120deg, var(--color-orange-ink), var(--color-orange) 55%, var(--color-orange-light));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Premium raised surface used by cards / panels */
+.surface-card {
+  background: linear-gradient(180deg, #fffdfa, var(--color-beige));
+  border: 1px solid rgba(194, 65, 12, 0.10);
+  box-shadow: var(--shadow-card);
+}
+
+/* Frosted sticky bars */
+.surface-glass {
+  background: color-mix(in srgb, var(--color-beige) 82%, transparent);
+  backdrop-filter: blur(12px) saturate(1.1);
+  -webkit-backdrop-filter: blur(12px) saturate(1.1);
+}
+
+/* Richer hero gradient with depth (overrides flat for hero use).
+   Base gradient anchors on --color-orange-ink for WCAG-safe white text. */
+.bg-hero-rich {
+  background-image:
+    radial-gradient(130% 120% at 88% -10%, rgba(255, 255, 255, 0.30), transparent 55%),
+    radial-gradient(120% 120% at 0% 110%, rgba(196, 65, 12, 0.45), transparent 60%),
+    linear-gradient(135deg, var(--color-orange-ink), var(--color-orange));
+}
+
+/* Shine sweep on primary buttons (relative + overflow-hidden host) */
+.btn-shine { position: relative; overflow: hidden; }
+.btn-shine::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 30%, rgba(255, 255, 255, 0.35) 48%, transparent 66%);
+  transform: translateX(-130%) skewX(-18deg);
+  transition: transform 0.6s ease;
+  pointer-events: none;
+}
+.btn-shine:hover::after { transform: translateX(130%) skewX(-18deg); }
+
+/* Skeleton shimmer for loading states */
+@keyframes skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, rgba(189,189,189,0.18) 25%, rgba(189,189,189,0.34) 37%, rgba(189,189,189,0.18) 63%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+  border-radius: 0.5rem;
 }
 
 body {
@@ -47,6 +195,33 @@ body {
   color: var(--color-ink);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Warm text selection */
+::selection {
+  background: rgba(244, 123, 66, 0.22);
+  color: var(--color-ink);
+}
+
+/* Slim warm scrollbar (desktop areas) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(194, 65, 12, 0.28) transparent;
+}
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(194, 65, 12, 0.28);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(194, 65, 12, 0.45);
+  background-clip: padding-box;
 }
 
 /* Global keyboard focus outline for every focusable element (a11y baseline). */
@@ -107,6 +282,112 @@ body {
   animation: auth-card-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+/* ─── Scroll reveal — cinematic rise + settle ─── */
+.reveal {
+  opacity: 0;
+  transform: translateY(30px) scale(0.985);
+  transition:
+    opacity 0.8s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: opacity, transform;
+}
+.reveal-in {
+  opacity: 1;
+  transform: none;
+}
+
+/* Slow living-photo drift for editorial hero tiles — reads as video */
+@keyframes ken-burns {
+  0%   { transform: scale(1.05) translate(0, 0); }
+  50%  { transform: scale(1.13) translate(-1.6%, -1.2%); }
+  100% { transform: scale(1.05) translate(0, 0); }
+}
+.animate-kenburns {
+  animation: ken-burns 20s ease-in-out infinite;
+}
+
+/* Header glides down on first load */
+@keyframes nav-in {
+  from { opacity: 0; transform: translateY(-16px); }
+  to   { opacity: 1; transform: none; }
+}
+.animate-nav-in {
+  /* `backwards` (not `both`): show the from-state before it runs, but release
+     control of `transform` once finished so the hide-on-scroll class works. */
+  animation: nav-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+/* ─── Cinematic auto-slider showcase ─── */
+/* Break a child out of a width-constrained, padded container to full viewport. */
+.full-bleed {
+  width: 100vw;
+  margin-inline: calc(50% - 50vw);
+}
+/* Near-black stage so the photo reads as a framed editorial shot. */
+.reel {
+  background: #0c0a09;
+}
+/* Per-slide autoplay progress fill — RTL, grows from the right edge. */
+@keyframes slide-progress {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+
+/* ─── Splash intro ─── */
+@keyframes splash-logo-pop {
+  0%   { opacity: 0; transform: scale(0.55); }
+  65%  { opacity: 1; transform: scale(1.08); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes splash-text-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes splash-out {
+  from { opacity: 1; transform: scale(1); }
+  to   { opacity: 0; transform: scale(1.04); pointer-events: none; }
+}
+@keyframes splash-ring {
+  0%   { opacity: 0; transform: scale(0.6); }
+  60%  { opacity: 1; }
+  100% { opacity: 0.35; transform: scale(1); }
+}
+.animate-splash-logo {
+  animation: splash-logo-pop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.animate-splash-text {
+  animation: splash-text-rise 0.45s ease-out 0.5s both;
+}
+.animate-splash-sub {
+  animation: splash-text-rise 0.45s ease-out 0.75s both;
+}
+.animate-splash-out {
+  animation: splash-out 0.5s ease-in forwards;
+}
+.animate-splash-ring {
+  animation: splash-ring 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* ─── Graduation cap loader ─── */
+@keyframes gradcap-bob {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-4px); }
+}
+@keyframes gradcap-swing {
+  0%, 100% { transform: rotate(-9deg); }
+  50%      { transform: rotate(9deg); }
+}
+.gradcap-bob {
+  animation: gradcap-bob 1.8s ease-in-out infinite;
+}
+.gradcap-tassel {
+  animation: gradcap-swing 1.8s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
 /* ─── Sash designer effects ─── */
 @keyframes shimmer-sweep {
   0%   { transform: translateX(-180%) skewX(-20deg); }
@@ -157,4 +438,63 @@ body {
 }
 .animate-edit-pop {
   animation: edit-pop 0.25s ease-out forwards;
+}
+
+/* ─── Delight: twinkling celebration sparkles ─── */
+@keyframes twinkle {
+  0%, 100% { opacity: 0.15; transform: scale(0.7) rotate(0deg); }
+  50%      { opacity: 0.9;  transform: scale(1) rotate(8deg); }
+}
+.animate-twinkle {
+  animation: twinkle 3.4s ease-in-out infinite;
+}
+
+/* ─── View Transitions: cinematic card → product morph ─── */
+/* Smooth, couture-paced morph for every shared element. */
+::view-transition-group(*) {
+  animation-duration: 0.44s;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+/* Soften pixel interpolation mid-flight so the morph reads as fabric, not a stretch. */
+@keyframes vt-blur {
+  40% { filter: blur(2px); }
+}
+::view-transition-image-pair(*) {
+  animation-name: vt-blur;
+}
+/* Page body crossfade — quick and quiet, lets the morph be the star. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 0.3s;
+  animation-timing-function: ease;
+}
+/* Anchor the sticky student header — a fixed reference point, never slides/fades. */
+::view-transition-group(student-header) {
+  animation: none;
+  z-index: 50;
+}
+::view-transition-old(student-header) { display: none; }
+::view-transition-new(student-header) { animation: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(*),
+  ::view-transition-new(*),
+  ::view-transition-group(*) {
+    animation-duration: 0s !important;
+    animation-delay: 0s !important;
+  }
+}
+
+/* ─── Respect reduced-motion: kill non-essential motion ─── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .sash-shimmer-strip::after,
+  .btn-shine::after { display: none; }
 }

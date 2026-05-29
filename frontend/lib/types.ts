@@ -185,6 +185,8 @@ export interface CatalogOptionGroup {
   requiresCustomerImage: boolean;
   options: CatalogOption[];
   inherited?: boolean;
+  /** Admin locked this group to a single fixed option (student can't change it). */
+  lockedOptionId?: string | null;
 }
 
 export interface ProductImage {
@@ -203,6 +205,7 @@ export interface CatalogProduct {
   customizable: boolean;
   active?: boolean;
   featured?: boolean;
+  wholesalerOnly?: boolean;
   sort?: number;
   imageUrl: string | null;
   images: ProductImage[];
@@ -222,6 +225,7 @@ export interface CatalogProductSummary {
   genderRestriction: GenderRestriction;
   active: boolean;
   featured: boolean;
+  wholesalerOnly: boolean;
   sort: number;
   imageUrl: string | null;
   groupCount: number;
@@ -254,6 +258,19 @@ export interface ShopFeed {
   priceRole: PriceRole;
   packages: ShopPackageCard[];
   byType: Partial<Record<ProductType, ShopProductCard[]>>;
+}
+
+export interface HeroSlide {
+  id: string;
+  imageUrl: string;
+  kicker: string | null;
+  title: string;
+  caption: string | null;
+  accent: string | null;
+  ctaLabel: string | null;
+  ctaHref: string | null;
+  sort: number;
+  active?: boolean;
 }
 
 export interface PackageTier {
@@ -359,6 +376,14 @@ export interface FontDef {
   script: "arabic" | "latin";
   style: string;
   source: "google" | "local";
+  /** Exact Google Fonts family name (e.g. "Aref Ruqaa"). */
+  family?: string;
+  /** Direct download URL for the real font files (Google zip or self-hosted).
+   *  Used by the staff order view so print shops can grab the .ttf files. */
+  file_url?: string | null;
+  /** Weights available on the font source. Loader requests only these;
+   *  Bold is disabled in the editor when 700 is absent. Defaults to [400, 700]. */
+  weights?: number[];
 }
 
 export interface DesignState {

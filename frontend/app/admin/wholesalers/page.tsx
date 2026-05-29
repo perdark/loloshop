@@ -7,8 +7,12 @@ import {
   deleteWholesaler,
   extendWholesalerDeadline,
   getAdminWholesalers,
+  getWholesalerSashConfig,
   updateWholesalerCommission,
+  updateWholesalerSashConfig,
+  type WholesalerSashConfig,
 } from "@/lib/admin";
+import { SashSideLockEditor } from "@/components/designer/SashSideLockEditor";
 import { getApiErrorMessage } from "@/lib/api";
 import { formatDateIQ, formatIQD, getJoinUrl } from "@/lib/format";
 import type { AdminWholesaler } from "@/lib/types";
@@ -29,6 +33,9 @@ export default function AdminWholesalersPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [extendOpen, setExtendOpen] = useState(false);
   const [commissionOpen, setCommissionOpen] = useState(false);
+  const [sashOpen, setSashOpen] = useState(false);
+  const [sashConfig, setSashConfig] = useState<WholesalerSashConfig | null>(null);
+  const [sashLoading, setSashLoading] = useState(false);
   const [selected, setSelected] = useState<AdminWholesaler | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -127,6 +134,37 @@ export default function AdminWholesalersPage() {
     }
   }
 
+  async function openSashConfig(w: AdminWholesaler) {
+    setSelected(w);
+    setSashConfig(null);
+    setSashOpen(true);
+    setSashLoading(true);
+    try {
+      const cfg = await getWholesalerSashConfig(w.id);
+      setSashConfig(cfg);
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "تعذر تحميل إعدادات الوشاح"));
+      setSashOpen(false);
+    } finally {
+      setSashLoading(false);
+    }
+  }
+
+  async function handleSashSave(cfg: WholesalerSashConfig) {
+    if (!selected) return;
+    setSubmitting(true);
+    try {
+      await updateWholesalerSashConfig(selected.id, cfg);
+      toast.success("تم حفظ إعدادات الوشاح");
+      setSashOpen(false);
+      setSelected(null);
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "تعذر حفظ الإعدادات"));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   async function handleExtend() {
     if (!selected || !newDeadline) {
       toast.error("اختر تاريخاً");
@@ -166,29 +204,29 @@ export default function AdminWholesalersPage() {
           {wholesalers.map((w) => (
             <article
               key={w.id}
-              className="rounded-xl border border-ink/10 bg-white p-4 lg:p-5"
+              className="surface-card card-lift rounded-2xl p-4 lg:p-5"
             >
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
-                  <h3 className="font-semibold text-ink">{w.name}</h3>
-                  <p className="text-sm text-ink/60">{w.phone}</p>
+                  <h3 className="font-display text-lg font-bold text-ink">{w.name}</h3>
+                  <p className="text-sm text-ink/60" dir="ltr">{w.phone}</p>
                   <p className="mt-2 text-sm">
                     <span className="text-ink/50">الطلاب: </span>
-                    {w.studentCount}
+                    <span className="font-medium tabular-nums text-ink">{w.studentCount}</span>
                     <span className="mx-2 text-ink/30">|</span>
                     <span className="text-ink/50">الموعد: </span>
                     {formatDateIQ(w.deadline)}
                   </p>
                   <p className="mt-1 text-sm">
                     <span className="text-ink/50">العمولة: </span>
-                    {w.commissionRate}%
+                    <span className="tabular-nums">{w.commissionRate}%</span>
                     <span className="mx-2 text-ink/30">|</span>
                     <span className="text-ink/50">المستحق: </span>
-                    <span className="font-semibold text-orange-ink">
+                    <span className="font-semibold tabular-nums text-orange-ink" dir="ltr">
                       {formatIQD(w.earnedCommission ?? 0)}
                     </span>
                   </p>
-                  <p className="mt-1 break-all text-xs text-ink/50">
+                  <p className="mt-2 break-all rounded-lg bg-ink/[0.04] px-2.5 py-1.5 text-xs text-ink/55" dir="ltr">
                     {w.referralUrl || getJoinUrl(w.referralCode)}
                   </p>
                 </div>
@@ -198,7 +236,7 @@ export default function AdminWholesalersPage() {
                   />
                   <Link
                     href={`/admin/wholesalers/${w.id}/students`}
-                    className="inline-flex min-h-11 items-center justify-center rounded-lg border border-ink/15 bg-white px-4 text-sm font-medium text-ink hover:bg-ink/5"
+                    className="inline-flex min-h-11 items-center justify-center rounded-full border border-ink/15 bg-white/60 px-5 text-sm font-semibold text-ink transition-all duration-200 hover:border-orange/40 hover:bg-white hover:text-orange-ink"
                   >
                     عرض الطلاب
                   </Link>
@@ -225,6 +263,9 @@ export default function AdminWholesalersPage() {
                     }}
                   >
                     العمولة
+                  </Button>
+                  <Button variant="ghost" onClick={() => openSashConfig(w)}>
+                    إعدادات الوشاح
                   </Button>
                   <Button
                     variant="ghost"
@@ -380,6 +421,23 @@ export default function AdminWholesalersPage() {
           value={newDeadline}
           onChange={(e) => setNewDeadline(e.target.value)}
         />
+      </Modal>
+
+      <Modal
+        open={sashOpen}
+        onClose={() => !submitting && setSashOpen(false)}
+        title={`إعدادات الوشاح — ${selected?.name ?? ""}`}
+      >
+        {sashLoading || !sashConfig ? (
+          <PageLoader />
+        ) : (
+          <SashSideLockEditor
+            editableSide={sashConfig.editable_sash_side}
+            lockedSideDesign={sashConfig.locked_side_design}
+            saving={submitting}
+            onSave={handleSashSave}
+          />
+        )}
       </Modal>
     </div>
   );

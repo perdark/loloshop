@@ -135,6 +135,7 @@ CREATE TABLE IF NOT EXISTS products (
   featured           BOOLEAN NOT NULL DEFAULT FALSE,
   sort               INTEGER NOT NULL DEFAULT 0,
   active             BOOLEAN NOT NULL DEFAULT TRUE,
+  wholesaler_only    BOOLEAN NOT NULL DEFAULT FALSE,
   parent_id          UUID REFERENCES products(id) ON DELETE SET NULL,
   created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -326,6 +327,18 @@ CREATE TABLE IF NOT EXISTS product_price_roles (
   PRIMARY KEY (product_id, role)
 );
 
+-- Admin can lock a (child) product's option group to a single fixed option.
+-- Keyed by the child product_id so inherited (parent) groups can be locked per-child.
+CREATE TABLE IF NOT EXISTS product_locked_options (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  group_id   UUID NOT NULL REFERENCES option_groups(id) ON DELETE CASCADE,
+  option_id  UUID NOT NULL REFERENCES options(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (product_id, group_id)
+);
+CREATE INDEX IF NOT EXISTS idx_product_locked_options_product ON product_locked_options(product_id);
+
 CREATE TABLE IF NOT EXISTS batches (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name_ar       TEXT NOT NULL,
@@ -374,5 +387,19 @@ CREATE TABLE IF NOT EXISTS package_rules (
 
 -- Migration 005: product parent-child hierarchy
 ALTER TABLE products ADD COLUMN IF NOT EXISTS parent_id UUID REFERENCES products(id) ON DELETE SET NULL;
+
+-- Migration 008: wholesaler-only product visibility
+ALTER TABLE products ADD COLUMN IF NOT EXISTS wholesaler_only BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- Migration 009: per-wholesaler sash side lock.
+-- Wholesaler-joined students design only one side; the other (locked) side
+-- shows the admin/wholesaler's saved default Fabric JSON, read-only.
+ALTER TABLE wholesalers ADD COLUMN IF NOT EXISTS editable_sash_side TEXT;
+ALTER TABLE wholesalers ADD COLUMN IF NOT EXISTS locked_side_design JSONB;
+DO $$ BEGIN
+  ALTER TABLE wholesalers
+    ADD CONSTRAINT chk_wholesalers_editable_side
+    CHECK (editable_sash_side IS NULL OR editable_sash_side IN ('left', 'right'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 COMMIT;

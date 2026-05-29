@@ -81,9 +81,11 @@ function ReadOnlyPanel({
   }, [json, sashColor, width, height, fontsUsed]);
 
   return (
-    <div className="flex flex-col items-center gap-2">
-      <div className="rounded-lg shadow-md ring-1 ring-ink/10">
-        <canvas ref={canvasElRef} />
+    <div className="flex flex-col items-center gap-2.5">
+      <div className="overflow-hidden rounded-2xl bg-cream p-1.5 shadow-[var(--shadow-card)] ring-1 ring-ink/10">
+        <div className="overflow-hidden rounded-xl">
+          <canvas ref={canvasElRef} />
+        </div>
       </div>
       <span className="text-sm font-semibold text-ink">{label}</span>
     </div>
@@ -114,19 +116,23 @@ export function DesignViewer({
 
   return (
     <div className="space-y-4" aria-label="معاينة التصميم">
-      <div className="flex flex-wrap justify-center gap-2">
-        <Button
-          variant={view === "gown" ? "primary" : "ghost"}
-          onClick={() => setView("gown")}
-        >
-          على الروب
-        </Button>
-        <Button
-          variant={view === "panels" ? "primary" : "ghost"}
-          onClick={() => setView("panels")}
-        >
-          لوحات مسطحة
-        </Button>
+      <div className="flex justify-center">
+        <div className="inline-flex gap-1 rounded-full border border-ink/10 bg-beige/60 p-1">
+          <Button
+            size="sm"
+            variant={view === "gown" ? "primary" : "ghost"}
+            onClick={() => setView("gown")}
+          >
+            على الروب
+          </Button>
+          <Button
+            size="sm"
+            variant={view === "panels" ? "primary" : "ghost"}
+            onClick={() => setView("panels")}
+          >
+            لوحات مسطحة
+          </Button>
+        </div>
       </div>
 
       {view === "gown" ? (

@@ -16,8 +16,31 @@ export function VerifyOtpForm() {
 
   const [phone, setPhone] = useState(defaultPhone);
   const [digits, setDigits] = useState(["", "", "", "", "", ""]);
+  const [otpError, setOtpError] = useState("");
   const [loading, setLoading] = useState(false);
   const inputsRef = useRef<(HTMLInputElement | null)[]>([]);
+
+  async function submitOtp(code: string) {
+    if (!phone.trim()) {
+      toast.error("أدخل رقم الهاتف");
+      return;
+    }
+    setLoading(true);
+    setOtpError("");
+    try {
+      await verifyOtp(phone.trim(), code);
+      toast.success("تم التحقق بنجاح");
+      router.replace("/login");
+    } catch (err) {
+      const msg = getApiErrorMessage(err, "رمز غير صحيح");
+      setOtpError(msg);
+      toast.error(msg);
+      setDigits(["", "", "", "", "", ""]);
+      setTimeout(() => inputsRef.current[0]?.focus(), 50);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   function handleDigitChange(index: number, value: string) {
     const digit = value.replace(/\D/g, "").slice(-1);
@@ -27,6 +50,22 @@ export function VerifyOtpForm() {
     if (digit && index < 5) {
       inputsRef.current[index + 1]?.focus();
     }
+    // auto-submit when 6th digit is filled
+    if (digit && index === 5) {
+      const code = next.join("");
+      if (code.length === 6) submitOtp(code);
+    }
+  }
+
+  function handleDigitPaste(e: React.ClipboardEvent) {
+    const text = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
+    if (!text) return;
+    e.preventDefault();
+    const next = Array(6).fill("").map((_, i) => text[i] ?? "");
+    setDigits(next);
+    const lastFilled = Math.min(text.length, 5);
+    inputsRef.current[lastFilled]?.focus();
+    if (text.length === 6) submitOtp(text);
   }
 
   function handleKeyDown(index: number, key: string) {
@@ -38,25 +77,11 @@ export function VerifyOtpForm() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const code = digits.join("");
-    if (!phone.trim()) {
-      toast.error("أدخل رقم الهاتف");
-      return;
-    }
     if (code.length !== 6) {
       toast.error("أدخل الرمز المكوّن من ٦ أرقام");
       return;
     }
-
-    setLoading(true);
-    try {
-      await verifyOtp(phone.trim(), code);
-      toast.success("تم التحقق بنجاح");
-      router.replace("/login");
-    } catch (err) {
-      toast.error(getApiErrorMessage(err, "رمز غير صحيح"));
-    } finally {
-      setLoading(false);
-    }
+    await submitOtp(code);
   }
 
   return (
@@ -70,8 +95,8 @@ export function VerifyOtpForm() {
           autoComplete="tel"
         />
         <div>
-          <p className="mb-2 text-sm font-medium text-ink">رمز التحقق</p>
-          <div className="flex justify-center gap-2" dir="ltr">
+          <p className="mb-3 text-center text-sm font-medium text-ink/70">رمز التحقق المكوّن من ٦ أرقام</p>
+          <div className="flex justify-center gap-2" dir="ltr" onPaste={handleDigitPaste}>
             {digits.map((d, i) => (
               <input
                 key={i}
@@ -82,13 +107,26 @@ export function VerifyOtpForm() {
                 inputMode="numeric"
                 maxLength={1}
                 value={d}
+                disabled={loading}
                 onChange={(e) => handleDigitChange(i, e.target.value)}
                 onKeyDown={(e) => handleKeyDown(i, e.key)}
-                className="h-12 w-10 rounded-lg border border-ink/15 text-center text-lg font-bold text-ink outline-none focus:border-orange focus:ring-2 focus:ring-orange/20"
                 aria-label={`رقم ${i + 1}`}
+                aria-describedby={otpError ? "verify-otp-error" : undefined}
+                aria-invalid={!!otpError || undefined}
+                className={[
+                  "h-12 w-10 rounded-xl border text-center text-xl font-bold text-ink outline-none transition-colors duration-150",
+                  "focus:border-orange-ink focus:ring-2 focus:ring-orange-ink/20",
+                  otpError ? "border-red-400 bg-red-50" : d ? "border-orange-ink bg-orange-ink/5" : "border-ink/20 bg-white",
+                  loading ? "opacity-50" : "",
+                ].join(" ")}
               />
             ))}
           </div>
+          {otpError && (
+            <p id="verify-otp-error" role="alert" className="mt-2 text-center text-xs text-red-600">
+              {otpError}
+            </p>
+          )}
         </div>
         <Button type="submit" fullWidth loading={loading}>
           تحقق

@@ -146,4 +146,36 @@ async function bulkSetStatus(req, res) {
   res.json({ data: { count: updated.length, status: newStatus } });
 }
 
-module.exports = { dashboard, pendingStudents, listStudents, approve, reject, bulkSetStatus };
+// ── Sash side lock config — wholesaler manages their own ──
+async function getSashConfig(req, res) {
+  const wId = await getWholesalerId(req.user.id);
+  if (!wId) return res.status(404).json({ error: 'حساب الممثل غير موجود', code: 'ERR_NOT_FOUND' });
+  const { rows } = await query(
+    `SELECT id, editable_sash_side, locked_side_design FROM wholesalers WHERE id = $1`,
+    [wId]
+  );
+  res.json({ data: rows[0] });
+}
+
+async function updateSashConfig(req, res) {
+  const wId = await getWholesalerId(req.user.id);
+  if (!wId) return res.status(404).json({ error: 'حساب الممثل غير موجود', code: 'ERR_NOT_FOUND' });
+  const side = req.body.editable_sash_side ?? null;
+  if (!(side === null || side === 'left' || side === 'right')) {
+    return res.status(400).json({ error: 'جانب غير صالح', code: 'ERR_VALIDATION' });
+  }
+  const design = side === null ? null : (req.body.locked_side_design ?? null);
+  const { rows } = await query(
+    `UPDATE wholesalers SET editable_sash_side = $1, locked_side_design = $2
+     WHERE id = $3 RETURNING id, editable_sash_side, locked_side_design`,
+    [side, design, wId]
+  );
+  await query(
+    `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
+     VALUES ($1, 'update_sash_side', 'wholesaler', $2, $3)`,
+    [req.user.id, wId, JSON.stringify({ editable_sash_side: side })]
+  );
+  res.json({ data: rows[0] });
+}
+
+module.exports = { dashboard, pendingStudents, listStudents, approve, reject, bulkSetStatus, getSashConfig, updateSashConfig };

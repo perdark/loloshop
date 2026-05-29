@@ -107,15 +107,23 @@ export default function AdminStaffPage() {
           {rows.map((u) => (
             <article
               key={u.id}
-              className="rounded-xl border border-ink/10 bg-white p-4"
+              className="surface-card card-lift rounded-2xl p-4"
             >
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="font-semibold text-ink">{u.name}</p>
-                  <p className="text-sm text-ink/60" dir="ltr">
-                    {u.phone}
-                  </p>
-                  {u.email && <p className="text-xs text-ink/50">{u.email}</p>}
+                <div className="flex items-center gap-3">
+                  <span
+                    aria-hidden
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-orange/10 font-display text-base font-bold text-orange-ink"
+                  >
+                    {u.name?.trim().charAt(0) || "م"}
+                  </span>
+                  <div>
+                    <p className="font-semibold text-ink">{u.name}</p>
+                    <p className="text-sm text-ink/60" dir="ltr">
+                      {u.phone}
+                    </p>
+                    {u.email && <p className="text-xs text-ink/50">{u.email}</p>}
+                  </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Button
