@@ -8,7 +8,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { getFabric } from "@/lib/fabric-loader";
 import { getApiErrorMessage } from "@/lib/api";
 import { listFonts, resolveDesignMediaUrl } from "@/lib/designer";
-import { sashHexBase } from "@/lib/designer-colors";
+import { SASH_COLOR_HEX, sashHexBase } from "@/lib/designer-colors";
 import { boldSupported, fontFamilyFor, loadFont } from "@/lib/fonts-loader";
 import {
   ensureDesignFontsLoaded,
@@ -197,6 +197,9 @@ export function TextEditor({
 
   const sideLabel =
     side === "left" ? "جانب الاسم (اليسار)" : "جانب الجامعة (اليمين)";
+
+  // Fabric tones for the editing stage so the canvas reads as the chosen sash.
+  const sashFabric = SASH_COLOR_HEX[sashColor] || SASH_COLOR_HEX["أبيض"];
 
   useEffect(() => {
     if (!open) return;
@@ -734,19 +737,31 @@ export function TextEditor({
             <p className="max-w-md px-1 text-center text-sm leading-relaxed text-ink/70">
               اكتب وزخرِف عبر «إضافة نص»، ثم رتّب العناصر على لوحة الوشاح.
             </p>
-            {/* Calm tailoring-table stage: the sash panel rests on a recessed surface */}
-            <div className="w-full rounded-2xl bg-[var(--shop-sink)] p-4 sm:p-6">
-              <div className="relative w-full touch-none">
-                {!ready && (
-                  <div className="absolute inset-0 z-10 flex items-center justify-center">
-                    <Spinner />
-                  </div>
-                )}
-                <canvas
-                  ref={canvasElRef}
-                  aria-label={`لوحة تصميم — ${sideLabel}`}
-                  className="mx-auto rounded-lg shadow-[var(--shadow-float)] ring-1 ring-ink/10"
-                />
+            {/* Tailoring-table stage: the canvas rests inside a real sash of the
+                chosen fabric color — selvedge, stitch line, weave + hem tail. */}
+            <div className="flex w-full flex-col items-center rounded-2xl bg-[var(--shop-sink)] p-4 sm:p-6">
+              <div
+                className="sash-stage"
+                style={
+                  {
+                    "--sash-fabric-light": sashFabric.light,
+                    "--sash-fabric-base": sashFabric.base,
+                    "--sash-fabric-dark": sashFabric.dark,
+                  } as React.CSSProperties
+                }
+              >
+                <div className="relative touch-none">
+                  {!ready && (
+                    <div className="absolute inset-0 z-10 flex items-center justify-center">
+                      <Spinner />
+                    </div>
+                  )}
+                  <canvas
+                    ref={canvasElRef}
+                    aria-label={`لوحة تصميم — ${sideLabel}`}
+                    className="mx-auto block"
+                  />
+                </div>
               </div>
               <p className="mt-3 text-center text-xs text-[var(--shop-muted)]">
                 اسحب أي عنصر · الزوايا للتكبير والتدوير
@@ -887,7 +902,7 @@ export function TextEditor({
                   type="button"
                   onClick={deleteActive}
                   disabled={!hasSelection}
-                  className="ms-auto inline-flex min-h-11 items-center gap-1.5 rounded-full border border-ink/15 px-4 text-sm font-medium text-ink-soft transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-700 disabled:opacity-30"
+                  className="ms-auto inline-flex min-h-11 items-center gap-1.5 rounded-full border border-ink/15 px-4 text-sm font-medium text-ink-soft transition-colors hover:border-danger/40 hover:bg-danger/10 hover:text-danger disabled:opacity-30"
                 >
                   {IconTrash} حذف
                 </button>

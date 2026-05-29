@@ -7,18 +7,20 @@ Bar: agency portfolio piece judged by 50+ businessmen. Spec source of truth: `DE
 ## Execution order (evidence-based, by ripple, not by screen)
 
 ### Stage A — Shared primitives (fix once, ripples to ~30-40% of findings)
-- [ ] `components/ui/Button.tsx` — danger variant: kill `bg-red-700` flood → quiet ink/ghost danger; ghost: opaque surface token (not `bg-white/60`); `sm` size → ≥44px; drop resting shadow
-- [ ] `components/ui/Input.tsx` + Select — error styling → single warm `--color-danger` (ink-toned border + soft-ink message; no red ring/fill/`bg-red-50`); field bg → surface token (not `bg-white`); unify focus on `orange-ink`
-- [ ] shared `EmptyState` — replace trash-can glyph with context icons; orange-dashed border → neutral hairline; soft-ink message; add title/description/action slots
-- [ ] `globals.css` `.surface-card` — remove resting shadow (Flat-By-Default; hairline + tone only, shadow on state)
-- [ ] CTAs: `bg-brand-gradient` → solid `bg-orange-ink` (fixes white-on-#f47b42 = 1.99:1 AA fail)
-- [ ] add `.font-display-ar` (Amiri) utility so Arabic headings render at true display scale (stop Playfair fallback)
+- [x] `components/ui/Button.tsx` — danger variant: killed `bg-red-700` flood → quiet warm-brick, fills on hover; ghost → surface token; `sm` → 44px; resting shadow softened ✅
+- [x] `components/ui/Input.tsx` + Select — error → warm `--color-danger` (no red flood); field bg → surface token; unified `orange-ink` focus ✅
+- [x] shared `EmptyState` — neutral inbox icon (was trash); hairline border; soft-ink message; title/icon/action slots ✅
+- [x] `globals.css` `.surface-card` — removed resting shadow (Flat-By-Default) ✅
+- [ ] CTAs: `bg-brand-gradient` → solid `bg-orange-ink` (fixes white-on-#f47b42 = 1.99:1 AA fail) — per-screen, in phases
+- [x] add `.font-display-ar` (Amiri) utility so Arabic headings render at true display scale (stop Playfair fallback) ✅
 - [x] `globals.css` tokens unified: paper/ink palette, ink-toned shadows, neutralized `.text-gradient-brand`, reduced `.surface-glass` ✅
 
 ### Phase 1 — Sash designer (signature) — 22 findings
-- [ ] **Render real sash in editor + staff viewer** — clip to `SASH_CLIP_PATH` V-tail + subtle fabric texture + stitch (visual only; export untouched). Shared across `TextEditor` / `SashGownPreview` / `DesignViewer`
-- [ ] font picker chips → set each in its own typeface
-- [ ] strip ambient orange across designer chrome/header/tashkeel/ornament/font chips; gold/navy off-palette swatches → palette
+- [x] **Render real sash in EDITOR** (`TextEditor`) — `.sash-stage` frame: fabric-color selvedge, embroidered stitch line, weave+sheen overlay, hem tail. Text never clipped (inset by padding). ✅
+- [ ] apply the same sash render to staff `DesignViewer` (+ confirm `SashGownPreview`/`SashFlat` already good)
+- [x] font picker chips already set in own typeface (`fontFamily` per chip) — was a screenshot artifact ✅
+- [x] designer delete button off-palette red → danger token ✅
+- [ ] strip ambient orange across designer chrome/header/tashkeel/ornament/font chips; gold/navy thread swatches are product data (keep)
 - [ ] `product/[id]/page.tsx` — orange is ambient on every fieldset/divider/breakdown/upload/bullet → earned ≤10%
 - [ ] larger Amiri headings; remove header orange gradient + shimmer overuse
 

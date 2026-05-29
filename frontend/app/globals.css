@@ -247,6 +247,12 @@ body {
   font-family: var(--font-display);
 }
 
+/* Arabic display — Amiri only, for calligraphic headings at large scale.
+   Use this on Arabic h1/h2 so they never fall back to Playfair (no Arabic glyphs). */
+.font-display-ar {
+  font-family: var(--font-display-ar);
+}
+
 .font-script {
   font-family: var(--font-script);
 }
@@ -398,6 +404,52 @@ html {
 }
 .gradcap-tassel {
   animation: gradcap-swing 1.8s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+/* ─── Sash editing stage: make the canvas read as real embroidered fabric ───
+   Wraps the Fabric canvas in a fabric selvedge (gradient = chosen sash color),
+   an embroidered stitch line, a woven-texture + sheen overlay, and a soft hem
+   tail. Decorative only — the canvas content (text) is inset by the padding so
+   nothing the student types is ever clipped. Colors come from --sash-fabric-*. */
+.sash-stage {
+  display: inline-block;
+  position: relative;
+  padding: 16px;
+  border-radius: 12px;
+  background: linear-gradient(
+    150deg,
+    var(--sash-fabric-light, #f3efe6),
+    var(--sash-fabric-base, #e7e1d4) 55%,
+    var(--sash-fabric-dark, #cfc7b5)
+  );
+  box-shadow: var(--shadow-float);
+  /* soft hem tail at the bottom — reads as a sash point, only cuts the selvedge */
+  clip-path: polygon(0 0, 100% 0, 100% 94%, 50% 100%, 0 94%);
+}
+/* embroidered stitch line just inside the selvedge */
+.sash-stage::before {
+  content: "";
+  position: absolute;
+  inset: 8px;
+  border: 1.5px dashed color-mix(in srgb, var(--sash-fabric-light, #fff) 65%, #fff);
+  border-radius: 8px;
+  opacity: 0.55;
+  pointer-events: none;
+}
+/* woven texture + diagonal sheen across the whole fabric */
+.sash-stage::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.04) 0 2px, transparent 2px 4px),
+    linear-gradient(115deg, rgba(255, 255, 255, 0.12), transparent 42%);
+  mix-blend-mode: overlay;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sash-stage::after { background: none; }
 }
 
 /* ─── Sash designer effects ─── */
