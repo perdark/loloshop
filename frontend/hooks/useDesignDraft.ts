@@ -110,9 +110,6 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
       .sort((a, b) => priority(a) - priority(b));
   }, [product, gender]);
 
-  const canPreview =
-    singleSideOnly || (!!leftJson && !!rightJson) || (!!leftJson && !!rightJson);
-
   const previewReady = editableSide
     ? // Locked: student only needs to design their editable side.
       editableSide === "left"

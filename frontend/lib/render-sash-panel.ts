@@ -188,7 +188,7 @@ export function applyPanelViewport(
   targetHeight: number
 ): void {
   const data = parseSideJson(json);
-  const { w: srcW, h: srcH } = sideSourceSize(data);
+  const { w: srcW } = sideSourceSize(data);
 
   const matrix = horizontalPanelViewportMatrix(json, targetWidth, targetHeight);
   if (matrix) {

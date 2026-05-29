@@ -36,7 +36,6 @@ import type {
   ProductType,
 } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
-import { PageLoader } from "@/components/ui/Spinner";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Modal } from "@/components/ui/Modal";
 
