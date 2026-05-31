@@ -623,3 +623,40 @@ html {
   .sash-shimmer-strip::after,
   .btn-shine::after { display: none; }
 }
+
+/* ─────────────────────────────────────────────────────────
+   Showcase (/showcase) — Path A cinematic 2.5D hero motion
+   ───────────────────────────────────────────────────────── */
+@keyframes showcase-float {
+  0%, 100% { transform: translateY(0) rotate(-0.4deg); }
+  50%      { transform: translateY(-14px) rotate(0.4deg); }
+}
+@keyframes showcase-float-cap {
+  0%, 100% { transform: translateY(0) rotate(1.2deg); }
+  50%      { transform: translateY(-22px) rotate(-1.2deg); }
+}
+@keyframes showcase-sweep {
+  0%   { transform: translateX(-130%) skewX(-18deg); opacity: 0; }
+  18%  { opacity: 0.85; }
+  60%  { opacity: 0; }
+  100% { transform: translateX(230%) skewX(-18deg); opacity: 0; }
+}
+@keyframes showcase-glow {
+  0%, 100% { opacity: 0.35; transform: scale(0.96); }
+  50%      { opacity: 0.9;  transform: scale(1.06); }
+}
+.showcase-float     { animation: showcase-float 7s ease-in-out infinite; }
+.showcase-float-cap { animation: showcase-float-cap 6s ease-in-out infinite; }
+.showcase-sweep::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(105deg, transparent 30%, rgba(255,255,255,0.55) 50%, transparent 70%);
+  animation: showcase-sweep 5.5s ease-in-out infinite;
+  mix-blend-mode: screen; pointer-events: none;
+}
+.showcase-glow { animation: showcase-glow 3.2s ease-in-out infinite; }
+
+/* Showcase editorial hero motion */
+@keyframes showcase-kenburns { 0%{transform:scale(1.07)} 100%{transform:scale(1)} }
+@keyframes showcase-rise { 0%{opacity:0;transform:translateY(18px)} 100%{opacity:1;transform:translateY(0)} }
+.showcase-kenburns { animation: showcase-kenburns 14s ease-out forwards; }
+.showcase-rise { opacity:0; animation: showcase-rise 0.9s cubic-bezier(0.2,0.7,0.2,1) forwards; }
