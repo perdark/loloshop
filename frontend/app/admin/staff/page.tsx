@@ -8,12 +8,16 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
 import { getApiErrorMessage } from "@/lib/api";
-import type { User } from "@/lib/types";
+import { Select } from "@/components/ui/Select";
+import type { StaffOrderScope, StaffType, User } from "@/lib/types";
+import { ORDER_SCOPE_LABELS, STAFF_TYPE_LABELS } from "@/lib/constants";
 import {
   createStaff,
   deleteStaff,
   getAdminStaff,
   resetStaffPassword,
+  updateStaffScope,
+  updateStaffType,
 } from "@/lib/admin";
 
 export default function AdminStaffPage() {
@@ -30,8 +34,12 @@ export default function AdminStaffPage() {
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [staffTypeField, setStaffTypeField] = useState<StaffType>("designer");
+  const [orderScopeField, setOrderScopeField] = useState<StaffOrderScope>("both");
 
   const [newPassword, setNewPassword] = useState("");
+  const [typeUpdating, setTypeUpdating] = useState<string | null>(null);
+  const [scopeUpdating, setScopeUpdating] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -48,7 +56,6 @@ export default function AdminStaffPage() {
   }, []);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial fetch
     load();
   }, [load]);
 
@@ -59,18 +66,46 @@ export default function AdminStaffPage() {
     }
     setSubmitting(true);
     try {
-      await createStaff({ name, phone, email, password });
+      await createStaff({ name, phone, email, password, staff_type: staffTypeField, order_scope: orderScopeField });
       toast.success("تم إنشاء الموظف");
       setCreateOpen(false);
       setName("");
       setPhone("");
       setEmail("");
       setPassword("");
+      setStaffTypeField("designer");
+      setOrderScopeField("both");
       load();
     } catch (err) {
       toast.error(getApiErrorMessage(err, "تعذر إنشاء الموظف"));
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleUpdateType(userId: string, newType: StaffType) {
+    setTypeUpdating(userId);
+    try {
+      await updateStaffType(userId, newType);
+      toast.success("تم تحديث الدور");
+      load();
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "تعذر تحديث الدور"));
+    } finally {
+      setTypeUpdating(null);
+    }
+  }
+
+  async function handleUpdateScope(userId: string, scope: StaffOrderScope) {
+    setScopeUpdating(userId);
+    try {
+      await updateStaffScope(userId, scope);
+      toast.success("تم تحديث النطاق");
+      load();
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "تعذر تحديث النطاق"));
+    } finally {
+      setScopeUpdating(null);
     }
   }
 
@@ -146,9 +181,48 @@ export default function AdminStaffPage() {
                       {u.phone}
                     </p>
                     {u.email && <p className="text-xs text-[var(--shop-muted)]">{u.email}</p>}
+                    {u.staff_type && (
+                      <span className="mt-1 inline-flex items-center rounded-full border border-orange-ink/25 bg-orange-ink/8 px-2 py-0.5 text-xs font-semibold text-orange-ink">
+                        {STAFF_TYPE_LABELS[u.staff_type]}
+                      </span>
+                    )}
+                    {u.order_scope && (
+                      <span className="mt-1 inline-flex items-center rounded-full border border-line bg-surface-sink px-2 py-0.5 text-xs font-medium text-ink-soft">
+                        {ORDER_SCOPE_LABELS[u.order_scope]}
+                      </span>
+                    )}
                   </div>
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Inline role change */}
+                  <select
+                    value={u.staff_type ?? ""}
+                    disabled={typeUpdating === u.id}
+                    onChange={(e) =>
+                      handleUpdateType(u.id, e.target.value as StaffType)
+                    }
+                    className="min-h-11 rounded-xl border border-line bg-beige px-3 py-2 text-sm text-ink shadow-[var(--shadow-soft)] outline-none transition-colors hover:border-orange-ink/40 focus:border-orange-ink disabled:opacity-60"
+                    aria-label={`دور ${u.name}`}
+                  >
+                    <option value="" disabled>اختر الدور</option>
+                    {Object.entries(STAFF_TYPE_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </select>
+                  {/* Inline scope change */}
+                  <select
+                    value={u.order_scope ?? "both"}
+                    disabled={scopeUpdating === u.id}
+                    onChange={(e) =>
+                      handleUpdateScope(u.id, e.target.value as StaffOrderScope)
+                    }
+                    className="min-h-11 rounded-xl border border-line bg-beige px-3 py-2 text-sm text-ink shadow-[var(--shadow-soft)] outline-none transition-colors hover:border-orange-ink/40 focus:border-orange-ink disabled:opacity-60"
+                    aria-label={`نطاق ${u.name}`}
+                  >
+                    {Object.entries(ORDER_SCOPE_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </select>
                   <Button
                     variant="ghost"
                     onClick={() => {
@@ -207,6 +281,24 @@ export default function AdminStaffPage() {
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+          />
+          <Select
+            label="الدور في الإنتاج"
+            value={staffTypeField}
+            onChange={(e) => setStaffTypeField(e.target.value as StaffType)}
+            options={Object.entries(STAFF_TYPE_LABELS).map(([value, label]) => ({
+              value,
+              label,
+            }))}
+          />
+          <Select
+            label="نطاق الطلبات"
+            value={orderScopeField}
+            onChange={(e) => setOrderScopeField(e.target.value as StaffOrderScope)}
+            options={Object.entries(ORDER_SCOPE_LABELS).map(([value, label]) => ({
+              value,
+              label,
+            }))}
           />
         </div>
       </Modal>

@@ -45,6 +45,8 @@ export interface MyDesignResponse {
   editable_sash_side?: SashSide | null;
   /** Saved Fabric JSON for the locked side (rendered read-only). */
   locked_side_design?: unknown | null;
+  /** True = student joined via a wholesaler/rep; false = independent retail. */
+  is_rep_student?: boolean;
 }
 
 export async function getMyDesign(): Promise<MyDesignResponse> {

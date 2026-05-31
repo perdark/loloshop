@@ -13,26 +13,10 @@ async function priceRoleForUser(user, override) {
   return rows[0]?.wholesaler_id ? 'wholesaler' : 'retail';
 }
 
-// --- Audience: may this viewer see products flagged wholesaler_only? ---
-// TRUE for admin/staff/wholesaler roles and for students joined via a rep link
-// (students.wholesaler_id IS NOT NULL). FALSE for retail students and anon.
-async function canSeeWholesalerOnly(user) {
-  if (!user) return false;
-  if (user.role === 'admin' || user.role === 'staff' || user.role === 'wholesaler') {
-    return true;
-  }
-  const { rows } = await query(
-    `SELECT wholesaler_id FROM students WHERE user_id = $1`,
-    [user.id]
-  );
-  return !!rows[0]?.wholesaler_id;
-}
-
 // ---------- PUBLIC: full product config for the configurator ----------
 async function getProductFull(req, res) {
   const { id } = req.params;
   const role = await priceRoleForUser(req.user, req.query.role);
-  const allowWholesalerOnly = await canSeeWholesalerOnly(req.user);
   const prod = await query(
     `SELECT p.id, p.type, p.name_ar, p.description, p.customizable, p.gender_restriction,
             p.image_url, p.featured, p.parent_id, p.wholesaler_only,
@@ -41,9 +25,8 @@ async function getProductFull(req, res) {
      FROM products p
      LEFT JOIN product_price_roles ppr ON ppr.product_id = p.id AND ppr.role = $2
      LEFT JOIN products par ON par.id = p.parent_id
-     WHERE p.id = $1 AND p.active = TRUE
-       AND ($3 = TRUE OR p.wholesaler_only = FALSE)`,
-    [id, role, allowWholesalerOnly]
+     WHERE p.id = $1 AND p.active = TRUE`,
+    [id, role]
   );
   if (!prod.rows.length) {
     return res.status(404).json({ error: 'المنتج غير موجود', code: 'ERR_NOT_FOUND' });
@@ -124,7 +107,9 @@ async function getProductFull(req, res) {
 // ---------- PUBLIC: shop feed (packages-first, products grouped by type) ----------
 async function getShop(req, res) {
   const role = await priceRoleForUser(req.user, req.query.role);
-  const allowWholesalerOnly = await canSeeWholesalerOnly(req.user);
+  // Audience drives the funnel: wholesaler-students see only the package form (FE redirect),
+  // retail browses products + cart, guests browse anonymously.
+  const audience = !req.user ? 'guest' : role === 'wholesaler' ? 'wholesaler_student' : 'retail';
   const products = await query(
     `SELECT p.id, p.type, p.name_ar, p.description, p.customizable, p.gender_restriction,
             p.image_url, p.featured, p.sort,
@@ -132,22 +117,26 @@ async function getShop(req, res) {
      FROM products p
      LEFT JOIN product_price_roles ppr ON ppr.product_id = p.id AND ppr.role = $1
      WHERE p.active = TRUE
-       AND ($2 = TRUE OR p.wholesaler_only = FALSE)
        AND NOT EXISTS (
          SELECT 1 FROM products c WHERE c.parent_id = p.id AND c.active = TRUE
        )
      ORDER BY p.type, p.sort, p.created_at DESC`,
-    [role, allowWholesalerOnly]
-  );
-  // packages are wholesaler-only for now (retail sees none unless retail packages exist)
-  const packages = await query(
-    `SELECT id, name_ar, price, image_url, sort FROM packages
-     WHERE active = TRUE AND role = $1 ORDER BY sort, created_at`,
     [role]
   );
+  // Packages are surfaced as a single form to wholesaler-students; retail reaches them via the
+  // cart suggestion (listPackages), never as a tile grid on the home feed.
+  let packages = [];
+  if (role === 'wholesaler') {
+    const pk = await query(
+      `SELECT id, name_ar, price, image_url, sort FROM packages
+       WHERE active = TRUE AND role = $1 ORDER BY sort, created_at`,
+      [role]
+    );
+    packages = pk.rows;
+  }
   const by_type = {};
   products.rows.forEach((p) => (by_type[p.type] ||= []).push(p));
-  res.json({ data: { price_role: role, packages: packages.rows, by_type } });
+  res.json({ data: { price_role: role, audience, packages, by_type } });
 }
 
 // ---------- ADMIN: list all products (incl. inactive) for catalog editor ----------
@@ -510,7 +499,7 @@ async function deleteHeroSlide(req, res) {
 
 module.exports = {
   getHeroSlides, listHeroSlidesAdmin, createHeroSlide, updateHeroSlide, deleteHeroSlide,
-  priceRoleForUser, canSeeWholesalerOnly, getProductFull, getShop, listProductsAdmin,
+  priceRoleForUser, getProductFull, getShop, listProductsAdmin,
   addProductImage, deleteProductImage,
   createProduct, updateProduct, deleteProduct,
   createGroup, updateGroup, deleteGroup,

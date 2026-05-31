@@ -3,6 +3,9 @@ const { query, tx } = require('../lib/db');
 
 const SALT_ROUNDS = 10;
 
+const STAFF_TYPES = ['designer', 'embroiderer', 'presser', 'preparer', 'manager'];
+const STAFF_SCOPES = ['retail', 'wholesaler', 'both'];
+
 async function analytics(req, res) {
   const totals = await query(
     `SELECT
@@ -294,7 +297,7 @@ async function wholesalerStudents(req, res) {
   const { rows } = await query(
     `SELECT s.id, u.name, u.phone, s.status, s.university_name, s.department,
        lo.status AS order_status,
-       (lo.status IN ('design_complete', 'staff_review', 'printing', 'ready', 'delivered')) AS is_completed
+       (lo.status IN ('design_complete', 'staff_review', 'printing', 'embroidery', 'pressing', 'preparing', 'ready', 'delivered')) AS is_completed
      FROM students s
      JOIN users u ON u.id = s.user_id
      LEFT JOIN LATERAL (
@@ -324,7 +327,7 @@ async function toggleEditException(req, res) {
 
 async function listStaff(req, res) {
   const { rows } = await query(
-    `SELECT id, name, phone, email, phone_verified
+    `SELECT id, name, phone, email, staff_type, order_scope, phone_verified
      FROM users
      WHERE role = 'staff'
      ORDER BY name ASC`
@@ -333,12 +336,18 @@ async function listStaff(req, res) {
 }
 
 async function createStaff(req, res) {
-  const { name, phone, email, password } = req.body;
+  const { name, phone, email, password, staff_type, order_scope } = req.body;
   if (!name || !phone || !password) {
     return res.status(400).json({ error: 'بيانات ناقصة', code: 'ERR_VALIDATION' });
   }
   if (String(password).length < 6) {
     return res.status(400).json({ error: 'كلمة المرور قصيرة', code: 'ERR_VALIDATION' });
+  }
+  if (staff_type && !STAFF_TYPES.includes(staff_type)) {
+    return res.status(400).json({ error: 'نوع موظف غير صالح', code: 'ERR_VALIDATION' });
+  }
+  if (order_scope && !STAFF_SCOPES.includes(order_scope)) {
+    return res.status(400).json({ error: 'نطاق طلبات غير صالح', code: 'ERR_VALIDATION' });
   }
   const exists = await query(`SELECT id FROM users WHERE phone = $1`, [phone]);
   if (exists.rows.length) {
@@ -346,18 +355,58 @@ async function createStaff(req, res) {
   }
   const hash = await bcrypt.hash(password, SALT_ROUNDS);
   const { rows } = await query(
-    `INSERT INTO users (name, phone, email, password_hash, role, phone_verified)
-     VALUES ($1, $2, $3, $4, 'staff', TRUE)
-     RETURNING id, name, phone, email, phone_verified`,
-    [name, phone, email || null, hash]
+    `INSERT INTO users (name, phone, email, password_hash, role, staff_type, order_scope, phone_verified)
+     VALUES ($1, $2, $3, $4, 'staff', $5, COALESCE($6, 'both'), TRUE)
+     RETURNING id, name, phone, email, staff_type, order_scope, phone_verified`,
+    [name, phone, email || null, hash, staff_type || null, order_scope || null]
   );
   const staff = rows[0];
   await query(
     `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
      VALUES ($1, 'create_staff', 'user', $2, $3)`,
-    [req.user.id, staff.id, JSON.stringify({ role: 'staff', phone })]
+    [req.user.id, staff.id, JSON.stringify({ role: 'staff', staff_type: staff_type || null, order_scope: order_scope || 'both', phone })]
   );
   res.status(201).json({ data: staff });
+}
+
+async function updateStaffScope(req, res) {
+  const { id } = req.params;
+  const { order_scope } = req.body;
+  if (!STAFF_SCOPES.includes(order_scope)) {
+    return res.status(400).json({ error: 'نطاق طلبات غير صالح', code: 'ERR_VALIDATION' });
+  }
+  const { rows } = await query(
+    `UPDATE users SET order_scope = $1 WHERE id = $2 AND role = 'staff'
+     RETURNING id, name, order_scope`,
+    [order_scope, id]
+  );
+  if (!rows.length) return res.status(404).json({ error: 'غير موجود', code: 'ERR_NOT_FOUND' });
+  await query(
+    `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
+     VALUES ($1, 'update_staff_scope', 'user', $2, $3)`,
+    [req.user.id, id, JSON.stringify({ order_scope })]
+  );
+  res.json({ data: rows[0] });
+}
+
+async function updateStaffType(req, res) {
+  const { id } = req.params;
+  const { staff_type } = req.body;
+  if (staff_type !== null && !STAFF_TYPES.includes(staff_type)) {
+    return res.status(400).json({ error: 'نوع موظف غير صالح', code: 'ERR_VALIDATION' });
+  }
+  const { rows } = await query(
+    `UPDATE users SET staff_type = $1 WHERE id = $2 AND role = 'staff'
+     RETURNING id, name, staff_type`,
+    [staff_type, id]
+  );
+  if (!rows.length) return res.status(404).json({ error: 'غير موجود', code: 'ERR_NOT_FOUND' });
+  await query(
+    `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
+     VALUES ($1, 'update_staff_type', 'user', $2, $3)`,
+    [req.user.id, id, JSON.stringify({ staff_type })]
+  );
+  res.json({ data: rows[0] });
 }
 
 async function updateStaffPassword(req, res) {
@@ -403,5 +452,5 @@ module.exports = {
   listWholesalers, createWholesaler, updateDeadline, updateCommission, deleteWholesaler,
   getWholesalerSashConfig, updateWholesalerSashConfig,
   wholesalerStudents, toggleEditException,
-  listStaff, createStaff, updateStaffPassword, deleteStaff,
+  listStaff, createStaff, updateStaffType, updateStaffScope, updateStaffPassword, deleteStaff,
 };

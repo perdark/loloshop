@@ -1,20 +1,94 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { BrandMark } from "@/components/ui/BrandLogo";
 import { logout } from "@/lib/auth";
 import { toast } from "sonner";
-import type { StaffListFilter } from "@/lib/staff-types";
+import { STAFF_TYPE_LABELS } from "@/lib/constants";
 import type { User } from "@/lib/types";
+import type { StaffType } from "@/lib/types";
 
-// Filter chips — only the /staff route uses a filter param; wholesalers is a separate route.
-const filterChips: { filter: StaffListFilter; label: string }[] = [
-  { filter: "all",      label: "جميع الطلبات" },
-  { filter: "review",   label: "قيد المراجعة" },
-  { filter: "printing", label: "جاهز للطباعة" },
-  { filter: "done",     label: "مكتمل" },
-];
+// ─── Nav definitions per staff_type ──────────────────────────────────────────
+
+interface NavLink {
+  href: string;
+  label: string;
+  icon: React.ReactNode;
+  /** If true, this link is active for all sub-paths too */
+  prefix?: boolean;
+}
+
+function iconClipboard() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" />
+      <rect x="9" y="3" width="6" height="4" rx="1" />
+      <path d="M9 12h6M9 16h4" />
+    </svg>
+  );
+}
+
+function iconBarChart() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <line x1="18" y1="20" x2="18" y2="10" />
+      <line x1="12" y1="20" x2="12" y2="4" />
+      <line x1="6" y1="20" x2="6" y2="14" />
+    </svg>
+  );
+}
+
+function iconUsers() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  );
+}
+
+function getNavLinks(
+  staffType: StaffType | null | undefined,
+  isAdmin: boolean,
+): NavLink[] {
+  // Admin gets full manager view over the production area.
+  if (isAdmin || staffType === "manager") {
+    return [
+      { href: "/staff", label: "المتابعة", icon: iconBarChart() },
+      { href: "/staff/queue", label: "جميع الطلبات", icon: iconClipboard(), prefix: true },
+      { href: "/staff/wholesalers", label: "طلاب الممثلين", icon: iconUsers(), prefix: true },
+    ];
+  }
+  switch (staffType) {
+    case "designer":
+      return [
+        { href: "/staff", label: "مراجعة التصاميم", icon: iconClipboard() },
+        { href: "/staff/wholesalers", label: "طلاب الممثلين", icon: iconUsers(), prefix: true },
+      ];
+    case "embroiderer":
+      return [
+        { href: "/staff", label: "قائمة التطريز", icon: iconClipboard() },
+      ];
+    case "presser":
+      return [
+        { href: "/staff", label: "قائمة الكوي", icon: iconClipboard() },
+      ];
+    case "preparer":
+      return [
+        { href: "/staff", label: "قائمة التجهيز", icon: iconClipboard() },
+      ];
+    default:
+      // Fallback: legacy view
+      return [
+        { href: "/staff", label: "لوحة الطلبات", icon: iconClipboard() },
+        { href: "/staff/wholesalers", label: "طلاب الممثلين", icon: iconUsers(), prefix: true },
+      ];
+  }
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
 
 interface StaffSidebarProps {
   user: User;
@@ -24,8 +98,6 @@ interface StaffSidebarProps {
 
 export function StaffSidebar({ user, open, onClose }: StaffSidebarProps) {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const currentFilter = (searchParams.get("filter") || "all") as StaffListFilter;
 
   function handleLogout() {
     logout();
@@ -33,94 +105,52 @@ export function StaffSidebar({ user, open, onClose }: StaffSidebarProps) {
     window.location.href = "/login";
   }
 
-  const onOrdersPage = pathname === "/staff";
-  const onWholesalersPage = pathname.startsWith("/staff/wholesalers");
+  const isAdmin = user.role === "admin";
+  const links = getNavLinks(user.staff_type, isAdmin);
+  // Admins viewing production show "مدير (إنتاج)" so it's clear they're not
+  // looking at their usual admin panel.
+  const typeLabel = isAdmin
+    ? "مدير — متابعة الإنتاج"
+    : user.staff_type
+      ? STAFF_TYPE_LABELS[user.staff_type]
+      : "موظف";
 
   const sidebar = (
-    // Surface background on warm paper — no dark ink shell, no brand-gradient stripe.
     <aside className="flex h-full w-64 flex-col border-e border-line bg-surface">
-      {/* Brand header — flat surface, no orange blur blob */}
-      <div className="border-b border-line px-5 py-5">
+      {/* Brand header — warm veil so it reads as a premium header, not a plain bar */}
+      <div className="bg-warm-veil border-b border-line px-5 py-5">
         <div className="flex items-center gap-3">
-          <BrandMark size={48} priority />
+          <BrandMark size={44} priority />
           <div>
             <p className="font-display text-sm font-semibold text-ink">لولو شوب</p>
-            <p className="mt-0.5 text-xs text-muted">لوحة الموظف</p>
+            <p className="mt-0.5 text-xs font-medium text-orange-ink">{typeLabel}</p>
           </div>
         </div>
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-5" aria-label="قائمة الموظف">
-        {/* ── Main sections ── */}
-        <div className="space-y-0.5">
-          {/* Orders section — shows filter chips when active */}
-          <Link
-            href="/staff"
-            onClick={onClose}
-            className={`flex min-h-11 items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-medium transition-colors ${
-              onOrdersPage
-                ? "bg-orange-ink/8 text-orange-ink"
-                : "text-ink-soft hover:bg-surface-sink hover:text-ink"
-            }`}
-          >
-            {/* Orders icon */}
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" />
-              <rect x="9" y="3" width="6" height="4" rx="1" />
-              <path d="M9 12h6M9 16h4" />
-            </svg>
-            لوحة الطلبات
-          </Link>
+      <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-0.5" aria-label="قائمة الموظف">
+        {links.map((link) => {
+          const isActive = link.prefix
+            ? pathname.startsWith(link.href)
+            : pathname === link.href;
 
-          {/* Filter chips — surface bg, hairline border, pill shape. Selected = orange-ink fill */}
-          {onOrdersPage && (
-            <div className="ms-6 mt-1.5 flex flex-col gap-1" role="group" aria-label="تصفية الطلبات">
-              {filterChips.map((chip) => {
-                const isSelected =
-                  chip.filter === "all"
-                    ? !searchParams.get("filter") || currentFilter === "all"
-                    : currentFilter === chip.filter;
-
-                const href =
-                  chip.filter === "all" ? "/staff" : `/staff?filter=${chip.filter}`;
-
-                return (
-                  <Link
-                    key={chip.filter}
-                    href={href}
-                    onClick={onClose}
-                    aria-current={isSelected ? "page" : undefined}
-                    className={`inline-flex min-h-9 items-center rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors ${
-                      isSelected
-                        ? "border-orange-ink bg-orange-ink text-white"
-                        : "border-line bg-surface text-ink-soft hover:border-orange-ink/40 hover:text-ink"
-                    }`}
-                  >
-                    {chip.label}
-                  </Link>
-                );
-              })}
-            </div>
-          )}
-
-          <Link
-            href="/staff/wholesalers"
-            onClick={onClose}
-            className={`mt-0.5 flex min-h-11 items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-medium transition-colors ${
-              onWholesalersPage
-                ? "bg-orange-ink/8 text-orange-ink"
-                : "text-ink-soft hover:bg-surface-sink hover:text-ink"
-            }`}
-          >
-            {/* Wholesalers icon */}
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-              <circle cx="9" cy="7" r="4" />
-              <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
-            </svg>
-            طلاب الممثلين
-          </Link>
-        </div>
+          return (
+            <Link
+              key={link.href}
+              href={link.href}
+              onClick={onClose}
+              aria-current={isActive ? "page" : undefined}
+              className={`flex min-h-11 items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
+                isActive
+                  ? "bg-orange-ink/10 text-orange-ink"
+                  : "font-medium text-ink-soft hover:bg-surface-sink hover:text-ink"
+              }`}
+            >
+              {link.icon}
+              {link.label}
+            </Link>
+          );
+        })}
       </nav>
 
       {/* Footer: user info + logout */}

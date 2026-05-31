@@ -1,4 +1,5 @@
 export type UserRole = "admin" | "staff" | "wholesaler" | "retail";
+export type StaffOrderScope = "retail" | "wholesaler" | "both";
 
 export type OrderStatus =
   | "pending_approval"
@@ -6,9 +7,18 @@ export type OrderStatus =
   | "design_complete"
   | "staff_review"
   | "printing"
+  | "embroidery"
+  | "pressing"
+  | "preparing"
   | "ready"
   | "delivered"
   | "cancelled";
+
+/** Staff job-types (production pipeline). Meaningful only when role === "staff". */
+export type StaffType = "designer" | "embroiderer" | "presser" | "preparer" | "manager";
+export type DesignApprovalStatus = "pending" | "approved" | "rejected";
+/** Who is browsing the shop — drives the package-form vs product-discovery funnel. */
+export type ShopAudience = "wholesaler_student" | "retail" | "guest";
 
 export type ProductType = "sash" | "robe" | "cap" | "shawl";
 export type StudentApprovalStatus = "pending_approval" | "approved" | "rejected";
@@ -33,6 +43,10 @@ export interface User {
   phone: string;
   email?: string;
   role: UserRole;
+  /** Set for production staff; null/undefined for other roles. From GET /auth/me. */
+  staff_type?: StaffType | null;
+  /** Which order source this staff member can see. From GET /auth/me. */
+  order_scope?: StaffOrderScope;
 }
 
 export interface LoginResponse {
@@ -88,6 +102,8 @@ export interface AdminOrder {
   profit: number | null;
   status: OrderStatus;
   createdAt: string;
+  /** "retail" | "wholesaler" — populated from backend. */
+  source?: "retail" | "wholesaler";
 }
 
 export interface AdminWholesaler {
@@ -256,6 +272,8 @@ export interface ShopProductCard {
 
 export interface ShopFeed {
   priceRole: PriceRole;
+  /** wholesaler_student → redirect to package form; retail/guest → browse products. */
+  audience: ShopAudience;
   packages: ShopPackageCard[];
   byType: Partial<Record<ProductType, ShopProductCard[]>>;
 }
@@ -398,4 +416,6 @@ export interface DesignState {
   notes: string | null;
   completed: boolean;
   completed_at?: string | null;
+  approval_status?: DesignApprovalStatus;
+  rejection_reason?: string | null;
 }

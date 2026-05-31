@@ -1,4 +1,4 @@
-import type { OrderStatus } from "./types";
+import type { DesignApprovalStatus, OrderStatus } from "./types";
 
 export type StaffListFilter = "all" | "review" | "printing" | "done";
 
@@ -56,4 +56,141 @@ export function mapApiOrderRow(row: ApiOrderRow): StaffOrder {
     status: row.status,
     createdAt: row.created_at,
   };
+}
+
+// ─── Production pipeline types ────────────────────────────────────────────────
+
+/** Row from GET /production/queue */
+export interface ProductionQueueItem {
+  id: string;
+  status: OrderStatus;
+  created_at: string;
+  design_id: string | null;
+  student_name: string;
+  university_name: string | null;
+  department: string | null;
+  product_name: string;
+  product_type: string;
+  batch_name: string | null;
+  deadline: string | null;
+  approval_status: DesignApprovalStatus | null;
+  rejection_reason: string | null;
+  /** Populated by backend: "retail" or "wholesaler". */
+  source: "retail" | "wholesaler";
+  /** Populated only when source === "wholesaler". */
+  wholesaler_name: string | null;
+  /** Non-null when this order belongs to a multi-item checkout bundle. */
+  checkout_group_id: string | null;
+}
+
+/** One item in the `items[]` array on the production order detail */
+export interface ProductionOrderItem {
+  label_snapshot: string;
+  price_snapshot: number;
+  qty: number;
+  customer_image_url: string | null;
+  group_id: string | null;
+  option_id: string | null;
+}
+
+/** Sibling order in a package (cap/robe/sash bundle) */
+export interface PackageOrderSibling {
+  id: string;
+  status: OrderStatus;
+  price: number;
+  product_name: string;
+  product_type: string;
+}
+
+/**
+ * Item in the `bundle` array on a production order detail.
+ * Returned only when the order is part of a multi-item checkout group.
+ * is_current=true marks the order currently being viewed.
+ */
+export interface BundleItem {
+  id: string;
+  status: OrderStatus;
+  price: number;
+  product_name: string;
+  product_type: string;
+  is_current: boolean;
+}
+
+/** Full detail from GET /production/orders/:id */
+export interface ProductionOrderDetail {
+  order: {
+    id: string;
+    status: OrderStatus;
+    created_at: string;
+    price: number;
+    design_id: string | null;
+    package_id: string | null;
+    batch_id: string | null;
+    student_id: string;
+    student_name: string;
+    student_phone: string;
+    university_name: string | null;
+    department: string | null;
+    gender: string | null;
+    product_name: string;
+    product_type: string;
+    batch_name: string | null;
+    deadline: string | null;
+    /** Order source — "retail" or "wholesaler". */
+    source: "retail" | "wholesaler";
+    /** Wholesaler display name; null for retail orders. */
+    wholesaler_name: string | null;
+  };
+  design: {
+    id: string;
+    sash_color: string | null;
+    approval_status: DesignApprovalStatus;
+    rejection_reason: string | null;
+    completed: boolean;
+    /** Only present when can_see_design=true */
+    left_canvas?: unknown | null;
+    right_canvas?: unknown | null;
+    logo_url?: string | null;
+    extra_image_url?: string | null;
+    fonts_used?: string[];
+    notes?: string | null;
+  } | null;
+  items: ProductionOrderItem[];
+  package_orders: PackageOrderSibling[] | null;
+  /**
+   * Full bundle context for the checkout group this order belongs to.
+   * null when the order was not part of a multi-item bundle checkout.
+   * Each entry has is_current=true for the order being viewed.
+   * `package_orders` is a backward-compat alias — prefer `bundle`.
+   */
+  bundle: BundleItem[] | null;
+  can_see_design: boolean;
+}
+
+// ─── Monitor types ────────────────────────────────────────────────────────────
+
+export interface MonitorData {
+  wip: Partial<Record<OrderStatus, number>>;
+  throughput: {
+    actor_id: string;
+    name: string;
+    staff_type: string;
+    actions: number;
+    last_action: string | null;
+  }[];
+  overdue: {
+    id: string;
+    student_name: string;
+    product_name: string;
+    status: OrderStatus;
+    batch_name: string | null;
+    deadline: string;
+  }[];
+  stale: {
+    id: string;
+    student_name: string;
+    status: OrderStatus;
+    updated_at: string;
+    hours_in_stage: number;
+  }[];
 }

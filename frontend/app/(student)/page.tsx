@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { getApiErrorMessage } from "@/lib/api";
 import { getHeroSlides, getShopFeed } from "@/lib/catalog";
 import { SHOP_SECTION_TITLES, SHOP_TYPE_ORDER } from "@/lib/constants";
 import type { HeroSlide, ProductType, ShopFeed, ShopProductCard } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
-import { PackageTile, ProductTile } from "@/components/shop/ProductTile";
+import { ProductTile } from "@/components/shop/ProductTile";
 import { ShopCover } from "@/components/shop/ShopCover";
 import { AtelierStory, MilestoneStory, DesignProcess } from "@/components/shop/BrandStory";
 
@@ -41,14 +42,64 @@ function ShopSkeleton() {
   );
 }
 
+/**
+ * Reads the `?need=` search param and calls back into the parent page.
+ * Must live inside a <Suspense> boundary (Next 16 requirement for useSearchParams).
+ */
+function NeedParamReader({
+  onNeed,
+}: {
+  onNeed: (types: ProductType[]) => void;
+}) {
+  const searchParams = useSearchParams();
+  const onNeedRef = useRef(onNeed);
+
+  useLayoutEffect(() => {
+    onNeedRef.current = onNeed;
+  });
+
+  useEffect(() => {
+    const raw = searchParams.get("need");
+    if (!raw) return;
+    const types = raw
+      .split(",")
+      .filter((t): t is ProductType =>
+        (["sash", "robe", "cap", "shawl"] as string[]).includes(t)
+      );
+    if (types.length > 0) onNeedRef.current(types);
+  }, [searchParams]);
+
+  return null;
+}
+
 export default function StudentHomePage() {
+  const router = useRouter();
   const [feed, setFeed] = useState<ShopFeed | null>(null);
   const [heroSlide, setHeroSlide] = useState<HeroSlide | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterKey>("all");
+  const catalogSectionRef = useRef<HTMLElement | null>(null);
 
-  function loadShop() {
+  /**
+   * Called by NeedParamReader when ?need= is present.
+   * Pre-filters the grid to the first requested type and smooth-scrolls
+   * to the catalog section. Respects prefers-reduced-motion.
+   */
+  const handleNeed = useCallback((types: ProductType[]) => {
+    if (types.length > 0) setFilter(types[0]);
+    const el = catalogSectionRef.current;
+    if (!el) return;
+    const prefersReduced = window.matchMedia(
+      "(prefers-reduced-motion: reduce)"
+    ).matches;
+    el.scrollIntoView({
+      behavior: prefersReduced ? "auto" : "smooth",
+      block: "start",
+    });
+  }, []);
+
+  const loadShop = useCallback(() => {
     setLoading(true);
     setLoadError(null);
     // Hero is decorative — a failed slider must never block the catalog, so the
@@ -56,7 +107,13 @@ export default function StudentHomePage() {
     Promise.allSettled([getShopFeed(), getHeroSlides()])
       .then(([feedRes, heroRes]) => {
         if (feedRes.status === "fulfilled") {
-          setFeed(feedRes.value);
+          const feedData = feedRes.value;
+          // Wholesaler-students have no product grid — send them straight to the package form.
+          if (feedData.audience === "wholesaler_student") {
+            router.replace("/package");
+            return;
+          }
+          setFeed(feedData);
         } else {
           const msg = getApiErrorMessage(
             feedRes.reason,
@@ -73,12 +130,11 @@ export default function StudentHomePage() {
         }
       })
       .finally(() => setLoading(false));
-  }
+  }, [router]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- mount fetch
     loadShop();
-  }, []);
+  }, [loadShop]);
 
   // Which categories actually have products — only those become chips.
   const availableTypes = useMemo<ProductType[]>(
@@ -124,12 +180,17 @@ export default function StudentHomePage() {
     );
   }
 
-  const hasPackages = feed.packages.length > 0;
   const hasAnyProduct = allProducts.length > 0;
-  const showPackages = hasPackages && filter === "all";
+  // Packages are NOT shown on the home feed for retail — they surface only
+  // inside the cart as a single "complete your package" suggestion card.
 
   return (
-    <div className="space-y-0">
+    <div className="animate-fade-page-in space-y-0">
+      {/* NeedParamReader must be inside Suspense — Next 16 requires it for useSearchParams */}
+      <Suspense fallback={null}>
+        <NeedParamReader onNeed={handleNeed} />
+      </Suspense>
+
       <ShopCover slide={heroSlide} />
 
       {/* ── Brand story band 1: The atelier — full paper, generous padding ── */}
@@ -157,35 +218,18 @@ export default function StudentHomePage() {
       <div className="full-bleed h-px bg-line" aria-hidden />
 
       {/* ── Catalog area — padded section so it breathes like a page turn ── */}
-      <section className="space-y-12 py-12 sm:py-16">
+      <section ref={catalogSectionRef} className="space-y-12 py-12 sm:py-16">
 
       {/* Whole catalog still empty — the cover and designer carry the page. */}
-      {!hasAnyProduct && !hasPackages ? (
+      {!hasAnyProduct ? (
         <div className="flex flex-col items-center gap-3 rounded-card border border-dashed border-orange/25 bg-[var(--shop-sink)] px-6 py-14 text-center">
           <p className="font-script text-3xl leading-none text-orange-ink">lolo</p>
           <p className="max-w-[32ch] text-sm font-medium text-ink-soft">
-            المتجر يجهّز لموسم التخرّج — تابعونا على إنستغرام @loloshop96
+            المتجر يجهّز لموسم التخرّج، تابعونا على إنستغرام @loloshop96
           </p>
         </div>
       ) : (
         <>
-          {/* Packages first — the full graduation look */}
-          {showPackages && (
-            <div className="scroll-reveal space-y-4">
-              <SectionHeading
-                title="إطلالات كاملة"
-                note="الروب والوشاح والقبعة، مجموعة واحدة"
-              />
-              <div className="grid grid-cols-2 gap-x-4 gap-y-7 md:grid-cols-3 md:gap-x-6 md:gap-y-10 lg:grid-cols-4">
-                {feed.packages.map((pkg) => (
-                  <div key={pkg.id} className="scroll-reveal">
-                    <PackageTile pkg={pkg} />
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
           {/* The collection — chips filter, tiles read like catalog pages */}
           <div className="scroll-reveal space-y-5">
             <SectionHeading
@@ -237,7 +281,7 @@ export default function StudentHomePage() {
                 <button
                   type="button"
                   onClick={() => setFilter("all")}
-                  className="rounded-pill bg-ink px-4 py-2 text-sm font-semibold text-cream transition-colors hover:bg-ink-soft"
+                  className="inline-flex min-h-11 items-center rounded-pill bg-ink px-5 py-2 text-sm font-semibold text-cream transition-colors hover:bg-ink/80"
                 >
                   عرض كل المنتجات
                 </button>

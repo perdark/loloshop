@@ -24,6 +24,7 @@ import {
   validateSelection,
   type OptionSelection,
 } from "@/lib/pricing";
+import { addToCart } from "@/lib/cart";
 import type { CatalogProduct, ConfigureOrderResult } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -83,11 +84,12 @@ export default function StudentProductPage() {
     {}
   );
   const [confirmed, setConfirmed] = useState<ConfigureOrderResult | null>(null);
+  const [addedToCart, setAddedToCart] = useState(false);
+  const [addingToCart, setAddingToCart] = useState(false);
   const [gender, setGender] = useState<"male" | "female" | null>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem(GENDER_KEY);
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage read on mount
     if (saved === "male" || saved === "female") setGender(saved);
   }, []);
 
@@ -108,7 +110,6 @@ export default function StudentProductPage() {
   // Auto-select single-option required groups (e.g. product has only 1 sash type)
   useEffect(() => {
     if (!product) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- derived from product, no cascade
     setSelection((prev) => {
       const autoSel: OptionSelection = { ...prev };
       for (const g of product.optionGroups) {
@@ -145,6 +146,33 @@ export default function StudentProductPage() {
     if (!product) return null;
     return validateCustomerImages(product, selection, customerImages);
   }, [product, selection, customerImages]);
+
+  async function handleAddToCart() {
+    if (!product || !id) return;
+    const err = validateSelection(product, selection, gender);
+    if (err) {
+      toast.error(err);
+      return;
+    }
+    const imgErr = validateCustomerImages(product, selection, customerImages);
+    if (imgErr) {
+      toast.error(imgErr);
+      return;
+    }
+    setAddingToCart(true);
+    try {
+      await addToCart(
+        id,
+        buildConfigureSelections(product, selection, customerImages)
+      );
+      setAddedToCart(true);
+      toast.success("أضيف إلى السلة");
+    } catch (e) {
+      toast.error(getApiErrorMessage(e, "تعذر الإضافة — سجّل دخولك كطالب"));
+    } finally {
+      setAddingToCart(false);
+    }
+  }
 
   async function handleConfirm() {
     if (!product || !id) return;
@@ -315,7 +343,41 @@ export default function StudentProductPage() {
         </div>
       </div>
 
-      {product.type !== "sash" && (
+      {product.type !== "sash" && !product.customizable && (
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-cream px-4 py-3.5 shadow-[var(--shadow-float)]">
+          <div className="mx-auto max-w-5xl">
+            {addedToCart ? (
+              <div className="flex gap-2">
+                <Button
+                  fullWidth
+                  variant="secondary"
+                  onClick={() => router.push("/cart")}
+                >
+                  عرض السلة
+                </Button>
+                <Button
+                  fullWidth
+                  variant="ghost"
+                  onClick={() => router.push("/")}
+                >
+                  متابعة التسوق
+                </Button>
+              </div>
+            ) : (
+              <Button
+                fullWidth
+                loading={addingToCart}
+                disabled={Boolean(customerImageError) || addingToCart}
+                onClick={handleAddToCart}
+              >
+                أضف إلى السلة
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {product.type !== "sash" && product.customizable && (
         <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-cream px-4 py-3.5 shadow-[var(--shadow-float)]">
           <div className="mx-auto max-w-5xl">
           {confirmed ? (

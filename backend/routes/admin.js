@@ -22,6 +22,8 @@ router.post('/students/:id/edit-exception', c.toggleEditException);
 // Staff management (admin only)
 router.get('/staff', c.listStaff);
 router.post('/staff', c.createStaff);
+router.patch('/staff/:id/type', c.updateStaffType);
+router.patch('/staff/:id/scope', c.updateStaffScope);
 router.patch('/staff/:id/password', c.updateStaffPassword);
 router.delete('/staff/:id', c.deleteStaff);
 

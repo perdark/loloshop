@@ -20,6 +20,7 @@ const navItems: {
   { href: "/admin/hero-slides", label: "شريط الواجهة", exact: false },
   { href: "/admin/batches", label: "الدفعات", exact: false },
   { href: "/admin/staff", label: "الموظفون", exact: false },
+  { href: "/staff", label: "الإنتاج ومتابعة الموظفين", exact: false },
 ];
 
 interface AdminSidebarProps {

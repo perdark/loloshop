@@ -170,6 +170,7 @@ export async function getShopFeed(): Promise<ShopFeed> {
   );
   return {
     priceRole: (raw.price_role as PriceRole) || "retail",
+    audience: (raw.audience as import("./types").ShopAudience) ?? "guest",
     packages,
     byType,
   };

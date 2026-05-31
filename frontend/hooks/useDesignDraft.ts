@@ -10,6 +10,7 @@ import {
 } from "@/lib/designer";
 import { getProductFull, getShopFeed } from "@/lib/catalog";
 import { buildConfigureSelections, configureOrder } from "@/lib/orders";
+import { addToCart } from "@/lib/cart";
 import {
   computePriceBreakdown,
   groupVisibleForGender,
@@ -56,6 +57,7 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
   const [studentStatus, setStudentStatus] = useState<string | null>(null);
   const [completedLocked, setCompletedLocked] = useState(false);
   const [editException, setEditException] = useState(false);
+  const [isRepStudent, setIsRepStudent] = useState(false);
   const [gender, setGender] = useState<"male" | "female" | null>(null);
   // Per-wholesaler sash side lock: which side the student may edit (null = both).
   const [editableSide, setEditableSide] = useState<"left" | "right" | null>(null);
@@ -140,6 +142,7 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
 
         setEditException(!!my.edit_exception);
         setStudentStatus(my.student_status);
+        setIsRepStudent(!!my.is_rep_student);
 
         // Per-wholesaler sash side lock. The locked side = opposite of editable.
         const editSide =
@@ -397,24 +400,42 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
         fonts_used: Array.from(usedFontsRef.current),
         notes: notes || null,
       });
-      try {
-        await configureOrder({
-          productId: product.id,
-          designId,
-          selections: buildConfigureSelections(product, selection, customerImages),
-        });
-      } catch (e) {
-        toast.error(getApiErrorMessage(e, "تعذر تسعير الطلب — تواصل مع الدعم"));
-        return false;
+
+      if (isRepStudent) {
+        // Rep-student (wholesaler-joined): keep the direct order flow.
+        try {
+          await configureOrder({
+            productId: product.id,
+            designId,
+            selections: buildConfigureSelections(product, selection, customerImages),
+          });
+        } catch (e) {
+          toast.error(getApiErrorMessage(e, "تعذر تسعير الطلب — تواصل مع الدعم"));
+          return false;
+        }
+        try {
+          await completeDesign();
+        } catch (e) {
+          toast.error(getApiErrorMessage(e, "تم الحفظ لكن تعذر قفل التصميم — تواصل مع الدعم"));
+          return false;
+        }
+        toast.success("تم تأكيد تصميمك وطلبك");
+        router.replace("/");
+      } else {
+        // Retail student: add designed sash to cart, then go to cart.
+        try {
+          await addToCart(
+            product.id,
+            buildConfigureSelections(product, selection, customerImages),
+            { designId }
+          );
+        } catch (e) {
+          toast.error(getApiErrorMessage(e, "تعذر إضافة الوشاح للسلة — تواصل مع الدعم"));
+          return false;
+        }
+        toast.success("أُضيف تصميمك إلى السلة");
+        router.replace("/cart");
       }
-      try {
-        await completeDesign();
-      } catch (e) {
-        toast.error(getApiErrorMessage(e, "تم الحفظ لكن تعذر قفل التصميم — تواصل مع الدعم"));
-        return false;
-      }
-      toast.success("تم تأكيد تصميمك وطلبك");
-      router.replace("/");
       return true;
     } catch (e) {
       toast.error(getApiErrorMessage(e, "تعذر حفظ التصميم"));
@@ -447,6 +468,7 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
     studentStatus,
     completedLocked,
     editException,
+    isRepStudent,
     gender,
     pickGender,
     product,

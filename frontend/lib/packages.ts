@@ -22,10 +22,10 @@ function mapPackage(raw: Record<string, unknown>): PackageTier {
   };
 }
 
-export async function listPackages(): Promise<PackageTier[]> {
+export async function listPackages(role: "wholesaler" | "retail" = "wholesaler"): Promise<PackageTier[]> {
   const { data } = await api.get<{ data: Record<string, unknown>[] }>(
     "/catalog/packages",
-    { params: { role: "wholesaler" } }
+    { params: { role } }
   );
   return (data.data || []).map(mapPackage);
 }

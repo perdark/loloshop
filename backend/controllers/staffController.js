@@ -1,6 +1,6 @@
 const { query } = require('../lib/db');
 
-const COMPLETED_STATUSES = ['design_complete', 'staff_review', 'printing', 'ready', 'delivered'];
+const COMPLETED_STATUSES = ['design_complete', 'staff_review', 'printing', 'embroidery', 'pressing', 'preparing', 'ready', 'delivered'];
 
 async function wholesalerStudents(req, res) {
   const { id } = req.params; // wholesaler id

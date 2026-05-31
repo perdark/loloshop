@@ -1,15 +1,31 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { fetchMe } from "@/lib/auth-api";
 import { getToken, setUser, logout } from "@/lib/auth";
 import type { User, UserRole } from "@/lib/types";
 
-export function useRequireAuth(allowedRole?: UserRole) {
+/**
+ * Guard the current page to one or more roles.
+ *
+ * Accepts either a single role string or an array of roles so that
+ * mixed-access pages (e.g. staff + admin) can share a layout without
+ * duplicating the auth check.
+ *
+ * Existing single-role callers (`useRequireAuth("admin")`) continue to work
+ * unchanged.
+ */
+export function useRequireAuth(allowedRoles?: UserRole | UserRole[]) {
   const router = useRouter();
   const [user, setUserState] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // Normalise to an array once so the effect dependency is stable across renders
+  const rolesArray = useMemo<UserRole[] | undefined>(() => {
+    if (!allowedRoles) return undefined;
+    return Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles];
+  }, [allowedRoles]);
 
   useEffect(() => {
     let cancelled = false;
@@ -28,7 +44,7 @@ export function useRequireAuth(allowedRole?: UserRole) {
         setUser(me);
         setUserState(me);
 
-        if (allowedRole && me.role !== allowedRole) {
+        if (rolesArray && !rolesArray.includes(me.role)) {
           router.replace("/login");
           return;
         }
@@ -46,7 +62,7 @@ export function useRequireAuth(allowedRole?: UserRole) {
     return () => {
       cancelled = true;
     };
-  }, [router, allowedRole]);
+  }, [router, rolesArray]);
 
   return { user, loading };
 }

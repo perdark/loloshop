@@ -37,8 +37,25 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN
   CREATE TYPE order_status AS ENUM (
     'pending_approval', 'designing', 'design_complete', 'staff_review',
-    'printing', 'ready', 'delivered', 'cancelled'
+    'printing', 'embroidery', 'pressing', 'preparing', 'ready', 'delivered', 'cancelled'
   );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- Production-pipeline stages (Migration 010). Idempotent upgrade for existing DBs;
+-- no-op on a fresh DB where CREATE TYPE above already lists them. Adding a value is
+-- transaction-safe here because schema.sql never USES these values as data.
+ALTER TYPE order_status ADD VALUE IF NOT EXISTS 'embroidery';
+ALTER TYPE order_status ADD VALUE IF NOT EXISTS 'pressing';
+ALTER TYPE order_status ADD VALUE IF NOT EXISTS 'preparing';
+
+-- Staff job-types (Migration 010). Meaningful only when users.role = 'staff'.
+DO $$ BEGIN
+  CREATE TYPE staff_type AS ENUM ('designer', 'embroiderer', 'presser', 'preparer', 'manager');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- Individual design approval verdict (Migration 010).
+DO $$ BEGIN
+  CREATE TYPE design_approval_status AS ENUM ('pending', 'approved', 'rejected');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- =====================================================
@@ -351,22 +368,7 @@ CREATE INDEX IF NOT EXISTS idx_batches_wholesaler ON batches(wholesaler_id);
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS batch_id UUID REFERENCES batches(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_orders_batch ON orders(batch_id);
 
-ALTER TABLE orders ADD COLUMN IF NOT EXISTS package_id UUID REFERENCES packages(id) ON DELETE SET NULL;
-CREATE INDEX IF NOT EXISTS idx_orders_package ON orders(package_id);
-
-CREATE TABLE IF NOT EXISTS order_items (
-  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  order_id       UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-  group_id       UUID REFERENCES option_groups(id) ON DELETE SET NULL,
-  option_id      UUID REFERENCES options(id) ON DELETE SET NULL,
-  label_snapshot TEXT NOT NULL,
-  price_snapshot BIGINT NOT NULL DEFAULT 0,
-  qty            INTEGER NOT NULL DEFAULT 1,
-  customer_image_url TEXT,
-  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);
-
+-- packages must exist BEFORE orders.package_id FK (C1 fix: moved up from below order_items)
 CREATE TABLE IF NOT EXISTS packages (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name_ar    TEXT NOT NULL,
@@ -385,6 +387,27 @@ CREATE TABLE IF NOT EXISTS package_rules (
   UNIQUE (sash_type_option_id)
 );
 
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS package_id UUID REFERENCES packages(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_orders_package ON orders(package_id);
+
+-- Migration 011: checkout_group_id links all orders from a single cart checkout.
+-- Single-item checkouts leave this NULL. orders stay separate; we only link them.
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS checkout_group_id UUID;
+CREATE INDEX IF NOT EXISTS idx_orders_checkout_group ON orders(checkout_group_id);
+
+CREATE TABLE IF NOT EXISTS order_items (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id       UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  group_id       UUID REFERENCES option_groups(id) ON DELETE SET NULL,
+  option_id      UUID REFERENCES options(id) ON DELETE SET NULL,
+  label_snapshot TEXT NOT NULL,
+  price_snapshot BIGINT NOT NULL DEFAULT 0,
+  qty            INTEGER NOT NULL DEFAULT 1,
+  customer_image_url TEXT,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);
+
 -- Migration 005: product parent-child hierarchy
 ALTER TABLE products ADD COLUMN IF NOT EXISTS parent_id UUID REFERENCES products(id) ON DELETE SET NULL;
 
@@ -401,5 +424,53 @@ DO $$ BEGIN
     ADD CONSTRAINT chk_wholesalers_editable_side
     CHECK (editable_sash_side IS NULL OR editable_sash_side IN ('left', 'right'));
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- =====================================================
+-- Migration 010 — multi-role staff + production pipeline + retail cart
+-- =====================================================
+
+-- Staff job-type (designer | embroiderer | presser | preparer | manager); NULL for non-staff.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS staff_type staff_type;
+CREATE INDEX IF NOT EXISTS idx_users_staff_type ON users(staff_type) WHERE staff_type IS NOT NULL;
+
+-- Staff order-scope (Migration 011): which order SOURCE a staff member handles —
+-- 'retail' (independent students), 'wholesaler' (rep-linked students), or 'both'.
+-- An order's source = its student's wholesaler_id (NULL = retail). Manager/admin = all.
+DO $$ BEGIN
+  CREATE TYPE staff_order_scope AS ENUM ('retail', 'wholesaler', 'both');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS order_scope staff_order_scope NOT NULL DEFAULT 'both';
+
+-- Individual design approval gate (set by the designer / manager / admin).
+ALTER TABLE designs ADD COLUMN IF NOT EXISTS approval_status design_approval_status NOT NULL DEFAULT 'pending';
+ALTER TABLE designs ADD COLUMN IF NOT EXISTS approved_by UUID REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE designs ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
+ALTER TABLE designs ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
+CREATE INDEX IF NOT EXISTS idx_designs_approval ON designs(approval_status);
+
+-- Retail shopping cart — one active cart per user; items snapshot the configured selections + price.
+CREATE TABLE IF NOT EXISTS carts (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS cart_items (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  cart_id        UUID NOT NULL REFERENCES carts(id) ON DELETE CASCADE,
+  product_id     UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  design_id      UUID REFERENCES designs(id) ON DELETE SET NULL,  -- set for a designed sash line
+  selections     JSONB NOT NULL DEFAULT '[]'::jsonb,  -- [{group_id, option_id, qty, customer_image_url}]
+  price_snapshot BIGINT NOT NULL CHECK (price_snapshot >= 0),
+  qty            INTEGER NOT NULL DEFAULT 1 CHECK (qty >= 1),
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_cart_items_cart ON cart_items(cart_id);
+-- Idempotent upgrade for DBs created before the designed-sash cart line existed.
+ALTER TABLE cart_items ADD COLUMN IF NOT EXISTS design_id UUID REFERENCES designs(id) ON DELETE SET NULL;
+
+DROP TRIGGER IF EXISTS trg_carts_updated ON carts;
+CREATE TRIGGER trg_carts_updated BEFORE UPDATE ON carts FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 COMMIT;

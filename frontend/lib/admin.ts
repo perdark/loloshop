@@ -10,6 +10,7 @@ import type {
   CreateWholesalerResult,
   HeroSlide,
   OrderStatus,
+  StaffOrderScope,
   User,
 } from "./types";
 
@@ -72,6 +73,7 @@ interface ApiOrderRow {
   profit: number | null;
   status: OrderStatus;
   created_at: string;
+  source?: "retail" | "wholesaler";
 }
 
 interface ApiWholesalerRow {
@@ -103,6 +105,7 @@ function mapOrder(row: ApiOrderRow): AdminOrder {
     profit: row.profit,
     status: row.status,
     createdAt: row.created_at,
+    source: row.source,
   };
 }
 
@@ -148,6 +151,9 @@ export interface OrdersFilters {
   status?: OrderStatus | "";
   dateFrom?: string;
   dateTo?: string;
+  source?: "retail" | "wholesaler" | "";
+  /** Product type filter — only honoured in item mode. e.g. "sash" | "robe" | "cap" */
+  type?: string;
 }
 
 export async function getAdminAnalytics(): Promise<AdminAnalytics> {
@@ -171,9 +177,98 @@ export async function getAdminOrders(
       status: filters.status || undefined,
       from: filters.dateFrom || undefined,
       to: filters.dateTo || undefined,
+      source: filters.source || undefined,
+      type: filters.type || undefined,
     },
   });
   return (data.data || []).map(mapOrder);
+}
+
+// ─── Bundle (grouped) order types ────────────────────────────────────────────
+
+/** One component order within a bundle group */
+export interface AdminBundleItem {
+  order_id: string;
+  product_name: string;
+  product_type: string;
+  status: OrderStatus;
+  price: number;
+  cost: number;
+  profit: number;
+}
+
+/** A grouped bundle card returned by GET /admin/orders?group=bundle */
+export interface AdminBundle {
+  checkout_group_id: string | null;
+  student_name: string;
+  university_name: string | null;
+  created_at: string;
+  total_price: number;
+  total_cost: number;
+  total_profit: number;
+  items: AdminBundleItem[];
+}
+
+interface ApiBundleItem {
+  order_id: string;
+  product_name: string;
+  product_type: string;
+  status: OrderStatus;
+  price: number;
+  cost: number;
+  profit: number;
+}
+
+interface ApiBundle {
+  checkout_group_id: string | null;
+  student_name: string;
+  university_name: string | null;
+  created_at: string;
+  total_price: number;
+  total_cost: number;
+  total_profit: number;
+  items: ApiBundleItem[];
+}
+
+function mapBundle(raw: ApiBundle): AdminBundle {
+  return {
+    checkout_group_id: raw.checkout_group_id,
+    student_name: raw.student_name,
+    university_name: raw.university_name ?? null,
+    created_at: raw.created_at,
+    total_price: Number(raw.total_price),
+    total_cost: Number(raw.total_cost),
+    total_profit: Number(raw.total_profit),
+    items: (raw.items || []).map((item) => ({
+      order_id: item.order_id,
+      product_name: item.product_name,
+      product_type: item.product_type,
+      status: item.status,
+      price: Number(item.price),
+      cost: Number(item.cost),
+      profit: Number(item.profit),
+    })),
+  };
+}
+
+/**
+ * GET /admin/orders?group=bundle
+ * Returns orders grouped by checkout_group_id.
+ * Ungrouped orders appear as single-item bundles (checkout_group_id null).
+ */
+export async function getAdminOrderBundles(
+  filters: Pick<OrdersFilters, "wholesalerId" | "source" | "dateFrom" | "dateTo"> = {}
+): Promise<AdminBundle[]> {
+  const { data } = await api.get<{ data: { bundles: ApiBundle[] } }>("/admin/orders", {
+    params: {
+      group: "bundle",
+      wholesaler_id: filters.wholesalerId || undefined,
+      source: filters.source || undefined,
+      from: filters.dateFrom || undefined,
+      to: filters.dateTo || undefined,
+    },
+  });
+  return (data.data?.bundles || []).map(mapBundle);
 }
 
 export async function getAdminWholesalers(): Promise<AdminWholesaler[]> {
@@ -251,6 +346,8 @@ interface ApiStaffRow {
   phone: string;
   email?: string | null;
   phone_verified?: boolean;
+  staff_type?: string | null;
+  order_scope?: StaffOrderScope | null;
 }
 
 export interface CreateStaffPayload {
@@ -258,6 +355,8 @@ export interface CreateStaffPayload {
   phone: string;
   email?: string;
   password: string;
+  staff_type?: string;
+  order_scope?: StaffOrderScope;
 }
 
 export async function getAdminStaff(): Promise<User[]> {
@@ -267,8 +366,24 @@ export async function getAdminStaff(): Promise<User[]> {
     name: r.name,
     phone: r.phone,
     email: r.email || undefined,
-    role: "staff",
+    role: "staff" as const,
+    staff_type: (r.staff_type as User["staff_type"]) ?? null,
+    order_scope: (r.order_scope as StaffOrderScope) ?? undefined,
   }));
+}
+
+export async function updateStaffScope(
+  id: string,
+  order_scope: StaffOrderScope
+): Promise<void> {
+  await api.patch(`/admin/staff/${id}/scope`, { order_scope });
+}
+
+export async function updateStaffType(
+  id: string,
+  staff_type: string
+): Promise<void> {
+  await api.patch(`/admin/staff/${id}/type`, { staff_type });
 }
 
 export async function createStaff(payload: CreateStaffPayload): Promise<void> {
@@ -277,6 +392,8 @@ export async function createStaff(payload: CreateStaffPayload): Promise<void> {
     phone: payload.phone,
     email: payload.email,
     password: payload.password,
+    staff_type: payload.staff_type,
+    order_scope: payload.order_scope,
   });
 }
 

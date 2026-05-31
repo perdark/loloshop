@@ -36,6 +36,8 @@ async function getMyDesign(req, res) {
     student_status: student.status,
     student_gender: student.gender || null,
     edit_exception: !!student.edit_exception,
+    // Retail (no wholesaler) confirm → cart; rep students keep the direct package/order flow.
+    is_rep_student: !!student.wholesaler_id,
     editable_sash_side: sashLock.editable_sash_side,
     locked_side_design: sashLock.locked_side_design,
   });
@@ -155,6 +157,78 @@ async function getDesignByStudent(req, res) {
   res.json({ data: rows[0] });
 }
 
+// Designer / manager / admin: approve an individual design → its sash order enters embroidery.
+async function approveDesign(req, res) {
+  const { id } = req.params; // design id
+  const result = await tx(async (client) => {
+    const d = await client.query(
+      `UPDATE designs SET approval_status = 'approved', approved_by = $2, approved_at = NOW(),
+         rejection_reason = NULL
+       WHERE id = $1 RETURNING id, student_id`,
+      [id, req.user.id]
+    );
+    if (!d.rows.length) return null;
+    const o = await client.query(
+      `UPDATE orders SET status = 'embroidery'
+       WHERE design_id = $1 AND status = 'design_complete' RETURNING id, student_id`,
+      [id]
+    );
+    await client.query(
+      `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
+       VALUES ($1, 'approve_design', 'design', $2, $3)`,
+      [req.user.id, id, JSON.stringify({ orders: o.rows.map((r) => r.id) })]
+    );
+    const stu = await client.query(`SELECT user_id FROM students WHERE id = $1`, [d.rows[0].student_id]);
+    if (stu.rows[0]) {
+      await client.query(
+        `INSERT INTO notifications (user_id, type, title_ar, body_ar, link)
+         VALUES ($1, 'design_approved', $2, $3, '/')`,
+        [stu.rows[0].user_id, 'تمت الموافقة على تصميمك', 'اعتُمد تصميم الوشاح وبدأ التطريز']
+      );
+    }
+    return { advanced: o.rows.length };
+  });
+  if (!result) return res.status(404).json({ error: 'التصميم غير موجود', code: 'ERR_NOT_FOUND' });
+  res.json({ data: { id, approval_status: 'approved', advanced: result.advanced } });
+}
+
+// Designer / manager / admin: reject a design → reopen it for editing, order back to designing.
+async function rejectDesign(req, res) {
+  const { id } = req.params; // design id
+  const reason = (req.body && req.body.reason ? String(req.body.reason) : '').trim();
+  if (!reason) return res.status(400).json({ error: 'يرجى كتابة سبب الرفض', code: 'ERR_VALIDATION' });
+  const result = await tx(async (client) => {
+    const d = await client.query(
+      `UPDATE designs SET approval_status = 'rejected', rejection_reason = $2,
+         approved_by = $3, approved_at = NULL, completed = FALSE, completed_at = NULL
+       WHERE id = $1 RETURNING id, student_id`,
+      [id, reason, req.user.id]
+    );
+    if (!d.rows.length) return null;
+    await client.query(
+      `UPDATE orders SET status = 'designing'
+       WHERE design_id = $1 AND status = 'design_complete'`,
+      [id]
+    );
+    await client.query(
+      `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
+       VALUES ($1, 'reject_design', 'design', $2, $3)`,
+      [req.user.id, id, JSON.stringify({ reason })]
+    );
+    const stu = await client.query(`SELECT user_id FROM students WHERE id = $1`, [d.rows[0].student_id]);
+    if (stu.rows[0]) {
+      await client.query(
+        `INSERT INTO notifications (user_id, type, title_ar, body_ar, link)
+         VALUES ($1, 'design_rejected', $2, $3, '/design')`,
+        [stu.rows[0].user_id, 'يحتاج تصميمك إلى تعديل', reason]
+      );
+    }
+    return d.rows[0];
+  });
+  if (!result) return res.status(404).json({ error: 'التصميم غير موجود', code: 'ERR_NOT_FOUND' });
+  res.json({ data: { id, approval_status: 'rejected' } });
+}
+
 async function uploadLogo(req, res) {
   if (!req.file) return res.status(400).json({ error: 'لم يتم رفع ملف', code: 'ERR_VALIDATION' });
   res.json({ data: { url: publicUrl(req, 'logos', req.file.filename) } });
@@ -165,4 +239,7 @@ async function uploadImage(req, res) {
   res.json({ data: { url: publicUrl(req, 'images', req.file.filename) } });
 }
 
-module.exports = { getMyDesign, saveDesign, completeDesign, getDesignByStudent, uploadLogo, uploadImage };
+module.exports = {
+  getMyDesign, saveDesign, completeDesign, getDesignByStudent,
+  approveDesign, rejectDesign, uploadLogo, uploadImage,
+};

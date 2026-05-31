@@ -10,6 +10,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { useRequireAuth } from "@/hooks/useRequireAuth";
 
 interface ApiRow {
   id: string;
@@ -74,6 +75,7 @@ function StudentSkeleton() {
 
 export default function StaffWholesalerStudentsPage() {
   const { wholesalerId } = useParams<{ wholesalerId: string }>();
+  const { user } = useRequireAuth(["staff", "admin"]);
   const [rows, setRows] = useState<WholesalerStudentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);
@@ -88,8 +90,13 @@ export default function StaffWholesalerStudentsPage() {
     if (!wholesalerId) return;
     setLoading(true);
     setFetchError(false);
+    // Admin must hit /admin/wholesalers/:id/students (staff route requires role=staff).
+    const endpoint =
+      user?.role === "admin"
+        ? `/admin/wholesalers/${wholesalerId}/students`
+        : `/staff/wholesalers/${wholesalerId}/students`;
     api
-      .get<{ data: ApiRow[] }>(`/staff/wholesalers/${wholesalerId}/students`)
+      .get<{ data: ApiRow[] }>(endpoint)
       .then(({ data }) => {
         setRows(
           (data.data || []).map((r) => ({
@@ -109,12 +116,13 @@ export default function StaffWholesalerStudentsPage() {
         setFetchError(true);
       })
       .finally(() => setLoading(false));
-  }, [wholesalerId]);
+  }, [wholesalerId, user?.role]);
 
   useEffect(() => {
+    if (!user) return; // wait until auth resolves before fetching
     load();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wholesalerId]);
+  }, [wholesalerId, user?.role]);
 
   // reset page whenever filters change (adjust state during render — no effect)
   const filtersKey = `${search}|${statusFilter}|${completion}`;

@@ -7,7 +7,7 @@ import { PageLoader } from "@/components/ui/Spinner";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 
 function StaffShell({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useRequireAuth("staff");
+  const { user, loading } = useRequireAuth(["staff", "admin"]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   if (loading || !user) {
@@ -48,7 +48,7 @@ function StaffShell({ children }: { children: React.ReactNode }) {
             </svg>
           </button>
           <span className="font-display text-lg font-bold text-ink">
-            لوحة الموظف
+            {user.role === "admin" ? "الإنتاج والمتابعة" : "لوحة الموظف"}
           </span>
           <BrandMark size={36} className="ms-auto" />
         </header>

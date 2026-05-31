@@ -1,5 +1,4 @@
 const { query } = require('../lib/db');
-const { canSeeWholesalerOnly } = require('./catalogController');
 
 async function list(req, res) {
   const { type } = req.query;
@@ -8,10 +7,6 @@ async function list(req, res) {
   if (type) {
     params.push(type);
     where += ` AND type = $${params.length}`;
-  }
-  // Hide wholesaler-only products from retail/anonymous viewers.
-  if (!(await canSeeWholesalerOnly(req.user))) {
-    where += ` AND wholesaler_only = FALSE`;
   }
   const { rows: products } = await query(
     `SELECT id, type, name_ar, description, base_price, customizable
@@ -35,12 +30,10 @@ async function list(req, res) {
 
 async function getOne(req, res) {
   const { id } = req.params;
-  const allowWholesalerOnly = await canSeeWholesalerOnly(req.user);
   const { rows: products } = await query(
     `SELECT id, type, name_ar, description, base_price, customizable
-     FROM products WHERE id = $1 AND active = TRUE
-       AND ($2 = TRUE OR wholesaler_only = FALSE)`,
-    [id, allowWholesalerOnly]
+     FROM products WHERE id = $1 AND active = TRUE`,
+    [id]
   );
   if (!products.length) return res.status(404).json({ error: 'المنتج غير موجود', code: 'ERR_NOT_FOUND' });
   const { rows: variants } = await query(
