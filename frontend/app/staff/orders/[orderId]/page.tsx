@@ -370,8 +370,12 @@ export default function ProductionOrderDetailPage() {
   const logoUrl = design ? resolveImageUrl(design.logo_url) : null;
   const extraUrl = design ? resolveImageUrl(design.extra_image_url) : null;
 
-  // Canvas available only when server says so
-  const showCanvas = can_see_design && design?.left_canvas != null;
+  // Canvas available only when server says so. Show the preview when EITHER
+  // side has artwork — a sash may have only the right panel (university name /
+  // logo / year) drawn while the left (student name) is left empty, and vice
+  // versa. Gating on left_canvas alone hid those designs from staff entirely.
+  const showCanvas =
+    can_see_design && (design?.left_canvas != null || design?.right_canvas != null);
 
   // True when there's student artwork awaiting the designer's verdict.
   const canApprove =
@@ -580,6 +584,23 @@ export default function ProductionOrderDetailPage() {
               <div className="flex justify-between gap-4 border-b border-line pb-2.5">
                 <dt className="text-muted">الهاتف</dt>
                 <dd dir="ltr">{order.student_phone || "—"}</dd>
+              </div>
+              <div className="flex justify-between gap-4 border-b border-line pb-2.5">
+                <dt className="text-muted">انستغرام</dt>
+                <dd dir="ltr">
+                  {order.instagram_username ? (
+                    <a
+                      href={`https://instagram.com/${order.instagram_username}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-medium text-orange-ink underline underline-offset-2"
+                    >
+                      @{order.instagram_username}
+                    </a>
+                  ) : (
+                    "—"
+                  )}
+                </dd>
               </div>
               <div className="flex justify-between gap-4 border-b border-line pb-2.5">
                 <dt className="text-muted">الجامعة</dt>

@@ -160,7 +160,7 @@ async function getOrder(req, res) {
             o.has_embroidery, o.needs_pressing, o.measurements, o.final_design_url,
             o.working_staff_id, o.working_since,
             u.name AS student_name, u.phone AS student_phone,
-            s.university_name, s.department, s.gender, s.study_type,
+            s.university_name, s.department, s.gender, s.study_type, s.instagram_username,
             p.name_ar AS product_name, p.type AS product_type,
             b.name_ar AS batch_name, b.deadline,
             CASE WHEN s.wholesaler_id IS NULL THEN 'retail' ELSE 'wholesaler' END AS source,

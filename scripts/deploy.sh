@@ -13,6 +13,9 @@ git reset --hard origin/main
 echo "==> backend: install deps"
 cd backend && npm ci --omit=dev && cd ..
 
+echo "==> db: apply schema (idempotent)"
+cd backend && npm run migrate && cd ..
+
 echo "==> frontend: install + build"
 cd frontend && npm ci && npm run build && cd ..
 

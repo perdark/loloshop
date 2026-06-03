@@ -139,6 +139,8 @@ export interface ProductionOrderDetail {
     gender: string | null;
     /** Study schedule — "morning" (صباحي) or "evening" (مسائي). */
     study_type: "morning" | "evening" | null;
+    /** Instagram handle (no leading @) — used by staff/admin to contact the student. */
+    instagram_username: string | null;
     product_name: string;
     product_type: string;
     batch_name: string | null;

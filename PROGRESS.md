@@ -296,3 +296,8 @@ None
 | frontend/components/staff/ExportPngButton.tsx | ✅ |
 | frontend/lib/staff.ts | ✅ |
 | frontend/lib/staff-types.ts | ✅ |
+
+## Mock data + embroidery text (2026-06-03)
+- Migration `017_embroidery_text_required.sql` — `requires_customer_text=TRUE` on robe sleeve (`تطريز ردن`) + cap (`من الجانب`/`من الأعلى`) options → configurator now shows the typed-instruction box; text surfaces in staff/admin order detail.
+- Staff order detail: added Instagram row (clickable) + `instagram_username` to `getOrder` query/type.
+- `backend/seed-mock-orders.js` (`npm run seed:orders`): 20 retail (first 4 + last 4 = robe sleeve embroidery w/ text, 1 cap w/ text, 11 designed sashes) + 1 wholesaler `MOCKREP50` (0772050000/whole123) with 50 orders. Idempotent.

@@ -8,6 +8,7 @@
     "seed": "node seed.js",
     "seed:v2": "node seed-v2.js",
     "seed:mock": "node seed-mock-pipeline.js",
+    "seed:orders": "node seed-mock-orders.js",
     "migrate": "node migrate.js",
     "migrate:file": "node migrate.js"
   },

@@ -256,7 +256,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_orders_student_product_nodesign
 -- =====================================================
 CREATE TABLE IF NOT EXISTS audit_log (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  actor_id   UUID REFERENCES users(id),
+  actor_id   UUID REFERENCES users(id) ON DELETE SET NULL,
   action     TEXT NOT NULL,
   entity     TEXT NOT NULL,
   entity_id  UUID NOT NULL,
