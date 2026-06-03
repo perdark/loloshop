@@ -49,10 +49,19 @@ async function createOtp(phone, purpose = 'verify') {
 // code logs in as ANY phone (incl. admin/staff) and gates password reset, so it is
 // never honored when NODE_ENV==='production', even if DEV_MASTER_OTP is set in env.
 const MAX_OTP_ATTEMPTS = 5; // wrong guesses before the code is burned
-const DEV_MASTER_OTP =
-  process.env.NODE_ENV === 'production'
-    ? null
-    : process.env.DEV_MASTER_OTP ?? '111111';
+// In prod the master code is a full-account-takeover backdoor, so it stays OFF
+// unless BOTH an explicit opt-in flag and a NON-default code are set in env.
+// Dev keeps the convenient 111111 default.
+const DEV_MASTER_OTP = (() => {
+  if (process.env.NODE_ENV !== 'production') {
+    return process.env.DEV_MASTER_OTP ?? '111111';
+  }
+  if (process.env.ALLOW_PROD_MASTER_OTP === 'true' && process.env.DEV_MASTER_OTP) {
+    console.warn('[OTP] PROD master OTP ENABLED via ALLOW_PROD_MASTER_OTP — backdoor active.');
+    return process.env.DEV_MASTER_OTP;
+  }
+  return null;
+})();
 
 async function verifyOtp(phone, code, purpose = 'verify') {
   if (DEV_MASTER_OTP && code === DEV_MASTER_OTP) {
