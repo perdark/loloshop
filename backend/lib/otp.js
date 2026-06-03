@@ -103,32 +103,50 @@ async function verifyOtp(phone, code, purpose = 'verify') {
   return consumed.rows.length > 0;
 }
 
+const ZENTRAMSG_URL = process.env.ZENTRAMSG_API_URL || 'https://api.zentramsg.com/v1/messages';
+
+// Zentramsg's `ids` field wants international digits with no leading '+' or '00'
+// (e.g. an Iraqi local number 0771234567 → 964771234567). Numbers are stored
+// in local form, so normalise here.
+function toIntlDigits(phone) {
+  let d = String(phone).replace(/\D/g, '');
+  if (d.startsWith('00')) d = d.slice(2);
+  if (d.startsWith('964')) return d;          // already international
+  if (d.startsWith('0')) return '964' + d.slice(1); // local Iraqi → +964
+  return d;
+}
+
 async function sendViaZentramsg(phone, code) {
-  const key = process.env.ZENTRAMSG_API_KEY;
-  if (!key) {
-    // Never print live codes to logs in production. If the SMS key is missing in
-    // prod, OTP can't be delivered — surface it loudly rather than leaking codes.
+  const token = process.env.ZENTRAMSG_API_KEY;       // x-api-token
+  const device = process.env.ZENTRAMSG_DEVICE_UUID;  // device_uuid (the WhatsApp sender device)
+  if (!token || !device) {
+    // Never print live codes to logs in production. If the WhatsApp creds are
+    // missing in prod, OTP can't be delivered — surface it loudly rather than
+    // leaking codes to the logs.
     if (process.env.NODE_ENV === 'production') {
-      console.error('ZENTRAMSG_API_KEY missing — OTP cannot be sent in production.');
+      console.error('ZENTRAMSG_API_KEY / ZENTRAMSG_DEVICE_UUID missing — OTP cannot be sent in production.');
     } else {
       console.log(`[OTP DEV] ${phone} -> ${code}`);
     }
     return;
   }
   try {
-    const res = await fetch('https://api.zentramsg.com/v1/messages', {
+    const form = new FormData();
+    form.append('device_uuid', device);
+    form.append('text_message', `رمز التحقق LoloShop: ${code}`);
+    form.append('type_message', 'text');
+    form.append('type_contact', 'numbers');
+    form.append('ids', toIntlDigits(phone));
+    // Native fetch sets the multipart Content-Type (with boundary) from the FormData.
+    const res = await fetch(ZENTRAMSG_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-      body: JSON.stringify({
-        to: phone,
-        sender: process.env.ZENTRAMSG_SENDER,
-        message: `رمز التحقق LoloShop: ${code}`,
-      }),
+      headers: { 'x-api-token': token },
+      body: form,
     });
-    if (!res.ok) console.error('Zentramsg send failed:', await res.text());
+    if (!res.ok) console.error('Zentramsg send failed:', res.status, await res.text());
   } catch (e) {
     console.error('Zentramsg error:', e.message);
   }
 }
 
-module.exports = { createOtp, verifyOtp };
+module.exports = { createOtp, verifyOtp, toIntlDigits };
