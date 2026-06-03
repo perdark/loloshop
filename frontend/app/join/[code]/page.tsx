@@ -8,6 +8,7 @@ import { getApiErrorMessage } from "@/lib/api";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { AuthCard } from "@/components/auth/AuthCard";
+import { STUDY_TYPE_LABELS } from "@/lib/constants";
 
 // Inline checkmark — warm brick on cream surface, no emoji, no gradient fill.
 function CheckIcon() {
@@ -38,6 +39,10 @@ export default function JoinPage() {
     email: "",
     password: "",
     confirmPassword: "",
+    university_name: "",
+    department: "",
+    study_type: "" as "" | "morning" | "evening",
+    instagram_username: "",
   });
 
   function validate(): boolean {
@@ -49,6 +54,10 @@ export default function JoinPage() {
       e.password = "كلمة المرور ٦ أحرف على الأقل";
     if (form.password !== form.confirmPassword)
       e.confirmPassword = "كلمتا المرور غير متطابقتين";
+    if (!form.university_name.trim()) e.university_name = "اسم الجامعة مطلوب";
+    if (!form.department.trim()) e.department = "القسم / التخصص مطلوب";
+    if (!form.study_type) e.study_type = "الدراسة الصباحية أو المسائية مطلوبة";
+    if (!form.instagram_username.trim()) e.instagram_username = "يوزر الانستا مطلوب";
     setErrors(e);
     return Object.keys(e).length === 0;
   }
@@ -64,6 +73,10 @@ export default function JoinPage() {
         phone: form.phone.trim(),
         email: form.email.trim(),
         password: form.password,
+        university_name: form.university_name.trim(),
+        department: form.department.trim(),
+        study_type: form.study_type as "morning" | "evening",
+        instagram_username: form.instagram_username.trim().replace(/^@+/, ""),
       });
       setSubmitted(true);
     } catch (err) {
@@ -163,6 +176,79 @@ export default function JoinPage() {
           error={errors.confirmPassword}
           autoComplete="new-password"
         />
+
+        <Input
+          label="الجامعة"
+          value={form.university_name}
+          onChange={(e) => setForm({ ...form, university_name: e.target.value })}
+          error={errors.university_name}
+        />
+        <Input
+          label="القسم / التخصص"
+          value={form.department}
+          onChange={(e) => setForm({ ...form, department: e.target.value })}
+          error={errors.department}
+        />
+
+        {/* Study schedule — required pill toggles */}
+        <div className="flex flex-col gap-1.5">
+          <span className="text-sm font-medium text-ink">الدراسة</span>
+          <div className="flex gap-3">
+            {(Object.entries(STUDY_TYPE_LABELS) as [("morning" | "evening"), string][]).map(([value, label]) => (
+              <label key={value} className="flex-1">
+                <input
+                  type="radio"
+                  name="study_type"
+                  value={value}
+                  checked={form.study_type === value}
+                  onChange={() => setForm({ ...form, study_type: value })}
+                  className="peer sr-only"
+                />
+                <span className="block cursor-pointer rounded-xl border border-line bg-beige py-3 text-center text-sm peer-checked:border-orange-ink peer-checked:bg-orange-ink/10 peer-checked:font-semibold peer-checked:text-orange-ink">
+                  {label}
+                </span>
+              </label>
+            ))}
+          </div>
+          {errors.study_type && (
+            <p className="text-xs text-danger" role="alert">{errors.study_type}</p>
+          )}
+        </div>
+
+        {/* Instagram username — strip leading @ on submit */}
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="join-instagram" className="text-sm font-medium text-ink">
+            يوزر الانستا
+          </label>
+          <div className="flex items-stretch gap-0" dir="ltr">
+            <span className="inline-flex select-none items-center rounded-s-xl border border-e-0 border-line bg-beige px-3 text-sm font-semibold text-ink">
+              @
+            </span>
+            <input
+              id="join-instagram"
+              type="text"
+              inputMode="text"
+              autoComplete="username"
+              value={form.instagram_username}
+              onChange={(e) =>
+                setForm({ ...form, instagram_username: e.target.value.replace(/^@+/, "") })
+              }
+              placeholder="username"
+              aria-invalid={!!errors.instagram_username}
+              aria-describedby={errors.instagram_username ? "join-instagram-error" : undefined}
+              className={[
+                "min-h-11 min-w-0 flex-1 rounded-e-xl border bg-beige px-3.5 py-2.5 text-ink outline-none transition-colors placeholder:text-ink/55",
+                "focus:border-orange-ink focus:ring-2 focus:ring-orange-ink/20",
+                errors.instagram_username ? "border-danger" : "border-line",
+              ].join(" ")}
+            />
+          </div>
+          {errors.instagram_username && (
+            <p id="join-instagram-error" className="text-xs text-danger" role="alert">
+              {errors.instagram_username}
+            </p>
+          )}
+        </div>
 
         <Button type="submit" fullWidth loading={loading}>
           إرسال الطلب

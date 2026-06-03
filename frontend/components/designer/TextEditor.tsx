@@ -51,7 +51,17 @@ async function mergeWhiteboardOntoCanvas(
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const enlivened: any[] = await fabric.util.enlivenObjects(objects);
-  enlivened.forEach((o) => canvas.add(o));
+  enlivened.forEach((o) => {
+    // Re-apply decoration locks — the isDecoration flag is serialised in JSON
+    // but Fabric does not restore custom lock/visibility settings on enliven.
+    if (o.isDecoration) {
+      o.lockMovementX = true;
+      o.lockMovementY = true;
+      o.lockRotation = true;
+      o.setControlsVisibility?.({ mtr: false });
+    }
+    canvas.add(o);
+  });
   canvas.discardActiveObject();
   canvas.renderAll();
   if (typeof document !== "undefined" && document.fonts?.ready) {
@@ -251,12 +261,23 @@ export function TextEditor({
       if (disposed || !canvasElRef.current) return;
       fabricLibRef.current = fabric;
 
+      const isTouch = typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
       const canvas = new fabric.Canvas(canvasElRef.current, {
         width: CANVAS.w,
         height: CANVAS.h,
         backgroundColor: sashHexBase(sashColor),
         preserveObjectStacking: true,
       });
+      // ── Mobile-friendly control handles (cast via any — Fabric v6 types are
+      //    incomplete; these properties exist at runtime on fabric.Canvas) ──
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const cv = canvas as any;
+      cv.cornerSize = isTouch ? 28 : 12;
+      cv.touchCornerSize = 26;
+      cv.cornerStyle = "circle";
+      cv.transparentCorners = false;
+      cv.cornerColor = "#f47b42";
+      cv.borderColor = "#f47b42";
       fabricRef.current = canvas;
 
       // Read the live active object (event payload is unreliable for re-selects
@@ -350,6 +371,16 @@ export function TextEditor({
           // Fonts are loaded now — re-measure so reopened text isn't laid out
           // with stale fallback metrics (the "text in wrong position" bug).
           reflowTextOnPanel(canvas);
+          // Re-apply decoration locks that are not restored by loadFromJSON.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (canvas.getObjects() as any[]).forEach((o: any) => {
+            if (o.isDecoration) {
+              o.lockMovementX = true;
+              o.lockMovementY = true;
+              o.lockRotation = true;
+              o.setControlsVisibility?.({ mtr: false });
+            }
+          });
           canvas.renderAll();
         } catch {
           // ignore bad json
@@ -648,6 +679,19 @@ export function TextEditor({
     canvas.renderAll();
   }
 
+  /** Scale the currently-selected object by a multiplier (clamped). */
+  function scaleSelected(factor: number) {
+    const canvas = fabricRef.current;
+    const obj = canvas?.getActiveObject();
+    if (!obj) return;
+    const sx = Math.min(10, Math.max(0.05, (obj.scaleX ?? 1) * factor));
+    const sy = Math.min(10, Math.max(0.05, (obj.scaleY ?? 1) * factor));
+    obj.set({ scaleX: sx, scaleY: sy });
+    obj.setCoords?.();
+    canvas.requestRenderAll();
+    commitChange(obj);
+  }
+
   async function restoreSnapshot(targetIndex: number) {
     const h = historyRef.current;
     const canvas = fabricRef.current;
@@ -915,6 +959,45 @@ export function TextEditor({
                 >
                   {IconTrash} حذف
                 </button>
+              </div>
+
+              {/* Scale control — works for ALL object types (text, image,
+                  decoration). Shown when anything is selected. */}
+              <div
+                className={`mt-3 flex items-center gap-2 transition-opacity ${hasSelection ? "opacity-100" : "pointer-events-none opacity-30"}`}
+                dir="rtl"
+              >
+                <div
+                  className="inline-flex items-center rounded-full border border-line bg-cream"
+                  role="group"
+                  aria-label="حجم العنصر"
+                >
+                  <button
+                    type="button"
+                    onClick={() => scaleSelected(0.9)}
+                    disabled={!hasSelection}
+                    className="flex min-h-11 min-w-11 items-center justify-center rounded-full text-ink transition-colors hover:bg-[var(--shop-sink)] disabled:opacity-30"
+                    aria-label="تصغير العنصر"
+                    title="تصغير العنصر"
+                  >
+                    <Glyph>
+                      <path d="M5 12h14" />
+                    </Glyph>
+                  </button>
+                  <span className="px-1 text-xs font-medium text-[var(--shop-muted)]">الحجم الكلي</span>
+                  <button
+                    type="button"
+                    onClick={() => scaleSelected(1.1)}
+                    disabled={!hasSelection}
+                    className="flex min-h-11 min-w-11 items-center justify-center rounded-full text-ink transition-colors hover:bg-[var(--shop-sink)] disabled:opacity-30"
+                    aria-label="تكبير العنصر"
+                    title="تكبير العنصر"
+                  >
+                    <Glyph>
+                      <path d="M12 5v14M5 12h14" />
+                    </Glyph>
+                  </button>
+                </div>
               </div>
 
               {/* Alignment + line spacing — essential for multi-line Arabic */}

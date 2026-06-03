@@ -103,8 +103,10 @@ export async function register(body: {
   password: string;
   email?: string;
   gender?: "male" | "female";
-  university_name?: string;
-  department?: string;
+  university_name: string;
+  department: string;
+  study_type: "morning" | "evening";
+  instagram_username: string;
 }): Promise<{ user_id: string; otp_required: boolean }> {
   try {
     const { data } = await api.post<{

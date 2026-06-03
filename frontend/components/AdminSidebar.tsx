@@ -17,9 +17,6 @@ const navItems: {
   { href: "/admin/orders", label: "الطلبات", exact: false },
   { href: "/admin/wholesalers", label: "الممثلون", exact: false },
   { href: "/admin/products", label: "الكتالوج", exact: false },
-  { href: "/admin/hero-slides", label: "شريط الواجهة", exact: false },
-  { href: "/admin/batches", label: "الدفعات", exact: false },
-  { href: "/admin/staff", label: "الموظفون", exact: false },
   { href: "/staff", label: "الإنتاج ومتابعة الموظفين", exact: false },
 ];
 

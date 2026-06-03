@@ -165,6 +165,78 @@ Toggle `edit_exception` flag.
 { "data": { "id": "...", "edit_exception": true } }
 ```
 
+### GET `/admin/staff/:id/salary`
+Returns salary summary for a staff member. `balance = base_salary + SUM(bonus) - SUM(deduction)`.
+```json
+{
+  "data": {
+    "user_id": "uuid",
+    "base_salary": 500000,
+    "balance": 550000,
+    "transactions": [
+      { "id": "uuid", "type": "bonus", "amount": 50000, "reason_ar": "جهد إضافي", "created_by": "uuid", "created_at": "..." },
+      { "id": "uuid", "type": "salary_set", "amount": 500000, "reason_ar": null, "created_by": "uuid", "created_at": "..." }
+    ]
+  }
+}
+```
+
+### POST `/admin/staff/:id/salary`
+UPSERT base salary + record a `salary_set` transaction. Returns updated summary.
+```json
+// req
+{ "base_salary": 500000 }
+// res 200
+{ "data": { "user_id": "...", "base_salary": 500000, "balance": 500000, "transactions": [...] } }
+```
+
+### POST `/admin/staff/:id/salary/bonus`
+Add a bonus transaction. Returns updated summary.
+```json
+// req
+{ "amount": 50000, "reason_ar": "جهد إضافي" }
+// res 200
+{ "data": { "user_id": "...", "base_salary": 500000, "balance": 550000, "transactions": [...] } }
+```
+
+### POST `/admin/staff/:id/salary/deduction`
+Add a deduction transaction. Returns updated summary.
+```json
+// req
+{ "amount": 25000, "reason_ar": "تأخر" }
+// res 200
+{ "data": { "user_id": "...", "base_salary": 500000, "balance": 525000, "transactions": [...] } }
+```
+
+### GET `/admin/staff/:id/activity`
+Returns up to 200 most recent activity log entries for the staff member.
+```json
+{
+  "data": [
+    {
+      "id": "uuid",
+      "action": "advance_stage",
+      "from_stage": "staff_review",
+      "to_stage": "printing",
+      "created_at": "...",
+      "order_id": "uuid",
+      "product_name": "وشاح تخرج",
+      "student_name": "محمد علي"
+    }
+  ]
+}
+```
+
+---
+
+## Payroll (role=admin or staff — self-service)
+
+### GET `/payroll/me/salary`
+Staff member reads their own salary summary (same shape as admin endpoint above).
+
+### GET `/payroll/me/activity`
+Staff member reads their own activity log (same shape as admin endpoint above).
+
 ---
 
 ## Wholesaler (role=wholesaler only)

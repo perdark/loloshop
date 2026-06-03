@@ -356,7 +356,7 @@ async function createStaff(req, res) {
   const hash = await bcrypt.hash(password, SALT_ROUNDS);
   const { rows } = await query(
     `INSERT INTO users (name, phone, email, password_hash, role, staff_type, order_scope, phone_verified)
-     VALUES ($1, $2, $3, $4, 'staff', $5, COALESCE($6, 'both'), TRUE)
+     VALUES ($1, $2, $3, $4, 'staff', $5::staff_type, COALESCE($6::staff_order_scope, 'both'), TRUE)
      RETURNING id, name, phone, email, staff_type, order_scope, phone_verified`,
     [name, phone, email || null, hash, staff_type || null, order_scope || null]
   );

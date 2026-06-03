@@ -1,37 +1,55 @@
 const { query, tx } = require('../lib/db');
 const { priceRoleForUser } = require('./catalogController');
+const { publish } = require('../lib/eventBus');
+const { staffScopeAllows } = require('../middleware/auth');
 
 const ALL_STATUSES = [
-  'pending_approval', 'designing', 'design_complete', 'staff_review',
-  'printing', 'embroidery', 'pressing', 'preparing', 'ready', 'delivered', 'cancelled',
+  'pending_approval', 'designing', 'design_complete', 'converting',
+  'staff_review', 'printing', 'embroidery', 'pressing', 'preparing',
+  'ready', 'delivered', 'cancelled',
 ];
 
-// Allowed status transitions (state machine). Admin/staff cannot make illegal jumps.
-// Pipeline: design_complete →(designer approve) embroidery → pressing → preparing → ready → delivered;
-// design_complete →(designer reject) designing. Legacy staff_review/printing kept only to drain old rows.
+// Allowed status transitions (state machine).
+// Pipeline: pending_approval → designing → design_complete
+//   → (designer APPROVES sash) converting → (digitizer) embroidery → pressing → preparing → ready → delivered
+//   → (designer ADVANCES design-less emb order) converting → ...
+// Also includes reopen edges (delivered→preparing etc.) for reverting.
 const TRANSITIONS = {
   pending_approval: ['designing', 'cancelled'],
   designing: ['design_complete', 'cancelled'],
-  design_complete: ['embroidery', 'designing', 'cancelled'],
-  embroidery: ['pressing', 'cancelled'],
+  design_complete: ['converting', 'embroidery', 'designing', 'cancelled'],
+  converting: ['embroidery', 'design_complete', 'cancelled'],
+  embroidery: ['pressing', 'preparing', 'cancelled'],
   pressing: ['preparing', 'cancelled'],
-  preparing: ['ready', 'cancelled'],
-  ready: ['delivered', 'cancelled'],
-  delivered: [],
+  preparing: ['ready', 'embroidery', 'cancelled'],
+  ready: ['delivered', 'preparing', 'cancelled'],
+  delivered: ['preparing'],
   cancelled: [],
+  // Legacy drain-only statuses
   staff_review: ['embroidery', 'designing', 'cancelled'],
   printing: ['embroidery', 'pressing', 'cancelled'],
 };
 
-// Which staff_type may perform each "from→to" edge. admin role and `manager` staff_type
-// bypass this map entirely; cancelling is manager/admin only.
+// Which staff_type may perform each "from→to" edge.
+// admin role and `manager` staff_type bypass this map entirely; cancelling is manager/admin only.
 const STAGE_AUTHZ = {
-  'design_complete→embroidery': ['designer'],
+  // forward edges
+  'design_complete→converting': ['designer'],
   'design_complete→designing': ['designer'],
+  'converting→embroidery': ['digitizer'],
+  'converting→design_complete': ['digitizer'],
   'embroidery→pressing': ['embroiderer'],
+  'embroidery→preparing': ['embroiderer'],
   'pressing→preparing': ['presser'],
   'preparing→ready': ['preparer'],
   'ready→delivered': ['preparer'],
+  // revert edges
+  'delivered→preparing': ['preparer'],
+  'ready→preparing': ['preparer'],
+  'preparing→embroidery': ['preparer'],
+  'pressing→embroidery': ['presser'],
+  'embroidery→converting': ['embroiderer'],
+  'converting→design_complete': ['digitizer'],
 };
 
 function canStaffTransition(user, from, to) {
@@ -46,6 +64,7 @@ const STATUS_LABEL_AR = {
   pending_approval: 'بانتظار الموافقة',
   designing: 'قيد التصميم',
   design_complete: 'اكتمل التصميم',
+  converting: 'تحويل التصميم لتطريز',
   staff_review: 'قيد المراجعة',
   printing: 'قيد الطباعة',
   embroidery: 'قيد التطريز',
@@ -90,10 +109,8 @@ async function listOrders(req, res) {
 
   // ── group=bundle: aggregate orders into bundles ──
   if (group === 'bundle') {
-    // Pull all matching flat rows (no pagination — bundles group across rows)
-    const bundleTypeClause = typeFilter
-      ? `WHERE p.type = '${typeFilter}'` // additional filter inside subquery (safe — validated above)
-      : '';
+    // Pull all matching flat rows (no pagination — bundles group across rows).
+    // Note: bundle mode does not apply the `type` filter (bundles span types).
     const bundleSql = `
       SELECT o.id AS order_id, o.checkout_group_id,
              u.name AS student_name, s.university_name,
@@ -191,13 +208,19 @@ async function updateStatus(req, res) {
     return res.status(400).json({ error: 'حالة غير صالحة', code: 'ERR_VALIDATION' });
   }
   const cur = await query(
-    `SELECT o.id, o.status, s.user_id
+    `SELECT o.id, o.status, s.user_id, s.wholesaler_id
      FROM orders o JOIN students s ON s.id = o.student_id
      WHERE o.id = $1`,
     [id]
   );
   if (!cur.rows.length) {
     return res.status(404).json({ error: 'الطلب غير موجود', code: 'ERR_NOT_FOUND' });
+  }
+  // Scope guard: a retail/wholesaler-scoped staffer may only touch orders of their
+  // source (manager/admin bypass). Mirrors the /production advance|revert routes —
+  // this legacy PATCH must not be an unguarded side door into the state machine.
+  if (!staffScopeAllows(req.user, cur.rows[0].wholesaler_id == null)) {
+    return res.status(403).json({ error: 'هذا الطلب خارج نطاقك', code: 'ERR_FORBIDDEN' });
   }
   const prev = cur.rows[0].status;
   if (prev !== status && !(TRANSITIONS[prev] || []).includes(status)) {
@@ -225,12 +248,13 @@ async function updateStatus(req, res) {
     );
     return rows[0];
   });
+  publish({ type: 'order', orderId: updated.id, status: updated.status });
   res.json({ data: updated });
 }
 
 // Validate + price a set of option selections for a product at a price role.
 // Shared by the order configurator and the retail cart so pricing/validation lives in
-// one place. Returns { ok:true, total, items } or { ok:false, status, error, code }.
+// one place. Returns { ok:true, total, items, hasEmbroidery } or { ok:false, status, error, code }.
 async function priceSelections({ productId, role, selections, studentGender }) {
   const prod = await query(
     `SELECT p.id, p.parent_id, p.gender_restriction, COALESCE(ppr.base_price, p.base_price) AS base_price
@@ -253,7 +277,8 @@ async function priceSelections({ productId, role, selections, studentGender }) {
     ? [productId, prod.rows[0].parent_id]
     : [productId];
   const groups = await query(
-    `SELECT id, name_ar, required, max_select, input_type, gender_restriction, requires_customer_image
+    `SELECT id, name_ar, required, max_select, input_type, gender_restriction,
+            requires_customer_image, requires_customer_text
      FROM option_groups WHERE product_id = ANY($1::uuid[]) AND active = TRUE`,
     [groupProductIds]
   );
@@ -271,7 +296,7 @@ async function priceSelections({ productId, role, selections, studentGender }) {
   const optMap = new Map();
   if (optionIds.length) {
     const opts = await query(
-      `SELECT o.id, o.group_id, o.label_ar, o.requires_customer_image,
+      `SELECT o.id, o.group_id, o.label_ar, o.requires_customer_image, o.requires_customer_text,
               COALESCE(opr.price_delta, o.price_delta) AS price_delta
        FROM options o
        LEFT JOIN option_price_roles opr ON opr.option_id = o.id AND opr.role = $2
@@ -282,7 +307,9 @@ async function priceSelections({ productId, role, selections, studentGender }) {
   }
 
   let total = prod.rows[0].base_price;
-  const items = [{ label: 'السعر الأساسي', price: total, group_id: null, option_id: null, qty: 1 }];
+  const items = [{ label: 'السعر الأساسي', price: total, group_id: null, option_id: null, qty: 1, customer_text: null }];
+  let hasEmbroidery = false;
+
   for (const s of sel) {
     const g = groupMap.get(s.group_id);
     if (!g) return { ok: false, status: 400, error: 'خيار غير صالح', code: 'ERR_VALIDATION' };
@@ -301,20 +328,29 @@ async function priceSelections({ productId, role, selections, studentGender }) {
     if (needsImage && !s.customer_image_url) {
       return { ok: false, status: 400, error: `يرجى رفع صورة لـ ${g.name_ar}`, code: 'ERR_CUSTOMER_IMAGE_REQUIRED' };
     }
+    // customer must provide embroidery text when group or option requires it
+    const needsText = g.requires_customer_text || opt.requires_customer_text;
+    if (needsText && (!s.customer_text || !String(s.customer_text).trim())) {
+      return { ok: false, status: 400, error: `يرجى كتابة تفاصيل التطريز لـ ${g.name_ar}`, code: 'ERR_CUSTOMER_TEXT_REQUIRED' };
+    }
+    // Track embroidery: any option requiring image OR text means embroidery work
+    if (needsImage || needsText) hasEmbroidery = true;
+
     const line = opt.price_delta * qty;
     total += line;
     items.push({
       label: `${g.name_ar}: ${opt.label_ar}${qty > 1 ? ' ×' + qty : ''}`,
       price: line, group_id: s.group_id, option_id: opt.id, qty,
       customer_image_url: s.customer_image_url || null,
+      customer_text: needsText ? String(s.customer_text).trim() : null,
     });
   }
-  return { ok: true, total, items };
+  return { ok: true, total, items, hasEmbroidery };
 }
 
 // ---------- Configure order from selected options (retail student) ----------
 async function configureOrder(req, res) {
-  const { product_id, design_id, batch_id, selections } = req.body;
+  const { product_id, design_id, batch_id, selections, measurements } = req.body;
   if (!product_id) {
     return res.status(400).json({ error: 'المنتج مطلوب', code: 'ERR_VALIDATION' });
   }
@@ -330,6 +366,26 @@ async function configureOrder(req, res) {
     return res.status(403).json({ error: 'يجب موافقة الممثل أولاً', code: 'ERR_NOT_APPROVED' });
   }
   const role = await priceRoleForUser(req.user);
+
+  // Fetch product type for robe validation
+  const prodTypeRes = await query(`SELECT type FROM products WHERE id = $1 AND active = TRUE`, [product_id]);
+  if (!prodTypeRes.rows.length) {
+    return res.status(404).json({ error: 'المنتج غير موجود', code: 'ERR_NOT_FOUND' });
+  }
+  const productType = prodTypeRes.rows[0].type;
+
+  // Robe requires measurements
+  if (productType === 'robe') {
+    const m = measurements || {};
+    const { shoulder_cm, robe_length_cm, sleeve_length_cm } = m;
+    if (
+      !isFinite(Number(shoulder_cm)) || Number(shoulder_cm) <= 0 ||
+      !isFinite(Number(robe_length_cm)) || Number(robe_length_cm) <= 0 ||
+      !isFinite(Number(sleeve_length_cm)) || Number(sleeve_length_cm) <= 0
+    ) {
+      return res.status(400).json({ error: 'يرجى إدخال قياسات الروب', code: 'ERR_VALIDATION' });
+    }
+  }
 
   // auto-attach rep orders to their wholesaler's most recent batch
   let resolvedBatchId = null;
@@ -359,9 +415,21 @@ async function configureOrder(req, res) {
   }
   const { total, items } = priced;
 
-  // Orders carrying a design enter the approval pipeline (design_complete → designer review);
-  // design-less products (robe/cap/shawl) have nothing to embroider, so go straight to the preparer.
-  const initialStatus = design_id ? 'design_complete' : 'preparing';
+  // Compute routing flags
+  const has_embroidery = !!design_id || priced.hasEmbroidery;
+  const needs_pressing = !!design_id;
+
+  // Determine initial status based on routing
+  let initialStatus;
+  if (design_id) {
+    initialStatus = 'design_complete';
+  } else if (priced.hasEmbroidery) {
+    initialStatus = 'design_complete'; // designer handles design-less embroidery
+  } else {
+    initialStatus = 'preparing';
+  }
+
+  const measurementsJson = (productType === 'robe' && measurements) ? JSON.stringify(measurements) : null;
 
   // Reconcile with an existing order to avoid duplicates:
   //  - sash: the designer auto-creates a 'designing' order keyed by design_id → update it
@@ -375,28 +443,34 @@ async function configureOrder(req, res) {
     if (existing.rows.length) {
       oid = existing.rows[0].id;
       await client.query(
-        `UPDATE orders SET price = $1, batch_id = $2, status = $3 WHERE id = $4`,
-        [total, resolvedBatchId, initialStatus, oid]
+        `UPDATE orders SET price = $1, batch_id = $2, status = $3,
+         has_embroidery = $4, needs_pressing = $5, measurements = $6
+         WHERE id = $7`,
+        [total, resolvedBatchId, initialStatus, has_embroidery, needs_pressing, measurementsJson, oid]
       );
       await client.query(`DELETE FROM order_items WHERE order_id = $1`, [oid]);
     } else {
       const o = await client.query(
-        `INSERT INTO orders (student_id, product_id, design_id, batch_id, price, status)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-        [student.id, product_id, design_id || null, resolvedBatchId, total, initialStatus]
+        `INSERT INTO orders (student_id, product_id, design_id, batch_id, price, status,
+                             has_embroidery, needs_pressing, measurements)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+        [student.id, product_id, design_id || null, resolvedBatchId, total, initialStatus,
+         has_embroidery, needs_pressing, measurementsJson]
       );
       oid = o.rows[0].id;
     }
     for (const it of items) {
       await client.query(
-        `INSERT INTO order_items (order_id, group_id, option_id, label_snapshot, price_snapshot, qty, customer_image_url)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [oid, it.group_id, it.option_id, it.label, it.price, it.qty, it.customer_image_url || null]
+        `INSERT INTO order_items (order_id, group_id, option_id, label_snapshot, price_snapshot, qty, customer_image_url, customer_text)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [oid, it.group_id, it.option_id, it.label, it.price, it.qty,
+         it.customer_image_url || null, it.customer_text || null]
       );
     }
     return oid;
   });
 
+  publish({ type: 'order_new', orderId });
   res.status(201).json({ data: { order_id: orderId, price_role: role, total, breakdown: items } });
 }
 
@@ -462,6 +536,7 @@ async function configurePackage(req, res) {
         }),
       ]
     );
+    publish({ type: 'order_new', orderId: package_id });
     return res.status(201).json({ data: { order_id: package_id } });
   }
 
@@ -553,6 +628,7 @@ async function configurePackage(req, res) {
     return ids;
   });
 
+  publish({ type: 'order_new' });
   res.status(201).json({
     data: {
       order_id: orderIds[byType.sash],
@@ -583,7 +659,7 @@ async function getOrderBreakdown(req, res) {
     return res.status(403).json({ error: 'ممنوع', code: 'ERR_FORBIDDEN' });
   }
   const items = await query(
-    `SELECT label_snapshot, price_snapshot, qty, customer_image_url FROM order_items
+    `SELECT label_snapshot, price_snapshot, qty, customer_image_url, customer_text FROM order_items
      WHERE order_id = $1 ORDER BY created_at`,
     [id]
   );

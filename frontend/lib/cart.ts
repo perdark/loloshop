@@ -1,5 +1,6 @@
 import { api } from "./api";
 import { resolveCatalogMediaUrl } from "./catalog";
+import type { RobeMeasurements } from "./types";
 
 export interface CartItem {
   id: string;
@@ -7,7 +8,7 @@ export interface CartItem {
   productName: string;
   productType: string;
   imageUrl: string | null;
-  selections: { group_id: string; option_id: string; qty?: number; customer_image_url?: string }[];
+  selections: { group_id: string; option_id: string; qty?: number; customer_image_url?: string; customer_text?: string }[];
   priceSnapshot: number;
   qty: number;
   customizable: boolean;
@@ -51,8 +52,8 @@ export async function getCart(): Promise<Cart> {
 
 export async function addToCart(
   productId: string,
-  selections: { group_id: string; option_id: string; qty?: number; customer_image_url?: string }[],
-  opts?: { qty?: number; designId?: string }
+  selections: { group_id: string; option_id: string; qty?: number; customer_image_url?: string; customer_text?: string }[],
+  opts?: { qty?: number; designId?: string; measurements?: RobeMeasurements }
 ): Promise<{ id: string; priceSnapshot: number; qty: number }> {
   const body: Record<string, unknown> = {
     product_id: productId,
@@ -60,6 +61,7 @@ export async function addToCart(
   };
   if (opts?.qty != null) body.qty = opts.qty;
   if (opts?.designId != null) body.design_id = opts.designId;
+  if (opts?.measurements) body.measurements = opts.measurements;
   const { data } = await api.post<{
     data: Record<string, unknown>;
   }>("/cart/items", body);

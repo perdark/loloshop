@@ -13,9 +13,11 @@ import { getProductFull } from "@/lib/catalog";
 import { getApiErrorMessage } from "@/lib/api";
 import {
   customerImageRequired,
+  customerTextRequired,
   getSelectedOptionId,
   selectionKey,
   validateCustomerImages,
+  validateCustomerTexts,
 } from "@/lib/customerImage";
 import { buildConfigureSelections, configureOrder } from "@/lib/orders";
 import {
@@ -25,7 +27,7 @@ import {
   type OptionSelection,
 } from "@/lib/pricing";
 import { addToCart } from "@/lib/cart";
-import type { CatalogProduct, ConfigureOrderResult } from "@/lib/types";
+import type { CatalogProduct, ConfigureOrderResult, RobeMeasurements } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 
@@ -83,6 +85,13 @@ export default function StudentProductPage() {
   const [customerImages, setCustomerImages] = useState<Record<string, string>>(
     {}
   );
+  const [customerTexts, setCustomerTexts] = useState<Record<string, string>>({});
+  const [measurements, setMeasurements] = useState<RobeMeasurements>({
+    shoulder_cm: 0,
+    robe_length_cm: 0,
+    sleeve_length_cm: 0,
+  });
+  const [showErrors, setShowErrors] = useState(false);
   const [confirmed, setConfirmed] = useState<ConfigureOrderResult | null>(null);
   const [addedToCart, setAddedToCart] = useState(false);
   const [addingToCart, setAddingToCart] = useState(false);
@@ -139,31 +148,44 @@ export default function StudentProductPage() {
       }
       return next;
     });
+    setCustomerTexts((prev) => {
+      const next = { ...prev };
+      for (const k of Object.keys(next)) {
+        if (k.startsWith(`${groupId}:`)) delete next[k];
+      }
+      return next;
+    });
     setConfirmed(null);
+    setShowErrors(false);
   }
 
-  const customerImageError = useMemo(() => {
-    if (!product) return null;
-    return validateCustomerImages(product, selection, customerImages);
-  }, [product, selection, customerImages]);
+  const measurementsError = useMemo(() => {
+    if (!product || product.type !== "robe") return null;
+    if (
+      measurements.shoulder_cm <= 0 ||
+      measurements.robe_length_cm <= 0 ||
+      measurements.sleeve_length_cm <= 0
+    ) {
+      return "يرجى إدخال جميع مقاسات الروب";
+    }
+    return null;
+  }, [product, measurements]);
 
   async function handleAddToCart() {
     if (!product || !id) return;
     const err = validateSelection(product, selection, gender);
-    if (err) {
-      toast.error(err);
-      return;
-    }
+    if (err) { toast.error(err); return; }
     const imgErr = validateCustomerImages(product, selection, customerImages);
-    if (imgErr) {
-      toast.error(imgErr);
-      return;
-    }
+    if (imgErr) { setShowErrors(true); toast.error(imgErr); return; }
+    const txtErr = validateCustomerTexts(product, selection, customerTexts);
+    if (txtErr) { setShowErrors(true); toast.error(txtErr); return; }
+    if (measurementsError) { setShowErrors(true); toast.error(measurementsError); return; }
     setAddingToCart(true);
     try {
       await addToCart(
         id,
-        buildConfigureSelections(product, selection, customerImages)
+        buildConfigureSelections(product, selection, customerImages, customerTexts),
+        product.type === "robe" ? { measurements } : undefined
       );
       setAddedToCart(true);
       toast.success("أضيف إلى السلة");
@@ -177,24 +199,18 @@ export default function StudentProductPage() {
   async function handleConfirm() {
     if (!product || !id) return;
     const err = validateSelection(product, selection, gender);
-    if (err) {
-      toast.error(err);
-      return;
-    }
+    if (err) { toast.error(err); return; }
     const imgErr = validateCustomerImages(product, selection, customerImages);
-    if (imgErr) {
-      toast.error(imgErr);
-      return;
-    }
+    if (imgErr) { setShowErrors(true); toast.error(imgErr); return; }
+    const txtErr = validateCustomerTexts(product, selection, customerTexts);
+    if (txtErr) { setShowErrors(true); toast.error(txtErr); return; }
+    if (measurementsError) { setShowErrors(true); toast.error(measurementsError); return; }
     setSubmitting(true);
     try {
       const result = await configureOrder({
         productId: id,
-        selections: buildConfigureSelections(
-          product,
-          selection,
-          customerImages
-        ),
+        selections: buildConfigureSelections(product, selection, customerImages, customerTexts),
+        ...(product.type === "robe" ? { measurements } : {}),
       });
       setConfirmed(result);
       toast.success("تم تأكيد الطلب");
@@ -285,6 +301,10 @@ export default function StudentProductPage() {
           const needsImage =
             optionId != null &&
             customerImageRequired(group, optionId);
+          const needsText =
+            optionId != null &&
+            customerTextRequired(group, optionId);
+          const showUploadBlock = needsImage || needsText;
           const key =
             optionId != null ? selectionKey(group.id, optionId) : null;
 
@@ -297,7 +317,7 @@ export default function StudentProductPage() {
                 lockedOptionId={group.lockedOptionId}
                 onChange={setGroupValue}
               />
-              {needsImage && key && optionId && (
+              {showUploadBlock && key && optionId && (
                 <CustomerImageUpload
                   group={group}
                   optionId={optionId}
@@ -306,11 +326,83 @@ export default function StudentProductPage() {
                     setCustomerImages((prev) => ({ ...prev, [key]: url }));
                     setConfirmed(null);
                   }}
+                  textValue={customerTexts[key]}
+                  onTextChange={(text) => {
+                    setCustomerTexts((prev) => ({ ...prev, [key]: text }));
+                    setConfirmed(null);
+                  }}
+                  showErrors={showErrors}
                 />
               )}
             </div>
           );
         })}
+
+        {/* فصال الروب — mandatory measurements for robe products */}
+        {product.type === "robe" && (
+          <fieldset className="surface-card rounded-2xl p-4">
+            <legend className="px-1 font-display text-sm font-bold text-ink">
+              فصال الروب
+              <span className="ms-1 text-orange-ink">*</span>
+            </legend>
+            <p className="mt-1 text-xs leading-relaxed text-ink-soft">
+              أدخل مقاساتك بالسنتيمتر لضمان الحجم المناسب.
+            </p>
+            <div className="mt-3 space-y-3">
+              {(
+                [
+                  { key: "shoulder_cm", label: "كتف" },
+                  { key: "robe_length_cm", label: "طول الروب" },
+                  { key: "sleeve_length_cm", label: "طول الردن" },
+                ] as { key: keyof RobeMeasurements; label: string }[]
+              ).map(({ key: mKey, label }) => {
+                const val = measurements[mKey];
+                const hasError = showErrors && val <= 0;
+                return (
+                  <div key={mKey} className="flex items-center gap-3">
+                    <label
+                      htmlFor={`m-${mKey}`}
+                      className="w-28 shrink-0 text-sm font-semibold text-ink"
+                    >
+                      {label}
+                    </label>
+                    <div className="relative flex-1">
+                      <input
+                        id={`m-${mKey}`}
+                        type="number"
+                        inputMode="decimal"
+                        min={1}
+                        max={300}
+                        placeholder="0"
+                        value={val === 0 ? "" : val}
+                        onChange={(e) => {
+                          const n = parseFloat(e.target.value) || 0;
+                          setMeasurements((prev) => ({ ...prev, [mKey]: n }));
+                        }}
+                        className={`min-h-11 w-full rounded-xl border pe-12 ps-3.5 py-2.5 text-sm font-medium text-ink placeholder:text-ink/30 outline-none transition-colors focus:ring-2 focus:ring-orange/30 ${
+                          hasError
+                            ? "border-red-400 bg-red-50 focus:border-red-400"
+                            : "border-neutral bg-white focus:border-orange"
+                        }`}
+                      />
+                      <span
+                        aria-hidden
+                        className="pointer-events-none absolute end-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-ink-soft"
+                      >
+                        سم
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+              {showErrors && measurementsError && (
+                <p role="alert" className="text-xs font-medium text-red-500">
+                  {measurementsError}
+                </p>
+              )}
+            </div>
+          </fieldset>
+        )}
 
         <PriceBreakdown lines={preview.lines} total={preview.total} compact />
         {confirmed && (
@@ -367,8 +459,8 @@ export default function StudentProductPage() {
               <Button
                 fullWidth
                 loading={addingToCart}
-                disabled={Boolean(customerImageError) || addingToCart}
-                onClick={handleAddToCart}
+                disabled={addingToCart}
+                onClick={() => { setShowErrors(true); handleAddToCart(); }}
               >
                 أضف إلى السلة
               </Button>
@@ -388,8 +480,8 @@ export default function StudentProductPage() {
             <Button
               fullWidth
               loading={submitting}
-              disabled={Boolean(customerImageError)}
-              onClick={handleConfirm}
+              disabled={submitting}
+              onClick={() => { setShowErrors(true); handleConfirm(); }}
             >
               تأكيد الطلب (نقداً)
             </Button>

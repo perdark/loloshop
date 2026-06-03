@@ -80,11 +80,34 @@ app.use('/api/products', require('./routes/products'));
 app.use('/api/catalog', require('./routes/catalog'));
 app.use('/api/designs', require('./routes/designs'));
 app.use('/api/fonts', require('./routes/fonts'));
+app.use('/api/payroll', require('./routes/payroll'));
 
 app.use((err, req, res, next) => {
+  // Errors flagged `expose` carry a safe Arabic message + status (e.g. OTP rate
+  // limit) — surface them as-is. Everything else is an unexpected 500.
+  if (err && err.expose && err.status) {
+    return res.status(err.status).json({
+      error: err.message,
+      code: err.code || 'ERR_SERVER',
+    });
+  }
   console.error('Unhandled:', err);
   res.status(500).json({ error: 'خطأ في الخادم', code: 'ERR_SERVER' });
 });
 
 const port = parseInt(process.env.PORT || '4000', 10);
-app.listen(port, () => console.log(`LoloShop API on :${port}`));
+const server = app.listen(port, () => console.log(`LoloShop API on :${port}`));
+
+// Graceful shutdown — on PM2 reload/deploy, stop accepting new connections and let
+// in-flight requests (and SSE streams) finish instead of being killed mid-write.
+function shutdown(signal) {
+  console.log(`${signal} received — closing server…`);
+  server.close(() => {
+    console.log('Server closed.');
+    process.exit(0);
+  });
+  // Hard cap so a stuck connection can't block the deploy forever.
+  setTimeout(() => process.exit(1), 10_000).unref();
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

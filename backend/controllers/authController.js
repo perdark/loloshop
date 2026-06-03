@@ -7,10 +7,20 @@ const { sendPasswordReset } = require('../lib/email');
 
 const SALT_ROUNDS = 10;
 
+// Free-text registration fields are stored and shown to staff/admin later; cap
+// length so a 5MB JSON body can't stuff multi-MB junk into a column.
+const MAX_FIELD_LEN = 120;
+function tooLong(...values) {
+  return values.some((v) => v != null && String(v).length > MAX_FIELD_LEN);
+}
+
 async function register(req, res) {
-  const { name, phone, email, password, role = 'retail', university_name, department, gender } = req.body;
+  const { name, phone, email, password, role = 'retail', university_name, department, gender, study_type, instagram_username } = req.body;
   if (!name || !phone || !password) {
     return res.status(400).json({ error: 'بيانات ناقصة', code: 'ERR_VALIDATION' });
+  }
+  if (tooLong(name, email, university_name, department, instagram_username) || String(phone).length > 32) {
+    return res.status(400).json({ error: 'قيمة طويلة جداً في أحد الحقول', code: 'ERR_VALIDATION' });
   }
   if (!['retail'].includes(role)) {
     return res.status(403).json({ error: 'دور غير مسموح', code: 'ERR_FORBIDDEN' });
@@ -18,6 +28,19 @@ async function register(req, res) {
   if (gender && !['male', 'female'].includes(gender)) {
     return res.status(400).json({ error: 'الجنس غير صالح', code: 'ERR_VALIDATION' });
   }
+  if (!university_name || !String(university_name).trim()) {
+    return res.status(400).json({ error: 'اسم الجامعة مطلوب', code: 'ERR_VALIDATION' });
+  }
+  if (!department || !String(department).trim()) {
+    return res.status(400).json({ error: 'القسم/التخصص مطلوب', code: 'ERR_VALIDATION' });
+  }
+  if (!study_type || !['morning', 'evening'].includes(study_type)) {
+    return res.status(400).json({ error: 'الدراسة (صباحي/مسائي) مطلوبة', code: 'ERR_VALIDATION' });
+  }
+  if (!instagram_username || !String(instagram_username).trim()) {
+    return res.status(400).json({ error: 'حساب إنستقرام مطلوب', code: 'ERR_VALIDATION' });
+  }
+  const cleanInstagram = String(instagram_username).trim().replace(/^@/, '');
   const existing = await query(
     `SELECT phone, email FROM users WHERE phone = $1 OR (email IS NOT NULL AND email = $2)`,
     [phone, email || null]
@@ -36,9 +59,9 @@ async function register(req, res) {
   );
   // pure retail (no referral): create student row pre-approved
   await query(
-    `INSERT INTO students (user_id, full_name_third, university_name, department, gender, status)
-     VALUES ($1, $2, $3, $4, $5, 'approved')`,
-    [u.rows[0].id, name, university_name || null, department || null, gender || null]
+    `INSERT INTO students (user_id, full_name_third, university_name, department, gender, study_type, instagram_username, status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'approved')`,
+    [u.rows[0].id, name, String(university_name).trim(), String(department).trim(), gender || null, study_type, cleanInstagram]
   );
   await createOtp(phone, 'verify');
   res.status(201).json({ data: { user_id: u.rows[0].id, otp_required: true } });

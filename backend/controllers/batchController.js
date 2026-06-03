@@ -98,11 +98,17 @@ async function getBatch(req, res) {
   );
   const grand_total = students.rows.reduce((sum, r) => sum + Number(r.total), 0);
 
+  // cost/profit are admin-only business secrets — never expose to wholesalers.
+  const isAdmin = req.user.role === 'admin';
+  const studentRows = isAdmin
+    ? students.rows
+    : students.rows.map(({ cost, profit, ...rest }) => rest);
+
   res.json({
     data: {
       id: batch.id, name_ar: batch.name_ar, deadline: batch.deadline,
       wholesaler_id: batch.wholesaler_id,
-      students: students.rows,
+      students: studentRows,
       grand_total,
     },
   });

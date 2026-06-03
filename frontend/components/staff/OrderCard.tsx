@@ -69,6 +69,14 @@ export function OrderCard({ order, basePath = "/staff/orders" }: OrderCardProps)
 
   const approvalStatus = "approval_status" in order ? order.approval_status : null;
 
+  // Live presence — WHO currently has this order's detail tab open. The backend
+  // only returns working_staff_name while the worker's heartbeat is fresh (its
+  // TTL), so a non-null value already means "open right now". Stops 5 designers
+  // from grabbing the same order.
+  const workingName =
+    "working_staff_name" in order ? order.working_staff_name : null;
+  const isBeingWorked = !!workingName;
+
   // Source chip — only on ProductionQueueItem (has `source` field)
   const source = "source" in order ? (order as ProductionQueueItem).source : null;
   const wholesalerName =
@@ -89,6 +97,15 @@ export function OrderCard({ order, basePath = "/staff/orders" }: OrderCardProps)
             {department ? ` · ${department}` : ""}
           </p>
           <p className="mt-1 text-xs text-muted">{productName}</p>
+          {isBeingWorked && (
+            <span className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-orange-ink/30 bg-orange-ink/8 px-2 py-0.5 text-xs font-semibold text-orange-ink">
+              <span className="relative flex h-2 w-2" aria-hidden>
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-orange-ink/60" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-orange-ink" />
+              </span>
+              يعمل عليه: {workingName}
+            </span>
+          )}
         </div>
         <span
           className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${badge}`}

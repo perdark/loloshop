@@ -7,6 +7,7 @@
     "dev": "nodemon server.js",
     "seed": "node seed.js",
     "seed:v2": "node seed-v2.js",
+    "seed:mock": "node seed-mock-pipeline.js",
     "migrate": "node migrate.js",
     "migrate:file": "node migrate.js"
   },

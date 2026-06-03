@@ -39,6 +39,17 @@ export function customerImageRequired(
   return Boolean(opt?.requiresCustomerImage);
 }
 
+/** Customer must type embroidery text when group or chosen option requires it. */
+export function customerTextRequired(
+  group: CatalogOptionGroup,
+  optionId: string | null
+): boolean {
+  if (!optionId) return false;
+  if (group.requiresCustomerText) return true;
+  const opt = group.options.find((o) => o.id === optionId);
+  return Boolean(opt?.requiresCustomerText);
+}
+
 export function validateCustomerImages(
   product: CatalogProduct,
   selection: OptionSelection,
@@ -50,6 +61,26 @@ export function validateCustomerImages(
     const key = selectionKey(group.id, optionId!);
     if (!customerImages[key]) {
       return `صورة مطلوبة منك: ${group.nameAr}`;
+    }
+  }
+  return null;
+}
+
+/**
+ * Validates that every group requiring embroidery text has a non-empty value.
+ * For counter groups the text is collected per-group (one instruction for all units).
+ */
+export function validateCustomerTexts(
+  product: CatalogProduct,
+  selection: OptionSelection,
+  customerTexts: Record<string, string>
+): string | null {
+  for (const group of product.optionGroups) {
+    const optionId = getSelectedOptionId(group, selection);
+    if (!customerTextRequired(group, optionId)) continue;
+    const key = selectionKey(group.id, optionId!);
+    if (!customerTexts[key]?.trim()) {
+      return `نص التطريز مطلوب: ${group.nameAr}`;
     }
   }
   return null;

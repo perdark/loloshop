@@ -28,6 +28,9 @@ const greatVibes = Great_Vibes({
 });
 
 export const metadata: Metadata = {
+  // Absolute base for OG/Twitter/manifest URLs — without it they resolve against
+  // localhost at build time and break link previews in production.
+  metadataBase: new URL("https://lolo-shop96.com"),
   title: {
     default: "لولو شوب — أوشحة وروبات التخرج",
     template: "%s · لولو شوب",
@@ -43,10 +46,10 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
-      { url: "/icons/icon-192.svg", sizes: "192x192", type: "image/svg+xml" },
-      { url: "/icons/icon-512.svg", sizes: "512x512", type: "image/svg+xml" },
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
     ],
-    apple: [{ url: "/icons/icon-192.svg", sizes: "192x192", type: "image/svg+xml" }],
+    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
   },
   openGraph: {
     type: "website",

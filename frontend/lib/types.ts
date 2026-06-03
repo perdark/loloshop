@@ -5,6 +5,7 @@ export type OrderStatus =
   | "pending_approval"
   | "designing"
   | "design_complete"
+  | "converting"
   | "staff_review"
   | "printing"
   | "embroidery"
@@ -15,7 +16,10 @@ export type OrderStatus =
   | "cancelled";
 
 /** Staff job-types (production pipeline). Meaningful only when role === "staff". */
-export type StaffType = "designer" | "embroiderer" | "presser" | "preparer" | "manager";
+export type StaffType = "designer" | "digitizer" | "embroiderer" | "presser" | "preparer" | "manager";
+/** Student study schedule (mandatory at signup). */
+export type StudyType = "morning" | "evening";
+export type SalaryTxnType = "salary_set" | "bonus" | "deduction";
 export type DesignApprovalStatus = "pending" | "approved" | "rejected";
 /** Who is browsing the shop — drives the package-form vs product-discovery funnel. */
 export type ShopAudience = "wholesaler_student" | "retail" | "guest";
@@ -163,6 +167,60 @@ export interface JoinPayload {
   phone: string;
   email: string;
   password: string;
+  /** Mandatory signup fields (batch update). */
+  university_name: string;
+  department: string;
+  study_type: StudyType;
+  instagram_username: string;
+}
+
+/** Robe tailoring measurements (فصال الروب) in cm — not priced. */
+export interface RobeMeasurements {
+  shoulder_cm: number;
+  robe_length_cm: number;
+  sleeve_length_cm: number;
+}
+
+/** Staff payroll: base salary + computed balance. */
+export interface StaffSalary {
+  userId: string;
+  baseSalary: number;
+  balance: number;
+  transactions: SalaryTransaction[];
+}
+
+export interface SalaryTransaction {
+  id: string;
+  type: SalaryTxnType;
+  amount: number;
+  reasonAr: string | null;
+  createdAt: string;
+}
+
+/** Staff incentive goal (e.g. "complete 15 orders before tomorrow") + live progress. */
+export interface StaffGoal {
+  id: string;
+  userId: string;
+  titleAr: string | null;
+  targetCount: number;
+  bonusAmount: number;
+  deadline: string;
+  progress: number;
+  achieved: boolean;
+  awarded: boolean;
+  awardedAt: string | null;
+  expired: boolean;
+  createdAt: string;
+}
+
+/** One auto-recorded staff production action. */
+export interface StaffActivity {
+  id: string;
+  action: string;
+  orderId: string | null;
+  fromStage: OrderStatus | null;
+  toStage: OrderStatus | null;
+  createdAt: string;
 }
 
 export interface ApiError {
@@ -182,6 +240,8 @@ export interface CatalogOption {
   active: boolean;
   /** Customer → admin: must upload photo for this option value */
   requiresCustomerImage: boolean;
+  /** Customer → admin: must type an embroidery instruction for this option value */
+  requiresCustomerText?: boolean;
 }
 
 export interface CatalogOptionGroup {
@@ -199,6 +259,8 @@ export interface CatalogOptionGroup {
   genderRestriction: GenderRestriction;
   /** Customer → admin: must upload for any selection in this group */
   requiresCustomerImage: boolean;
+  /** Customer → admin: must type an embroidery instruction for any selection in this group */
+  requiresCustomerText?: boolean;
   options: CatalogOption[];
   inherited?: boolean;
   /** Admin locked this group to a single fixed option (student can't change it). */

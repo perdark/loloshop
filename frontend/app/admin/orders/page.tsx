@@ -11,7 +11,7 @@ import {
   updateOrderCost,
 } from "@/lib/admin";
 import type { AdminBundle } from "@/lib/admin";
-import { ORDER_SOURCE_LABELS, ORDER_STATUS_LABELS, ORDER_STATUS_OPTIONS } from "@/lib/constants";
+import { ORDER_STATUS_LABELS, ORDER_STATUS_OPTIONS } from "@/lib/constants";
 import { formatDateShort, formatIQD } from "@/lib/format";
 import type { AdminOrder, AdminWholesaler, OrderStatus } from "@/lib/types";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -19,10 +19,12 @@ import { Select } from "@/components/ui/Select";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { usePolling } from "@/lib/hooks/usePolling";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type ViewMode = "item" | "bundle";
+type OrderSource = "retail" | "wholesaler";
 type SortKey = "profit" | "cost" | "price" | null;
 type SortDir = "asc" | "desc";
 
@@ -31,6 +33,11 @@ const PRODUCT_TYPE_CHIPS: { value: string; label: string }[] = [
   { value: "sash", label: "وشاح" },
   { value: "robe", label: "روب" },
   { value: "cap", label: "كاب" },
+];
+
+const SOURCE_TABS: { value: OrderSource; label: string; subtitle: string }[] = [
+  { value: "retail", label: "طلبات التجزئة", subtitle: "طلبات الطلاب المستقلين" },
+  { value: "wholesaler", label: "طلبات الممثلين", subtitle: "طلبات عبر ممثلي الجامعات" },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -141,12 +148,288 @@ function BundleCard({ bundle }: { bundle: AdminBundle }) {
   );
 }
 
+// ─── Orders section (used for both retail + wholesaler) ───────────────────────
+
+interface OrdersSectionProps {
+  orders: AdminOrder[];
+  bundles: AdminBundle[];
+  viewMode: ViewMode;
+  loading: boolean;
+  fetchError: boolean;
+  costDraftById: Record<string, string>;
+  savingCostId: string | null;
+  sortKey: SortKey;
+  sortDir: SortDir;
+  typeFilter: string;
+  onCostInput: (orderId: string, raw: string) => void;
+  onSaveCost: (orderId: string) => void;
+  onSort: (key: SortKey) => void;
+  onRetry: () => void;
+}
+
+function OrdersSection({
+  orders,
+  bundles,
+  viewMode,
+  loading,
+  fetchError,
+  costDraftById,
+  savingCostId,
+  sortKey,
+  sortDir,
+  typeFilter: _typeFilter,
+  onCostInput,
+  onSaveCost,
+  onSort,
+  onRetry,
+}: OrdersSectionProps) {
+  function sortArrow(key: SortKey) {
+    if (sortKey !== key) return <span className="ms-1 opacity-30">↕</span>;
+    return <span className="ms-1 opacity-80">{sortDir === "desc" ? "↓" : "↑"}</span>;
+  }
+
+  const totalPrice = orders.reduce((s, o) => s + (o.price ?? 0), 0);
+  const totalCost = orders.reduce((s, o) => s + (o.cost ?? 0), 0);
+  const totalProfit = orders.reduce((s, o) => s + (o.profit ?? 0), 0);
+  const isEmpty = viewMode === "bundle" ? bundles.length === 0 : orders.length === 0;
+
+  if (loading) {
+    return viewMode === "bundle" ? <BundlesSkeleton /> : <OrdersTableSkeleton />;
+  }
+
+  if (fetchError) {
+    return (
+      <div className="rounded-2xl border border-danger/25 bg-[var(--shop-sink)] px-6 py-10 text-center">
+        <p className="text-base font-semibold text-ink">تعذر تحميل الطلبات</p>
+        <p className="mt-1 text-sm text-ink-soft">تحقق من اتصالك ثم أعد المحاولة.</p>
+        <Button className="mt-4" onClick={onRetry}>إعادة المحاولة</Button>
+      </div>
+    );
+  }
+
+  if (isEmpty) {
+    return (
+      <EmptyState
+        title="لا توجد طلبات"
+        message="لا توجد طلبات مطابقة للفلاتر المحددة."
+      />
+    );
+  }
+
+  if (viewMode === "bundle") {
+    return (
+      <div className="space-y-4">
+        {bundles.map((b, idx) => (
+          <BundleCard key={b.checkout_group_id ?? `single-${idx}`} bundle={b} />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {/* Desktop table */}
+      <div
+        className="surface-card hidden overflow-x-auto rounded-2xl md:block"
+        tabIndex={0}
+        role="region"
+        aria-label="جدول الطلبات"
+      >
+        <table className="w-full min-w-[820px] text-sm">
+          <thead className="sticky top-0 z-10">
+            <tr className="border-b border-ink/10 bg-ink/[0.04] text-right text-xs uppercase tracking-wide text-[var(--shop-muted)]">
+              <th className="px-4 py-3 font-semibold">الاسم الكامل</th>
+              <th className="px-4 py-3 font-semibold">المنتج</th>
+              <th
+                className="cursor-pointer select-none px-4 py-3 font-semibold hover:text-ink/90"
+                onClick={() => onSort("price")}
+              >
+                السعر {sortArrow("price")}
+              </th>
+              <th
+                className="cursor-pointer select-none px-4 py-3 font-semibold hover:text-ink/90"
+                onClick={() => onSort("cost")}
+              >
+                التكلفة {sortArrow("cost")}
+              </th>
+              <th
+                className="cursor-pointer select-none px-4 py-3 font-semibold hover:text-ink/90"
+                onClick={() => onSort("profit")}
+              >
+                الربح {sortArrow("profit")}
+              </th>
+              <th className="px-4 py-3 font-semibold">الحالة</th>
+              <th className="px-4 py-3 font-semibold">تعديل التكلفة</th>
+            </tr>
+          </thead>
+          <tbody>
+            {orders.map((order) => (
+              <tr
+                key={order.id}
+                className="border-b border-ink/5 transition-colors odd:bg-cream/40 last:border-0 hover:bg-peach/25"
+              >
+                <td className="px-4 py-3 font-medium text-ink">{order.studentName}</td>
+                <td className="px-4 py-3 text-ink-soft">{order.productName}</td>
+                <td className="px-4 py-3 tabular-nums text-ink-soft" dir="ltr">{formatIQD(order.price)}</td>
+                <td className="px-4 py-3 tabular-nums text-ink-soft" dir="ltr">
+                  {order.cost != null ? formatIQD(order.cost) : "—"}
+                </td>
+                <td
+                  className={`px-4 py-3 font-semibold tabular-nums ${profitColor(order.profit)}`}
+                  dir="ltr"
+                >
+                  {order.profit != null ? formatIQD(order.profit) : "—"}
+                </td>
+                <td className="px-4 py-3">
+                  <span className="inline-flex rounded-full bg-ink/[0.06] px-2.5 py-1 text-xs font-medium text-muted">
+                    {ORDER_STATUS_LABELS[order.status]}
+                  </span>
+                </td>
+                <td className="px-4 py-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Input
+                      type="text"
+                      inputMode="numeric"
+                      className="max-w-[8rem]"
+                      value={costDraftById[order.id] ?? ""}
+                      onChange={(e) => onCostInput(order.id, e.target.value)}
+                      placeholder="د.ع"
+                      dir="ltr"
+                      aria-label="التكلفة"
+                    />
+                    <Button
+                      className="min-h-9 px-3 py-2 text-xs"
+                      loading={savingCostId === order.id}
+                      onClick={() => onSaveCost(order.id)}
+                    >
+                      حفظ
+                    </Button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="border-t-2 border-ink/20 bg-ink/[0.04] font-semibold text-sm">
+              <td className="px-4 py-3 text-muted" colSpan={2}>
+                الإجمالي ({orders.length} طلب)
+              </td>
+              <td className="px-4 py-3 tabular-nums text-ink-soft" dir="ltr">
+                {formatIQD(totalPrice)}
+              </td>
+              <td className="px-4 py-3 tabular-nums text-ink-soft" dir="ltr">
+                {formatIQD(totalCost)}
+              </td>
+              <td
+                className={`px-4 py-3 tabular-nums ${profitColor(totalProfit)}`}
+                dir="ltr"
+              >
+                {formatIQD(totalProfit)}
+              </td>
+              <td colSpan={2} />
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      {/* Mobile cards */}
+      <div className="space-y-3 md:hidden">
+        {orders.map((order) => (
+          <article
+            key={order.id}
+            className="surface-card card-lift rounded-2xl p-4"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <p className="font-semibold text-ink">{order.studentName}</p>
+              <span className="shrink-0 text-xs text-muted">{formatDateShort(order.createdAt)}</span>
+            </div>
+            <p className="mt-1 text-sm text-ink-soft">
+              {order.productName}
+              {order.wholesalerName ? ` · ${order.wholesalerName}` : ""}
+            </p>
+            <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+              <div>
+                <span className="text-[var(--shop-muted)]">السعر: </span>
+                <span className="tabular-nums" dir="ltr">{formatIQD(order.price)}</span>
+              </div>
+              <div>
+                <span className="text-[var(--shop-muted)]">التكلفة: </span>
+                <span className="tabular-nums" dir="ltr">{order.cost != null ? formatIQD(order.cost) : "—"}</span>
+              </div>
+              <div className="col-span-2">
+                <span className="text-[var(--shop-muted)]">الربح: </span>
+                <span
+                  className={`font-semibold tabular-nums ${profitColor(order.profit)}`}
+                  dir="ltr"
+                >
+                  {order.profit != null ? formatIQD(order.profit) : "—"}
+                </span>
+              </div>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-ink/10 pt-3">
+              <span className="text-sm text-[var(--shop-muted)]">تعديل التكلفة:</span>
+              <Input
+                type="text"
+                inputMode="numeric"
+                className="max-w-[7rem]"
+                value={costDraftById[order.id] ?? ""}
+                onChange={(e) => onCostInput(order.id, e.target.value)}
+                placeholder="د.ع"
+                dir="ltr"
+                aria-label="التكلفة"
+              />
+              <Button
+                className="min-h-9 px-3 py-2 text-xs"
+                loading={savingCostId === order.id}
+                onClick={() => onSaveCost(order.id)}
+              >
+                حفظ
+              </Button>
+            </div>
+            <p className="mt-2 text-xs text-[var(--shop-muted)]">
+              {ORDER_STATUS_LABELS[order.status]} · {formatDateShort(order.createdAt)}
+            </p>
+          </article>
+        ))}
+
+        {/* Mobile summary card */}
+        <div className="surface-card rounded-2xl border-2 border-ink/10 p-4 text-sm">
+          <p className="mb-3 font-semibold text-ink">
+            الإجمالي — {orders.length} طلب
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <span className="text-[var(--shop-muted)]">السعر: </span>
+              <span className="tabular-nums" dir="ltr">{formatIQD(totalPrice)}</span>
+            </div>
+            <div>
+              <span className="text-[var(--shop-muted)]">التكلفة: </span>
+              <span className="tabular-nums" dir="ltr">{formatIQD(totalCost)}</span>
+            </div>
+            <div className="col-span-2">
+              <span className="text-[var(--shop-muted)]">الربح: </span>
+              <span
+                className={`font-semibold tabular-nums ${profitColor(totalProfit)}`}
+                dir="ltr"
+              >
+                {formatIQD(totalProfit)}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function AdminOrdersPage() {
-  // Shared filters
+  // Source tab
+  const [activeSource, setActiveSource] = useState<OrderSource>("retail");
+
+  // Shared filters (per-source)
   const [wholesalerId, setWholesalerId] = useState("");
-  const [sourceFilter, setSourceFilter] = useState<"retail" | "wholesaler" | "">("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
@@ -157,9 +440,11 @@ export default function AdminOrdersPage() {
   // View mode
   const [viewMode, setViewMode] = useState<ViewMode>("item");
 
-  // Data
-  const [orders, setOrders] = useState<AdminOrder[]>([]);
-  const [bundles, setBundles] = useState<AdminBundle[]>([]);
+  // Data — separate per source
+  const [retailOrders, setRetailOrders] = useState<AdminOrder[]>([]);
+  const [wholesalerOrders, setWholesalerOrders] = useState<AdminOrder[]>([]);
+  const [retailBundles, setRetailBundles] = useState<AdminBundle[]>([]);
+  const [wholesalerBundles, setWholesalerBundles] = useState<AdminBundle[]>([]);
   const [wholesalers, setWholesalers] = useState<AdminWholesaler[]>([]);
 
   const [loading, setLoading] = useState(true);
@@ -171,49 +456,72 @@ export default function AdminOrdersPage() {
   const [sortKey, setSortKey] = useState<SortKey>(null);
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setFetchError(false);
     try {
-      const wholesalersData = await getAdminWholesalers();
+      const [wholesalersData] = await Promise.all([getAdminWholesalers()]);
       setWholesalers(wholesalersData);
 
       if (viewMode === "bundle") {
-        const bundlesData = await getAdminOrderBundles({
-          wholesalerId: wholesalerId || undefined,
-          source: sourceFilter || undefined,
-          dateFrom: dateFrom || undefined,
-          dateTo: dateTo || undefined,
-        });
-        setBundles(bundlesData);
+        const [retailB, wholesalerB] = await Promise.all([
+          getAdminOrderBundles({
+            source: "retail",
+            dateFrom: dateFrom || undefined,
+            dateTo: dateTo || undefined,
+          }),
+          getAdminOrderBundles({
+            wholesalerId: wholesalerId || undefined,
+            source: "wholesaler",
+            dateFrom: dateFrom || undefined,
+            dateTo: dateTo || undefined,
+          }),
+        ]);
+        setRetailBundles(retailB);
+        setWholesalerBundles(wholesalerB);
       } else {
-        const ordersData = await getAdminOrders({
-          wholesalerId: wholesalerId || undefined,
-          status: status || undefined,
-          source: sourceFilter || undefined,
-          dateFrom: dateFrom || undefined,
-          dateTo: dateTo || undefined,
-          type: typeFilter || undefined,
-        });
-        setOrders(ordersData);
+        const [retailData, wholesalerData] = await Promise.all([
+          getAdminOrders({
+            source: "retail",
+            status: status || undefined,
+            dateFrom: dateFrom || undefined,
+            dateTo: dateTo || undefined,
+            type: typeFilter || undefined,
+          }),
+          getAdminOrders({
+            wholesalerId: wholesalerId || undefined,
+            source: "wholesaler",
+            status: status || undefined,
+            dateFrom: dateFrom || undefined,
+            dateTo: dateTo || undefined,
+            type: typeFilter || undefined,
+          }),
+        ]);
+        setRetailOrders(retailData);
+        setWholesalerOrders(wholesalerData);
+        // Merge cost drafts for both sets
+        const allOrders = [...retailData, ...wholesalerData];
         setCostDraftById(
           Object.fromEntries(
-            ordersData.map((o) => [o.id, o.cost != null ? String(o.cost) : ""])
+            allOrders.map((o) => [o.id, o.cost != null ? String(o.cost) : ""])
           )
         );
       }
     } catch (e) {
-      toast.error(getApiErrorMessage(e, "تعذر تحميل الطلبات"));
+      if (!silent) toast.error(getApiErrorMessage(e, "تعذر تحميل الطلبات"));
       setFetchError(true);
     } finally {
       setLoading(false);
     }
-  }, [viewMode, wholesalerId, status, sourceFilter, dateFrom, dateTo, typeFilter]);
+  }, [viewMode, wholesalerId, status, dateFrom, dateTo, typeFilter]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch on mount / filters
     load();
   }, [load]);
+
+  // Live polling — refresh every 12 s silently
+  usePolling(() => load(true), 12000);
 
   async function handleSaveCost(orderId: string) {
     const raw = (costDraftById[orderId] ?? "").trim().replace(/[^\d]/g, "");
@@ -252,24 +560,17 @@ export default function AdminOrdersPage() {
     }
   }
 
-  function sortArrow(key: SortKey) {
-    if (sortKey !== key) return <span className="ms-1 opacity-30">↕</span>;
-    return (
-      <span className="ms-1 opacity-80">{sortDir === "desc" ? "↓" : "↑"}</span>
-    );
+  function sortOrders(list: AdminOrder[]) {
+    if (!sortKey) return list;
+    return [...list].sort((a, b) => {
+      const av = (a[sortKey] as number | null) ?? -Infinity;
+      const bv = (b[sortKey] as number | null) ?? -Infinity;
+      return sortDir === "asc" ? av - bv : bv - av;
+    });
   }
 
-  const sortedOrders = sortKey
-    ? [...orders].sort((a, b) => {
-        const av = (a[sortKey] as number | null) ?? -Infinity;
-        const bv = (b[sortKey] as number | null) ?? -Infinity;
-        return sortDir === "asc" ? av - bv : bv - av;
-      })
-    : orders;
-
-  const totalPrice = sortedOrders.reduce((s, o) => s + (o.price ?? 0), 0);
-  const totalCost = sortedOrders.reduce((s, o) => s + (o.cost ?? 0), 0);
-  const totalProfit = sortedOrders.reduce((s, o) => s + (o.profit ?? 0), 0);
+  const activeOrders = sortOrders(activeSource === "retail" ? retailOrders : wholesalerOrders);
+  const activeBundles = activeSource === "retail" ? retailBundles : wholesalerBundles;
 
   const wholesalerOptions = [
     { value: "", label: "كل الممثلين" },
@@ -278,18 +579,78 @@ export default function AdminOrdersPage() {
 
   const statusOptions = [
     { value: "", label: "كل الحالات" },
-    ...ORDER_STATUS_OPTIONS.map((s) => ({
-      value: s,
-      label: ORDER_STATUS_LABELS[s],
-    })),
+    ...ORDER_STATUS_OPTIONS.map((s) => ({ value: s, label: ORDER_STATUS_LABELS[s] })),
   ];
-
-  const isEmpty =
-    viewMode === "bundle" ? bundles.length === 0 : orders.length === 0;
 
   return (
     <div dir="rtl" lang="ar">
-      <PageHeader title="الطلبات" subtitle="جميع طلبات الطلاب مع الأرباح" />
+      <PageHeader
+        title="الطلبات"
+        subtitle="مقسّمة حسب المصدر — تجزئة وممثلين"
+        action={
+          <button
+            type="button"
+            onClick={() => load()}
+            disabled={loading}
+            className="group inline-flex shrink-0 items-center gap-2 rounded-full border border-ink/15 bg-beige px-4 py-2 text-sm font-semibold text-ink-soft transition-colors hover:border-orange/40 hover:text-orange-ink disabled:opacity-50"
+          >
+            <svg
+              aria-hidden
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className={`transition-transform duration-500 ${loading ? "animate-spin" : "group-hover:rotate-180"}`}
+            >
+              <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+              <path d="M21 3v5h-5" />
+              <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+              <path d="M3 21v-5h5" />
+            </svg>
+            تحديث
+          </button>
+        }
+      />
+
+      {/* ── Source tabs ── */}
+      <div className="mb-6 flex items-stretch gap-0 overflow-hidden rounded-2xl border border-line bg-surface-sink">
+        {SOURCE_TABS.map((tab) => {
+          const count = tab.value === "retail"
+            ? (viewMode === "bundle" ? retailBundles.length : retailOrders.length)
+            : (viewMode === "bundle" ? wholesalerBundles.length : wholesalerOrders.length);
+          const isActive = activeSource === tab.value;
+          return (
+            <button
+              key={tab.value}
+              type="button"
+              onClick={() => setActiveSource(tab.value)}
+              className={`flex flex-1 flex-col items-start gap-0.5 border-e border-line px-4 py-3.5 last:border-e-0 transition-colors min-h-[44px] ${
+                isActive
+                  ? "bg-orange-ink text-white"
+                  : "bg-surface hover:bg-beige text-ink"
+              }`}
+            >
+              <span className={`text-sm font-bold ${isActive ? "text-white" : "text-ink"}`}>
+                {tab.label}
+              </span>
+              <span className={`text-xs ${isActive ? "text-white/80" : "text-ink-soft"}`}>
+                {tab.subtitle}
+                {!loading && (
+                  <span className={`ms-1.5 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full px-1.5 text-[10px] font-bold tabular-nums ${
+                    isActive ? "bg-white/20 text-white" : "bg-orange-ink/10 text-orange-ink"
+                  }`}>
+                    {count}
+                  </span>
+                )}
+              </span>
+            </button>
+          );
+        })}
+      </div>
 
       {/* ── View mode toggle ── */}
       <div className="mb-5 flex items-center gap-2">
@@ -317,14 +678,17 @@ export default function AdminOrdersPage() {
         </button>
       </div>
 
-      {/* ── Shared filters ── */}
+      {/* ── Filters ── */}
       <div className="surface-card mb-4 grid gap-3 rounded-2xl p-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Select
-          label="الممثل"
-          options={wholesalerOptions}
-          value={wholesalerId}
-          onChange={(e) => setWholesalerId(e.target.value)}
-        />
+        {/* Only show wholesaler filter on the wholesaler tab */}
+        {activeSource === "wholesaler" && (
+          <Select
+            label="الممثل"
+            options={wholesalerOptions}
+            value={wholesalerId}
+            onChange={(e) => setWholesalerId(e.target.value)}
+          />
+        )}
         {viewMode === "item" && (
           <Select
             label="الحالة"
@@ -333,16 +697,6 @@ export default function AdminOrdersPage() {
             onChange={(e) => setStatus(e.target.value as OrderStatus | "")}
           />
         )}
-        <Select
-          label="المصدر"
-          options={[
-            { value: "", label: "الكل" },
-            { value: "retail", label: ORDER_SOURCE_LABELS.retail },
-            { value: "wholesaler", label: ORDER_SOURCE_LABELS.wholesaler },
-          ]}
-          value={sourceFilter}
-          onChange={(e) => setSourceFilter(e.target.value as "retail" | "wholesaler" | "")}
-        />
         <div dir="rtl" className="flex flex-col gap-1">
           <label className="text-xs font-semibold text-muted">من تاريخ</label>
           <input
@@ -362,7 +716,7 @@ export default function AdminOrdersPage() {
           />
         </div>
         <div className="flex items-end sm:col-span-2 lg:col-span-4">
-          <Button onClick={load} loading={loading}>
+          <Button onClick={() => load()} loading={loading}>
             تطبيق الفلاتر
           </Button>
         </div>
@@ -388,262 +742,104 @@ export default function AdminOrdersPage() {
         </div>
       )}
 
-      {/* ── Content ── */}
-      {loading ? (
-        viewMode === "bundle" ? <BundlesSkeleton /> : <OrdersTableSkeleton />
-      ) : fetchError ? (
-        <div className="rounded-2xl border border-danger/25 bg-[var(--shop-sink)] px-6 py-10 text-center">
-          <p className="text-base font-semibold text-ink">تعذر تحميل الطلبات</p>
-          <p className="mt-1 text-sm text-ink-soft">تحقق من اتصالك ثم أعد المحاولة.</p>
-          <Button className="mt-4" onClick={load}>إعادة المحاولة</Button>
-        </div>
-      ) : isEmpty ? (
-        <EmptyState
-          title="لا توجد طلبات"
-          message="لا توجد طلبات مطابقة للفلاتر المحددة."
-          action={
-            <Button
-              variant="ghost"
-              onClick={() => {
-                setWholesalerId("");
-                setStatus("");
-                setSourceFilter("");
-                setDateFrom("");
-                setDateTo("");
-                setTypeFilter("");
-              }}
-            >
-              مسح الفلاتر
-            </Button>
-          }
-        />
-      ) : viewMode === "bundle" ? (
-        /* ── Bundle view ── */
-        <div className="space-y-4">
-          {bundles.map((b, idx) => (
-            <BundleCard key={b.checkout_group_id ?? `single-${idx}`} bundle={b} />
-          ))}
-        </div>
-      ) : (
-        /* ── Item view ── */
-        <>
-          {/* Desktop table */}
-          <div
-            className="surface-card hidden overflow-x-auto rounded-2xl md:block"
-            tabIndex={0}
-            role="region"
-            aria-label="جدول الطلبات"
-          >
-            <table className="w-full min-w-[880px] text-sm">
-              <thead className="sticky top-0 z-10">
-                <tr className="border-b border-ink/10 bg-ink/[0.04] text-right text-xs uppercase tracking-wide text-[var(--shop-muted)]">
-                  <th className="px-4 py-3 font-semibold">الاسم الكامل</th>
-                  <th className="px-4 py-3 font-semibold">المنتج</th>
-                  <th
-                    className="cursor-pointer select-none px-4 py-3 font-semibold hover:text-ink/90"
-                    onClick={() => handleSort("price")}
-                  >
-                    السعر {sortArrow("price")}
-                  </th>
-                  <th
-                    className="cursor-pointer select-none px-4 py-3 font-semibold hover:text-ink/90"
-                    onClick={() => handleSort("cost")}
-                  >
-                    التكلفة {sortArrow("cost")}
-                  </th>
-                  <th
-                    className="cursor-pointer select-none px-4 py-3 font-semibold hover:text-ink/90"
-                    onClick={() => handleSort("profit")}
-                  >
-                    الربح {sortArrow("profit")}
-                  </th>
-                  <th className="px-4 py-3 font-semibold">الحالة</th>
-                  <th className="px-4 py-3 font-semibold">الممثل</th>
-                  <th className="px-4 py-3 font-semibold">المصدر</th>
-                  <th className="px-4 py-3 font-semibold">تعديل التكلفة</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedOrders.map((order) => (
-                  <tr
-                    key={order.id}
-                    className="border-b border-ink/5 transition-colors odd:bg-cream/40 last:border-0 hover:bg-peach/25"
-                  >
-                    <td className="px-4 py-3 font-medium text-ink">{order.studentName}</td>
-                    <td className="px-4 py-3 text-ink-soft">{order.productName}</td>
-                    <td className="px-4 py-3 tabular-nums text-ink-soft" dir="ltr">{formatIQD(order.price)}</td>
-                    <td className="px-4 py-3 tabular-nums text-ink-soft" dir="ltr">
-                      {order.cost != null ? formatIQD(order.cost) : "—"}
-                    </td>
-                    <td
-                      className={`px-4 py-3 font-semibold tabular-nums ${profitColor(order.profit)}`}
-                      dir="ltr"
-                    >
-                      {order.profit != null ? formatIQD(order.profit) : "—"}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="inline-flex rounded-full bg-ink/[0.06] px-2.5 py-1 text-xs font-medium text-muted">
-                        {ORDER_STATUS_LABELS[order.status]}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-ink-soft">{order.wholesalerName ?? "—"}</td>
-                    <td className="px-4 py-3">
-                      {order.source ? (
-                        order.source === "wholesaler" ? (
-                          <span className="inline-flex rounded-full border border-orange-ink/25 bg-orange-ink/8 px-2.5 py-0.5 text-xs font-medium text-orange-ink">
-                            {ORDER_SOURCE_LABELS.wholesaler}
-                          </span>
-                        ) : (
-                          <span className="inline-flex rounded-full border border-line bg-surface-sink px-2.5 py-0.5 text-xs font-medium text-ink-soft">
-                            {ORDER_SOURCE_LABELS.retail}
-                          </span>
-                        )
-                      ) : "—"}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Input
-                          type="text"
-                          inputMode="numeric"
-                          className="max-w-[8rem]"
-                          value={costDraftById[order.id] ?? ""}
-                          onChange={(e) => handleCostInput(order.id, e.target.value)}
-                          placeholder="د.ع"
-                          dir="ltr"
-                          aria-label="التكلفة"
-                        />
-                        <Button
-                          className="min-h-9 px-3 py-2 text-xs"
-                          loading={savingCostId === order.id}
-                          onClick={() => handleSaveCost(order.id)}
-                        >
-                          حفظ
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr className="border-t-2 border-ink/20 bg-ink/[0.04] font-semibold text-sm">
-                  <td className="px-4 py-3 text-muted" colSpan={2}>
-                    الإجمالي ({sortedOrders.length} طلب)
-                  </td>
-                  <td className="px-4 py-3 tabular-nums text-ink-soft" dir="ltr">
-                    {formatIQD(totalPrice)}
-                  </td>
-                  <td className="px-4 py-3 tabular-nums text-ink-soft" dir="ltr">
-                    {formatIQD(totalCost)}
-                  </td>
-                  <td
-                    className={`px-4 py-3 tabular-nums ${profitColor(totalProfit)}`}
-                    dir="ltr"
-                  >
-                    {formatIQD(totalProfit)}
-                  </td>
-                  <td colSpan={4} />
-                </tr>
-              </tfoot>
-            </table>
+      {/* ── Totals summary row (quick overview for active tab) ── */}
+      {!loading && !fetchError && (
+        <div className="mb-5 grid grid-cols-2 gap-3 rounded-2xl border border-orange-ink/15 bg-orange-ink/5 p-4 sm:grid-cols-4">
+          <div>
+            <p className="text-xs text-muted">
+              {activeSource === "retail" ? "طلبات التجزئة" : "طلبات الممثلين"}
+            </p>
+            <p className="mt-0.5 font-bold tabular-nums text-ink">
+              {viewMode === "bundle" ? activeBundles.length : activeOrders.length} طلب
+            </p>
           </div>
-
-          {/* Mobile cards */}
-          <div className="space-y-3 md:hidden">
-            {sortedOrders.map((order) => (
-              <article
-                key={order.id}
-                className="surface-card card-lift rounded-2xl p-4"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <p className="font-semibold text-ink">{order.studentName}</p>
-                  {order.source && (
-                    order.source === "wholesaler" ? (
-                      <span className="shrink-0 inline-flex rounded-full border border-orange-ink/25 bg-orange-ink/8 px-2 py-0.5 text-xs font-medium text-orange-ink">
-                        {ORDER_SOURCE_LABELS.wholesaler}
-                      </span>
-                    ) : (
-                      <span className="shrink-0 inline-flex rounded-full border border-line bg-surface-sink px-2 py-0.5 text-xs font-medium text-ink-soft">
-                        {ORDER_SOURCE_LABELS.retail}
-                      </span>
-                    )
-                  )}
-                </div>
-                <p className="mt-1 text-sm text-ink-soft">
-                  {order.productName} · {order.wholesalerName ?? "—"}
+          {viewMode === "item" && (
+            <>
+              <div>
+                <p className="text-xs text-muted">إجمالي الإيراد</p>
+                <p className="mt-0.5 font-bold tabular-nums text-ink" dir="ltr">
+                  {formatIQD(activeOrders.reduce((s, o) => s + (o.price ?? 0), 0))}
                 </p>
-                <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-                  <div>
-                    <span className="text-[var(--shop-muted)]">السعر: </span>
-                    <span className="tabular-nums" dir="ltr">{formatIQD(order.price)}</span>
-                  </div>
-                  <div>
-                    <span className="text-[var(--shop-muted)]">التكلفة: </span>
-                    <span className="tabular-nums" dir="ltr">{order.cost != null ? formatIQD(order.cost) : "—"}</span>
-                  </div>
-                  <div className="col-span-2">
-                    <span className="text-[var(--shop-muted)]">الربح: </span>
-                    <span
-                      className={`font-semibold tabular-nums ${profitColor(order.profit)}`}
-                      dir="ltr"
-                    >
-                      {order.profit != null ? formatIQD(order.profit) : "—"}
-                    </span>
-                  </div>
-                </div>
-                <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-ink/10 pt-3">
-                  <span className="text-sm text-[var(--shop-muted)]">تعديل التكلفة:</span>
-                  <Input
-                    type="text"
-                    inputMode="numeric"
-                    className="max-w-[7rem]"
-                    value={costDraftById[order.id] ?? ""}
-                    onChange={(e) => handleCostInput(order.id, e.target.value)}
-                    placeholder="د.ع"
-                    dir="ltr"
-                    aria-label="التكلفة"
-                  />
-                  <Button
-                    className="min-h-9 px-3 py-2 text-xs"
-                    loading={savingCostId === order.id}
-                    onClick={() => handleSaveCost(order.id)}
-                  >
-                    حفظ
-                  </Button>
-                </div>
-                <p className="mt-2 text-xs text-[var(--shop-muted)]">
-                  {ORDER_STATUS_LABELS[order.status]} · {formatDateShort(order.createdAt)}
-                </p>
-              </article>
-            ))}
-
-            {/* Summary card */}
-            <div className="surface-card rounded-2xl border-2 border-ink/10 p-4 text-sm">
-              <p className="mb-3 font-semibold text-ink">
-                الإجمالي — {sortedOrders.length} طلب
-              </p>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <span className="text-[var(--shop-muted)]">السعر: </span>
-                  <span className="tabular-nums" dir="ltr">{formatIQD(totalPrice)}</span>
-                </div>
-                <div>
-                  <span className="text-[var(--shop-muted)]">التكلفة: </span>
-                  <span className="tabular-nums" dir="ltr">{formatIQD(totalCost)}</span>
-                </div>
-                <div className="col-span-2">
-                  <span className="text-[var(--shop-muted)]">الربح: </span>
-                  <span
-                    className={`font-semibold tabular-nums ${profitColor(totalProfit)}`}
-                    dir="ltr"
-                  >
-                    {formatIQD(totalProfit)}
-                  </span>
-                </div>
               </div>
-            </div>
-          </div>
-        </>
+              <div>
+                <p className="text-xs text-muted">إجمالي التكلفة</p>
+                <p className="mt-0.5 font-bold tabular-nums text-ink-soft" dir="ltr">
+                  {formatIQD(activeOrders.reduce((s, o) => s + (o.cost ?? 0), 0))}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted">الربح</p>
+                <p
+                  className={`mt-0.5 font-bold tabular-nums ${profitColor(activeOrders.reduce((s, o) => s + (o.profit ?? 0), 0))}`}
+                  dir="ltr"
+                >
+                  {formatIQD(activeOrders.reduce((s, o) => s + (o.profit ?? 0), 0))}
+                </p>
+              </div>
+            </>
+          )}
+          {viewMode === "bundle" && (
+            <>
+              <div>
+                <p className="text-xs text-muted">إجمالي الإيراد</p>
+                <p className="mt-0.5 font-bold tabular-nums text-ink" dir="ltr">
+                  {formatIQD(activeBundles.reduce((s, b) => s + b.total_price, 0))}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted">إجمالي التكلفة</p>
+                <p className="mt-0.5 font-bold tabular-nums text-ink-soft" dir="ltr">
+                  {formatIQD(activeBundles.reduce((s, b) => s + b.total_cost, 0))}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted">الربح</p>
+                <p
+                  className={`mt-0.5 font-bold tabular-nums ${profitColor(activeBundles.reduce((s, b) => s + b.total_profit, 0))}`}
+                  dir="ltr"
+                >
+                  {formatIQD(activeBundles.reduce((s, b) => s + b.total_profit, 0))}
+                </p>
+              </div>
+            </>
+          )}
+        </div>
       )}
+
+      {/* ── Active source orders ── */}
+      <OrdersSection
+        orders={activeOrders}
+        bundles={activeBundles}
+        viewMode={viewMode}
+        loading={loading}
+        fetchError={fetchError}
+        costDraftById={costDraftById}
+        savingCostId={savingCostId}
+        sortKey={sortKey}
+        sortDir={sortDir}
+        typeFilter={typeFilter}
+        onCostInput={handleCostInput}
+        onSaveCost={handleSaveCost}
+        onSort={handleSort}
+        onRetry={load}
+      />
+
+      {/* Cross-source counts for admin awareness */}
+      {!loading && !fetchError && (
+        <div className="mt-6 rounded-xl border border-line bg-surface-sink px-4 py-3 text-xs text-muted">
+          <span className="font-semibold text-ink-soft">إجمالي النظام: </span>
+          طلبات التجزئة {viewMode === "bundle" ? retailBundles.length : retailOrders.length}
+          {" · "}
+          طلبات الممثلين {viewMode === "bundle" ? wholesalerBundles.length : wholesalerOrders.length}
+          {" · "}
+          المجموع {
+            viewMode === "bundle"
+              ? retailBundles.length + wholesalerBundles.length
+              : retailOrders.length + wholesalerOrders.length
+          }
+        </div>
+      )}
+
     </div>
   );
 }

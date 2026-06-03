@@ -6,13 +6,20 @@ import { toast } from "sonner";
 import { getApiErrorMessage } from "@/lib/api";
 import { resolveCatalogMediaUrl } from "@/lib/catalog";
 import { uploadDesignImage } from "@/lib/designer";
+import { customerTextRequired } from "@/lib/customerImage";
 import type { CatalogOptionGroup } from "@/lib/types";
 
 interface CustomerImageUploadProps {
   group: CatalogOptionGroup;
   optionId: string;
+  /** The uploaded image URL (undefined if not yet uploaded). */
   value: string | undefined;
   onChange: (url: string) => void;
+  /** Current embroidery text for this selection (only used when requiresCustomerText). */
+  textValue?: string;
+  onTextChange?: (text: string) => void;
+  /** Show inline error state (called by parent after failed submit attempt). */
+  showErrors?: boolean;
 }
 
 export function CustomerImageUpload({
@@ -20,12 +27,19 @@ export function CustomerImageUpload({
   optionId,
   value,
   onChange,
+  textValue,
+  onTextChange,
+  showErrors = false,
 }: CustomerImageUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const opt = group.options.find((o) => o.id === optionId);
   const hintUrl = group.imageUrl || opt?.imageUrl || null;
   const previewUrl = value ? resolveCatalogMediaUrl(value) : null;
+  const needsText = customerTextRequired(group, optionId);
+
+  const textMissing = needsText && !textValue?.trim();
+  const imageMissing = !value;
 
   async function handleFile(file: File) {
     setUploading(true);
@@ -44,11 +58,13 @@ export function CustomerImageUpload({
     <div className="mt-3 rounded-2xl border border-orange/40 bg-orange/5 p-4 ring-1 ring-orange/10">
       <p className="inline-flex items-center gap-1.5 text-sm font-semibold text-ink">
         <span aria-hidden className="h-2 w-2 rounded-full bg-brand-gradient" />
-        صورة مطلوبة منك
+        {needsText ? "تفاصيل التطريز مطلوبة" : "صورة مطلوبة منك"}
         <span className="text-orange-ink">*</span>
       </p>
       <p className="mt-1 text-xs leading-relaxed text-ink-soft">
-        ارفع صورة مرجعية للطباعة — يختلف عن صورة التوضيح من الأدمن أدناه.
+        {needsText
+          ? "اكتب تفاصيل التطريز وارفع صورة مرجعية — كلاهما مطلوب."
+          : "ارفع صورة مرجعية للطباعة — يختلف عن صورة التوضيح من الأدمن أدناه."}
       </p>
 
       {(group.hintAr || hintUrl) && (
@@ -73,6 +89,35 @@ export function CustomerImageUpload({
         </div>
       )}
 
+      {/* Embroidery text input — only shown when the option requires customer text */}
+      {needsText && (
+        <div className="mt-3">
+          <label className="block text-xs font-semibold text-ink" htmlFor={`cust-text-${group.id}`}>
+            شنو تريد تطرّز؟ اكتب التفاصيل
+            <span className="text-orange-ink"> *</span>
+          </label>
+          <textarea
+            id={`cust-text-${group.id}`}
+            dir="rtl"
+            rows={3}
+            placeholder="مثال: اسمي علي محمد — بالخط الديواني"
+            value={textValue ?? ""}
+            onChange={(e) => onTextChange?.(e.target.value)}
+            className={`mt-1.5 w-full resize-none rounded-xl border px-3.5 py-3 text-sm leading-relaxed text-ink placeholder:text-ink/35 outline-none transition-colors focus:ring-2 focus:ring-orange/30 ${
+              showErrors && textMissing
+                ? "border-red-400 bg-red-50 focus:border-red-400"
+                : "border-orange/40 bg-white focus:border-orange"
+            }`}
+          />
+          {showErrors && textMissing && (
+            <p role="alert" className="mt-1 text-xs font-medium text-red-500">
+              يرجى كتابة تفاصيل التطريز
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Image upload */}
       <input
         ref={inputRef}
         type="file"
@@ -85,8 +130,13 @@ export function CustomerImageUpload({
         }}
       />
 
+      <p className={`mt-3 text-xs font-semibold text-ink ${needsText ? "" : "sr-only"}`}>
+        {needsText ? "صورة مرجعية" : ""}
+        {needsText && <span className="text-orange-ink"> *</span>}
+      </p>
+
       {previewUrl ? (
-        <div className="mt-3">
+        <div className={needsText ? "mt-1.5" : "mt-3"}>
           <div className="relative h-36 w-full overflow-hidden rounded-xl border border-orange/30 bg-white shadow-[var(--shadow-soft)]">
             <Image
               src={previewUrl}
@@ -106,33 +156,44 @@ export function CustomerImageUpload({
           </button>
         </div>
       ) : (
-        <button
-          type="button"
-          disabled={uploading}
-          onClick={() => inputRef.current?.click()}
-          className="mt-3 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-orange/60 bg-white text-sm font-semibold text-orange-ink transition-colors hover:border-orange hover:bg-orange/5 disabled:opacity-50"
-        >
-          {uploading ? (
-            "جاري الرفع…"
-          ) : (
-            <>
-              <svg
-                aria-hidden
-                viewBox="0 0 24 24"
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M12 16V4m0 0L8 8m4-4l4 4" />
-                <path d="M20 16v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2" />
-              </svg>
-              اختر صورة من جهازك
-            </>
+        <>
+          <button
+            type="button"
+            disabled={uploading}
+            onClick={() => inputRef.current?.click()}
+            className={`mt-3 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed bg-white text-sm font-semibold transition-colors disabled:opacity-50 ${
+              showErrors && imageMissing
+                ? "border-red-400 text-red-500 hover:border-red-500 hover:bg-red-50"
+                : "border-orange/60 text-orange-ink hover:border-orange hover:bg-orange/5"
+            }`}
+          >
+            {uploading ? (
+              "جاري الرفع…"
+            ) : (
+              <>
+                <svg
+                  aria-hidden
+                  viewBox="0 0 24 24"
+                  className="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M12 16V4m0 0L8 8m4-4l4 4" />
+                  <path d="M20 16v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2" />
+                </svg>
+                اختر صورة من جهازك
+              </>
+            )}
+          </button>
+          {showErrors && imageMissing && (
+            <p role="alert" className="mt-1 text-xs font-medium text-red-500">
+              يرجى رفع صورة مرجعية
+            </p>
           )}
-        </button>
+        </>
       )}
     </div>
   );

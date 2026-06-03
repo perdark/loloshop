@@ -1,5 +1,6 @@
 const { query, tx } = require('../lib/db');
 const { publicUrl } = require('../lib/upload');
+const { publish } = require('../lib/eventBus');
 
 async function getStudentByUserId(userId) {
   const { rows } = await query(
@@ -157,7 +158,7 @@ async function getDesignByStudent(req, res) {
   res.json({ data: rows[0] });
 }
 
-// Designer / manager / admin: approve an individual design → its sash order enters embroidery.
+// Designer / manager / admin: approve an individual design → its sash order enters 'converting'.
 async function approveDesign(req, res) {
   const { id } = req.params; // design id
   const result = await tx(async (client) => {
@@ -169,7 +170,7 @@ async function approveDesign(req, res) {
     );
     if (!d.rows.length) return null;
     const o = await client.query(
-      `UPDATE orders SET status = 'embroidery'
+      `UPDATE orders SET status = 'converting'
        WHERE design_id = $1 AND status = 'design_complete' RETURNING id, student_id`,
       [id]
     );
@@ -178,17 +179,28 @@ async function approveDesign(req, res) {
        VALUES ($1, 'approve_design', 'design', $2, $3)`,
       [req.user.id, id, JSON.stringify({ orders: o.rows.map((r) => r.id) })]
     );
+    // Activity log
+    const orderId = o.rows[0]?.id || null;
+    await client.query(
+      `INSERT INTO staff_activity_log (user_id, action, order_id, from_stage, to_stage)
+       VALUES ($1, 'approve_design', $2, 'design_complete', 'converting')`,
+      [req.user.id, orderId]
+    );
     const stu = await client.query(`SELECT user_id FROM students WHERE id = $1`, [d.rows[0].student_id]);
     if (stu.rows[0]) {
       await client.query(
         `INSERT INTO notifications (user_id, type, title_ar, body_ar, link)
          VALUES ($1, 'design_approved', $2, $3, '/')`,
-        [stu.rows[0].user_id, 'تمت الموافقة على تصميمك', 'اعتُمد تصميم الوشاح وبدأ التطريز']
+        [stu.rows[0].user_id, 'تمت الموافقة على تصميمك', 'اعتُمد تصميم الوشاح وانتقل لتحويل التطريز']
       );
     }
-    return { advanced: o.rows.length };
+    return { advanced: o.rows.length, orderId };
   });
   if (!result) return res.status(404).json({ error: 'التصميم غير موجود', code: 'ERR_NOT_FOUND' });
+  if (result.orderId) {
+    publish({ type: 'order', orderId: result.orderId, status: 'converting' });
+    publish({ type: 'presence', orderId: result.orderId, working_staff_id: null, working_staff_name: null });
+  }
   res.json({ data: { id, approval_status: 'approved', advanced: result.advanced } });
 }
 
@@ -205,15 +217,22 @@ async function rejectDesign(req, res) {
       [id, reason, req.user.id]
     );
     if (!d.rows.length) return null;
-    await client.query(
+    const o = await client.query(
       `UPDATE orders SET status = 'designing'
-       WHERE design_id = $1 AND status = 'design_complete'`,
+       WHERE design_id = $1 AND status = 'design_complete' RETURNING id`,
       [id]
     );
     await client.query(
       `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
        VALUES ($1, 'reject_design', 'design', $2, $3)`,
       [req.user.id, id, JSON.stringify({ reason })]
+    );
+    // Activity log
+    const orderId = o.rows[0]?.id || null;
+    await client.query(
+      `INSERT INTO staff_activity_log (user_id, action, order_id, from_stage, to_stage)
+       VALUES ($1, 'reject_design', $2, 'design_complete', 'designing')`,
+      [req.user.id, orderId]
     );
     const stu = await client.query(`SELECT user_id FROM students WHERE id = $1`, [d.rows[0].student_id]);
     if (stu.rows[0]) {
@@ -223,9 +242,13 @@ async function rejectDesign(req, res) {
         [stu.rows[0].user_id, 'يحتاج تصميمك إلى تعديل', reason]
       );
     }
-    return d.rows[0];
+    return { ...d.rows[0], orderId };
   });
   if (!result) return res.status(404).json({ error: 'التصميم غير موجود', code: 'ERR_NOT_FOUND' });
+  if (result.orderId) {
+    publish({ type: 'order', orderId: result.orderId, status: 'designing' });
+    publish({ type: 'presence', orderId: result.orderId, working_staff_id: null, working_staff_name: null });
+  }
   res.json({ data: { id, approval_status: 'rejected' } });
 }
 

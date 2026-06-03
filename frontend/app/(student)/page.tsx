@@ -4,9 +4,9 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, Sus
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { getApiErrorMessage } from "@/lib/api";
-import { getHeroSlides, getShopFeed } from "@/lib/catalog";
+import { getShopFeed } from "@/lib/catalog";
 import { SHOP_SECTION_TITLES, SHOP_TYPE_ORDER } from "@/lib/constants";
-import type { HeroSlide, ProductType, ShopFeed, ShopProductCard } from "@/lib/types";
+import type { ProductType, ShopFeed, ShopProductCard } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
 import { ProductTile } from "@/components/shop/ProductTile";
 import { ShopCover } from "@/components/shop/ShopCover";
@@ -75,7 +75,6 @@ function NeedParamReader({
 export default function StudentHomePage() {
   const router = useRouter();
   const [feed, setFeed] = useState<ShopFeed | null>(null);
-  const [heroSlide, setHeroSlide] = useState<HeroSlide | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterKey>("all");
@@ -102,32 +101,22 @@ export default function StudentHomePage() {
   const loadShop = useCallback(() => {
     setLoading(true);
     setLoadError(null);
-    // Hero is decorative — a failed slider must never block the catalog, so the
-    // two requests settle independently.
-    Promise.allSettled([getShopFeed(), getHeroSlides()])
-      .then(([feedRes, heroRes]) => {
-        if (feedRes.status === "fulfilled") {
-          const feedData = feedRes.value;
-          // Wholesaler-students have no product grid — send them straight to the package form.
-          if (feedData.audience === "wholesaler_student") {
-            router.replace("/package");
-            return;
-          }
-          setFeed(feedData);
-        } else {
-          const msg = getApiErrorMessage(
-            feedRes.reason,
-            "تعذر تحميل المتجر — تحقق من الاتصال بالخادم"
-          );
-          setLoadError(msg);
-          toast.error(msg);
+    getShopFeed()
+      .then((feedData) => {
+        // Wholesaler-students have no product grid — send them straight to the package form.
+        if (feedData.audience === "wholesaler_student") {
+          router.replace("/package");
+          return;
         }
-        if (heroRes.status === "fulfilled") {
-          const active = heroRes.value
-            .filter((s) => s.active !== false)
-            .sort((a, b) => a.sort - b.sort);
-          setHeroSlide(active[0] ?? null);
-        }
+        setFeed(feedData);
+      })
+      .catch((reason) => {
+        const msg = getApiErrorMessage(
+          reason,
+          "تعذر تحميل المتجر — تحقق من الاتصال بالخادم"
+        );
+        setLoadError(msg);
+        toast.error(msg);
       })
       .finally(() => setLoading(false));
   }, [router]);
@@ -161,7 +150,7 @@ export default function StudentHomePage() {
   if (!feed) {
     return (
       <div className="space-y-10">
-        <ShopCover slide={null} />
+        <ShopCover />
         <div className="animate-step-in flex flex-col items-center gap-4 rounded-card border border-dashed border-orange/25 bg-beige/60 px-6 py-14 text-center">
           <span
             aria-hidden
@@ -191,7 +180,7 @@ export default function StudentHomePage() {
         <NeedParamReader onNeed={handleNeed} />
       </Suspense>
 
-      <ShopCover slide={heroSlide} />
+      <ShopCover />
 
       {/* ── Brand story band 1: The atelier — full paper, generous padding ── */}
       <section className="py-14 sm:py-20">

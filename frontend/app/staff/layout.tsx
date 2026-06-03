@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useState } from "react";
+import Link from "next/link";
 import { StaffSidebar } from "@/components/staff/StaffSidebar";
 import { BrandMark } from "@/components/ui/BrandLogo";
 import { PageLoader } from "@/components/ui/Spinner";
@@ -13,6 +14,8 @@ function StaffShell({ children }: { children: React.ReactNode }) {
   if (loading || !user) {
     return <PageLoader />;
   }
+
+  const isAdmin = user.role === "admin";
 
   return (
     <div className="min-h-screen bg-cream" dir="rtl" lang="ar">
@@ -48,9 +51,19 @@ function StaffShell({ children }: { children: React.ReactNode }) {
             </svg>
           </button>
           <span className="font-display text-lg font-bold text-ink">
-            {user.role === "admin" ? "الإنتاج والمتابعة" : "لوحة الموظف"}
+            {isAdmin ? "الإنتاج والمتابعة" : "لوحة الموظف"}
           </span>
-          <BrandMark size={36} className="ms-auto" />
+          <div className="ms-auto flex items-center gap-2">
+            {isAdmin && (
+              <Link
+                href="/admin"
+                className="flex h-9 items-center rounded-lg border border-orange-ink/30 bg-orange-ink/8 px-3 text-xs font-semibold text-orange-ink transition-colors hover:bg-orange-ink/15"
+              >
+                لوحة التحكم
+              </Link>
+            )}
+            <BrandMark size={36} />
+          </div>
         </header>
 
         <main className="p-4 lg:p-8 animate-fade-page-in">{children}</main>

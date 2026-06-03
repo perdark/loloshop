@@ -8,10 +8,19 @@ import { PageLoader } from "@/components/ui/Spinner";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Button } from "@/components/ui/Button";
 import { StatCard } from "@/components/ui/StatCard";
-import { getQueue, getMonitor } from "@/lib/staff";
+import { Modal } from "@/components/ui/Modal";
+import { Input } from "@/components/ui/Input";
+import { getQueue, getMonitor, getCompleted, revertOrder } from "@/lib/staff";
+import { addStaffBonus, addStaffDeduction } from "@/lib/admin";
 import { getApiErrorMessage } from "@/lib/api";
-import { ORDER_STATUS_LABELS, ORDER_SCOPE_LABELS, ORDER_SOURCE_LABELS, STAFF_TYPE_LABELS } from "@/lib/constants";
+import {
+  ORDER_STATUS_LABELS,
+  ORDER_SCOPE_LABELS,
+  ORDER_SOURCE_LABELS,
+  STAFF_TYPE_LABELS,
+} from "@/lib/constants";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
+import { useProductionEvents } from "@/hooks/useProductionEvents";
 import type { ProductionQueueItem, MonitorData } from "@/lib/staff-types";
 import type { StaffOrderScope, StaffType, OrderStatus } from "@/lib/types";
 import Link from "next/link";
@@ -35,6 +44,11 @@ const QUEUE_META: Partial<Record<StaffType, { title: string; subtitle: string; e
     title: "مراجعة التصاميم",
     subtitle: "تصاميم مكتملة بانتظار الموافقة أو الرفض",
     empty: "لا توجد تصاميم بانتظار المراجعة حالياً",
+  },
+  digitizer: {
+    title: "قائمة تحويل التطريز",
+    subtitle: "طلبات جاهزة للتحويل",
+    empty: "لا توجد طلبات تحويل حالياً",
   },
   embroiderer: {
     title: "قائمة التطريز",
@@ -93,7 +107,81 @@ function SourceFilterControl({ value, onChange }: SourceFilterProps) {
   );
 }
 
-// ─── Simple queue view (designer / embroiderer / presser / preparer) ──────────
+// ─── Completed orders section (per-staff) ─────────────────────────────────────
+
+function CompletedSection() {
+  const [items, setItems] = useState<ProductionQueueItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [revertingId, setRevertingId] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await getCompleted();
+      setItems(data);
+    } catch {
+      // Non-critical — don't toast on background fetch
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function handleReopen(orderId: string) {
+    setRevertingId(orderId);
+    try {
+      await revertOrder(orderId);
+      toast.success("تم إرجاع الطلب للمرحلة السابقة");
+      await load();
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "تعذر إرجاع الطلب"));
+    } finally {
+      setRevertingId(null);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3" aria-hidden>
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="skeleton h-28 rounded-2xl" />
+        ))}
+      </div>
+    );
+  }
+
+  if (items.length === 0) {
+    return <EmptyState message="لا توجد طلبات منجزة بعد" />;
+  }
+
+  return (
+    <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      {items.map((item) => (
+        <li key={item.id} className="relative">
+          <OrderCard order={item} />
+          <div className="mt-2 px-1">
+            <Button
+              variant="ghost"
+              fullWidth
+              loading={revertingId === item.id}
+              disabled={revertingId !== null && revertingId !== item.id}
+              onClick={() => handleReopen(item.id)}
+            >
+              إرجاع للتعديل
+            </Button>
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+// ─── Tabs: active queue + completed ──────────────────────────────────────────
+
+type Tab = "active" | "completed";
 
 function QueueView({
   staffType,
@@ -104,6 +192,7 @@ function QueueView({
   showSourceFilter: boolean;
   orderScope?: StaffOrderScope;
 }) {
+  const [activeTab, setActiveTab] = useState<Tab>("active");
   const [items, setItems] = useState<ProductionQueueItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);
@@ -115,26 +204,56 @@ function QueueView({
     empty: "لا توجد طلبات حالياً",
   };
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setFetchError(false);
-    try {
-      const data = await getQueue(
-        undefined,
-        sourceFilter || undefined
-      );
-      setItems(data);
-    } catch (err) {
-      toast.error(getApiErrorMessage(err, "تعذر تحميل الطلبات"));
-      setFetchError(true);
-    } finally {
-      setLoading(false);
-    }
-  }, [sourceFilter]);
+  const load = useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      if (!silent) setLoading(true);
+      setFetchError(false);
+      try {
+        const data = await getQueue(undefined, sourceFilter || undefined);
+        setItems(data);
+      } catch (err) {
+        if (!silent) {
+          toast.error(getApiErrorMessage(err, "تعذر تحميل الطلبات"));
+          setFetchError(true);
+        }
+      } finally {
+        if (!silent) setLoading(false);
+      }
+    },
+    [sourceFilter]
+  );
 
   useEffect(() => {
+    if (activeTab !== "active") return;
     load();
-  }, [load]);
+    // Backstop reconcile — SSE handles the live updates; this just heals any
+    // missed event or stale (crashed-tab) presence the server's TTL has dropped.
+    const interval = setInterval(() => load({ silent: true }), 60_000);
+    return () => clearInterval(interval);
+  }, [activeTab, load]);
+
+  // Real-time: patch presence tags instantly; reload when an order moves stage
+  // (it may enter/leave this queue) or a new order arrives.
+  useProductionEvents((e) => {
+    if (activeTab !== "active") return;
+    if (e.type === "presence") {
+      setItems((prev) =>
+        prev.map((it) =>
+          it.id === e.orderId
+            ? {
+                ...it,
+                working_staff_name: e.working_staff_name ?? null,
+                working_since: e.working_staff_id
+                  ? new Date().toISOString()
+                  : null,
+              }
+            : it
+        )
+      );
+    } else {
+      load({ silent: true });
+    }
+  }, activeTab === "active");
 
   return (
     <div dir="rtl" lang="ar">
@@ -142,96 +261,193 @@ function QueueView({
         title={meta.title}
         subtitle={meta.subtitle}
         action={
-          <Button variant="ghost" onClick={load} loading={loading}>
-            تحديث
-          </Button>
+          activeTab === "active" ? (
+            <Button variant="ghost" onClick={() => load()} loading={loading}>
+              تحديث
+            </Button>
+          ) : undefined
         }
       />
 
-      {/* Scope badge for scoped staff, source filter for managers/both */}
-      {showSourceFilter ? (
-        <div className="mb-4">
-          <SourceFilterControl value={sourceFilter} onChange={setSourceFilter} />
-        </div>
-      ) : orderScope && orderScope !== "both" ? (
-        <div className="mb-4">
-          <span className="inline-flex items-center rounded-full border border-orange-ink/25 bg-orange-ink/8 px-3 py-1 text-sm font-medium text-orange-ink">
-            نطاقك: {ORDER_SCOPE_LABELS[orderScope]}
-          </span>
-        </div>
-      ) : null}
+      {/* Tab switcher */}
+      <div className="mb-4 flex gap-1 rounded-full border border-line bg-surface-sink p-1 w-fit">
+        {(["active", "completed"] as Tab[]).map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            onClick={() => setActiveTab(tab)}
+            className={[
+              "min-h-9 rounded-full px-5 text-sm font-medium transition-colors",
+              activeTab === tab
+                ? "bg-orange-ink text-white shadow-[var(--shadow-soft)]"
+                : "text-ink-soft hover:text-ink",
+            ].join(" ")}
+          >
+            {tab === "active" ? "النشطة" : "مكتملة / أنجزتها"}
+          </button>
+        ))}
+      </div>
 
-      {loading ? (
-        <QueueSkeleton />
-      ) : fetchError ? (
-        <div className="rounded-2xl border border-danger/25 bg-[var(--shop-sink)] px-6 py-10 text-center">
-          <p className="text-base font-semibold text-ink">تعذر تحميل الطلبات</p>
-          <p className="mt-1 text-sm text-ink-soft">تحقق من اتصالك ثم أعد المحاولة.</p>
-          <Button className="mt-4" onClick={load}>إعادة المحاولة</Button>
-        </div>
-      ) : items.length === 0 ? (
-        <EmptyState message={meta.empty} />
+      {activeTab === "active" ? (
+        <>
+          {/* Scope badge / source filter */}
+          {showSourceFilter ? (
+            <div className="mb-4">
+              <SourceFilterControl value={sourceFilter} onChange={setSourceFilter} />
+            </div>
+          ) : orderScope && orderScope !== "both" ? (
+            <div className="mb-4">
+              <span className="inline-flex items-center rounded-full border border-orange-ink/25 bg-orange-ink/8 px-3 py-1 text-sm font-medium text-orange-ink">
+                نطاقك: {ORDER_SCOPE_LABELS[orderScope]}
+              </span>
+            </div>
+          ) : null}
+
+          {loading ? (
+            <QueueSkeleton />
+          ) : fetchError ? (
+            <div className="rounded-2xl border border-danger/25 bg-[var(--shop-sink)] px-6 py-10 text-center">
+              <p className="text-base font-semibold text-ink">تعذر تحميل الطلبات</p>
+              <p className="mt-1 text-sm text-ink-soft">تحقق من اتصالك ثم أعد المحاولة.</p>
+              <Button className="mt-4" onClick={() => load()}>إعادة المحاولة</Button>
+            </div>
+          ) : items.length === 0 ? (
+            <EmptyState message={meta.empty} />
+          ) : (
+            <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {items.map((item) => (
+                <li key={item.id}>
+                  <OrderCard order={item} />
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
       ) : (
-        <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {items.map((item) => (
-            <li key={item.id}>
-              <OrderCard order={item} />
-            </li>
-          ))}
-        </ul>
+        <CompletedSection />
       )}
     </div>
   );
 }
 
-// ─── Manager dashboard ────────────────────────────────────────────────────────
+// ─── Monitor dashboard ────────────────────────────────────────────────────────
 
 const STAGE_ORDER: OrderStatus[] = [
   "design_complete",
+  "converting",
   "embroidery",
   "pressing",
   "preparing",
   "ready",
 ];
 
-function MonitorDashboard({ showSourceFilter }: { showSourceFilter: boolean }) {
-  const [data, setData] = useState<MonitorData | null>(null);
+/** Extended MonitorData to include optional working[] array */
+type MonitorDataExtended = MonitorData & {
+  working?: {
+    staff_id: string;
+    staff_name: string;
+    order_id: string;
+    product_name: string;
+    since: string;
+  }[];
+};
+
+function MonitorDashboard({
+  showSourceFilter,
+  isAdmin,
+}: {
+  showSourceFilter: boolean;
+  isAdmin: boolean;
+}) {
+  const [data, setData] = useState<MonitorDataExtended | null>(null);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("");
+  const [activeTab, setActiveTab] = useState<"monitor" | "completed">("monitor");
 
-  // Re-fetch the whole dashboard (WIP / overdue / stale) when the source filter changes.
-  const load = useCallback(async () => {
-    setLoading(true);
-    setFetchError(false);
-    try {
-      const d = await getMonitor(sourceFilter || undefined);
-      setData(d);
-    } catch (err) {
-      toast.error(getApiErrorMessage(err, "تعذر تحميل بيانات المتابعة"));
-      setFetchError(true);
-    } finally {
-      setLoading(false);
+  // Quick bonus/deduction straight from the performance table (admin only —
+  // the salary endpoints are admin-scoped).
+  const [salaryModal, setSalaryModal] = useState<{
+    userId: string;
+    name: string;
+    kind: "bonus" | "deduction";
+  } | null>(null);
+  const [salaryAmount, setSalaryAmount] = useState("");
+  const [salaryReason, setSalaryReason] = useState("");
+  const [salarySaving, setSalarySaving] = useState(false);
+
+  function openSalary(userId: string, name: string, kind: "bonus" | "deduction") {
+    setSalaryAmount("");
+    setSalaryReason("");
+    setSalaryModal({ userId, name, kind });
+  }
+
+  async function handleSalarySubmit() {
+    if (!salaryModal) return;
+    const amount = Number.parseInt(salaryAmount.replace(/[^\d]/g, ""), 10);
+    if (Number.isNaN(amount) || amount <= 0) {
+      toast.error("أدخل مبلغاً صحيحاً");
+      return;
     }
-  }, [sourceFilter]);
+    setSalarySaving(true);
+    try {
+      const reason = salaryReason.trim() || undefined;
+      if (salaryModal.kind === "bonus") {
+        await addStaffBonus(salaryModal.userId, amount, reason);
+        toast.success("تم إضافة الحافز");
+      } else {
+        await addStaffDeduction(salaryModal.userId, amount, reason);
+        toast.success("تم إضافة الخصم");
+      }
+      setSalaryModal(null);
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "تعذر حفظ العملية"));
+    } finally {
+      setSalarySaving(false);
+    }
+  }
+
+  const load = useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      if (!silent) setLoading(true);
+      setFetchError(false);
+      try {
+        const d = await getMonitor(sourceFilter || undefined);
+        setData(d as MonitorDataExtended);
+      } catch (err) {
+        if (!silent) {
+          toast.error(getApiErrorMessage(err, "تعذر تحميل بيانات المتابعة"));
+          setFetchError(true);
+        }
+      } finally {
+        if (!silent) setLoading(false);
+      }
+    },
+    [sourceFilter]
+  );
 
   useEffect(() => {
-    load();
-  }, [load]);
+    if (activeTab === "monitor") load();
+  }, [activeTab, load]);
 
-  // Build queue link href — appends ?source= when a filter is selected.
+  // Real-time: the manager monitor reflects live presence + stage throughput, so
+  // reload quietly on any production event while it's the active tab.
+  useProductionEvents(() => {
+    if (activeTab === "monitor") load({ silent: true });
+  }, activeTab === "monitor");
+
   function stageHref(stage: OrderStatus): string {
     const params = new URLSearchParams({ stage });
     if (sourceFilter) params.set("source", sourceFilter);
     return `/staff/queue?${params.toString()}`;
   }
 
-  if (loading) {
+  if (loading && activeTab === "monitor") {
     return (
       <div dir="rtl" lang="ar" className="space-y-6 animate-fade-page-in" aria-hidden>
         <div className="skeleton h-9 w-48" />
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-          {Array.from({ length: 5 }).map((_, i) => (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          {Array.from({ length: 6 }).map((_, i) => (
             <div key={i} className="skeleton h-24 rounded-2xl" />
           ))}
         </div>
@@ -241,182 +457,323 @@ function MonitorDashboard({ showSourceFilter }: { showSourceFilter: boolean }) {
     );
   }
 
-  if (fetchError || !data) {
+  if (fetchError || (!data && activeTab === "monitor")) {
     return (
       <div dir="rtl" lang="ar" className="space-y-4">
         <PageHeader title="المتابعة" subtitle="مراقبة خط الإنتاج" />
         <div className="rounded-2xl border border-danger/25 bg-[var(--shop-sink)] px-6 py-10 text-center">
           <p className="text-base font-semibold text-ink">تعذر تحميل بيانات المتابعة</p>
-          <Button className="mt-4" onClick={load}>إعادة المحاولة</Button>
+          <Button className="mt-4" onClick={() => load()}>إعادة المحاولة</Button>
         </div>
       </div>
     );
   }
 
-  const totalWip = STAGE_ORDER.reduce((s, st) => s + (data.wip[st] ?? 0), 0);
+  const totalWip = STAGE_ORDER.reduce((s, st) => s + (data?.wip[st] ?? 0), 0);
 
   return (
-    <div dir="rtl" lang="ar" className="space-y-8 animate-fade-page-in">
+    <div dir="rtl" lang="ar" className="space-y-6 animate-fade-page-in">
       <PageHeader
         title="المتابعة"
         subtitle={`${totalWip} طلب نشط في خط الإنتاج`}
         action={
-          <Button variant="ghost" onClick={load} loading={loading}>
-            تحديث
-          </Button>
+          activeTab === "monitor" ? (
+            <Button variant="ghost" onClick={() => load()} loading={loading}>
+              تحديث
+            </Button>
+          ) : undefined
         }
       />
 
-      {showSourceFilter && (
-        <div>
-          <SourceFilterControl value={sourceFilter} onChange={setSourceFilter} />
-        </div>
-      )}
+      {/* Tab switcher */}
+      <div className="flex gap-1 rounded-full border border-line bg-surface-sink p-1 w-fit">
+        {(["monitor", "completed"] as const).map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            onClick={() => setActiveTab(tab)}
+            className={[
+              "min-h-9 rounded-full px-5 text-sm font-medium transition-colors",
+              activeTab === tab
+                ? "bg-orange-ink text-white shadow-[var(--shadow-soft)]"
+                : "text-ink-soft hover:text-ink",
+            ].join(" ")}
+          >
+            {tab === "monitor" ? "المتابعة" : "مكتملة / أنجزتها"}
+          </button>
+        ))}
+      </div>
 
-      {/* WIP stat cards per stage */}
-      <section>
-        <h2 className="section-heading mb-4 font-display-ar text-base font-bold text-ink">الطلبات حسب المرحلة</h2>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-          {STAGE_ORDER.map((stage) => (
-            <StatCard
-              key={stage}
-              label={ORDER_STATUS_LABELS[stage] ?? stage}
-              value={String(data.wip[stage] ?? 0)}
-            />
-          ))}
-        </div>
-      </section>
+      {activeTab === "completed" ? (
+        <CompletedSection />
+      ) : (
+        <>
+          {showSourceFilter && (
+            <div>
+              <SourceFilterControl value={sourceFilter} onChange={setSourceFilter} />
+            </div>
+          )}
 
-      {/* Staff throughput */}
-      <section>
-        <h2 className="section-heading mb-4 font-display-ar text-base font-bold text-ink">أداء الموظفين</h2>
-        {data.throughput.length === 0 ? (
-          <EmptyState message="لا توجد بيانات أداء حتى الآن" />
-        ) : (
-          <div className="overflow-x-auto rounded-2xl border border-line bg-surface shadow-[var(--shadow-soft)]">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-line bg-surface-sink">
-                  <th className="px-4 py-3 text-start font-semibold text-ink-soft">الموظف</th>
-                  <th className="px-4 py-3 text-start font-semibold text-ink-soft">الدور</th>
-                  <th className="px-4 py-3 text-end font-semibold text-ink-soft">الإجراءات</th>
-                  <th className="px-4 py-3 text-start font-semibold text-ink-soft">آخر نشاط</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.throughput.map((row) => (
-                  <tr key={row.actor_id} className="border-b border-line last:border-0 hover:bg-surface-sink/50 transition-colors">
-                    <td className="px-4 py-3 font-medium text-ink">{row.name}</td>
-                    <td className="px-4 py-3 text-ink-soft">
-                      {(STAFF_TYPE_LABELS as Record<string, string>)[row.staff_type] ?? row.staff_type}
-                    </td>
-                    <td className="px-4 py-3 text-end">
-                      <span className="inline-flex items-center justify-center rounded-full bg-orange-ink/10 px-2.5 py-0.5 text-xs font-bold text-orange-ink">
-                        {row.actions}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-xs text-muted">
-                      {row.last_action
-                        ? new Intl.DateTimeFormat("ar-IQ", {
-                            timeZone: "Asia/Baghdad",
-                            year: "numeric",
-                            month: "2-digit",
-                            day: "2-digit",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          }).format(new Date(row.last_action))
-                        : "—"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+          {data && (
+            <>
+              {/* WIP stat cards per stage */}
+              <section>
+                <h2 className="section-heading mb-4 font-display-ar text-base font-bold text-ink">
+                  الطلبات حسب المرحلة
+                </h2>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+                  {STAGE_ORDER.map((stage) => (
+                    <StatCard
+                      key={stage}
+                      label={ORDER_STATUS_LABELS[stage] ?? stage}
+                      value={String(data.wip[stage] ?? 0)}
+                    />
+                  ))}
+                </div>
+              </section>
 
-      {/* Overdue orders */}
-      {data.overdue.length > 0 && (
-        <section>
-          <h2 className="section-heading mb-4 font-display-ar text-base font-bold text-danger">
-            طلبات متأخرة ({data.overdue.length})
-          </h2>
-          <ul className="space-y-2">
-            {data.overdue.map((o) => (
-              <li key={o.id}>
-                <Link
-                  href={`/staff/orders/${o.id}`}
-                  className="flex items-center justify-between gap-3 rounded-xl border border-danger/20 bg-danger/5 px-4 py-3 transition-colors hover:bg-danger/10"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate font-medium text-ink">{o.student_name}</p>
-                    <p className="text-xs text-muted">{o.product_name}{o.batch_name ? ` · ${o.batch_name}` : ""}</p>
+              {/* Active presence — who is working on what right now */}
+              {data.working && data.working.length > 0 && (
+                <section>
+                  <h2 className="section-heading mb-4 font-display-ar text-base font-bold text-ink">
+                    يعمل الآن
+                  </h2>
+                  <ul className="space-y-2">
+                    {data.working.map((w) => (
+                      <li key={`${w.staff_id}-${w.order_id}`}>
+                        <Link
+                          href={`/staff/orders/${w.order_id}`}
+                          className="flex items-center justify-between gap-3 rounded-xl border border-line bg-surface px-4 py-3 text-sm transition-colors hover:border-orange-ink/30 hover:bg-surface-sink/50"
+                        >
+                          <span className="font-medium text-ink">
+                            الموظف {w.staff_name} يعمل على {w.product_name}
+                          </span>
+                          <span className="shrink-0 rounded-full border border-orange-ink/25 bg-orange-ink/8 px-2.5 py-0.5 text-xs font-semibold text-orange-ink">
+                            نشط
+                          </span>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+
+              {/* Staff throughput */}
+              <section>
+                <h2 className="section-heading mb-4 font-display-ar text-base font-bold text-ink">
+                  أداء الموظفين
+                </h2>
+                {data.throughput.length === 0 ? (
+                  <EmptyState message="لا توجد بيانات أداء حتى الآن" />
+                ) : (
+                  <div className="overflow-x-auto rounded-2xl border border-line bg-surface shadow-[var(--shadow-soft)]">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-line bg-surface-sink">
+                          <th className="px-4 py-3 text-start font-semibold text-ink-soft">الموظف</th>
+                          <th className="px-4 py-3 text-start font-semibold text-ink-soft">الدور</th>
+                          {isAdmin && (
+                            <th className="px-4 py-3 text-start font-semibold text-ink-soft">تعديل الراتب</th>
+                          )}
+                          <th className="px-4 py-3 text-end font-semibold text-ink-soft">الإجراءات</th>
+                          <th className="px-4 py-3 text-start font-semibold text-ink-soft">آخر نشاط</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {data.throughput.map((row) => (
+                          <tr
+                            key={row.actor_id}
+                            className="border-b border-line last:border-0 hover:bg-surface-sink/50 transition-colors"
+                          >
+                            <td className="px-4 py-3 font-medium text-ink">{row.name}</td>
+                            <td className="px-4 py-3 text-ink-soft">
+                              {(STAFF_TYPE_LABELS as Record<string, string>)[row.staff_type] ?? row.staff_type}
+                            </td>
+                            {isAdmin && (
+                              <td className="px-4 py-3">
+                                <div className="flex gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => openSalary(row.actor_id, row.name, "bonus")}
+                                    className="inline-flex min-h-8 items-center rounded-lg border border-orange-ink/30 bg-orange-ink/8 px-2.5 py-1 text-xs font-semibold text-orange-ink transition-colors hover:bg-orange-ink/15"
+                                  >
+                                    + حافز
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => openSalary(row.actor_id, row.name, "deduction")}
+                                    className="inline-flex min-h-8 items-center rounded-lg border border-danger/30 bg-danger/8 px-2.5 py-1 text-xs font-semibold text-danger transition-colors hover:bg-danger/15"
+                                  >
+                                    − خصم
+                                  </button>
+                                </div>
+                              </td>
+                            )}
+                            <td className="px-4 py-3 text-end">
+                              <span className="inline-flex items-center justify-center rounded-full bg-orange-ink/10 px-2.5 py-0.5 text-xs font-bold text-orange-ink">
+                                {row.actions}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-xs text-muted">
+                              {row.last_action
+                                ? new Intl.DateTimeFormat("ar-IQ", {
+                                    timeZone: "Asia/Baghdad",
+                                    year: "numeric",
+                                    month: "2-digit",
+                                    day: "2-digit",
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  }).format(new Date(row.last_action))
+                                : "—"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                  <div className="shrink-0 text-end">
-                    <span className="text-xs font-semibold text-danger">
-                      {ORDER_STATUS_LABELS[o.status] ?? o.status}
-                    </span>
-                    <p className="text-xs text-muted">{o.deadline}</p>
-                  </div>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+                )}
+              </section>
 
-      {/* Stale orders */}
-      {data.stale.length > 0 && (
-        <section>
-          <h2 className="section-heading mb-4 font-display-ar text-base font-bold text-ink">
-            متأخر في المرحلة ({data.stale.length})
-          </h2>
-          <ul className="space-y-2">
-            {data.stale.map((o) => (
-              <li key={o.id}>
-                <Link
-                  href={`/staff/orders/${o.id}`}
-                  className="flex items-center justify-between gap-3 rounded-xl border border-line bg-surface px-4 py-3 transition-colors hover:border-orange-ink/30 hover:bg-surface-sink/50"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate font-medium text-ink">{o.student_name}</p>
-                    <p className="text-xs text-muted">{ORDER_STATUS_LABELS[o.status] ?? o.status}</p>
-                  </div>
-                  <span className="shrink-0 rounded-full border border-orange-ink/25 bg-orange-ink/8 px-2.5 py-0.5 text-xs font-semibold text-orange-ink">
-                    {Math.round(o.hours_in_stage)} ساعة
-                  </span>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+              {/* Quick bonus/deduction modal (admin) */}
+              <Modal
+                open={!!salaryModal}
+                onClose={() => setSalaryModal(null)}
+                title={
+                  salaryModal
+                    ? `${salaryModal.kind === "bonus" ? "إضافة حافز" : "إضافة خصم"} — ${salaryModal.name}`
+                    : ""
+                }
+                footer={
+                  <>
+                    <Button variant="ghost" onClick={() => setSalaryModal(null)}>
+                      إلغاء
+                    </Button>
+                    <Button
+                      variant={salaryModal?.kind === "deduction" ? "danger" : "primary"}
+                      onClick={handleSalarySubmit}
+                      loading={salarySaving}
+                    >
+                      {salaryModal?.kind === "deduction" ? "تطبيق الخصم" : "إضافة"}
+                    </Button>
+                  </>
+                }
+              >
+                <div className="space-y-3">
+                  <Input
+                    label="المبلغ (د.ع)"
+                    type="text"
+                    inputMode="numeric"
+                    dir="ltr"
+                    value={salaryAmount}
+                    onChange={(e) =>
+                      setSalaryAmount(e.target.value.replace(/[^\d]/g, ""))
+                    }
+                    placeholder="0"
+                  />
+                  <Input
+                    label="السبب (اختياري)"
+                    value={salaryReason}
+                    onChange={(e) => setSalaryReason(e.target.value)}
+                    placeholder={
+                      salaryModal?.kind === "bonus"
+                        ? "مثال: أداء ممتاز هذا الشهر"
+                        : "مثال: تأخير في التسليم"
+                    }
+                  />
+                </div>
+              </Modal>
 
-      {/* All-stages link for manager */}
-      <section>
-        <h2 className="section-heading mb-4 font-display-ar text-base font-bold text-ink">روابط سريعة</h2>
-        <div className="flex flex-wrap gap-2">
-          {STAGE_ORDER.map((stage) => (
-            <Link
-              key={stage}
-              href={stageHref(stage)}
-              className="inline-flex min-h-11 items-center rounded-full border border-line bg-surface px-4 py-2 text-sm font-medium text-ink-soft transition-colors hover:border-orange-ink/40 hover:text-orange-ink"
-            >
-              {ORDER_STATUS_LABELS[stage]}
-              {data.wip[stage] ? (
-                <span className="ms-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-orange-ink text-[10px] font-bold text-white">
-                  {data.wip[stage]}
-                </span>
-              ) : null}
-            </Link>
-          ))}
-        </div>
-      </section>
+              {/* Overdue orders */}
+              {data.overdue.length > 0 && (
+                <section>
+                  <h2 className="section-heading mb-4 font-display-ar text-base font-bold text-danger">
+                    طلبات متأخرة ({data.overdue.length})
+                  </h2>
+                  <ul className="space-y-2">
+                    {data.overdue.map((o) => (
+                      <li key={o.id}>
+                        <Link
+                          href={`/staff/orders/${o.id}`}
+                          className="flex items-center justify-between gap-3 rounded-xl border border-danger/20 bg-danger/5 px-4 py-3 transition-colors hover:bg-danger/10"
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate font-medium text-ink">{o.student_name}</p>
+                            <p className="text-xs text-muted">
+                              {o.product_name}
+                              {o.batch_name ? ` · ${o.batch_name}` : ""}
+                            </p>
+                          </div>
+                          <div className="shrink-0 text-end">
+                            <span className="text-xs font-semibold text-danger">
+                              {ORDER_STATUS_LABELS[o.status] ?? o.status}
+                            </span>
+                            <p className="text-xs text-muted">{o.deadline}</p>
+                          </div>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+
+              {/* Stale orders */}
+              {data.stale.length > 0 && (
+                <section>
+                  <h2 className="section-heading mb-4 font-display-ar text-base font-bold text-ink">
+                    متأخر في المرحلة ({data.stale.length})
+                  </h2>
+                  <ul className="space-y-2">
+                    {data.stale.map((o) => (
+                      <li key={o.id}>
+                        <Link
+                          href={`/staff/orders/${o.id}`}
+                          className="flex items-center justify-between gap-3 rounded-xl border border-line bg-surface px-4 py-3 transition-colors hover:border-orange-ink/30 hover:bg-surface-sink/50"
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate font-medium text-ink">{o.student_name}</p>
+                            <p className="text-xs text-muted">{ORDER_STATUS_LABELS[o.status] ?? o.status}</p>
+                          </div>
+                          <span className="shrink-0 rounded-full border border-orange-ink/25 bg-orange-ink/8 px-2.5 py-0.5 text-xs font-semibold text-orange-ink">
+                            {Math.round(o.hours_in_stage)} ساعة
+                          </span>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+
+              {/* Quick stage links */}
+              <section>
+                <h2 className="section-heading mb-4 font-display-ar text-base font-bold text-ink">
+                  روابط سريعة
+                </h2>
+                <div className="flex flex-wrap gap-2">
+                  {STAGE_ORDER.map((stage) => (
+                    <Link
+                      key={stage}
+                      href={stageHref(stage)}
+                      className="inline-flex min-h-11 items-center rounded-full border border-line bg-surface px-4 py-2 text-sm font-medium text-ink-soft transition-colors hover:border-orange-ink/40 hover:text-orange-ink"
+                    >
+                      {ORDER_STATUS_LABELS[stage]}
+                      {data.wip[stage] ? (
+                        <span className="ms-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-orange-ink text-[10px] font-bold text-white">
+                          {data.wip[stage]}
+                        </span>
+                      ) : null}
+                    </Link>
+                  ))}
+                </div>
+              </section>
+            </>
+          )}
+        </>
+      )}
     </div>
   );
 }
 
-// ─── Root page — reads user from hook and branches ───────────────────────────
+// ─── Root page ────────────────────────────────────────────────────────────────
 
 function StaffPageContent() {
   const { user, loading } = useRequireAuth(["staff", "admin"]);
@@ -425,13 +782,16 @@ function StaffPageContent() {
     return <PageLoader />;
   }
 
-  // Admin has full manager-level visibility over the production pipeline.
   const isManager = user.role === "admin" || user.staff_type === "manager";
-  // Show source filter for managers/admins and for both-scope staff.
   const showSourceFilter = isManager || user.order_scope === "both";
 
   if (isManager) {
-    return <MonitorDashboard showSourceFilter={showSourceFilter} />;
+    return (
+      <MonitorDashboard
+        showSourceFilter={showSourceFilter}
+        isAdmin={user.role === "admin"}
+      />
+    );
   }
 
   const staffType = user.staff_type;
@@ -446,13 +806,9 @@ function StaffPageContent() {
     );
   }
 
-  // Fallback for staff without a type assigned (legacy / unset)
   return (
     <div dir="rtl" lang="ar">
-      <PageHeader
-        title="لوحة الطلبات"
-        subtitle="الطلبات النشطة"
-      />
+      <PageHeader title="لوحة الطلبات" subtitle="الطلبات النشطة" />
       <EmptyState
         title="الدور غير محدد"
         message="لم يتم تعيين دور إنتاج لهذا الحساب بعد. يرجى التواصل مع المدير."

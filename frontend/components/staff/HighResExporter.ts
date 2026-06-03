@@ -1,6 +1,5 @@
-import { getFabric } from "@/lib/fabric-loader";
 import { exportGownCompositePng } from "@/lib/render-gown-composite";
-import { loadPanelOntoCanvas } from "@/lib/render-sash-panel";
+import { rasterizePanelCanvas } from "@/lib/render-sash-panel";
 import {
   HIGH_RES_PANEL_HEIGHT,
   HIGH_RES_PANEL_WIDTH,
@@ -19,32 +18,16 @@ async function renderPanelToDataUrl(
   sashColor: string | null,
   fontsUsed: string[]
 ): Promise<string | null> {
-  if (!json) return null;
-
-  const fabric = await getFabric();
-  const el = document.createElement("canvas");
-  const canvas = new fabric.StaticCanvas(el, {
-    width: HIGH_RES_PANEL_WIDTH,
-    height: HIGH_RES_PANEL_HEIGHT,
-    backgroundColor: sashColorToHex(sashColor),
-  });
-
-  await loadPanelOntoCanvas(canvas, {
+  // Use the proven rasterizer (awaits fonts + a frame, renders horizontal board at
+  // source size then 2D-rotates) — the same path that fixed the on-screen flat panels.
+  const out = await rasterizePanelCanvas({
     json,
     sashColor,
     targetWidth: HIGH_RES_PANEL_WIDTH,
     targetHeight: HIGH_RES_PANEL_HEIGHT,
     fontsUsed,
   });
-
-  const url = canvas.toDataURL({
-    format: "png",
-    multiplier: 1,
-    enableRetinaScaling: false,
-  });
-
-  canvas.dispose();
-  return url;
+  return out ? out.toDataURL("image/png") : null;
 }
 
 export async function buildHighResCombinedDataUrl(

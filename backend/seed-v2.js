@@ -4,7 +4,7 @@
 require('dotenv').config();
 const { query, pool } = require('./lib/db');
 
-// product spec: base_price + groups[{..., options:[{label, delta, image?}]}]
+// product spec: base_price + groups[{..., options:[{label_ar, price_delta, requires_customer_text?, requires_customer_image?, image?}]}]
 const PRODUCTS = [
   {
     type: 'sash', name_ar: 'وشاح تخرج', description: 'وشاح تخرج فاخر', base_price: 30000, customizable: true,
@@ -25,8 +25,14 @@ const PRODUCTS = [
       { name_ar: 'الشكل', input_type: 'single_select', required: true, has_image: false,
         options: [{ label_ar: 'عادية', price_delta: 0 }, { label_ar: 'مثلثة', price_delta: 0 }] },
       { name_ar: 'تطريز القبعة', input_type: 'single_select', required: false, has_image: true,
-        hint_ar: 'الأدمن يرفع صورة توضيحية للطلاب', // التطريز لا يغيّر السعر
-        options: ['بدون', 'من الجانب', 'من الأعلى'].map((l) => ({ label_ar: l, price_delta: 0 })) },
+        hint_ar: 'الأدمن يرفع صورة توضيحية للطلاب',
+        options: [
+          { label_ar: 'بدون', price_delta: 0, requires_customer_text: false, requires_customer_image: false },
+          { label_ar: 'من الجانب', price_delta: 0, requires_customer_text: true, requires_customer_image: true },
+          { label_ar: 'من الأعلى', price_delta: 0, requires_customer_text: true, requires_customer_image: true },
+        ] },
+      { name_ar: 'كسرات القبعة', input_type: 'toggle', required: false, has_image: false,
+        options: [{ label_ar: 'مع كسرات', price_delta: 0 }] },
     ],
   },
   {
@@ -34,21 +40,21 @@ const PRODUCTS = [
     groups: [
       { name_ar: 'نوع القماش', input_type: 'single_select', required: true, has_image: true,
         options: [
-          { label_ar: 'قماش 1', price_delta: 0 },      // 25000
-          { label_ar: 'قماش 2', price_delta: 5000 },   // 30000
-          { label_ar: 'قماش 3', price_delta: 10000 },  // 35000
-          { label_ar: 'قماش 4', price_delta: 15000 },  // 40000
+          { label_ar: 'قماش 1', price_delta: 0 },
+          { label_ar: 'قماش 2', price_delta: 5000 },
+          { label_ar: 'قماش 3', price_delta: 10000 },
+          { label_ar: 'قماش 4', price_delta: 15000 },
         ] },
       { name_ar: 'تطريز الأكمام (ردان)', input_type: 'counter', required: false, has_image: true, max_select: 2,
-        options: [{ label_ar: 'تطريز ردن', price_delta: 5000 }] }, // +5000 لكل ردن، حد أقصى 2
-      { name_ar: 'كسرة', input_type: 'toggle', required: false, has_image: false,
-        options: [{ label_ar: 'مع كسرة', price_delta: 5000 }] },
+        options: [{ label_ar: 'تطريز ردن', price_delta: 5000, requires_customer_text: true, requires_customer_image: true }] },
+      { name_ar: 'كسرات', input_type: 'toggle', required: false, has_image: false,
+        options: [{ label_ar: 'كسرات', price_delta: 5000 }] },
     ],
   },
   {
     type: 'shawl', name_ar: 'شال أمريكي (ملكي للممثلين)', description: 'شال أمريكي — للبنات فقط',
     base_price: 30000, customizable: false, gender_restriction: 'female',
-    role_prices: [{ role: 'wholesaler', base_price: 20000 }], // retail = base 30000
+    role_prices: [{ role: 'wholesaler', base_price: 20000 }],
     groups: [],
   },
 ];
@@ -72,16 +78,28 @@ async function seedGroups(productId, groups) {
   for (let gi = 0; gi < groups.length; gi++) {
     const g = groups[gi];
     const { rows } = await query(
-      `INSERT INTO option_groups (product_id, name_ar, input_type, sort, required, has_image, hint_ar, max_select, gender_restriction)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
-      [productId, g.name_ar, g.input_type, gi, !!g.required, !!g.has_image, g.hint_ar || null, g.max_select || 1, g.gender_restriction || null]
+      `INSERT INTO option_groups
+         (product_id, name_ar, input_type, sort, required, has_image, hint_ar, max_select,
+          gender_restriction, requires_customer_text, requires_customer_image)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,COALESCE($10,FALSE),COALESCE($11,FALSE))
+       RETURNING id`,
+      [
+        productId, g.name_ar, g.input_type, gi, !!g.required, !!g.has_image,
+        g.hint_ar || null, g.max_select || 1, g.gender_restriction || null,
+        g.requires_customer_text || false, g.requires_customer_image || false,
+      ]
     );
     const gid = rows[0].id;
     for (let oi = 0; oi < g.options.length; oi++) {
       const o = g.options[oi];
       await query(
-        `INSERT INTO options (group_id, label_ar, price_delta, sort) VALUES ($1,$2,$3,$4)`,
-        [gid, o.label_ar, o.price_delta || 0, oi]
+        `INSERT INTO options
+           (group_id, label_ar, price_delta, sort, requires_customer_text, requires_customer_image)
+         VALUES ($1,$2,$3,$4,COALESCE($5,FALSE),COALESCE($6,FALSE))`,
+        [
+          gid, o.label_ar, o.price_delta || 0, oi,
+          o.requires_customer_text || false, o.requires_customer_image || false,
+        ]
       );
     }
     console.log(`   + group "${g.name_ar}" (${g.options.length} options)`);
@@ -89,7 +107,6 @@ async function seedGroups(productId, groups) {
 }
 
 async function seedPackages() {
-  // Wholesaler bundles (robe+sash+cap). Tier driven by sash type. Prices PENDING (open question).
   const tiers = [
     { name_ar: 'بكج ملكي', sash_type: 'ملكي خماسي' },
     { name_ar: 'بكج عادي', sash_type: 'عادي' },
@@ -101,7 +118,6 @@ async function seedPackages() {
       `INSERT INTO packages (name_ar, role, price, active) VALUES ($1,'wholesaler',0,FALSE) RETURNING id`,
       [t.name_ar]
     );
-    // map the sash-type option to this package tier
     const opt = await query(
       `SELECT o.id FROM options o JOIN option_groups g ON g.id = o.group_id
        JOIN products p ON p.id = g.product_id

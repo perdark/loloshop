@@ -27,14 +27,36 @@ async function joinReferral(req, res) {
     university_name,
     department,
     gender,
+    study_type,
+    instagram_username,
   } = req.body;
   const studentName = name || full_name_third;
   if (!studentName || !phone || !password) {
     return res.status(400).json({ error: 'بيانات ناقصة', code: 'ERR_VALIDATION' });
   }
+  // Cap free-text so a large JSON body can't stuff multi-MB junk into columns.
+  const MAX_FIELD_LEN = 120;
+  const overLong = [studentName, email, university_name, department, instagram_username]
+    .some((v) => v != null && String(v).length > MAX_FIELD_LEN);
+  if (overLong || String(phone).length > 32) {
+    return res.status(400).json({ error: 'قيمة طويلة جداً في أحد الحقول', code: 'ERR_VALIDATION' });
+  }
   if (gender && !['male', 'female'].includes(gender)) {
     return res.status(400).json({ error: 'الجنس غير صالح', code: 'ERR_VALIDATION' });
   }
+  if (!university_name || !String(university_name).trim()) {
+    return res.status(400).json({ error: 'اسم الجامعة مطلوب', code: 'ERR_VALIDATION' });
+  }
+  if (!department || !String(department).trim()) {
+    return res.status(400).json({ error: 'القسم/التخصص مطلوب', code: 'ERR_VALIDATION' });
+  }
+  if (!study_type || !['morning', 'evening'].includes(study_type)) {
+    return res.status(400).json({ error: 'الدراسة (صباحي/مسائي) مطلوبة', code: 'ERR_VALIDATION' });
+  }
+  if (!instagram_username || !String(instagram_username).trim()) {
+    return res.status(400).json({ error: 'حساب إنستقرام مطلوب', code: 'ERR_VALIDATION' });
+  }
+  const cleanInstagram = String(instagram_username).trim().replace(/^@/, '');
   const { rows: wRows } = await query(
     `SELECT id FROM wholesalers WHERE referral_code = $1`,
     [code]
@@ -61,9 +83,9 @@ async function joinReferral(req, res) {
       [studentName, phone, email || null, hash]
     );
     const s = await client.query(
-      `INSERT INTO students (user_id, wholesaler_id, full_name_third, university_name, department, gender, status)
-       VALUES ($1, $2, $3, $4, $5, $6, 'pending_approval') RETURNING id`,
-      [u.rows[0].id, wholesalerId, studentName, university_name || null, department || null, gender || null]
+      `INSERT INTO students (user_id, wholesaler_id, full_name_third, university_name, department, gender, study_type, instagram_username, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending_approval') RETURNING id`,
+      [u.rows[0].id, wholesalerId, studentName, String(university_name).trim(), String(department).trim(), gender || null, study_type, cleanInstagram]
     );
     await client.query(
       `INSERT INTO notifications (user_id, type, title_ar, body_ar, link)

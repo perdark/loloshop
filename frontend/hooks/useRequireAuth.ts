@@ -21,11 +21,20 @@ export function useRequireAuth(allowedRoles?: UserRole | UserRole[]) {
   const [user, setUserState] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Normalise to an array once so the effect dependency is stable across renders
+  // Callers pass an inline array literal (`["staff","admin"]`) — a NEW reference
+  // every render. Keying on the reference would re-run the effect on every
+  // render → fetchMe → setState → render → infinite loop. Key on the CONTENT
+  // (a stable string) instead so the effect only re-runs when the roles change.
+  const rolesKey = !allowedRoles
+    ? ""
+    : Array.isArray(allowedRoles)
+      ? allowedRoles.join(",")
+      : allowedRoles;
+
   const rolesArray = useMemo<UserRole[] | undefined>(() => {
-    if (!allowedRoles) return undefined;
-    return Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles];
-  }, [allowedRoles]);
+    if (!rolesKey) return undefined;
+    return rolesKey.split(",") as UserRole[];
+  }, [rolesKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -62,7 +71,10 @@ export function useRequireAuth(allowedRoles?: UserRole | UserRole[]) {
     return () => {
       cancelled = true;
     };
-  }, [router, rolesArray]);
+    // rolesArray is derived from rolesKey; depending on the stable string key
+    // keeps this effect from re-firing on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router, rolesKey]);
 
   return { user, loading };
 }

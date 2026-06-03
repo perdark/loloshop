@@ -81,6 +81,10 @@ export interface ProductionQueueItem {
   wholesaler_name: string | null;
   /** Non-null when this order belongs to a multi-item checkout bundle. */
   checkout_group_id: string | null;
+  /** Staff presence — who is actively working on this order (admin monitor). */
+  working_staff_id?: string | null;
+  working_staff_name?: string | null;
+  working_since?: string | null;
 }
 
 /** One item in the `items[]` array on the production order detail */
@@ -89,6 +93,8 @@ export interface ProductionOrderItem {
   price_snapshot: number;
   qty: number;
   customer_image_url: string | null;
+  /** Student's typed embroidery instruction (cap/sleeve embroidery). */
+  customer_text: string | null;
   group_id: string | null;
   option_id: string | null;
 }
@@ -122,7 +128,6 @@ export interface ProductionOrderDetail {
     id: string;
     status: OrderStatus;
     created_at: string;
-    price: number;
     design_id: string | null;
     package_id: string | null;
     batch_id: string | null;
@@ -132,6 +137,8 @@ export interface ProductionOrderDetail {
     university_name: string | null;
     department: string | null;
     gender: string | null;
+    /** Study schedule — "morning" (صباحي) or "evening" (مسائي). */
+    study_type: "morning" | "evening" | null;
     product_name: string;
     product_type: string;
     batch_name: string | null;
@@ -140,6 +147,19 @@ export interface ProductionOrderDetail {
     source: "retail" | "wholesaler";
     /** Wholesaler display name; null for retail orders. */
     wholesaler_name: string | null;
+    /** Routing flags (batch update). */
+    has_embroidery?: boolean;
+    needs_pressing?: boolean;
+    /** Robe tailoring measurements {shoulder_cm, robe_length_cm, sleeve_length_cm}. */
+    measurements?: { shoulder_cm: number; robe_length_cm: number; sleeve_length_cm: number } | null;
+    /** Final design image uploaded by admin/designer (replaces PDF). */
+    final_design_url?: string | null;
+    /** Staff presence — who is actively working on this order. */
+    working_staff_id?: string | null;
+    working_staff_name?: string | null;
+    working_since?: string | null;
+    /** Total order price — returned ONLY for admin + embroiderer. */
+    price?: number;
   };
   design: {
     id: string;

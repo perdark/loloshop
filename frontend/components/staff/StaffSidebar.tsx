@@ -49,6 +49,15 @@ function iconUsers() {
   );
 }
 
+function iconWallet() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+      <path d="M21 12a2 2 0 0 0-2-2h-4a2 2 0 0 0 0 4h4a2 2 0 0 0 2-2z" />
+    </svg>
+  );
+}
+
 function getNavLinks(
   staffType: StaffType | null | undefined,
   isAdmin: boolean,
@@ -106,7 +115,14 @@ export function StaffSidebar({ user, open, onClose }: StaffSidebarProps) {
   }
 
   const isAdmin = user.role === "admin";
-  const links = getNavLinks(user.staff_type, isAdmin);
+  const baseLinks = getNavLinks(user.staff_type, isAdmin);
+  // Staff (not pure admins) track their own salary + activity.
+  const links =
+    user.role === "staff"
+      ? [...baseLinks, { href: "/staff/me", label: "راتبي ونشاطي", icon: iconWallet(), prefix: true }]
+      : isAdmin
+        ? [...baseLinks, { href: "/staff/team", label: "الموظفون", icon: iconUsers(), prefix: true }]
+        : baseLinks;
   // Admins viewing production show "مدير (إنتاج)" so it's clear they're not
   // looking at their usual admin panel.
   const typeLabel = isAdmin
@@ -129,6 +145,16 @@ export function StaffSidebar({ user, open, onClose }: StaffSidebarProps) {
       </div>
 
       <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-0.5" aria-label="قائمة الموظف">
+        {isAdmin && (
+          <Link
+            href="/admin"
+            onClick={onClose}
+            className="mb-2 flex min-h-11 items-center gap-2.5 rounded-xl border border-orange-ink/30 bg-orange-ink/8 px-3 py-2 text-sm font-semibold text-orange-ink transition-colors hover:bg-orange-ink/15"
+          >
+            <span aria-hidden>→</span>
+            العودة للوحة التحكم
+          </Link>
+        )}
         {links.map((link) => {
           const isActive = link.prefix
             ? pathname.startsWith(link.href)

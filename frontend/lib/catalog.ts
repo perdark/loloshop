@@ -1,4 +1,4 @@
-import { api } from "./api";
+import { api, apiUploadFile } from "./api";
 import type {
   CatalogInputType,
   CatalogOption,
@@ -338,13 +338,11 @@ export async function unlockGroupOption(
 }
 
 export async function uploadCatalogImage(file: File): Promise<string> {
-  const form = new FormData();
-  form.append("file", file);
-  const { data } = await api.post<{ data: { url: string } }>(
-    "/catalog/uploads/image",
-    form,
-    { headers: { "Content-Type": "multipart/form-data" } }
-  );
+  // Use apiUploadFile so axios sets the multipart boundary automatically — setting
+  // Content-Type: multipart/form-data manually (no boundary) makes multer drop the file.
+  const data = (await apiUploadFile("/catalog/uploads/image", file)) as {
+    data: { url: string };
+  };
   return resolveCatalogMediaUrl(data.data.url) || data.data.url;
 }
 

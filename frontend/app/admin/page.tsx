@@ -1,12 +1,14 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { toast } from "sonner";
 import { getAdminAnalytics, getAdminAccounting } from "@/lib/admin";
 import { ORDER_STATUS_LABELS } from "@/lib/constants";
 import { formatIQD } from "@/lib/format";
 import type { AdminAccounting, AdminAnalytics } from "@/lib/types";
+import { usePolling } from "@/lib/hooks/usePolling";
+import { useProductionEvents } from "@/hooks/useProductionEvents";
 
 const DailyOrdersChart = dynamic(
   () =>
@@ -137,9 +139,26 @@ export default function AdminDashboardPage() {
   }, []);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial fetch
     load();
   }, [load]);
+
+  // Real-time: refresh the dashboard (orders, status counts, profit/revenue)
+  // whenever the server pushes a production event. Debounced so a burst of
+  // events (e.g. an order moving stage emits status + presence) coalesces into
+  // one reload. A slow poll stays as a backstop for missed events.
+  const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleReload = useCallback(() => {
+    if (reloadTimer.current) clearTimeout(reloadTimer.current);
+    reloadTimer.current = setTimeout(() => load(true), 400);
+  }, [load]);
+  useEffect(
+    () => () => {
+      if (reloadTimer.current) clearTimeout(reloadTimer.current);
+    },
+    []
+  );
+  useProductionEvents(scheduleReload);
+  usePolling(() => load(true), 30000);
 
   if (loading || !data || !accounting) {
     return <DashboardSkeleton />;

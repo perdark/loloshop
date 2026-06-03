@@ -1,5 +1,5 @@
-import { api } from "./api";
-import type { OrderStatus } from "./types";
+import { api, apiUploadFile } from "./api";
+import type { OrderStatus, SalaryTxnType, StaffActivity, StaffGoal, StaffSalary } from "./types";
 import {
   mapApiOrderRow,
   type MonitorData,
@@ -152,6 +152,71 @@ export async function rejectDesign(
 }
 
 /**
+ * POST /production/orders/:id/revert
+ * Revert/reopen an order to the previous stage.
+ */
+export async function revertOrder(id: string): Promise<{ id: string; status: string }> {
+  const { data } = await api.post<{ data: { id: string; status: string } }>(
+    `/production/orders/${id}/revert`
+  );
+  return data.data;
+}
+
+/**
+ * POST /production/orders/:id/claim
+ * Mark the current staff member as actively working on this order (presence).
+ */
+export interface ClaimResult {
+  claimed: boolean;
+  working_staff_id: string;
+  working_staff_name: string | null;
+}
+export async function claimOrder(id: string): Promise<ClaimResult> {
+  const { data } = await api.post<{ data: ClaimResult }>(
+    `/production/orders/${id}/claim`
+  );
+  return data.data;
+}
+
+/**
+ * POST /production/orders/:id/release
+ * Release the presence claim on the order.
+ */
+export async function releaseOrder(id: string): Promise<void> {
+  await api.post(`/production/orders/${id}/release`);
+}
+
+/**
+ * POST /production/orders/:id/final-design
+ * Upload the final design image (admin + designer only). Multipart, field "file".
+ * Returns the updated order with final_design_url.
+ */
+export async function uploadFinalDesign(
+  id: string,
+  file: File
+): Promise<{ url: string }> {
+  // Use apiUploadFile so axios sets the multipart boundary automatically — setting
+  // Content-Type: multipart/form-data manually (no boundary) makes multer drop the file.
+  // Backend responds { data: { url } } — absolute /uploads URL.
+  const data = (await apiUploadFile(
+    `/production/orders/${id}/final-design`,
+    file
+  )) as { data: { url: string } };
+  return data.data;
+}
+
+/**
+ * GET /production/completed
+ * Returns orders the current staff member has completed.
+ */
+export async function getCompleted(): Promise<import("./staff-types").ProductionQueueItem[]> {
+  const { data } = await api.get<{ data: import("./staff-types").ProductionQueueItem[] }>(
+    "/production/completed"
+  );
+  return data.data ?? [];
+}
+
+/**
  * GET /production/monitor
  * Manager / admin only — WIP counts, throughput, overdue, stale.
  */
@@ -162,4 +227,99 @@ export async function getMonitor(
     params: source ? { source } : undefined,
   });
   return data.data;
+}
+
+// ─── Staff self-service payroll + activity (GET /payroll/me/*) ─────────────────
+
+/** An activity row enriched with product/student names for the staff self view. */
+export interface MyActivityRow extends StaffActivity {
+  productName: string | null;
+  studentName: string | null;
+}
+
+/** GET /payroll/me/salary — the logged-in staff member's own salary + ledger. */
+export async function getMySalary(): Promise<StaffSalary> {
+  const { data } = await api.get<{
+    data: {
+      user_id: string;
+      base_salary: number;
+      balance: number;
+      transactions: { id: string; type: SalaryTxnType; amount: number; reason_ar: string | null; created_at: string }[];
+    };
+  }>("/payroll/me/salary");
+  const d = data.data;
+  return {
+    userId: d.user_id,
+    baseSalary: Number(d.base_salary) || 0,
+    balance: Number(d.balance) || 0,
+    transactions: (d.transactions ?? []).map((t) => ({
+      id: t.id,
+      type: t.type,
+      amount: Number(t.amount) || 0,
+      reasonAr: t.reason_ar,
+      createdAt: t.created_at,
+    })),
+  };
+}
+
+/** GET /payroll/me/goal — the logged-in staff member's current incentive goal + progress. */
+export async function getMyGoal(): Promise<StaffGoal | null> {
+  const { data } = await api.get<{
+    data: {
+      id: string;
+      user_id: string;
+      title_ar: string | null;
+      target_count: number;
+      bonus_amount: number;
+      deadline: string;
+      progress: number;
+      achieved: boolean;
+      awarded: boolean;
+      awarded_at: string | null;
+      expired: boolean;
+      created_at: string;
+    } | null;
+  }>("/payroll/me/goal");
+  const r = data.data;
+  if (!r) return null;
+  return {
+    id: r.id,
+    userId: r.user_id,
+    titleAr: r.title_ar,
+    targetCount: r.target_count,
+    bonusAmount: Number(r.bonus_amount),
+    deadline: r.deadline,
+    progress: r.progress,
+    achieved: r.achieved,
+    awarded: r.awarded,
+    awardedAt: r.awarded_at,
+    expired: r.expired,
+    createdAt: r.created_at,
+  };
+}
+
+/** GET /payroll/me/activity — the logged-in staff member's own activity log. */
+export async function getMyActivity(): Promise<MyActivityRow[]> {
+  const { data } = await api.get<{
+    data: {
+      id: string;
+      action: string;
+      from_stage: string | null;
+      to_stage: string | null;
+      created_at: string;
+      order_id: string | null;
+      product_name: string | null;
+      student_name: string | null;
+    }[];
+  }>("/payroll/me/activity");
+  return (data.data ?? []).map((r) => ({
+    id: r.id,
+    action: r.action,
+    orderId: r.order_id,
+    fromStage: (r.from_stage as OrderStatus | null) ?? null,
+    toStage: (r.to_stage as OrderStatus | null) ?? null,
+    createdAt: r.created_at,
+    productName: r.product_name,
+    studentName: r.student_name,
+  }));
 }

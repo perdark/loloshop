@@ -48,9 +48,24 @@ ALTER TYPE order_status ADD VALUE IF NOT EXISTS 'embroidery';
 ALTER TYPE order_status ADD VALUE IF NOT EXISTS 'pressing';
 ALTER TYPE order_status ADD VALUE IF NOT EXISTS 'preparing';
 
+-- Migration 012: digitizing stage (تحويل التصميم لتطريز) sits between design_complete and embroidery.
+ALTER TYPE order_status ADD VALUE IF NOT EXISTS 'converting';
+
 -- Staff job-types (Migration 010). Meaningful only when users.role = 'staff'.
+-- Migration 012 adds 'digitizer' (محوّل التطريز) — owns the 'converting' stage.
 DO $$ BEGIN
-  CREATE TYPE staff_type AS ENUM ('designer', 'embroiderer', 'presser', 'preparer', 'manager');
+  CREATE TYPE staff_type AS ENUM ('designer', 'embroiderer', 'presser', 'preparer', 'manager', 'digitizer');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE staff_type ADD VALUE IF NOT EXISTS 'digitizer';
+
+-- Migration 013: student study schedule (صباحي/مسائي), now mandatory at signup.
+DO $$ BEGIN
+  CREATE TYPE study_type AS ENUM ('morning', 'evening');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- Migration 013: staff payroll ledger entry kinds.
+DO $$ BEGIN
+  CREATE TYPE salary_txn_type AS ENUM ('salary_set', 'bonus', 'deduction');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- Individual design approval verdict (Migration 010).
@@ -84,8 +99,11 @@ CREATE TABLE IF NOT EXISTS otp_codes (
   purpose    TEXT NOT NULL DEFAULT 'verify',
   expires_at TIMESTAMPTZ NOT NULL,
   used       BOOLEAN NOT NULL DEFAULT FALSE,
+  attempts   INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+-- Brute-force guard column for pre-existing DBs (idempotent).
+ALTER TABLE otp_codes ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_otp_phone ON otp_codes(phone, used);
 CREATE INDEX IF NOT EXISTS idx_otp_phone_purpose ON otp_codes(phone, purpose, used);
 
@@ -469,8 +487,104 @@ CREATE TABLE IF NOT EXISTS cart_items (
 CREATE INDEX IF NOT EXISTS idx_cart_items_cart ON cart_items(cart_id);
 -- Idempotent upgrade for DBs created before the designed-sash cart line existed.
 ALTER TABLE cart_items ADD COLUMN IF NOT EXISTS design_id UUID REFERENCES designs(id) ON DELETE SET NULL;
+-- Robe tailoring measurements (فصال الروب) carried per cart line → copied to orders.measurements at checkout.
+ALTER TABLE cart_items ADD COLUMN IF NOT EXISTS measurements JSONB;
 
 DROP TRIGGER IF EXISTS trg_carts_updated ON carts;
 CREATE TRIGGER trg_carts_updated BEFORE UPDATE ON carts FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- =====================================================
+-- Migration 013 — batch: signup fields, embroidery text, robe measurements,
+-- production routing flags, staff presence, final design, salary + activity
+-- =====================================================
+
+-- Signup: university_name + department already exist; add study schedule + Instagram.
+ALTER TABLE students ADD COLUMN IF NOT EXISTS study_type study_type;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS instagram_username TEXT;
+
+-- Embroidery options (cap "تطريز القبعة" side/top, robe "تطريز الأكمام"):
+-- require a free-text instruction (what to embroider) in addition to an image.
+ALTER TABLE option_groups ADD COLUMN IF NOT EXISTS requires_customer_text BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE options       ADD COLUMN IF NOT EXISTS requires_customer_text BOOLEAN NOT NULL DEFAULT FALSE;
+-- Student's typed embroidery instruction, snapshotted onto the order line.
+ALTER TABLE order_items   ADD COLUMN IF NOT EXISTS customer_text TEXT;
+
+-- Robe tailoring measurements (فصال الروب) in cm — not priced.
+-- {shoulder_cm, robe_length_cm, sleeve_length_cm}
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS measurements JSONB;
+
+-- Production routing flags, computed at order creation (configureOrder).
+--   has_embroidery: order passes through converting + embroidery stages.
+--   needs_pressing: order also passes through the pressing stage (sash only).
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS has_embroidery BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS needs_pressing BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- Staff presence: who is actively working on an order (admin monitor + soft lock).
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS working_staff_id UUID REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS working_since TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_orders_working_staff ON orders(working_staff_id) WHERE working_staff_id IS NOT NULL;
+
+-- Final design image uploaded by admin/designer when a design is finished
+-- (works for all product types incl. cap/robe where design_id IS NULL).
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS final_design_url TEXT;
+
+-- Backfill routing flags for pre-existing orders (best effort):
+-- designed sashes get the full embroidery+pressing route; everything else stays flat.
+UPDATE orders SET has_embroidery = TRUE, needs_pressing = TRUE
+  WHERE design_id IS NOT NULL AND has_embroidery = FALSE AND needs_pressing = FALSE;
+
+-- =====================================================
+-- STAFF PAYROLL — base salary + ledger of bonuses/deductions (IQD)
+-- =====================================================
+CREATE TABLE IF NOT EXISTS staff_salaries (
+  user_id     UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  base_salary BIGINT NOT NULL DEFAULT 0 CHECK (base_salary >= 0),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_by  UUID REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS staff_salary_transactions (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  type       salary_txn_type NOT NULL,
+  amount     BIGINT NOT NULL CHECK (amount >= 0),
+  reason_ar  TEXT,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_salary_txn_user ON staff_salary_transactions(user_id, created_at DESC);
+
+-- =====================================================
+-- STAFF ACTIVITY LOG — auto-recorded production actions (advance/revert/claim)
+-- =====================================================
+CREATE TABLE IF NOT EXISTS staff_activity_log (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  action     TEXT NOT NULL,
+  order_id   UUID REFERENCES orders(id) ON DELETE SET NULL,
+  from_stage TEXT,
+  to_stage   TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_staff_activity_user ON staff_activity_log(user_id, created_at DESC);
+
+-- =====================================================
+-- STAFF GOALS — incentive targets (e.g. "complete 15 orders before tomorrow").
+-- Progress = completed production actions (advance/approve_design) within the window.
+-- The bonus_amount is auto-awarded as a salary 'bonus' transaction once the target is hit.
+-- =====================================================
+CREATE TABLE IF NOT EXISTS staff_goals (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title_ar     TEXT,
+  target_count INTEGER NOT NULL CHECK (target_count > 0),
+  bonus_amount BIGINT NOT NULL DEFAULT 0 CHECK (bonus_amount >= 0),
+  deadline     TIMESTAMPTZ NOT NULL,
+  awarded      BOOLEAN NOT NULL DEFAULT FALSE,
+  awarded_at   TIMESTAMPTZ,
+  created_by   UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_staff_goals_user ON staff_goals(user_id, created_at DESC);
 
 COMMIT;

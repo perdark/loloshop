@@ -4,6 +4,7 @@ export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
   pending_approval: "بانتظار الموافقة",
   designing: "قيد التصميم",
   design_complete: "اكتمل التصميم",
+  converting: "تحويل التصميم لتطريز",
   staff_review: "مراجعة الموظف",
   printing: "قيد الطباعة",
   embroidery: "قيد التطريز",
@@ -17,10 +18,24 @@ export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
 /** Staff job-type → Arabic label (production pipeline roles). */
 export const STAFF_TYPE_LABELS: Record<StaffType, string> = {
   designer: "مصمم",
+  digitizer: "محوّل التطريز",
   embroiderer: "تطريز",
   presser: "مكوجي",
   preparer: "مجهّز",
   manager: "مدير الإنتاج",
+};
+
+/** Study schedule (mandatory at signup). */
+export const STUDY_TYPE_LABELS: Record<"morning" | "evening", string> = {
+  morning: "صباحي",
+  evening: "مسائي",
+};
+
+/** Salary ledger entry kind → Arabic label. */
+export const SALARY_TXN_LABELS: Record<"salary_set" | "bonus" | "deduction", string> = {
+  salary_set: "تحديد الراتب",
+  bonus: "حافز",
+  deduction: "خصم",
 };
 
 export const PRODUCT_TYPE_LABELS: Record<ProductType, string> = {
@@ -62,6 +77,7 @@ export const ORDER_STATUS_OPTIONS: OrderStatus[] = [
   "pending_approval",
   "designing",
   "design_complete",
+  "converting",
   "staff_review",
   "printing",
   "embroidery",

@@ -10,6 +10,11 @@ import type {
   CreateWholesalerResult,
   HeroSlide,
   OrderStatus,
+  SalaryTransaction,
+  SalaryTxnType,
+  StaffActivity,
+  StaffGoal,
+  StaffSalary,
   StaffOrderScope,
   User,
 } from "./types";
@@ -481,4 +486,142 @@ export async function getAdminAccounting(): Promise<AdminAccounting> {
       data.independent_retail
     ),
   };
+}
+
+// ─── Staff Salary ────────────────────────────────────────────────────────────
+
+interface ApiSalaryTxn {
+  id: string;
+  type: SalaryTxnType;
+  amount: number;
+  reason_ar: string | null;
+  created_at: string;
+}
+
+interface ApiStaffSalary {
+  user_id: string;
+  base_salary: number;
+  balance: number;
+  transactions: ApiSalaryTxn[];
+}
+
+function mapSalaryTxn(r: ApiSalaryTxn): SalaryTransaction {
+  return {
+    id: r.id,
+    type: r.type,
+    amount: Number(r.amount),
+    reasonAr: r.reason_ar,
+    createdAt: r.created_at,
+  };
+}
+
+export async function getStaffSalary(userId: string): Promise<StaffSalary> {
+  const { data } = await api.get<{ data: ApiStaffSalary }>(`/admin/staff/${userId}/salary`);
+  return {
+    userId: data.data.user_id,
+    baseSalary: Number(data.data.base_salary),
+    balance: Number(data.data.balance),
+    transactions: (data.data.transactions || []).map(mapSalaryTxn),
+  };
+}
+
+export async function setStaffSalary(userId: string, baseSalary: number): Promise<void> {
+  await api.post(`/admin/staff/${userId}/salary`, { base_salary: baseSalary });
+}
+
+export async function addStaffBonus(
+  userId: string,
+  amount: number,
+  reasonAr?: string
+): Promise<void> {
+  await api.post(`/admin/staff/${userId}/salary/bonus`, {
+    amount,
+    reason_ar: reasonAr || undefined,
+  });
+}
+
+export async function addStaffDeduction(
+  userId: string,
+  amount: number,
+  reasonAr?: string
+): Promise<void> {
+  await api.post(`/admin/staff/${userId}/salary/deduction`, {
+    amount,
+    reason_ar: reasonAr || undefined,
+  });
+}
+
+// ─── Staff Activity ──────────────────────────────────────────────────────────
+
+interface ApiStaffActivity {
+  id: string;
+  action: string;
+  order_id: string | null;
+  from_stage: string | null;
+  to_stage: string | null;
+  created_at: string;
+}
+
+export async function getStaffActivity(userId: string): Promise<StaffActivity[]> {
+  const { data } = await api.get<{ data: ApiStaffActivity[] }>(`/admin/staff/${userId}/activity`);
+  return (data.data || []).map((r) => ({
+    id: r.id,
+    action: r.action,
+    orderId: r.order_id,
+    fromStage: (r.from_stage as StaffActivity["fromStage"]) ?? null,
+    toStage: (r.to_stage as StaffActivity["toStage"]) ?? null,
+    createdAt: r.created_at,
+  }));
+}
+
+// ─── Staff Goals (incentive targets) ─────────────────────────────────────────
+
+interface ApiStaffGoal {
+  id: string;
+  user_id: string;
+  title_ar: string | null;
+  target_count: number;
+  bonus_amount: number;
+  deadline: string;
+  progress: number;
+  achieved: boolean;
+  awarded: boolean;
+  awarded_at: string | null;
+  expired: boolean;
+  created_at: string;
+}
+
+function mapStaffGoal(r: ApiStaffGoal): StaffGoal {
+  return {
+    id: r.id,
+    userId: r.user_id,
+    titleAr: r.title_ar,
+    targetCount: r.target_count,
+    bonusAmount: Number(r.bonus_amount),
+    deadline: r.deadline,
+    progress: r.progress,
+    achieved: r.achieved,
+    awarded: r.awarded,
+    awardedAt: r.awarded_at,
+    expired: r.expired,
+    createdAt: r.created_at,
+  };
+}
+
+export async function getStaffGoal(userId: string): Promise<StaffGoal | null> {
+  const { data } = await api.get<{ data: ApiStaffGoal | null }>(`/admin/staff/${userId}/goal`);
+  return data.data ? mapStaffGoal(data.data) : null;
+}
+
+export async function setStaffGoal(
+  userId: string,
+  input: { targetCount: number; bonusAmount: number; deadline: string; titleAr?: string }
+): Promise<StaffGoal | null> {
+  const { data } = await api.post<{ data: ApiStaffGoal | null }>(`/admin/staff/${userId}/goal`, {
+    target_count: input.targetCount,
+    bonus_amount: input.bonusAmount,
+    deadline: input.deadline,
+    title_ar: input.titleAr || undefined,
+  });
+  return data.data ? mapStaffGoal(data.data) : null;
 }

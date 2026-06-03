@@ -18,8 +18,10 @@ function makeStorage(subdir) {
   });
 }
 
-const IMAGE_TYPES = /^image\/(png|jpe?g|webp|svg\+xml|heic|heif)$/i;
-const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.svg', '.heic', '.heif']);
+// SVG intentionally excluded — it can carry inline <script> (stored-XSS if ever
+// rendered inline). Raster formats only for customer/logo uploads.
+const IMAGE_TYPES = /^image\/(png|jpe?g|webp|heic|heif)$/i;
+const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.heic', '.heif']);
 
 function imageFilter(req, file, cb) {
   const ext = path.extname(file.originalname || '').toLowerCase();
@@ -43,7 +45,13 @@ const imageUpload = multer({
 });
 
 function publicUrl(req, subdir, filename) {
-  const base = process.env.PUBLIC_URL || `${req.protocol}://${req.get('host')}`;
+  // In dev, files live on THIS host's disk — using a prod PUBLIC_URL would hand
+  // back a 404 link. Only trust PUBLIC_URL in production; otherwise echo the
+  // request host (localhost:4000 in dev).
+  const base =
+    process.env.NODE_ENV === 'production' && process.env.PUBLIC_URL
+      ? process.env.PUBLIC_URL
+      : `${req.protocol}://${req.get('host')}`;
   return `${base}/uploads/${subdir}/${filename}`;
 }
 

@@ -41,7 +41,7 @@ async function getProductFull(req, res) {
   // Load own groups
   const ownGroups = await query(
     `SELECT id, name_ar, input_type, sort, required, has_image, hint_ar, image_url,
-            max_select, gender_restriction, requires_customer_image
+            max_select, gender_restriction, requires_customer_image, requires_customer_text
      FROM option_groups WHERE product_id = $1 AND active = TRUE ORDER BY sort, created_at`,
     [id]
   );
@@ -51,7 +51,7 @@ async function getProductFull(req, res) {
   if (row.parent_id) {
     parentGroups = await query(
       `SELECT id, name_ar, input_type, sort, required, has_image, hint_ar, image_url,
-              max_select, gender_restriction, requires_customer_image
+              max_select, gender_restriction, requires_customer_image, requires_customer_text
        FROM option_groups WHERE product_id = $1 AND active = TRUE ORDER BY sort, created_at`,
       [row.parent_id]
     );
@@ -67,7 +67,8 @@ async function getProductFull(req, res) {
   let options = { rows: [] };
   if (groupIds.length) {
     options = await query(
-      `SELECT o.id, o.group_id, o.label_ar, o.image_url, o.sort, o.requires_customer_image,
+      `SELECT o.id, o.group_id, o.label_ar, o.image_url, o.sort,
+              o.requires_customer_image, o.requires_customer_text,
               COALESCE(opr.price_delta, o.price_delta) AS price_delta
        FROM options o
        LEFT JOIN option_price_roles opr ON opr.option_id = o.id AND opr.role = $2
@@ -230,15 +231,18 @@ async function createGroup(req, res) {
   const { id } = req.params; // product id
   const {
     name_ar, input_type, sort, required, has_image, hint_ar, image_url,
-    max_select, gender_restriction,
+    max_select, gender_restriction, requires_customer_text,
   } = req.body;
   if (!name_ar) return res.status(400).json({ error: 'الاسم مطلوب', code: 'ERR_VALIDATION' });
   const { rows } = await query(
     `INSERT INTO option_groups
-       (product_id, name_ar, input_type, sort, required, has_image, hint_ar, image_url, max_select, gender_restriction)
-     VALUES ($1,$2,COALESCE($3,'single_select'),COALESCE($4,0),COALESCE($5,FALSE),COALESCE($6,FALSE),$7,$8,COALESCE($9,1),$10)
+       (product_id, name_ar, input_type, sort, required, has_image, hint_ar, image_url,
+        max_select, gender_restriction, requires_customer_text)
+     VALUES ($1,$2,COALESCE($3,'single_select'),COALESCE($4,0),COALESCE($5,FALSE),COALESCE($6,FALSE),$7,$8,
+             COALESCE($9,1),$10,COALESCE($11,FALSE))
      RETURNING id`,
-    [id, name_ar, input_type, sort, required, has_image, hint_ar || null, image_url || null, max_select, gender_restriction || null]
+    [id, name_ar, input_type, sort, required, has_image, hint_ar || null, image_url || null,
+     max_select, gender_restriction || null, requires_customer_text]
   );
   res.status(201).json({ data: { id: rows[0].id } });
 }
@@ -246,7 +250,7 @@ async function createGroup(req, res) {
 async function updateGroup(req, res) {
   const upd = buildUpdate(
     'option_groups',
-    ['name_ar', 'input_type', 'sort', 'required', 'has_image', 'hint_ar', 'image_url', 'max_select', 'gender_restriction', 'requires_customer_image', 'active'],
+    ['name_ar', 'input_type', 'sort', 'required', 'has_image', 'hint_ar', 'image_url', 'max_select', 'gender_restriction', 'requires_customer_image', 'requires_customer_text', 'active'],
     req.body, req.params.id
   );
   if (!upd) return res.status(400).json({ error: 'لا تغييرات', code: 'ERR_VALIDATION' });
@@ -264,12 +268,12 @@ async function deleteGroup(req, res) {
 // ---------- ADMIN: options ----------
 async function createOption(req, res) {
   const { id } = req.params; // group id
-  const { label_ar, price_delta, image_url, sort } = req.body;
+  const { label_ar, price_delta, image_url, sort, requires_customer_text } = req.body;
   if (!label_ar) return res.status(400).json({ error: 'الاسم مطلوب', code: 'ERR_VALIDATION' });
   const { rows } = await query(
-    `INSERT INTO options (group_id, label_ar, price_delta, image_url, sort)
-     VALUES ($1, $2, COALESCE($3,0), $4, COALESCE($5,0)) RETURNING id`,
-    [id, label_ar, price_delta, image_url || null, sort]
+    `INSERT INTO options (group_id, label_ar, price_delta, image_url, sort, requires_customer_text)
+     VALUES ($1, $2, COALESCE($3,0), $4, COALESCE($5,0), COALESCE($6,FALSE)) RETURNING id`,
+    [id, label_ar, price_delta, image_url || null, sort, requires_customer_text]
   );
   res.status(201).json({ data: { id: rows[0].id } });
 }
@@ -277,7 +281,7 @@ async function createOption(req, res) {
 async function updateOption(req, res) {
   const upd = buildUpdate(
     'options',
-    ['label_ar', 'price_delta', 'image_url', 'sort', 'requires_customer_image', 'active'],
+    ['label_ar', 'price_delta', 'image_url', 'sort', 'requires_customer_image', 'requires_customer_text', 'active'],
     req.body, req.params.id
   );
   if (!upd) return res.status(400).json({ error: 'لا تغييرات', code: 'ERR_VALIDATION' });
@@ -403,7 +407,7 @@ async function createPackage(req, res) {
   }
   const { rows } = await query(
     `INSERT INTO packages (name_ar, price, role, image_url, sort)
-     VALUES ($1, $2, COALESCE($3,'wholesaler'), $4, COALESCE($5,0)) RETURNING id`,
+     VALUES ($1, $2, COALESCE($3::price_role,'wholesaler'), $4, COALESCE($5,0)) RETURNING id`,
     [name_ar, price, role || null, image_url || null, sort || null]
   );
   res.status(201).json({ data: { id: rows[0].id } });

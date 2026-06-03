@@ -1,11 +1,10 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
-import { getFabric } from "@/lib/fabric-loader";
-import { loadPanelOntoCanvas } from "@/lib/render-sash-panel";
+import { renderPanelToDataUrl } from "@/lib/render-sash-panel";
 import { SASH_COLOR_HEX } from "@/lib/designer-colors";
 
 const SashGownPreview = dynamic(
@@ -29,61 +28,34 @@ function ReadOnlyPanel({
   height: number;
   fontsUsed?: string[];
 }) {
-  const canvasElRef = useRef<HTMLCanvasElement>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const fabricRef = useRef<any>(null);
+  const [url, setUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   // Resolve the fabric color vars so the .sash-stage wrapper reads as real fabric
   const fabricColors =
     SASH_COLOR_HEX[sashColor ?? "أبيض"] ?? SASH_COLOR_HEX["أبيض"];
 
+  // Render via the SAME proven rasterizer used by the staff PNG/board export
+  // (transparent background so the .sash-stage fabric texture shows through).
+  const fontsKey = (fontsUsed ?? []).join("|");
   useEffect(() => {
-    return () => {
-      try {
-        fabricRef.current?.dispose();
-      } catch {
-        // ignore
-      }
-      fabricRef.current = null;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!canvasElRef.current) return;
-    let disposed = false;
-
-    (async () => {
-      const fabric = await getFabric();
-      if (disposed || !canvasElRef.current) return;
-
-      let canvas = fabricRef.current;
-      if (!canvas) {
-        canvas = new fabric.StaticCanvas(canvasElRef.current, {
-          width,
-          height,
-        });
-        fabricRef.current = canvas;
-      } else {
-        canvas.setDimensions({ width, height });
-      }
-
-      try {
-        await loadPanelOntoCanvas(canvas, {
-          json,
-          sashColor,
-          targetWidth: width,
-          targetHeight: height,
-          fontsUsed,
-        });
-      } catch {
-        // ignore corrupt JSON
-      }
-    })();
-
-    return () => {
-      disposed = true;
-    };
-  }, [json, sashColor, width, height, fontsUsed]);
+    let alive = true;
+    setLoading(true);
+    renderPanelToDataUrl({
+      json,
+      sashColor,
+      targetWidth: width * 2,
+      targetHeight: height * 2,
+      fontsUsed,
+      transparentBg: true,
+    })
+      .then((u) => { if (alive) setUrl(u); })
+      .catch(() => { if (alive) setUrl(null); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+    // fontsKey stands in for the fontsUsed array identity
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [json, sashColor, width, height, fontsKey]);
 
   return (
     <div className="flex flex-col items-center gap-3">
@@ -99,8 +71,26 @@ function ReadOnlyPanel({
           } as React.CSSProperties
         }
       >
-        <div className="overflow-hidden rounded-xl">
-          <canvas ref={canvasElRef} />
+        <div
+          className="relative flex items-center justify-center overflow-hidden rounded-xl"
+          style={{ width, height }}
+        >
+          {loading ? (
+            <Spinner />
+          ) : url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={url}
+              alt={label}
+              width={width}
+              height={height}
+              className="block h-full w-full object-contain"
+            />
+          ) : (
+            <span className="px-3 text-center text-xs text-ink-soft">
+              لا يوجد تصميم لهذا الجانب
+            </span>
+          )}
         </div>
       </div>
       <span className="text-sm font-semibold text-ink">{label}</span>

@@ -5,6 +5,7 @@ import type {
   OrderBreakdownDetail,
   OrderBreakdownLine,
   PriceRole,
+  RobeMeasurements,
 } from "./types";
 import type { OptionSelection } from "./pricing";
 import { selectionKey } from "./customerImage";
@@ -14,12 +15,14 @@ export interface ConfigureSelectionPayload {
   option_id: string;
   qty?: number;
   customer_image_url?: string;
+  customer_text?: string;
 }
 
 export function buildConfigureSelections(
   product: CatalogProduct,
   selection: OptionSelection,
-  customerImages: Record<string, string> = {}
+  customerImages: Record<string, string> = {},
+  customerTexts: Record<string, string> = {}
 ): ConfigureSelectionPayload[] {
   const out: ConfigureSelectionPayload[] = [];
 
@@ -54,6 +57,9 @@ export function buildConfigureSelections(
     const url = customerImages[selectionKey(group.id, optionId)];
     if (url) row.customer_image_url = url;
 
+    const text = customerTexts[selectionKey(group.id, optionId)];
+    if (text?.trim()) row.customer_text = text.trim();
+
     out.push(row);
   }
 
@@ -79,15 +85,18 @@ export async function configureOrder(payload: {
   designId?: string;
   batchId?: string;
   selections: ConfigureSelectionPayload[];
+  measurements?: RobeMeasurements;
 }): Promise<ConfigureOrderResult> {
+  const body: Record<string, unknown> = {
+    product_id: payload.productId,
+    design_id: payload.designId,
+    batch_id: payload.batchId,
+    selections: payload.selections,
+  };
+  if (payload.measurements) body.measurements = payload.measurements;
   const { data } = await api.post<{ data: Record<string, unknown> }>(
     "/orders/configure",
-    {
-      product_id: payload.productId,
-      design_id: payload.designId,
-      batch_id: payload.batchId,
-      selections: payload.selections,
-    }
+    body
   );
   const raw = data.data;
   const breakdown = (raw.breakdown as Record<string, unknown>[]) || [];

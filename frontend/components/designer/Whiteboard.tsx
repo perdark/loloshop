@@ -75,12 +75,23 @@ export function Whiteboard({ side, fonts, onApply, onClose }: Props) {
       const fabric = await getFabric();
       if (disposed || !canvasElRef.current) return;
       fabricLibRef.current = fabric;
+      const isTouch = typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
       const canvas = new fabric.Canvas(canvasElRef.current, {
         width: BOARD.w,
         height: BOARD.h,
         backgroundColor: "#fffdf8",
         preserveObjectStacking: true,
       });
+      // ── Mobile-friendly control handles (cast via any — Fabric v6 types are
+      //    incomplete; these properties exist at runtime on fabric.Canvas) ──
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const cv = canvas as any;
+      cv.cornerSize = isTouch ? 28 : 12;
+      cv.touchCornerSize = 26;
+      cv.cornerStyle = "circle";
+      cv.transparentCorners = false;
+      cv.cornerColor = "#f47b42";
+      cv.borderColor = "#f47b42";
       fabricRef.current = canvas;
       canvas.on("selection:created", () => setHasSelection(true));
       canvas.on("selection:updated", () => setHasSelection(true));
@@ -209,7 +220,14 @@ export function Whiteboard({ side, fonts, onApply, onClose }: Props) {
       fill: textColor,
       direction: "rtl",
       editable: false,
+      // Decorations are scale-only — mark and lock movement + rotation.
+      isDecoration: true,
+      lockMovementX: true,
+      lockMovementY: true,
+      lockRotation: true,
     });
+    // Hide rotation handle; keep scale corners.
+    obj.setControlsVisibility?.({ mtr: false });
     canvas.add(obj);
     canvas.setActiveObject(obj);
     canvas.renderAll();
@@ -282,6 +300,20 @@ export function Whiteboard({ side, fonts, onApply, onClose }: Props) {
     onApply(json, Array.from(usedFontsRef.current));
   }
 
+  /** Scale the currently-selected object by a multiplier (clamped). */
+  function scaleSelected(factor: number) {
+    const canvas = fabricRef.current;
+    const obj = canvas?.getActiveObject();
+    if (!obj) return;
+    const sx = (obj.scaleX ?? 1) * factor;
+    const sy = (obj.scaleY ?? 1) * factor;
+    const clamped = Math.min(10, Math.max(0.05, sx));
+    const clampedY = Math.min(10, Math.max(0.05, sy));
+    obj.set({ scaleX: clamped, scaleY: clampedY });
+    obj.setCoords?.();
+    canvas.requestRenderAll();
+  }
+
   const sideLabel = side === "left" ? "اليسار" : "اليمين";
 
   return (
@@ -319,8 +351,35 @@ export function Whiteboard({ side, fonts, onApply, onClose }: Props) {
               </div>
             )}
             <canvas ref={canvasElRef} className="rounded-md shadow-lg ring-1 ring-ink/10" />
-            <p className="mt-2 text-center text-xs text-[var(--shop-muted)]">
-              اسحب أي عنصر لأي مكان • اسحب الزوايا للتكبير والتدوير
+            {/* On-screen scale control — visible when an object is selected,
+                useful on mobile where corner handles are small. */}
+            <div
+              className={`mt-2 flex items-center justify-center gap-2 transition-opacity ${hasSelection ? "opacity-100" : "pointer-events-none opacity-0"}`}
+              aria-hidden={!hasSelection}
+              dir="rtl"
+            >
+              <button
+                type="button"
+                onClick={() => scaleSelected(0.9)}
+                className="flex min-h-11 min-w-11 items-center justify-center rounded-full border border-line bg-surface text-xl font-bold text-ink shadow-sm transition-colors hover:bg-surface-sink active:scale-95"
+                aria-label="تصغير العنصر"
+                title="تصغير"
+              >
+                −
+              </button>
+              <span className="text-xs text-[var(--shop-muted)]">الحجم</span>
+              <button
+                type="button"
+                onClick={() => scaleSelected(1.1)}
+                className="flex min-h-11 min-w-11 items-center justify-center rounded-full border border-line bg-surface text-xl font-bold text-ink shadow-sm transition-colors hover:bg-surface-sink active:scale-95"
+                aria-label="تكبير العنصر"
+                title="تكبير"
+              >
+                +
+              </button>
+            </div>
+            <p className="mt-1 text-center text-xs text-[var(--shop-muted)]">
+              الزوايا للتكبير والتدوير
             </p>
           </div>
         </main>
