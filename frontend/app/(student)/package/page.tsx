@@ -2,8 +2,8 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useState, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { getApiErrorMessage } from "@/lib/api";
 import { getProductFull } from "@/lib/catalog";
@@ -17,6 +17,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
  * Shared package-form page.
  * - Wholesaler-students land here via the home-page redirect.
  * - Retail students come from the "أكمل باكج التخرّج" cart suggestion card.
+ * - VIP showcase routes here with ?pkg=<packageId> to pre-select a tier.
  * The form shows what's included, a cap-shape picker, the price,
  * and a confirm button → redirects to /design on success.
  */
@@ -46,8 +47,24 @@ function PackageSkeleton() {
   );
 }
 
+/**
+ * Shell that satisfies Next 16's requirement: useSearchParams must be inside
+ * a <Suspense> boundary. PackagePageContent reads the param synchronously.
+ */
 export default function PackagePage() {
+  return (
+    <Suspense fallback={<PackageSkeleton />}>
+      <PackagePageContent />
+    </Suspense>
+  );
+}
+
+function PackagePageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // ?pkg=<packageId> lets the VIP showcase (or any deep-link) pre-select a tier.
+  const preselectedPkgId = searchParams.get("pkg");
+
   const [packages, setPackages] = useState<PackageTier[]>([]);
   const [selected, setSelected] = useState<PackageTier | null>(null);
   const [capOptions, setCapOptions] = useState<CatalogOption[]>([]);
@@ -76,9 +93,14 @@ export default function PackagePage() {
         setCapOptions(caps);
       }
 
-      if (pkgs[0]) {
-        setSelected(pkgs[0]);
-        const def = pkgs[0].defaultCapOptionId;
+      // Pre-select the tier requested via ?pkg= (e.g. from VIP showcase),
+      // otherwise fall back to the first available package.
+      const preselect =
+        (preselectedPkgId && pkgs.find((p) => p.id === preselectedPkgId)) ||
+        pkgs[0];
+      if (preselect) {
+        setSelected(preselect);
+        const def = preselect.defaultCapOptionId;
         const defaultCap =
           def && caps.some((o) => o.id === def) ? def : (caps[0]?.id ?? "");
         setCapOptionId(defaultCap);
@@ -89,6 +111,8 @@ export default function PackagePage() {
     } finally {
       setLoading(false);
     }
+  // preselectedPkgId comes from URL and is stable for the lifetime of this render
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
