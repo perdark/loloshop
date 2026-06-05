@@ -52,6 +52,10 @@ export function StudentNav() {
   const [cartCount, setCartCount] = useState(0);
   // Hide on scroll-down, reveal on scroll-up — keeps the cinematic frames clear.
   const [hidden, setHidden] = useState(false);
+  // Immersive routes (VIP) hide the header over the hero so the lookbook cover
+  // reads full-bleed on first paint, revealing it once the hero is scrolled past.
+  const immersive = pathname.startsWith("/vip");
+  const [pastHero, setPastHero] = useState(false);
 
   useEffect(() => {
     const token = getToken();
@@ -72,6 +76,7 @@ export function StudentNav() {
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => {
         const y = window.scrollY;
+        setPastHero(y > window.innerHeight * 0.6);
         if (Math.abs(y - last) > 6) {
           setHidden(y > last && y > 80);
           last = y;
@@ -79,6 +84,7 @@ export function StudentNav() {
       });
     };
     window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
     return () => {
       window.removeEventListener("scroll", onScroll);
       cancelAnimationFrame(raf);
@@ -97,8 +103,14 @@ export function StudentNav() {
 
   return (
     <header
-      className={`animate-nav-in sticky top-0 z-40 border-b border-line bg-cream/97 shadow-[var(--shadow-soft)] transition-[translate] duration-300 ease-out ${
-        hidden ? "-translate-y-full" : "translate-y-0"
+      className={`${immersive ? "" : "animate-nav-in"} ${
+        immersive ? "fixed inset-x-0" : "sticky"
+      } top-0 z-40 transition-[translate] duration-300 ease-out ${
+        (immersive ? !pastHero : hidden) ? "-translate-y-full" : "translate-y-0"
+      } ${
+        immersive && !pastHero
+          ? ""
+          : "border-b border-line bg-cream/97 shadow-[var(--shadow-soft)]"
       }`}
       style={{ viewTransitionName: "student-header" }}
     >

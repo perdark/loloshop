@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
 import { Modal } from "@/components/ui/Modal";
 import { DesignerStepper } from "@/components/designer/DesignerStepper";
+import { VipTierGate } from "@/components/vip/VipTierGate";
 import { SashGownPreview } from "@/components/designer/SashGownPreview";
 import { OptionGroupField } from "@/components/catalog/OptionGroupField";
 import { CustomerImageUpload } from "@/components/catalog/CustomerImageUpload";
@@ -51,6 +52,7 @@ export default function DesignPage() {
     bootError,
     studentStatus,
     completedLocked,
+    isRepStudent,
     product,
     selection,
     customerImages,
@@ -90,6 +92,32 @@ export default function DesignPage() {
     gender,
     pickGender,
   } = draft;
+
+  // VIP tier pre-step (retail only). Navigational: "vip" → /vip showcase; "standard"
+  // proceeds with the unchanged design flow. Remembered so it shows once per draft.
+  const [tier, setTier] = useState<"standard" | "vip" | null>(null);
+  const [tierLoaded, setTierLoaded] = useState(false);
+  useEffect(() => {
+    try {
+      const t = sessionStorage.getItem("loloshop_draft_tier");
+      if (t === "standard" || t === "vip") setTier(t);
+    } catch {
+      /* ignore */
+    }
+    setTierLoaded(true);
+  }, []);
+  const resolveTier = useCallback(
+    (choice: "standard" | "vip") => {
+      try {
+        sessionStorage.setItem("loloshop_draft_tier", choice);
+      } catch {
+        /* ignore */
+      }
+      setTier(choice);
+      if (choice === "vip") router.push("/vip");
+    },
+    [router]
+  );
 
   if (authLoading || bootLoading) {
     return (
@@ -143,6 +171,30 @@ export default function DesignPage() {
         <Button variant="primary" onClick={() => router.push("/")}>
           العودة للرئيسية
         </Button>
+      </div>
+    );
+  }
+
+  // VIP tier gate — fresh retail draft only; never interrupts an in-progress design.
+  if (
+    tierLoaded &&
+    tier === null &&
+    !isRepStudent &&
+    product &&
+    step === 1 &&
+    !leftJson &&
+    !rightJson &&
+    !editingSide
+  ) {
+    return (
+      <div className="mx-auto min-h-screen max-w-4xl bg-cream">
+        <header className="flex items-center gap-3 border-b border-line bg-surface px-4 py-3">
+          <BrandMark size={40} />
+          <h1 className="font-display-ar text-xl font-semibold text-ink">صمّم وشاحك</h1>
+        </header>
+        <main className="px-4 py-10 animate-page-in">
+          <VipTierGate standardPrice={product.basePrice} onResolved={resolveTier} />
+        </main>
       </div>
     );
   }

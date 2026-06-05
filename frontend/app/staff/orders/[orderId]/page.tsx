@@ -10,7 +10,7 @@ import { ExportPngButton } from "@/components/staff/ExportPngButton";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
-import { ORDER_SOURCE_LABELS, ORDER_STATUS_LABELS } from "@/lib/constants";
+import { ORDER_SOURCE_LABELS, ORDER_STATUS_LABELS, PRODUCT_TYPE_LABELS } from "@/lib/constants";
 import { formatDateIQ } from "@/lib/format";
 import {
   getProductionOrder,
@@ -36,17 +36,6 @@ function resolveImageUrl(url: string | null | undefined): string | null {
     "http://localhost:4000";
   return `${base}${url.startsWith("/") ? "" : "/"}${url}`;
 }
-
-// ─── Stage-advance button labels ─────────────────────────────────────────────
-
-const ADVANCE_LABELS: Partial<Record<string, string>> = {
-  design_complete: "إرسال للتحويل / التطريز",
-  converting:      "إنهاء التحويل، نقل للتطريز",
-  embroidery:      "إنهاء التطريز، نقل للكوي",
-  pressing:        "إنهاء الكوي، نقل للتجهيز",
-  preparing:       "إنهاء التجهيز، تحديد جاهز",
-  ready:           "تأكيد التسليم",
-};
 
 // ─── Final design upload widget ───────────────────────────────────────────────
 
@@ -105,7 +94,7 @@ function FinalDesignUpload({
                 fill
                 sizes="(max-width: 768px) 100vw, 50vw"
                 className="object-contain"
-                loading="lazy"
+                loading="eager"
                 unoptimized
               />
             </div>
@@ -248,7 +237,8 @@ export default function ProductionOrderDetailPage() {
       );
       await releaseOrder(orderId).catch(() => undefined);
       hasClaimedRef.current = false;
-      // Back to the queue so the next order can be picked up immediately.
+      // Invalidate App Router cache before navigating so browser-back shows fresh status.
+      router.refresh();
       router.push("/staff");
     } catch (err) {
       toast.error(getApiErrorMessage(err, "تعذر تحديث الحالة"));
@@ -266,9 +256,12 @@ export default function ProductionOrderDetailPage() {
         `تم الإرجاع إلى: ${ORDER_STATUS_LABELS[updated.status as keyof typeof ORDER_STATUS_LABELS] ?? updated.status}`
       );
       setRevertOpen(false);
+      // Invalidate App Router cache before navigating.
+      router.refresh();
       router.push("/staff");
     } catch (err) {
       toast.error(getApiErrorMessage(err, "تعذر إرجاع الطلب"));
+      setRevertOpen(false);
     } finally {
       setRevertSubmitting(false);
     }
@@ -280,6 +273,7 @@ export default function ProductionOrderDetailPage() {
     try {
       await approveDesign(detail.design.id);
       toast.success("تمت الموافقة على التصميم");
+      router.refresh();
       router.push("/staff");
     } catch (err) {
       toast.error(getApiErrorMessage(err, "تعذر الموافقة على التصميم"));
@@ -299,9 +293,11 @@ export default function ProductionOrderDetailPage() {
       toast.success("تم رفض التصميم");
       setRejectOpen(false);
       setRejectReason("");
+      router.refresh();
       router.push("/staff");
     } catch (err) {
       toast.error(getApiErrorMessage(err, "تعذر رفض التصميم"));
+      setRejectOpen(false);
     } finally {
       setRejectSubmitting(false);
     }
@@ -351,10 +347,8 @@ export default function ProductionOrderDetailPage() {
     );
   }
 
-  const { order, design, items, package_orders, bundle, can_see_design } = detail;
-  const staffType = user?.staff_type;
-  const isManager = user?.role === "admin" || staffType === "manager";
-  const isDesigner = staffType === "designer";
+  const { order, design, items, package_orders, bundle, can_see_design, available_actions } = detail;
+  const productLabel = PRODUCT_TYPE_LABELS[order.product_type as keyof typeof PRODUCT_TYPE_LABELS] ?? "المنتج";
   const isAdmin = user?.role === "admin";
 
   // Presence banner — someone else is working on this order. `conflictOwner` is
@@ -377,45 +371,15 @@ export default function ProductionOrderDetailPage() {
   const showCanvas =
     can_see_design && (design?.left_canvas != null || design?.right_canvas != null);
 
-  // True when there's student artwork awaiting the designer's verdict.
-  const canApprove =
-    (isDesigner || isManager) &&
-    design?.approval_status === "pending" &&
-    order.status === "design_complete";
+  // Actions are exclusively derived from the server's available_actions object —
+  // no parallel frontend state machine. This means buttons shown == buttons that work.
+  const canApprove = available_actions.can_approve;
+  const canReject = available_actions.can_reject;
+  const showAdvance = !!available_actions.advance;
+  const showRevert = !!available_actions.revert;
+  const advanceLabel = available_actions.advance?.label ?? "تقدم للمرحلة التالية";
 
-  const showAdvance =
-    ADVANCE_LABELS[order.status] !== undefined &&
-    (isManager ||
-      (isDesigner &&
-        order.status === "design_complete" &&
-        design?.approval_status === "approved") ||
-      (isDesigner && order.status === "converting") ||
-      (staffType === "digitizer" && order.status === "converting") ||
-      (staffType === "embroiderer" && order.status === "embroidery") ||
-      (staffType === "presser" && order.status === "pressing") ||
-      (staffType === "preparer" &&
-        (order.status === "preparing" || order.status === "ready")));
-
-  // Show revert for stage owner + manager when not in terminal state
-  const revertableStatuses = [
-    "design_complete", "converting", "embroidery", "pressing", "preparing", "ready",
-  ];
-  const showRevert =
-    revertableStatuses.includes(order.status) &&
-    (isManager ||
-      (isDesigner && (order.status === "design_complete" || order.status === "converting")) ||
-      (staffType === "digitizer" && order.status === "converting") ||
-      (staffType === "embroiderer" && order.status === "embroidery") ||
-      (staffType === "presser" && order.status === "pressing") ||
-      (staffType === "preparer" && (order.status === "preparing" || order.status === "ready")));
-
-  const advanceLabel = ADVANCE_LABELS[order.status] ?? "تقدم للمرحلة التالية";
-
-  // Approve and advance never apply to the same order, so they're presented as ONE
-  // primary button. A sash with pending artwork → "موافقة على التصميم" (approve +
-  // advance in a single click); everything else (design-less cap/robe, later stages)
-  // → the plain stage-advance label. Reject stays a secondary action, shown only
-  // when there's a design to judge.
+  // Approve and advance never apply to the same order, presented as ONE primary button.
   const showPrimaryAction = canApprove || showAdvance;
   const primaryLabel = canApprove ? "موافقة على التصميم" : advanceLabel;
   const onPrimaryAction = canApprove ? handleApprove : handleAdvance;
@@ -477,7 +441,7 @@ export default function ProductionOrderDetailPage() {
               {primaryLabel}
             </Button>
           )}
-          {canApprove && (
+          {canReject && (
             <Button
               variant="danger"
               fullWidth
@@ -499,9 +463,9 @@ export default function ProductionOrderDetailPage() {
         </div>
       )}
 
-      {/* Final design upload — MOBILE: top of page, below the action button */}
+      {/* Final design upload — single instance, visible at all breakpoints */}
       {showFinalDesignUpload && (
-        <div className="mb-4 sm:hidden">
+        <div className="mb-4">
           <FinalDesignUpload
             orderId={orderId}
             currentUrl={order.final_design_url}
@@ -514,7 +478,7 @@ export default function ProductionOrderDetailPage() {
         {/* ── Design / sash preview panel ── */}
         <section className="rounded-3xl border border-line bg-surface p-4 shadow-[var(--shadow-card)] lg:p-6">
           <h2 className="mb-4 font-display-ar text-lg font-bold text-ink">
-            {can_see_design ? "معاينة التصميم" : "بيانات الوشاح"}
+            {can_see_design ? "معاينة التصميم" : `بيانات ${productLabel}`}
           </h2>
 
           {can_see_design && showCanvas && design ? (
@@ -537,7 +501,7 @@ export default function ProductionOrderDetailPage() {
           ) : can_see_design && !showCanvas ? (
             <div className="flex min-h-48 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-line bg-surface-sink p-6 text-center">
               <p className="text-sm font-medium text-ink-soft">لا يوجد تصميم محفوظ بعد</p>
-              <p className="text-xs text-muted">لم يكمل الطالب تصميم الوشاح حتى الآن</p>
+              <p className="text-xs text-muted">{`لم يكمل الطالب تصميم ${productLabel} حتى الآن`}</p>
             </div>
           ) : (
             <div className="space-y-4">
@@ -562,16 +526,6 @@ export default function ProductionOrderDetailPage() {
             </div>
           )}
 
-          {/* Final design upload — DESKTOP: bottom of the sash-design column (right side in RTL) */}
-          {showFinalDesignUpload && (
-            <div className="mt-6 hidden sm:block">
-              <FinalDesignUpload
-                orderId={orderId}
-                currentUrl={order.final_design_url}
-                onUploaded={handleFinalDesignUploaded}
-              />
-            </div>
-          )}
         </section>
 
         {/* ── Side panel ── */}
@@ -700,12 +654,12 @@ export default function ProductionOrderDetailPage() {
             </article>
           )}
 
-          {/* Options breakdown */}
-          {items.length > 0 && (
+          {/* Options breakdown — filter out the synthetic base-price row (group_id=null) */}
+          {items.filter((i) => i.group_id !== null).length > 0 && (
             <article className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
               <h3 className="mb-3 text-sm font-semibold text-ink">خيارات الطلب</h3>
               <ul className="space-y-3">
-                {items.map((item, idx) => (
+                {items.filter((i) => i.group_id !== null).map((item, idx) => (
                   <li key={idx} className="space-y-1.5">
                     <div className="flex items-center justify-between gap-2 text-sm">
                       <span className="text-ink-soft">{item.label_snapshot}</span>
@@ -861,7 +815,7 @@ export default function ProductionOrderDetailPage() {
                     {primaryLabel}
                   </Button>
                 )}
-                {canApprove && (
+                {canReject && (
                   <Button
                     variant="danger"
                     fullWidth

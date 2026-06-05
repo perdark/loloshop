@@ -66,13 +66,17 @@ function isManager(u) {
 
 // Route-aware next stage: design-bearing sashes must use approve (not advance).
 // Advance is for: converting, embroidery, pressing, preparing, ready + design-less embroidery orders
-// from design_complete.
+// from design_complete. An APPROVED design at design_complete may also advance (sash done, move on).
 function nextStageFor(order) {
-  const { status, design_id, needs_pressing } = order;
+  const { status, design_id, needs_pressing, design_approval_status } = order;
   switch (status) {
     case 'design_complete':
-      // design-bearing sash must use approve endpoint, not advance
-      if (design_id) return null;
+      // design-bearing sash: must be approved before it can advance to converting.
+      // Pending or rejected designs still need the designer's verdict first.
+      if (design_id) {
+        if (design_approval_status === 'approved') return 'converting';
+        return null; // pending/rejected → use approve endpoint
+      }
       return 'converting';
     case 'converting':
       return 'embroidery';
@@ -89,7 +93,9 @@ function nextStageFor(order) {
   }
 }
 
-// REVERT map: one step back for each status
+// REVERT map: one step back for each status.
+// design_complete → designing so the student/staff can submit a new design.
+// When reverting to designing the advance() handler resets the design approval_status to 'pending'.
 const REVERT_MAP = {
   delivered: 'preparing',
   ready: 'preparing',
@@ -97,6 +103,7 @@ const REVERT_MAP = {
   pressing: 'embroidery',
   embroidery: 'converting',
   converting: 'design_complete',
+  design_complete: 'designing',
 };
 
 // ---------- Stage-scoped work queue for the requesting staff member ----------
@@ -245,6 +252,45 @@ async function getOrder(req, res) {
     }
   }
 
+  // Compute available_actions from the same state machine used by POST handlers,
+  // so the frontend never shows a button the backend would reject.
+  const orderForActions = {
+    ...order,
+    design_approval_status: design?.approval_status ?? null,
+  };
+  const nextTo = nextStageFor(orderForActions);
+  const revertTo = REVERT_MAP[order.status] ?? null;
+
+  const { canStaffTransition: canTransition } = require('./orderController');
+
+  const ADVANCE_LABEL_AR = {
+    design_complete: 'إرسال للتحويل / التطريز',
+    converting:      'إنهاء التحويل، نقل للتطريز',
+    embroidery:      'إنهاء التطريز، نقل للكوي',
+    pressing:        'إنهاء الكوي، نقل للتجهيز',
+    preparing:       'إنهاء التجهيز، تحديد جاهز',
+    ready:           'تأكيد التسليم',
+  };
+
+  const available_actions = {
+    advance: nextTo && canTransition(u, order.status, nextTo)
+      ? { to: nextTo, label: ADVANCE_LABEL_AR[order.status] ?? 'تقدم للمرحلة التالية' }
+      : null,
+    revert: revertTo && canTransition(u, order.status, revertTo)
+      ? { to: revertTo }
+      : null,
+    can_approve:
+      !!design &&
+      design.approval_status === 'pending' &&
+      order.status === 'design_complete' &&
+      (u.staff_type === 'designer' || isManager(u)),
+    can_reject:
+      !!design &&
+      design.approval_status === 'pending' &&
+      order.status === 'design_complete' &&
+      (u.staff_type === 'designer' || isManager(u)),
+  };
+
   res.json({
     data: {
       order,
@@ -253,6 +299,7 @@ async function getOrder(req, res) {
       bundle,
       package_orders: bundle, // backward-compat alias
       can_see_design: !presserOnly,
+      available_actions,
     },
   });
 }
@@ -262,8 +309,10 @@ async function advance(req, res) {
   const { id } = req.params;
   const cur = await query(
     `SELECT o.id, o.status, o.design_id, o.has_embroidery, o.needs_pressing,
-            s.user_id, s.wholesaler_id
-     FROM orders o JOIN students s ON s.id = o.student_id WHERE o.id = $1`,
+            s.user_id, s.wholesaler_id, d.approval_status AS design_approval_status
+     FROM orders o JOIN students s ON s.id = o.student_id
+     LEFT JOIN designs d ON d.id = o.design_id
+     WHERE o.id = $1`,
     [id]
   );
   if (!cur.rows.length) return res.status(404).json({ error: 'الطلب غير موجود', code: 'ERR_NOT_FOUND' });
@@ -313,7 +362,7 @@ async function advance(req, res) {
 async function revert(req, res) {
   const { id } = req.params;
   const cur = await query(
-    `SELECT o.id, o.status, s.user_id, s.wholesaler_id
+    `SELECT o.id, o.status, o.design_id, s.user_id, s.wholesaler_id
      FROM orders o JOIN students s ON s.id = o.student_id WHERE o.id = $1`,
     [id]
   );
@@ -336,6 +385,15 @@ async function revert(req, res) {
        WHERE id = $2 RETURNING id, status`,
       [to, id]
     );
+    // Reverting to designing resets the design to pending so the student/staff
+    // can submit a new design and the approve→advance flow works again.
+    if (to === 'designing' && order.design_id) {
+      await client.query(
+        `UPDATE designs SET approval_status = 'pending', rejection_reason = NULL
+         WHERE id = $1`,
+        [order.design_id]
+      );
+    }
     await client.query(
       `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
        VALUES ($1, 'status_revert', 'order', $2, $3)`,

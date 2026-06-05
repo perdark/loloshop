@@ -358,6 +358,8 @@ export interface PackageTier {
   nameAr: string;
   price: number;
   imageUrl?: string | null;
+  /** Second editorial photo for the VIP "story" band (admin-managed). */
+  storyImageUrl?: string | null;
   sort?: number;
   active?: boolean;
   sashTypeOptionId: string;
@@ -367,6 +369,35 @@ export interface PackageTier {
   robeProductId?: string;
   sashProductId?: string;
   capProductId?: string;
+  /** VIP tier (premium retail graduation bundle). */
+  isVip?: boolean;
+  description?: string | null;
+  /** Ordered Arabic perks/benefits shown on the VIP showcase. */
+  features?: string[];
+  /** Display-only "what's inside" checklist. */
+  includedItems?: string[];
+  /** e.g. "VIP" / "الأفخم" — falls back to "VIP" in the UI. */
+  badgeLabel?: string | null;
+  /** Hex accent for the badge/halo ONLY (never body text). */
+  accent?: string | null;
+}
+
+/** Result of probing whether the student has a bundle worth upgrading to VIP. */
+export interface VipUpgradeContext {
+  upgradeable: boolean;
+  reason: "none" | "already_vip" | "in_production" | "no_student" | null;
+  locator: { from_package_id?: string; checkout_group_id?: string; order_id?: string } | null;
+  orderIds: string[];
+  currentTotal: number;
+  packageName: string | null;
+  missingTypes: ProductType[];
+}
+
+export interface VipUpgradeResult {
+  orderIds: string[];
+  total: number;
+  packageName: string;
+  missingTypes: ProductType[];
 }
 
 export interface BatchSummary {

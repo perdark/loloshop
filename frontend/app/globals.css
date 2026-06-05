@@ -85,6 +85,11 @@
   --shadow-card: 0 2px 8px -3px rgba(26, 26, 26, 0.10), 0 12px 30px -16px rgba(26, 26, 26, 0.14);
   --shadow-float: 0 10px 26px -12px rgba(26, 26, 26, 0.18), 0 3px 10px -5px rgba(26, 26, 26, 0.10);
   --shadow-pop: 0 22px 52px -22px rgba(26, 26, 26, 0.30), 0 8px 20px -10px rgba(26, 26, 26, 0.14);
+  /* `.full-bleed` children use 100vw, which is a few px wider than the content
+     box when a scrollbar is present — clip that excess so full-width heroes
+     never spawn a horizontal scrollbar. `clip` (not hidden) adds no scroll
+     container, so vertical scroll + the fixed sticky CTA are unaffected. */
+  overflow-x: clip;
 }
 
 /* WCAG contrast note: white text on #f47b42 = 1.99:1 (fails AA).
@@ -660,3 +665,218 @@ html {
 @keyframes showcase-rise { 0%{opacity:0;transform:translateY(18px)} 100%{opacity:1;transform:translateY(0)} }
 .showcase-kenburns { animation: showcase-kenburns 14s ease-out forwards; }
 .showcase-rise { opacity:0; animation: showcase-rise 0.9s cubic-bezier(0.2,0.7,0.2,1) forwards; }
+
+/* ─────────────────────────────────────────────────────────
+   VIP package surfaces — restrained gold sheen + halo + tilt.
+   CSS-only, GPU-friendly (transform/opacity/filter). The global
+   reduced-motion block above already zeroes durations; explicit
+   guards below also disable the decorative sweep/tilt. The accent
+   colour is driven per-instance via the --vip-accent custom prop.
+   ───────────────────────────────────────────────────────── */
+@keyframes vip-sheen {
+  0%   { transform: translateX(-130%) skewX(-18deg); opacity: 0; }
+  20%  { opacity: 0.85; }
+  60%  { opacity: 0; }
+  100% { transform: translateX(230%) skewX(-18deg); opacity: 0; }
+}
+.vip-sheen { position: relative; overflow: hidden; }
+.vip-sheen::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(105deg, transparent 32%,
+    color-mix(in srgb, var(--vip-accent, #b8860b) 60%, white) 50%, transparent 68%);
+  transform: translateX(-130%) skewX(-18deg);
+  opacity: 0;
+  animation: vip-sheen 4.6s ease-in-out infinite;
+  mix-blend-mode: screen;
+}
+
+/* RTL ribbon reveal — unfurls from the start (right) edge. One-shot. */
+@keyframes vip-ribbon-unfurl {
+  from { clip-path: inset(0 0 0 100%); }
+  to   { clip-path: inset(0 0 0 0); }
+}
+.vip-unfurl { animation: vip-ribbon-unfurl 0.7s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+/* Breathing accent glow behind the hero card (blur set inline on the element). */
+@keyframes vip-halo {
+  0%, 100% { opacity: 0.25; transform: scale(0.92); }
+  50%      { opacity: 0.55; transform: scale(1.05); }
+}
+.vip-halo { animation: vip-halo 4s ease-in-out infinite; }
+
+/* Magnetic tilt for VIP cards — transition only (no keyframe). */
+.vip-tilt {
+  transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.3s ease;
+}
+.vip-tilt:hover {
+  transform: perspective(900px) rotateX(2deg) translateY(-5px);
+  box-shadow: var(--shadow-float);
+}
+@media (hover: none) { .vip-tilt:hover { transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .vip-tilt:hover { transform: none; }
+  .vip-sheen::after { display: none; }
+}
+
+/* ─────────────────────────────────────────────────────────
+   VIP "Couture Ink" stage — the premium tier breaks out of the
+   warm-paper shop onto a dark editorial stage where gold finally
+   reads as luxury (gold-on-cream is invisible; gold-on-ink sings).
+   The near-black .reel stage already sanctions dark stages here.
+   Motion is transform/opacity/filter only and settles fully under
+   reduced-motion (global block + explicit guards below).
+   ───────────────────────────────────────────────────────── */
+:root {
+  --vip-gold: #e7c178;          /* luminous gold — reads on dark (badge #b8860b is for light) */
+  --vip-gold-bright: #f6e3b0;
+  --vip-stage-ink: #0c0a09;
+}
+
+.vip-stage {
+  position: relative;
+  isolation: isolate;
+  color: #f6efe3;
+  background:
+    radial-gradient(115% 85% at 82% 4%, rgba(244, 123, 66, 0.22), transparent 55%),
+    radial-gradient(95% 80% at 8% 104%, rgba(231, 193, 120, 0.15), transparent 55%),
+    linear-gradient(158deg, #1a130f 0%, #0c0a09 56%, #120b08 100%);
+}
+/* film grain — kills flat digital black, reads as fabric/paper tooth */
+.vip-stage::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.28;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.55'/></svg>");
+}
+.vip-stage > * { position: relative; z-index: 1; }
+/* thin gold seam along the top of the stage */
+.vip-stage-seam {
+  height: 1px;
+  background: linear-gradient(to left, transparent, var(--vip-gold), transparent);
+  opacity: 0.5;
+}
+
+/* gold hairline + label kicker — NO letter-spacing (Arabic must stay joined) */
+.vip-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--vip-gold);
+}
+.vip-kicker::before {
+  content: "";
+  width: 1.75rem;
+  height: 1px;
+  background: linear-gradient(to left, var(--vip-gold), transparent);
+}
+
+.vip-gold-text { color: var(--vip-gold-bright); }
+
+/* floor glow under the hero sash so it stands on the stage */
+.vip-floor {
+  background: radial-gradient(58% 50% at 50% 0%, rgba(231, 193, 120, 0.20), transparent 72%);
+  filter: blur(7px);
+}
+
+/* the sash gently floats on the stage */
+@keyframes vip-sash-float {
+  0%, 100% { transform: translateY(0) rotate(-0.5deg); }
+  50%      { transform: translateY(-13px) rotate(0.5deg); }
+}
+.vip-sash-float {
+  animation: vip-sash-float 7.5s ease-in-out infinite;
+  transform-origin: 50% 0%;
+}
+
+/* gold light sweeping the sash artwork (the embroidery "catches the light") */
+.vip-art-sheen { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.vip-art-sheen::after {
+  content: "";
+  position: absolute;
+  top: -12%;
+  bottom: -12%;
+  left: -30%;
+  width: 38%;
+  background: linear-gradient(105deg, transparent, rgba(246, 227, 176, 0.5), transparent);
+  transform: translateX(-60%) skewX(-16deg);
+  mix-blend-mode: screen;
+  animation: vip-art-sweep 5.2s ease-in-out infinite;
+}
+@keyframes vip-art-sweep {
+  0%   { transform: translateX(-60%) skewX(-16deg); }
+  100% { transform: translateX(440%) skewX(-16deg); }
+}
+
+/* gold seal medallion — embossed coin look */
+.vip-seal {
+  background: radial-gradient(circle at 36% 30%, #fcecc4, var(--vip-gold) 46%, #9a6f23 100%);
+  color: #1c1305;
+  box-shadow: 0 8px 20px -7px rgba(0, 0, 0, 0.6), inset 0 1px 2px rgba(255, 255, 255, 0.55),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+}
+
+/* warm-body pillar icon ring */
+.vip-pillar-ring {
+  background: color-mix(in srgb, var(--color-orange) 13%, transparent);
+  color: var(--color-orange-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vip-sash-float { animation: none !important; }
+  .vip-art-sheen::after { display: none; }
+}
+
+/* ─────────────────────────────────────────────────────────
+   VIP "light Stitch" rebuild — three small additions on top of
+   the kit above (the rest is reused: .full-bleed, .reveal,
+   .showcase-rise, .animate-kenburns, .vip-sheen, .vip-tilt,
+   .btn-shine, .card-lift). All GPU-friendly + reduced-motion safe.
+   ───────────────────────────────────────────────────────── */
+
+/* Gentle bob for the perks-strip icons (Stitch "ambient-float"). */
+@keyframes vip-float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-7px); }
+}
+.vip-float { animation: vip-float 4s ease-in-out infinite; }
+
+/* Gold gradient hairline border — RTL/overflow-safe (paints a ring
+   inside the element's own box via a masked pseudo, no -inset trick
+   that breaks under overflow:hidden). Drive thickness via padding. */
+.vip-border { position: relative; }
+.vip-border::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: linear-gradient(135deg,
+    var(--vip-gold-bright, #f6e3b0), #d4af37 45%, var(--vip-gold-bright, #f6e3b0));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* Soft brand-orange attention ring for the primary CTA. Carries the
+   resting card shadow as the base layer so the pulse never drops it;
+   box-shadow renders outside the box, so it coexists with btn-shine's
+   overflow:hidden. */
+@keyframes cta-pulse {
+  0%   { box-shadow: var(--shadow-card), 0 0 0 0 color-mix(in srgb, var(--color-orange) 50%, transparent); }
+  70%  { box-shadow: var(--shadow-card), 0 0 0 14px transparent; }
+  100% { box-shadow: var(--shadow-card), 0 0 0 0 transparent; }
+}
+.cta-pulse { animation: cta-pulse 2.8s cubic-bezier(0.22, 1, 0.36, 1) infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .vip-float { animation: none !important; }
+  .cta-pulse { animation: none !important; }
+}

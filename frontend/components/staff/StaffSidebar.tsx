@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { BrandMark } from "@/components/ui/BrandLogo";
-import { logout } from "@/lib/auth";
+import { logout, setSkipDashboardRedirect } from "@/lib/auth";
 import { toast } from "sonner";
 import { STAFF_TYPE_LABELS } from "@/lib/constants";
 import type { User } from "@/lib/types";
@@ -75,6 +75,10 @@ function getNavLinks(
       return [
         { href: "/staff", label: "مراجعة التصاميم", icon: iconClipboard() },
         { href: "/staff/wholesalers", label: "طلاب الممثلين", icon: iconUsers(), prefix: true },
+      ];
+    case "digitizer":
+      return [
+        { href: "/staff", label: "قائمة التحويل", icon: iconClipboard() },
       ];
     case "embroiderer":
       return [
@@ -183,6 +187,20 @@ export function StaffSidebar({ user, open, onClose }: StaffSidebarProps) {
       <div className="border-t border-line px-5 py-4">
         <p className="truncate text-sm font-semibold text-ink">{user.name}</p>
         <p className="mt-0.5 truncate text-xs text-muted" dir="ltr">{user.phone}</p>
+        <Link
+          href="/"
+          onClick={() => {
+            setSkipDashboardRedirect();
+            onClose();
+          }}
+          className="mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-line bg-surface-sink px-4 py-2 text-sm font-medium text-ink-soft transition-colors hover:border-orange-ink/40 hover:text-orange-ink"
+        >
+          <svg aria-hidden width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+            <path d="M9 22V12h6v10" />
+          </svg>
+          زيارة الموقع الرئيسي
+        </Link>
         <button
           type="button"
           onClick={handleLogout}

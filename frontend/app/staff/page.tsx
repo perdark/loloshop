@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { OrderCard } from "@/components/staff/OrderCard";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -341,6 +341,20 @@ const STAGE_ORDER: OrderStatus[] = [
   "ready",
 ];
 
+// ─── Stars of the month («نجوم الشهر») ───────────────────────────────────────
+// Top performers from the 30-day throughput window (status changes + design
+// approvals), celebrated as a podium instead of buried in the table.
+
+const RANK_LABELS = ["الأول", "الثاني", "الثالث"] as const;
+
+/** «٤٨ إجراءً في آخر ٣٠ يوماً» with Arabic plural rules. */
+function actionsArabic(n: number): string {
+  if (n === 1) return "إجراء واحد";
+  if (n === 2) return "إجراءان";
+  if (n <= 10) return `${n} إجراءات`;
+  return `${n} إجراءً`;
+}
+
 /** Extended MonitorData to include optional working[] array */
 type MonitorDataExtended = MonitorData & {
   working?: {
@@ -441,6 +455,8 @@ function MonitorDashboard({
     if (sourceFilter) params.set("source", sourceFilter);
     return `/staff/queue?${params.toString()}`;
   }
+
+  const topStaff = useMemo(() => (data?.throughput ?? []).slice(0, 3), [data]);
 
   if (loading && activeTab === "monitor") {
     return (
@@ -716,30 +732,64 @@ function MonitorDashboard({
                 </section>
               )}
 
-              {/* Stale orders */}
-              {data.stale.length > 0 && (
+              {/* Stars of the month — top 3 by 30-day throughput */}
+              {topStaff.length > 0 && (
                 <section>
                   <h2 className="section-heading mb-4 font-display-ar text-base font-bold text-ink">
-                    متأخر في المرحلة ({data.stale.length})
+                    نجوم الشهر
                   </h2>
-                  <ul className="space-y-2">
-                    {data.stale.map((o) => (
-                      <li key={o.id}>
-                        <Link
-                          href={`/staff/orders/${o.id}`}
-                          className="flex items-center justify-between gap-3 rounded-xl border border-line bg-surface px-4 py-3 transition-colors hover:border-orange-ink/30 hover:bg-surface-sink/50"
-                        >
-                          <div className="min-w-0">
-                            <p className="truncate font-medium text-ink">{o.student_name}</p>
-                            <p className="text-xs text-muted">{ORDER_STATUS_LABELS[o.status] ?? o.status}</p>
-                          </div>
-                          <span className="shrink-0 rounded-full border border-orange-ink/25 bg-orange-ink/8 px-2.5 py-0.5 text-xs font-semibold text-orange-ink">
-                            {Math.round(o.hours_in_stage)} ساعة
+                  <div className="grid gap-3 md:grid-cols-3">
+                    {topStaff.map((t, i) => (
+                      <div
+                        key={t.actor_id}
+                        className={`relative flex flex-col gap-2 rounded-2xl border px-4 py-4 ${
+                          i === 0
+                            ? "border-orange-ink/30 bg-warm-veil"
+                            : "border-line bg-surface"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span
+                            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-bold ${
+                              i === 0
+                                ? "bg-brand-gradient text-white"
+                                : "border border-line bg-surface-sink text-ink-soft"
+                            }`}
+                          >
+                            {i === 0 && (
+                              <svg aria-hidden width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M12 2l2.9 6.26L21.5 9.27l-4.75 4.13L18.18 20 12 16.4 5.82 20l1.43-6.6L2.5 9.27l6.6-1.01L12 2z" />
+                              </svg>
+                            )}
+                            {RANK_LABELS[i]}
                           </span>
-                        </Link>
-                      </li>
+                          {isAdmin && (
+                            <button
+                              type="button"
+                              onClick={() => openSalary(t.actor_id, t.name, "bonus")}
+                              className="min-h-9 rounded-full border border-orange-ink/25 px-3 text-xs font-semibold text-orange-ink transition-colors hover:bg-orange-ink/10"
+                            >
+                              + حافز
+                            </button>
+                          )}
+                        </div>
+                        <div>
+                          <p className="truncate font-display-ar text-base font-bold text-ink">
+                            {t.name}
+                          </p>
+                          <p className="text-xs text-muted">
+                            {STAFF_TYPE_LABELS[t.staff_type as StaffType] ?? t.staff_type}
+                          </p>
+                        </div>
+                        <p className="text-sm">
+                          <span className={`font-bold ${i === 0 ? "text-orange-ink" : "text-ink"}`}>
+                            {actionsArabic(t.actions)}
+                          </span>{" "}
+                          <span className="text-xs text-muted">في آخر ٣٠ يوماً</span>
+                        </p>
+                      </div>
                     ))}
-                  </ul>
+                  </div>
                 </section>
               )}
 

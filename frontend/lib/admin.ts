@@ -10,6 +10,7 @@ import type {
   CreateWholesalerResult,
   HeroSlide,
   OrderStatus,
+  PackageTier,
   SalaryTransaction,
   SalaryTxnType,
   StaffActivity,
@@ -611,6 +612,71 @@ function mapStaffGoal(r: ApiStaffGoal): StaffGoal {
 export async function getStaffGoal(userId: string): Promise<StaffGoal | null> {
   const { data } = await api.get<{ data: ApiStaffGoal | null }>(`/admin/staff/${userId}/goal`);
   return data.data ? mapStaffGoal(data.data) : null;
+}
+
+// ─── Packages (incl. VIP tier) ───────────────────────────────────────────────
+
+export interface PackagePayload {
+  name_ar: string;
+  price: number;
+  role?: "retail" | "wholesaler";
+  image_url?: string | null;
+  story_image_url?: string | null;
+  sort?: number;
+  active?: boolean;
+  is_vip?: boolean;
+  description?: string | null;
+  features?: string[];
+  included_items?: string[];
+  badge_label?: string | null;
+  accent?: string | null;
+}
+
+function mapAdminPackage(raw: Record<string, unknown>): PackageTier {
+  const arr = (v: unknown): string[] =>
+    Array.isArray(v) ? v.map(String) : typeof v === "string" ? (JSON.parse(v || "[]") as string[]) : [];
+  return {
+    id: String(raw.id),
+    nameAr: String(raw.name_ar ?? ""),
+    price: Number(raw.price ?? 0),
+    imageUrl: (raw.image_url as string | null) ?? null,
+    storyImageUrl: (raw.story_image_url as string | null) ?? null,
+    sort: Number(raw.sort ?? 0),
+    active: !!raw.active,
+    sashTypeOptionId: String(raw.sash_type_option_id ?? ""),
+    sashTypeLabel: String(raw.sash_type_label ?? ""),
+    isVip: !!raw.is_vip,
+    description: (raw.description as string | null) ?? null,
+    features: arr(raw.features),
+    includedItems: arr(raw.included_items),
+    badgeLabel: (raw.badge_label as string | null) ?? null,
+    accent: (raw.accent as string | null) ?? null,
+  };
+}
+
+/** Admin list — retail packages incl. inactive (active + VIP both shown). */
+export async function listAdminPackages(): Promise<PackageTier[]> {
+  const { data } = await api.get<{ data: Record<string, unknown>[] }>("/catalog/packages", {
+    params: { role: "retail", all: 1 },
+  });
+  return (data.data || []).map(mapAdminPackage);
+}
+
+export async function createPackage(payload: PackagePayload): Promise<{ id: string }> {
+  const { data } = await api.post<{ data: { id: string } }>("/catalog/packages", payload);
+  return data.data;
+}
+
+export async function updatePackage(id: string, patch: Partial<PackagePayload>): Promise<void> {
+  await api.patch(`/catalog/packages/${id}`, patch);
+}
+
+export async function deletePackage(id: string): Promise<void> {
+  await api.delete(`/catalog/packages/${id}`);
+}
+
+export async function setPackageRule(id: string, sashTypeOptionId: string): Promise<void> {
+  await api.put(`/catalog/packages/${id}/rule`, { sash_type_option_id: sashTypeOptionId });
 }
 
 export async function setStaffGoal(

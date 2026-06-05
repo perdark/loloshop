@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
 import { BrandMark } from "@/components/ui/BrandLogo";
-import { logout } from "@/lib/auth";
+import { logout, setSkipDashboardRedirect } from "@/lib/auth";
 import { toast } from "sonner";
 import type { User } from "@/lib/types";
 
@@ -17,6 +17,7 @@ const navItems: {
   { href: "/admin/orders", label: "الطلبات", exact: false },
   { href: "/admin/wholesalers", label: "الممثلون", exact: false },
   { href: "/admin/products", label: "الكتالوج", exact: false },
+  { href: "/admin/packages", label: "باقات VIP", exact: false },
   { href: "/staff", label: "الإنتاج ومتابعة الموظفين", exact: false },
 ];
 
@@ -136,6 +137,20 @@ export function AdminSidebar({ user, open, onClose }: AdminSidebarProps) {
       <div className="relative border-t border-cream/10 px-5 py-4">
         <p className="truncate text-sm font-medium">{user.name}</p>
         <p className="truncate text-xs text-cream/50" dir="ltr">{user.phone}</p>
+        <Link
+          href="/"
+          onClick={() => {
+            setSkipDashboardRedirect();
+            onClose();
+          }}
+          className="mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-cream/20 py-2 text-sm text-cream/80 transition-colors hover:border-cream/40 hover:bg-cream/10 hover:text-cream"
+        >
+          <svg aria-hidden width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+            <path d="M9 22V12h6v10" />
+          </svg>
+          زيارة الموقع الرئيسي
+        </Link>
         <button
           type="button"
           onClick={handleLogout}

@@ -19,6 +19,7 @@ import { PRODUCT_TYPE_LABELS } from "@/lib/constants";
 import type { ProductType } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { VipUpsellCard } from "@/components/vip/VipUpsellCard";
 
 function CartSkeleton() {
   return (
@@ -187,7 +188,7 @@ function MissingPiecesCard({ cartItems }: { cartItems: CartItem[] }) {
       <svg
         aria-hidden
         viewBox="0 0 24 24"
-        className="h-5 w-5 shrink-0 text-orange-ink transition-transform duration-200 group-hover:translate-x-0.5"
+        className="h-5 w-5 shrink-0 text-orange-ink transition-transform duration-200 group-hover:-translate-x-0.5"
         fill="none"
         stroke="currentColor"
         strokeWidth="2"
@@ -384,6 +385,9 @@ export default function CartPage() {
 
           {/* Missing pieces — one card only, not a grid */}
           <MissingPiecesCard cartItems={cart.items} />
+
+          {/* VIP upsell — upgrade an existing bundle, or discover VIP */}
+          <VipUpsellCard onUpgraded={loadCart} />
 
           {/* Total */}
           <div className="flex items-center justify-between rounded-[var(--radius-card)] bg-warm-veil border border-orange/20 px-5 py-4 shadow-[var(--shadow-soft)]">

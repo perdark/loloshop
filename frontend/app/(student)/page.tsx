@@ -1,9 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, Suspense } from "react";
+import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { getApiErrorMessage } from "@/lib/api";
+import {
+  clearSkipDashboardRedirect,
+  dashboardPathFor,
+  getUser,
+  shouldSkipDashboardRedirect,
+} from "@/lib/auth";
 import { getShopFeed } from "@/lib/catalog";
 import { SHOP_SECTION_TITLES, SHOP_TYPE_ORDER } from "@/lib/constants";
 import type { ProductType, ShopFeed, ShopProductCard } from "@/lib/types";
@@ -11,6 +18,7 @@ import { Button } from "@/components/ui/Button";
 import { ProductTile } from "@/components/shop/ProductTile";
 import { ShopCover } from "@/components/shop/ShopCover";
 import { AtelierStory, MilestoneStory, DesignProcess } from "@/components/shop/BrandStory";
+import { VipHomeBand } from "@/components/vip/VipHomeBand";
 
 type FilterKey = "all" | ProductType;
 
@@ -78,6 +86,10 @@ export default function StudentHomePage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterKey>("all");
+  // Admin/staff on "/": redirect to their panel, unless they explicitly
+  // chose "زيارة الموقع الرئيسي" — then show a return pill instead.
+  const [redirecting, setRedirecting] = useState(false);
+  const [panelHref, setPanelHref] = useState<string | null>(null);
   const catalogSectionRef = useRef<HTMLElement | null>(null);
 
   /**
@@ -122,8 +134,17 @@ export default function StudentHomePage() {
   }, [router]);
 
   useEffect(() => {
+    const href = dashboardPathFor(getUser()?.role);
+    if (href) {
+      if (!shouldSkipDashboardRedirect()) {
+        setRedirecting(true);
+        router.replace(href);
+        return;
+      }
+      setPanelHref(href);
+    }
     loadShop();
-  }, [loadShop]);
+  }, [loadShop, router]);
 
   // Which categories actually have products — only those become chips.
   const availableTypes = useMemo<ProductType[]>(
@@ -143,13 +164,33 @@ export default function StudentHomePage() {
     return featuredFirst(feed.byType[filter] ?? []);
   }, [feed, filter, allProducts]);
 
-  if (loading) return <ShopSkeleton />;
+  if (loading || redirecting) return <ShopSkeleton />;
+
+  // Admin/staff browsing the shop on purpose — floating pill back to their
+  // panel; clicking it re-arms the auto-redirect on "/".
+  // Portaled to <body>: <main> is transformed (animate-page-in), which would
+  // otherwise hijack position:fixed and pin the pill to the page bottom.
+  const returnPill = panelHref ? createPortal(
+    <button
+      type="button"
+      onClick={() => {
+        clearSkipDashboardRedirect();
+        router.push(panelHref);
+      }}
+      className="fixed bottom-5 left-1/2 z-50 flex min-h-11 -translate-x-1/2 items-center gap-2 rounded-pill bg-brand-gradient px-5 py-2.5 text-sm font-bold text-white shadow-[var(--shadow-float)] transition-transform hover:scale-[1.03]"
+    >
+      <span aria-hidden>→</span>
+      {panelHref === "/admin" ? "العودة للوحة التحكم" : "العودة لصفحة الموظف"}
+    </button>,
+    document.body
+  ) : null;
 
   // Catalog failed to load — keep the cover and the designer path alive, surface
   // the error and a retry rather than dropping to a blank screen.
   if (!feed) {
     return (
       <div className="space-y-10">
+        {returnPill}
         <ShopCover />
         <div className="animate-step-in flex flex-col items-center gap-4 rounded-card border border-dashed border-orange/25 bg-beige/60 px-6 py-14 text-center">
           <span
@@ -175,6 +216,7 @@ export default function StudentHomePage() {
 
   return (
     <div className="animate-fade-page-in space-y-0">
+      {returnPill}
       {/* NeedParamReader must be inside Suspense — Next 16 requires it for useSearchParams */}
       <Suspense fallback={null}>
         <NeedParamReader onNeed={handleNeed} />
@@ -188,6 +230,9 @@ export default function StudentHomePage() {
           <AtelierStory />
         </div>
       </section>
+
+      {/* ── VIP highlight — one editorial band → the VIP showcase (renders nothing if no VIP) ── */}
+      <VipHomeBand />
 
       {/* ── Brand story band 2: Milestone gallery — recessed surface-sink ── */}
       <section className="full-bleed bg-[var(--shop-sink)] py-14 sm:py-20">

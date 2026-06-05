@@ -1,5 +1,23 @@
 const { query } = require('../lib/db');
 const { publicUrl } = require('../lib/upload');
+const { publish } = require('../lib/eventBus');
+
+const HEX_RE = /^#[0-9a-fA-F]{6}$/;
+
+// JSONB arrays must be JSON.stringify'd before binding — pg otherwise serializes a JS
+// array as a Postgres array literal ('{…}') and the jsonb column rejects it.
+function jsonArray(value) {
+  return JSON.stringify(Array.isArray(value) ? value.map((v) => String(v)) : []);
+}
+
+// Best-effort traceability for admin package writes (mirrors the order audit pattern).
+async function auditPackage(req, action, id, details) {
+  await query(
+    `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
+     VALUES ($1, $2, 'package', $3, $4)`,
+    [req.user.id, action, id, JSON.stringify(details || {})]
+  );
+}
 
 // --- Price role: rep-linked students pay 'wholesaler' prices, others 'retail' ---
 async function priceRoleForUser(user, override) {
@@ -238,7 +256,7 @@ async function createGroup(req, res) {
     `INSERT INTO option_groups
        (product_id, name_ar, input_type, sort, required, has_image, hint_ar, image_url,
         max_select, gender_restriction, requires_customer_text)
-     VALUES ($1,$2,COALESCE($3,'single_select'),COALESCE($4,0),COALESCE($5,FALSE),COALESCE($6,FALSE),$7,$8,
+     VALUES ($1,$2,COALESCE($3::option_input,'single_select'),COALESCE($4,0),COALESCE($5,FALSE),COALESCE($6,FALSE),$7,$8,
              COALESCE($9,1),$10,COALESCE($11,FALSE))
      RETURNING id`,
     [id, name_ar, input_type, sort, required, has_image, hint_ar || null, image_url || null,
@@ -382,46 +400,78 @@ async function unlockGroupOption(req, res) {
   res.json({ data: { product_id: id, group_id: groupId, cleared: true } });
 }
 
-// ---------- PUBLIC: list active packages with sash type labels ----------
+// ---------- PUBLIC: list packages with sash type labels (+ optional VIP filter) ----------
 async function listPackages(req, res) {
   const role = await priceRoleForUser(req.user, req.query.role);
+  const wantVip = req.query.vip === '1' || req.query.vip === 'true';
+  // Admins may request inactive rows too (for the admin management list).
+  const includeInactive =
+    (req.query.all === '1' || req.query.all === 'true') && req.user && req.user.role === 'admin';
+  const where = ['p.role = $1'];
+  if (!includeInactive) where.push('p.active = TRUE');
+  if (wantVip) where.push('p.is_vip = TRUE');
   const { rows } = await query(
-    `SELECT p.id, p.name_ar, p.price, p.image_url, p.sort,
+    `SELECT p.id, p.name_ar, p.price, p.image_url, p.sort, p.active,
+            p.is_vip, p.description, p.features, p.included_items, p.badge_label, p.accent,
+            p.story_image_url,
             pr.sash_type_option_id,
             o.label_ar AS sash_type_label
      FROM packages p
      LEFT JOIN package_rules pr ON pr.package_id = p.id
      LEFT JOIN options o ON o.id = pr.sash_type_option_id
-     WHERE p.active = TRUE AND p.role = $1
+     WHERE ${where.join(' AND ')}
      ORDER BY p.sort, p.created_at`,
     [role]
   );
   res.json({ data: rows });
 }
 
-// ---------- ADMIN: package CRUD ----------
+// ---------- ADMIN: package CRUD (incl. VIP tier) ----------
 async function createPackage(req, res) {
-  const { name_ar, price, role, image_url, sort } = req.body;
+  const { name_ar, price, role, image_url, story_image_url, sort, is_vip, description, badge_label, accent } = req.body;
   if (!name_ar || price == null) {
     return res.status(400).json({ error: 'بيانات ناقصة', code: 'ERR_VALIDATION' });
   }
+  if (accent && !HEX_RE.test(accent)) {
+    return res.status(400).json({ error: 'لون غير صالح', code: 'ERR_VALIDATION' });
+  }
+  // VIP is retail-only: default role to 'retail' when the VIP flag is set.
+  const effectiveRole = role || (is_vip ? 'retail' : null);
   const { rows } = await query(
-    `INSERT INTO packages (name_ar, price, role, image_url, sort)
-     VALUES ($1, $2, COALESCE($3::price_role,'wholesaler'), $4, COALESCE($5,0)) RETURNING id`,
-    [name_ar, price, role || null, image_url || null, sort || null]
+    `INSERT INTO packages
+       (name_ar, price, role, image_url, sort, is_vip, description, features, included_items, badge_label, accent, story_image_url)
+     VALUES ($1, $2, COALESCE($3::price_role,'wholesaler'), $4, COALESCE($5,0),
+             COALESCE($6,FALSE), $7, $8::jsonb, $9::jsonb, $10, $11, $12)
+     RETURNING id`,
+    [
+      name_ar, price, effectiveRole, image_url || null, sort || null,
+      !!is_vip, description || null, jsonArray(req.body.features), jsonArray(req.body.included_items),
+      badge_label || null, accent || null, story_image_url || null,
+    ]
   );
+  await auditPackage(req, 'package_create', rows[0].id, { name_ar, is_vip: !!is_vip });
+  publish({ type: 'catalog', resource: 'package', id: rows[0].id });
   res.status(201).json({ data: { id: rows[0].id } });
 }
 
 async function updatePackage(req, res) {
+  if (req.body.accent && !HEX_RE.test(req.body.accent)) {
+    return res.status(400).json({ error: 'لون غير صالح', code: 'ERR_VALIDATION' });
+  }
+  // Stringify JSONB arrays before they reach buildUpdate (pg array-literal pitfall).
+  if (req.body.features !== undefined) req.body.features = jsonArray(req.body.features);
+  if (req.body.included_items !== undefined) req.body.included_items = jsonArray(req.body.included_items);
   const upd = buildUpdate(
     'packages',
-    ['name_ar', 'price', 'role', 'image_url', 'sort', 'active'],
+    ['name_ar', 'price', 'role', 'image_url', 'story_image_url', 'sort', 'active',
+     'is_vip', 'description', 'features', 'included_items', 'badge_label', 'accent'],
     req.body, req.params.id
   );
   if (!upd) return res.status(400).json({ error: 'لا تغييرات', code: 'ERR_VALIDATION' });
   const { rows } = await query(upd.sql, upd.params);
   if (!rows.length) return res.status(404).json({ error: 'غير موجود', code: 'ERR_NOT_FOUND' });
+  await auditPackage(req, 'package_update', req.params.id, { fields: Object.keys(req.body) });
+  publish({ type: 'catalog', resource: 'package', id: req.params.id });
   res.json({ data: rows[0] });
 }
 
@@ -430,6 +480,8 @@ async function deletePackage(req, res) {
     `UPDATE packages SET active = FALSE WHERE id = $1 RETURNING id`, [req.params.id]
   );
   if (!rows.length) return res.status(404).json({ error: 'غير موجود', code: 'ERR_NOT_FOUND' });
+  await auditPackage(req, 'package_delete', req.params.id, {});
+  publish({ type: 'catalog', resource: 'package', id: req.params.id });
   res.json({ data: rows[0] });
 }
 

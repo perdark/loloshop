@@ -35,7 +35,6 @@ const TRANSITIONS = {
 const STAGE_AUTHZ = {
   // forward edges
   'design_complete→converting': ['designer'],
-  'design_complete→designing': ['designer'],
   'converting→embroidery': ['digitizer'],
   'converting→design_complete': ['digitizer'],
   'embroidery→pressing': ['embroiderer'],
@@ -44,12 +43,12 @@ const STAGE_AUTHZ = {
   'preparing→ready': ['preparer'],
   'ready→delivered': ['preparer'],
   // revert edges
+  'design_complete→designing': ['designer'],
   'delivered→preparing': ['preparer'],
   'ready→preparing': ['preparer'],
   'preparing→embroidery': ['preparer'],
   'pressing→embroidery': ['presser'],
   'embroidery→converting': ['embroiderer'],
-  'converting→design_complete': ['digitizer'],
 };
 
 function canStaffTransition(user, from, to) {
@@ -640,6 +639,176 @@ async function configurePackage(req, res) {
   });
 }
 
+// ---------- VIP upgrade (retail) ----------
+// A bundle can be upgraded only while every piece is still pre-production.
+const VIP_UPGRADEABLE_STATUSES = ['pending_approval', 'designing', 'design_complete', 'preparing'];
+const BUNDLE_TYPES = ['sash', 'robe', 'cap'];
+
+// Resolve the retail student's most-recent order group from a locator (package_id /
+// checkout_group_id / order_id), with product type + VIP flag joined. Returns the rows
+// of the chosen group (one cart checkout or one package bundle), most-recent first.
+async function resolveBundleRows(studentId, { from_package_id, checkout_group_id, order_id }) {
+  if (from_package_id) {
+    return (await query(
+      `SELECT o.id, o.status, o.price, o.design_id, o.package_id, o.checkout_group_id,
+              p.type AS product_type, pk.is_vip AS pkg_is_vip, pk.name_ar AS pkg_name
+       FROM orders o JOIN products p ON p.id = o.product_id
+       LEFT JOIN packages pk ON pk.id = o.package_id
+       WHERE o.student_id = $1 AND o.package_id = $2 AND o.status <> 'cancelled'
+       ORDER BY o.created_at DESC`,
+      [studentId, from_package_id]
+    )).rows;
+  }
+  if (checkout_group_id) {
+    return (await query(
+      `SELECT o.id, o.status, o.price, o.design_id, o.package_id, o.checkout_group_id,
+              p.type AS product_type, pk.is_vip AS pkg_is_vip, pk.name_ar AS pkg_name
+       FROM orders o JOIN products p ON p.id = o.product_id
+       LEFT JOIN packages pk ON pk.id = o.package_id
+       WHERE o.student_id = $1 AND o.checkout_group_id = $2 AND o.status <> 'cancelled'
+       ORDER BY o.created_at DESC`,
+      [studentId, checkout_group_id]
+    )).rows;
+  }
+  if (order_id) {
+    const one = (await query(
+      `SELECT o.id, o.package_id, o.checkout_group_id FROM orders o
+       WHERE o.id = $1 AND o.student_id = $2 AND o.status <> 'cancelled'`,
+      [order_id, studentId]
+    )).rows[0];
+    if (!one) return [];
+    if (one.package_id) return resolveBundleRows(studentId, { from_package_id: one.package_id });
+    if (one.checkout_group_id) return resolveBundleRows(studentId, { checkout_group_id: one.checkout_group_id });
+    return (await query(
+      `SELECT o.id, o.status, o.price, o.design_id, o.package_id, o.checkout_group_id,
+              p.type AS product_type, pk.is_vip AS pkg_is_vip, pk.name_ar AS pkg_name
+       FROM orders o JOIN products p ON p.id = o.product_id
+       LEFT JOIN packages pk ON pk.id = o.package_id
+       WHERE o.id = $1`,
+      [order_id]
+    )).rows;
+  }
+  return [];
+}
+
+// GET /orders/vip-upgrade-context — does this student have a bundle worth upgrading?
+async function vipUpgradeContext(req, res) {
+  const st = await query(`SELECT id FROM students WHERE user_id = $1`, [req.user.id]);
+  if (!st.rows.length) return res.json({ data: { upgradeable: false, reason: 'no_student' } });
+  const studentId = st.rows[0].id;
+
+  // Most-recent non-cancelled order → its group is the upgrade candidate.
+  const latest = (await query(
+    `SELECT o.package_id, o.checkout_group_id, o.id
+     FROM orders o WHERE o.student_id = $1 AND o.status <> 'cancelled'
+     ORDER BY o.created_at DESC LIMIT 1`,
+    [studentId]
+  )).rows[0];
+  if (!latest) return res.json({ data: { upgradeable: false, reason: 'none' } });
+
+  const rows = await resolveBundleRows(studentId, {
+    from_package_id: latest.package_id || undefined,
+    checkout_group_id: latest.package_id ? undefined : latest.checkout_group_id || undefined,
+    order_id: latest.package_id || latest.checkout_group_id ? undefined : latest.id,
+  });
+  if (!rows.length) return res.json({ data: { upgradeable: false, reason: 'none' } });
+
+  const alreadyVip = rows.some((r) => r.pkg_is_vip);
+  const inProduction = rows.some((r) => !VIP_UPGRADEABLE_STATUSES.includes(r.status));
+  const presentTypes = new Set(rows.map((r) => r.product_type));
+  const missingTypes = BUNDLE_TYPES.filter((t) => !presentTypes.has(t));
+  const reason = alreadyVip ? 'already_vip' : inProduction ? 'in_production' : null;
+
+  res.json({
+    data: {
+      upgradeable: !alreadyVip && !inProduction,
+      reason,
+      locator: latest.package_id
+        ? { from_package_id: latest.package_id }
+        : latest.checkout_group_id
+          ? { checkout_group_id: latest.checkout_group_id }
+          : { order_id: latest.id },
+      order_ids: rows.map((r) => r.id),
+      current_total: rows.reduce((s, r) => s + Number(r.price || 0), 0),
+      package_name: rows.find((r) => r.pkg_name)?.pkg_name || null,
+      missing_types: missingTypes,
+    },
+  });
+}
+
+// POST /orders/upgrade-vip — re-stamp the student's existing bundle to a VIP package,
+// server-side priced, KEEPING the sash design + embroidery snapshots intact.
+async function upgradeToVip(req, res) {
+  const { package_id, from_package_id, checkout_group_id, order_id } = req.body;
+  if (!package_id) return res.status(400).json({ error: 'باقة VIP مطلوبة', code: 'ERR_VALIDATION' });
+  if (!from_package_id && !checkout_group_id && !order_id) {
+    return res.status(400).json({ error: 'لا يوجد طلب للترقية', code: 'ERR_VALIDATION' });
+  }
+
+  // Target must be an active retail VIP package.
+  const vip = (await query(
+    `SELECT id, name_ar, price FROM packages
+     WHERE id = $1 AND is_vip = TRUE AND active = TRUE AND role = 'retail'`,
+    [package_id]
+  )).rows[0];
+  if (!vip) return res.status(404).json({ error: 'باقة VIP غير موجودة', code: 'ERR_NOT_FOUND' });
+
+  const st = await query(`SELECT id FROM students WHERE user_id = $1`, [req.user.id]);
+  if (!st.rows.length) return res.status(404).json({ error: 'حساب الطالب غير موجود', code: 'ERR_NOT_FOUND' });
+  const studentId = st.rows[0].id;
+
+  const rows = await resolveBundleRows(studentId, { from_package_id, checkout_group_id, order_id });
+  if (!rows.length) return res.status(404).json({ error: 'لا يوجد طلب للترقية', code: 'ERR_NOT_FOUND' });
+  if (rows.some((r) => !VIP_UPGRADEABLE_STATUSES.includes(r.status))) {
+    return res.status(409).json({ error: 'لا يمكن الترقية بعد بدء الإنتاج', code: 'ERR_VIP_TOO_LATE' });
+  }
+
+  await tx(async (client) => {
+    for (const o of rows) {
+      const newPrice = o.product_type === 'sash' ? Number(vip.price) : 0;
+      // Price + package only — never touch design_id/status/measurements/routing flags.
+      await client.query(`UPDATE orders SET package_id = $1, price = $2 WHERE id = $3`, [vip.id, newPrice, o.id]);
+      // Drop any prior package/VIP marker rows (idempotent re-upgrade); keep real design/option/embroidery lines.
+      await client.query(
+        `DELETE FROM order_items WHERE order_id = $1
+         AND (label_snapshot LIKE 'باقة:%' OR label_snapshot LIKE 'باقة VIP:%' OR label_snapshot LIKE 'مشمول في باقة%')`,
+        [o.id]
+      );
+      const sumRemaining = Number((await client.query(
+        `SELECT COALESCE(SUM(price_snapshot), 0) AS s FROM order_items WHERE order_id = $1`,
+        [o.id]
+      )).rows[0].s);
+      // One reconciliation line so order_items always sum to the new bundle price.
+      const label = o.product_type === 'sash' ? `باقة VIP: ${vip.name_ar}` : `مشمول في باقة VIP: ${vip.name_ar}`;
+      await client.query(
+        `INSERT INTO order_items (order_id, label_snapshot, price_snapshot, qty) VALUES ($1, $2, $3, 1)`,
+        [o.id, label, newPrice - sumRemaining]
+      );
+    }
+    await client.query(
+      `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
+       VALUES ($1, 'upgrade_vip', 'package', $2, $3)`,
+      [req.user.id, vip.id, JSON.stringify({
+        order_ids: rows.map((r) => r.id),
+        from: { from_package_id, checkout_group_id, order_id },
+        total: Number(vip.price),
+      })]
+    );
+  });
+
+  for (const o of rows) publish({ type: 'order', orderId: o.id, status: o.status });
+
+  const presentTypes = new Set(rows.map((r) => r.product_type));
+  res.json({
+    data: {
+      order_ids: rows.map((r) => r.id),
+      total: Number(vip.price),
+      package_name: vip.name_ar,
+      missing_types: BUNDLE_TYPES.filter((t) => !presentTypes.has(t)),
+    },
+  });
+}
+
 // ---------- Order price breakdown (owner / staff / admin) ----------
 async function getOrderBreakdown(req, res) {
   const { id } = req.params;
@@ -674,5 +843,6 @@ async function getOrderBreakdown(req, res) {
 
 module.exports = {
   listOrders, updateStatus, configureOrder, configurePackage, getOrderBreakdown,
+  vipUpgradeContext, upgradeToVip,
   priceSelections, canStaffTransition, TRANSITIONS, STATUS_LABEL_AR, ALL_STATUSES,
 };

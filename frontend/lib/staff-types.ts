@@ -187,6 +187,14 @@ export interface ProductionOrderDetail {
    */
   bundle: BundleItem[] | null;
   can_see_design: boolean;
+  /** Actions the requesting user may perform on this order right now.
+   *  Derived server-side from the same state machine used by POST handlers. */
+  available_actions: {
+    advance: { to: string; label: string } | null;
+    revert: { to: string } | null;
+    can_approve: boolean;
+    can_reject: boolean;
+  };
 }
 
 // ─── Monitor types ────────────────────────────────────────────────────────────
