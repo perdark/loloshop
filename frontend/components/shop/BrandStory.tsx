@@ -47,11 +47,40 @@ export function AtelierStory() {
   );
 }
 
-/* 2 — The milestone: candid, editorial row. */
-const LOOKS = [
-  { src: "/lookbook/look-boutique.jpg", caption: "الإطلالة الكاملة" },
-  { src: "/lookbook/look-pharmacy-blue.jpg", caption: "أزرق الصيدلة" },
-  { src: "/lookbook/look-english-red.jpg", caption: "الأحمر الإنجليزي" },
+/* 2 — The milestone: real graduation moments from our cohorts. A mixed-aspect
+   mosaic — wide crowd shots span the full row, the tall candid strips sit
+   two-up. Each photo keeps an aspect that fits it, so nothing crops badly on
+   phone. */
+const HIGHLIGHTS: {
+  src: string;
+  caption: string;
+  alt: string;
+  span: "wide" | "tall";
+}[] = [
+  {
+    src: "/lookbook/grad-crowd.jpg",
+    caption: "دفعة كاملة بأوشحتنا",
+    alt: "مئات الخرّيجين على مدرّجات الجامعة يرتدون أوشحة تخرّج من تصميمنا",
+    span: "wide",
+  },
+  {
+    src: "/lookbook/grad-moments-1.jpg",
+    caption: "لحظات لا تتكرّر",
+    alt: "لقطات من حفل تخرّج: خرّيجات بالقبعات والأوشحة وصورة جماعية للدفعة",
+    span: "tall",
+  },
+  {
+    src: "/lookbook/grad-moments-2.jpg",
+    caption: "فرحة يومٍ واحد",
+    alt: "خرّيجون وخرّيجات يحتفلون بالورود والقبعات في يوم التخرّج",
+    span: "tall",
+  },
+  {
+    src: "/lookbook/grad-diyala.jpg",
+    caption: "جامعة ديالى — دفعة ٢٠٢٥",
+    alt: "خرّيجو قسم الجغرافيا في جامعة ديالى بأوشحة وروبات زرقاء من تصميمنا",
+    span: "wide",
+  },
 ];
 
 export function MilestoneStory() {
@@ -65,26 +94,38 @@ export function MilestoneStory() {
           لِلحظةٍ تنتظرها سنوات
         </h2>
         <p className="mt-3.5 text-base leading-relaxed text-ink-soft">
-          وشاح يحمل اسمك وجامعتك وسنة تخرّجك. تلبسه مرّة، وتبقى الصورة طول العمر.
+          لحظات حقيقية من تخريجات صمّمنا أوشحتها — وشاح يحمل اسمك وجامعتك وسنة
+          تخرّجك، تلبسه مرّة وتبقى الصورة طول العمر.
         </p>
       </div>
 
-      <ul className="grid grid-cols-2 gap-x-4 gap-y-6 p-0 sm:grid-cols-3">
-        {LOOKS.map((look) => (
-          <li key={look.src} className="list-none">
+      <ul className="grid grid-cols-2 gap-3 p-0 sm:gap-4">
+        {HIGHLIGHTS.map((item) => (
+          <li
+            key={item.src}
+            className={item.span === "wide" ? "col-span-2 list-none" : "list-none"}
+          >
             <figure className="m-0">
-              <div className="parallax-frame relative aspect-[3/4] w-full overflow-hidden rounded-xl">
+              <div
+                className={`parallax-frame relative w-full overflow-hidden rounded-xl ${
+                  item.span === "wide" ? "aspect-[16/10]" : "aspect-[4/5]"
+                }`}
+              >
                 <Image
-                  src={look.src}
-                  alt={look.caption}
+                  src={item.src}
+                  alt={item.alt}
                   fill
-                  sizes="(min-width: 640px) 30vw, 45vw"
+                  sizes={
+                    item.span === "wide"
+                      ? "(min-width: 768px) 672px, 100vw"
+                      : "(min-width: 768px) 330px, 48vw"
+                  }
                   loading="lazy"
                   className="parallax-photo object-cover"
                 />
               </div>
               <figcaption className="mt-2 text-xs text-[var(--shop-muted)]">
-                {look.caption}
+                {item.caption}
               </figcaption>
             </figure>
           </li>
