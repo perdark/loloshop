@@ -122,6 +122,22 @@ export interface BundleItem {
   is_current: boolean;
 }
 
+/** Intake data attached to a full-set bundle order (delivery / phones / event / deposit).
+ *  Shape varies by staff role — presser only gets { event_date }; embroiderer/manager/admin
+ *  get the full shape including deposit. */
+export interface OrderIntake {
+  customer_name?: string;
+  instagram_username?: string | null;
+  phone_primary?: string;
+  phone_secondary?: string | null;
+  governorate?: string | null;
+  area_details?: string | null;
+  event_date: string | null;
+  /** Only present for manager/embroiderer/admin. */
+  deposit?: number;
+  notes?: string | null;
+}
+
 /** Full detail from GET /production/orders/:id */
 export interface ProductionOrderDetail {
   order: {
@@ -162,6 +178,11 @@ export interface ProductionOrderDetail {
     working_since?: string | null;
     /** Total order price — returned ONLY for admin + embroiderer. */
     price?: number;
+    /** Full-set bundle intake (delivery/contact/event/deposit). Null for non-bundle orders.
+     *  Shape is role-gated: presser gets only { event_date }. */
+    intake?: OrderIntake | null;
+    /** Checkout group id this order belongs to (for sibling fetching). */
+    checkout_group_id?: string | null;
   };
   design: {
     id: string;

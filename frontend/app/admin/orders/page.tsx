@@ -9,6 +9,7 @@ import {
   getAdminOrderBundles,
   getAdminWholesalers,
   updateOrderCost,
+  updateCheckoutGroup,
 } from "@/lib/admin";
 import type { AdminBundle } from "@/lib/admin";
 import { ORDER_STATUS_LABELS, ORDER_STATUS_OPTIONS } from "@/lib/constants";
@@ -68,10 +69,68 @@ function BundlesSkeleton() {
   );
 }
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Format an Iraqi phone as a tel: link-friendly string; strips leading 0 and prepends 964. */
+function iqPhone(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const digits = raw.replace(/\D/g, "");
+  if (!digits) return null;
+  return digits.startsWith("0") ? `964${digits.slice(1)}` : digits;
+}
+
+/** Days from today to event_date. Negative = past. */
+function daysUntil(dateStr: string | null): number | null {
+  if (!dateStr) return null;
+  const diff = new Date(dateStr).getTime() - Date.now();
+  return Math.round(diff / 86_400_000);
+}
+
 // ─── Bundle card ──────────────────────────────────────────────────────────────
 
-function BundleCard({ bundle }: { bundle: AdminBundle }) {
+function BundleCard({
+  bundle,
+  onBundlesChange,
+}: {
+  bundle: AdminBundle;
+  onBundlesChange: (updater: (prev: AdminBundle[]) => AdminBundle[]) => void;
+}) {
   const isSingle = bundle.items.length === 1 && bundle.checkout_group_id === null;
+  const { intake } = bundle;
+
+  // Inline deposit editor state
+  const [depositDraft, setDepositDraft] = useState<string | null>(null);
+  const [savingDeposit, setSavingDeposit] = useState(false);
+
+  async function handleSaveDeposit() {
+    if (!bundle.checkout_group_id || depositDraft === null) return;
+    const raw = depositDraft.trim().replace(/[^\d]/g, "");
+    const val = raw === "" ? 0 : parseInt(raw, 10);
+    if (isNaN(val) || val < 0) { toast.error("عربون غير صالح"); return; }
+    setSavingDeposit(true);
+    try {
+      const updated = await updateCheckoutGroup(bundle.checkout_group_id, { deposit: val });
+      // Optimistic update — splice new intake into bundles list
+      onBundlesChange((prev) =>
+        prev.map((b) =>
+          b.checkout_group_id === bundle.checkout_group_id
+            ? { ...b, intake: updated }
+            : b
+        )
+      );
+      setDepositDraft(null);
+      toast.success("تم حفظ العربون");
+    } catch (e) {
+      toast.error(getApiErrorMessage(e, "تعذر حفظ العربون"));
+    } finally {
+      setSavingDeposit(false);
+    }
+  }
+
+  const days = intake?.event_date ? daysUntil(intake.event_date) : null;
+  const remaining = intake ? bundle.total_price - intake.deposit : null;
+  const phone1Int = iqPhone(intake?.phone_primary);
+  const phone2Int = iqPhone(intake?.phone_secondary);
 
   return (
     <article className={`surface-card rounded-2xl p-4 shadow-[var(--shadow-card)] ${isSingle ? "border border-line" : "border-2 border-orange-ink/20"}`}>
@@ -79,9 +138,12 @@ function BundleCard({ bundle }: { bundle: AdminBundle }) {
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <p className="font-display-ar font-bold text-ink">
-            {bundle.student_name}
+            {intake?.customer_name || bundle.student_name}
           </p>
-          {bundle.university_name && (
+          {intake?.instagram_username && (
+            <p className="text-sm text-orange-ink">@{intake.instagram_username}</p>
+          )}
+          {bundle.university_name && !intake && (
             <p className="text-sm text-ink-soft">{bundle.university_name}</p>
           )}
         </div>
@@ -94,6 +156,137 @@ function BundleCard({ bundle }: { bundle: AdminBundle }) {
           <span className="text-xs text-muted">{formatDateShort(bundle.created_at)}</span>
         </div>
       </div>
+
+      {/* Intake strip */}
+      {intake && (
+        <div className="mt-3 space-y-2 rounded-xl border border-line bg-surface-sink px-3 py-3 text-sm">
+          {/* Location */}
+          {(intake.governorate || intake.area_details) && (
+            <p className="text-ink-soft">
+              {[intake.governorate, intake.area_details].filter(Boolean).join(" / ")}
+            </p>
+          )}
+
+          {/* Phones */}
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            {phone1Int && (
+              <a
+                href={`tel:+${phone1Int}`}
+                className="font-medium text-orange-ink underline-offset-2 hover:underline"
+                dir="ltr"
+              >
+                +{phone1Int}
+              </a>
+            )}
+            {phone2Int && (
+              <a
+                href={`tel:+${phone2Int}`}
+                className="font-medium text-orange-ink underline-offset-2 hover:underline"
+                dir="ltr"
+              >
+                +{phone2Int}
+              </a>
+            )}
+          </div>
+
+          {/* Event date + countdown */}
+          {intake.event_date && (
+            <div className="flex items-center gap-2">
+              <span className="text-ink-soft">
+                الحفلة: {intake.event_date}
+              </span>
+              {days !== null && (
+                <span
+                  className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${
+                    days === 0
+                      ? "bg-danger/15 text-danger"
+                      : days < 0
+                        ? "bg-ink/10 text-ink-soft"
+                        : days <= 7
+                          ? "bg-danger/10 text-danger"
+                          : "bg-ink/8 text-ink-soft"
+                  }`}
+                >
+                  {days === 0
+                    ? "اليوم"
+                    : days < 0
+                      ? `قبل ${Math.abs(days)} يوم`
+                      : `حفلتهم بعد ${days} يوم`}
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Deposit + remaining */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <span className="text-ink-soft">
+              واصل:{" "}
+              <span className="font-semibold tabular-nums text-ink" dir="ltr">
+                {formatIQD(intake.deposit)}
+              </span>
+            </span>
+            {remaining !== null && (
+              <span className="text-ink-soft">
+                المتبقي:{" "}
+                <span
+                  className={`font-semibold tabular-nums ${remaining > 0 ? "text-ink" : "text-ink-soft"}`}
+                  dir="ltr"
+                >
+                  {formatIQD(Math.max(0, remaining))}
+                </span>
+              </span>
+            )}
+
+            {/* Inline deposit edit */}
+            {bundle.checkout_group_id && (
+              depositDraft === null ? (
+                <button
+                  type="button"
+                  onClick={() => setDepositDraft(String(intake.deposit))}
+                  className="ms-1 rounded-md px-2 py-0.5 text-xs font-medium text-orange-ink ring-1 ring-orange-ink/30 transition-colors hover:bg-orange-ink/10"
+                >
+                  تعديل العربون
+                </button>
+              ) : (
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={depositDraft}
+                    onChange={(e) => setDepositDraft(e.target.value.replace(/[^\d]/g, ""))}
+                    className="w-28 rounded-lg border border-orange-ink/40 bg-white px-2 py-1 text-sm tabular-nums text-ink outline-none focus:ring-2 focus:ring-orange-ink/20"
+                    dir="ltr"
+                    aria-label="العربون"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    disabled={savingDeposit}
+                    onClick={handleSaveDeposit}
+                    className="rounded-lg bg-orange-ink px-3 py-1 text-xs font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+                  >
+                    {savingDeposit ? "..." : "حفظ"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDepositDraft(null)}
+                    className="rounded-lg px-2 py-1 text-xs font-medium text-muted hover:bg-ink/5"
+                  >
+                    إلغاء
+                  </button>
+                </div>
+              )
+            )}
+          </div>
+
+          {/* Notes */}
+          {intake.notes && (
+            <p className="rounded-lg border border-line bg-surface px-2.5 py-1.5 text-xs text-ink-soft">
+              {intake.notes}
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Items */}
       <ul className="mt-3 space-y-2">
@@ -161,10 +354,12 @@ interface OrdersSectionProps {
   sortKey: SortKey;
   sortDir: SortDir;
   typeFilter: string;
+  activeSource: OrderSource;
   onCostInput: (orderId: string, raw: string) => void;
   onSaveCost: (orderId: string) => void;
   onSort: (key: SortKey) => void;
   onRetry: () => void;
+  onBundlesChange: (updater: (prev: AdminBundle[]) => AdminBundle[]) => void;
 }
 
 function OrdersSection({
@@ -178,10 +373,12 @@ function OrdersSection({
   sortKey,
   sortDir,
   typeFilter: _typeFilter,
+  activeSource: _activeSource,
   onCostInput,
   onSaveCost,
   onSort,
   onRetry,
+  onBundlesChange,
 }: OrdersSectionProps) {
   function sortArrow(key: SortKey) {
     if (sortKey !== key) return <span className="ms-1 opacity-30">↕</span>;
@@ -220,7 +417,11 @@ function OrdersSection({
     return (
       <div className="space-y-4">
         {bundles.map((b, idx) => (
-          <BundleCard key={b.checkout_group_id ?? `single-${idx}`} bundle={b} />
+          <BundleCard
+            key={b.checkout_group_id ?? `single-${idx}`}
+            bundle={b}
+            onBundlesChange={onBundlesChange}
+          />
         ))}
       </div>
     );
@@ -572,6 +773,14 @@ export default function AdminOrdersPage() {
   const activeOrders = sortOrders(activeSource === "retail" ? retailOrders : wholesalerOrders);
   const activeBundles = activeSource === "retail" ? retailBundles : wholesalerBundles;
 
+  function handleBundlesChange(updater: (prev: AdminBundle[]) => AdminBundle[]) {
+    if (activeSource === "retail") {
+      setRetailBundles(updater);
+    } else {
+      setWholesalerBundles(updater);
+    }
+  }
+
   const wholesalerOptions = [
     { value: "", label: "كل الممثلين" },
     ...wholesalers.map((w) => ({ value: w.id, label: w.name })),
@@ -818,10 +1027,12 @@ export default function AdminOrdersPage() {
         sortKey={sortKey}
         sortDir={sortDir}
         typeFilter={typeFilter}
+        activeSource={activeSource}
         onCostInput={handleCostInput}
         onSaveCost={handleSaveCost}
         onSort={handleSort}
         onRetry={load}
+        onBundlesChange={handleBundlesChange}
       />
 
       {/* Cross-source counts for admin awareness */}

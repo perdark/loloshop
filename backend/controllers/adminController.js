@@ -114,6 +114,43 @@ async function updateOrderCost(req, res) {
   res.json({ data: rows[0] });
 }
 
+// Edit a full-set bundle's intake row — record the deposit (واصل) as cash arrives,
+// fix phones/address, adjust the event date. Whitelisted columns only.
+async function updateCheckoutGroup(req, res) {
+  const { id } = req.params;
+  if (req.body.deposit !== undefined && (!isFinite(Number(req.body.deposit)) || Number(req.body.deposit) < 0)) {
+    return res.status(400).json({ error: 'عربون غير صالح', code: 'ERR_VALIDATION' });
+  }
+  const ALLOWED = [
+    'customer_name', 'instagram_username', 'phone_primary', 'phone_secondary',
+    'governorate', 'area_details', 'event_date', 'deposit', 'notes',
+  ];
+  const sets = [];
+  const params = [];
+  for (const col of ALLOWED) {
+    if (req.body[col] !== undefined) {
+      params.push(req.body[col] === '' ? null : req.body[col]);
+      sets.push(`${col} = $${params.length}`);
+    }
+  }
+  if (!sets.length) return res.status(400).json({ error: 'لا تغييرات', code: 'ERR_VALIDATION' });
+  params.push(id);
+  const { rows } = await query(
+    `UPDATE checkout_groups SET ${sets.join(', ')} WHERE id = $${params.length}
+     RETURNING id, customer_name, instagram_username, phone_primary, phone_secondary,
+               governorate, area_details, event_date::text AS event_date, deposit, notes,
+               created_at, updated_at`,
+    params
+  );
+  if (!rows.length) return res.status(404).json({ error: 'غير موجود', code: 'ERR_NOT_FOUND' });
+  await query(
+    `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
+     VALUES ($1, 'update_checkout_group', 'checkout_group', $2, $3)`,
+    [req.user.id, id, JSON.stringify({ fields: Object.keys(req.body) })]
+  );
+  res.json({ data: rows[0] });
+}
+
 async function listWholesalers(req, res) {
   const { rows } = await query(
     `SELECT w.id, u.name, u.phone, u.email, w.referral_code, w.deadline, w.commission_rate, w.created_at,
@@ -448,7 +485,7 @@ async function deleteStaff(req, res) {
 }
 
 module.exports = {
-  analytics, accounting, updateOrderCost,
+  analytics, accounting, updateOrderCost, updateCheckoutGroup,
   listWholesalers, createWholesaler, updateDeadline, updateCommission, deleteWholesaler,
   getWholesalerSashConfig, updateWholesalerSashConfig,
   wholesalerStudents, toggleEditException,

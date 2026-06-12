@@ -19,6 +19,7 @@ import { ProductTile } from "@/components/shop/ProductTile";
 import { ShopCover } from "@/components/shop/ShopCover";
 import { AtelierStory, MilestoneStory, DesignProcess } from "@/components/shop/BrandStory";
 import { VipHomeBand } from "@/components/vip/VipHomeBand";
+import { FullSetBand } from "@/components/shop/FullSetBand";
 
 type FilterKey = "all" | ProductType;
 
@@ -247,6 +248,9 @@ export default function StudentHomePage() {
           <DesignProcess />
         </div>
       </section>
+
+      {/* ── Full graduation set band ── */}
+      <FullSetBand />
 
       {/* ── Catalog separator ── */}
       <div className="full-bleed h-px bg-line" aria-hidden />

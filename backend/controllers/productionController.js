@@ -172,7 +172,11 @@ async function getOrder(req, res) {
             b.name_ar AS batch_name, b.deadline,
             CASE WHEN s.wholesaler_id IS NULL THEN 'retail' ELSE 'wholesaler' END AS source,
             wu.name AS wholesaler_name,
-            wk.name AS working_staff_name
+            wk.name AS working_staff_name,
+            cg.customer_name AS intake_customer_name, cg.instagram_username AS intake_instagram,
+            cg.phone_primary AS intake_phone_primary, cg.phone_secondary AS intake_phone_secondary,
+            cg.governorate AS intake_governorate, cg.area_details AS intake_area_details,
+            cg.event_date::text AS intake_event_date, cg.deposit AS intake_deposit, cg.notes AS intake_notes
      FROM orders o
      JOIN students s ON s.id = o.student_id
      JOIN users u ON u.id = s.user_id
@@ -181,20 +185,40 @@ async function getOrder(req, res) {
      LEFT JOIN wholesalers w ON w.id = s.wholesaler_id
      LEFT JOIN users wu ON wu.id = w.user_id
      LEFT JOIN users wk ON wk.id = o.working_staff_id
+     LEFT JOIN checkout_groups cg ON cg.id = o.checkout_group_id
      WHERE o.id = $1`,
     [id]
   );
   if (!base.rows.length) return res.status(404).json({ error: 'الطلب غير موجود', code: 'ERR_NOT_FOUND' });
   const order = { ...base.rows[0] };
 
+  // Full-set form intake (delivery / phones / event date / deposit) — null for cart bundles.
+  order.intake = order.intake_customer_name ? {
+    customer_name: order.intake_customer_name,
+    instagram_username: order.intake_instagram,
+    phone_primary: order.intake_phone_primary,
+    phone_secondary: order.intake_phone_secondary,
+    governorate: order.intake_governorate,
+    area_details: order.intake_area_details,
+    event_date: order.intake_event_date,
+    deposit: Number(order.intake_deposit) || 0,
+    notes: order.intake_notes,
+  } : null;
+  for (const k of Object.keys(order)) if (k.startsWith('intake_')) delete order[k];
+
   // SECURITY: non-managers are scoped to either retail or wholesaler orders only.
   if (!isManager(u) && !staffScopeAllows(u, order.source === 'retail')) {
     return res.status(403).json({ error: 'هذا الطلب خارج نطاقك', code: 'ERR_FORBIDDEN' });
   }
 
-  // PRICE VISIBILITY: only manager/admin/embroiderer sees price
+  // PRICE VISIBILITY: only manager/admin/embroiderer sees price (deposit is money too)
   if (!isManager(u) && u.staff_type !== 'embroiderer' && u.role !== 'admin') {
     delete order.price;
+    if (order.intake) delete order.intake.deposit;
+  }
+  // Presser gets no customer contact/address — just the event date for urgency.
+  if (presserOnly && order.intake) {
+    order.intake = { event_date: order.intake.event_date };
   }
 
   let design = null;

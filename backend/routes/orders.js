@@ -12,6 +12,9 @@ router.post('/configure', authRequired, requireRole('retail'), c.configureOrder)
 // Wholesaler package selection or rep student package bundle
 router.post('/configure-package', authRequired, requireRole('wholesaler', 'retail'), c.configurePackage);
 
+// Retail student: full-set order (طقم كامل روب+قبعة+وشاح) via the structured form wizard
+router.post('/configure-full-set', authRequired, requireRole('retail'), c.configureFullSet);
+
 // Retail student: VIP upgrade of an existing bundle (+ context probe for the upsell)
 router.get('/vip-upgrade-context', authRequired, requireRole('retail'), c.vipUpgradeContext);
 router.post('/upgrade-vip', authRequired, requireRole('retail'), c.upgradeToVip);

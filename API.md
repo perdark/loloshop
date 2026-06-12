@@ -415,6 +415,45 @@ Staff view — returns design + student info for print preparation.
 
 ---
 
+## Full-Set Orders (طقم كامل) — 2026-06-12
+
+### GET `/catalog/packages?full_set=1` (public)
+Active full-set tiers (`is_full_set=true`, role `retail`), each with `products[]` = admin-chosen composition (`{id, type, name_ar}`; empty → defaults by type). Plain `/catalog/packages` now EXCLUDES full-set rows (legacy flows unchanged); admin `?all=1` sees everything. `POST/PATCH /catalog/packages` accept `is_full_set` (mutually exclusive with `is_vip` → 400).
+
+### PUT `/catalog/packages/:id/products` (admin)
+`{ product_ids: [uuid…] }` — replace the package's bundled products. Must be active, max one per product type.
+
+### GET `/catalog/shop`
+`data.full_set_packages[]` added for retail/guest audiences.
+
+### POST `/orders/configure-full-set` (retail)
+One submission → 3 linked orders (sash/robe/cap, shared `checkout_group_id`) + a `checkout_groups` intake row. Body:
+```json
+{
+  "package_id": "uuid",
+  "robe": { "selections": [{ "group_id": "", "option_id": "", "customer_text": "" }],
+            "measurements": { "shoulder_cm": 48, "robe_length_cm": 115, "sleeve_length_cm": 60 } },
+  "cap":  { "selections": [] },
+  "sash": { "selections": [],
+            "zones": { "right_text": "اسم الخريج", "left_mode": "logo_year|text|plain",
+                       "left_text": "", "left_logo_url": "", "back_text": "" } },
+  "delivery": { "customer_name": "", "instagram_username": "", "phone_primary": "07xxxxxxxxx",
+                "phone_secondary": "", "governorate": "ديالى", "area_details": "" },
+  "event_date": "YYYY-MM-DD", "notes": ""
+}
+```
+Validation: required option groups (via `priceSelections`), measurements 25–80 / 70–190 / 30–100 cm, phones `^07\d{9}$` (Arabic digits normalized), 18-governorate whitelist, `right_text` required. Pricing: package price + option deltas (sash order carries the package price; robe/cap their own deltas). Products resolved from `package_products`, falling back to first-active-by-type. Sash → `design_complete` (embroidery); robe/cap → `preparing` unless an option needs embroidery. Idempotent re-submission. → `201 { data: { checkout_group_id, total, items: [{type, order_id, price}], orders: {sash, robe, cap} } }`
+
+### PATCH `/admin/checkout-groups/:id` (admin)
+Edit intake: `deposit` (واصل), `event_date`, phones, address, `customer_name`, `instagram_username`, `notes`. Audit-logged.
+
+### Intake surfaced in
+- `GET /admin/orders?group=bundle` → `bundle.intake {…}` (null for legacy cart bundles).
+- `GET /production/orders/:id` → `order.intake {…}` — `deposit` only for manager/embroiderer/admin; presser receives `{ event_date }` only.
+- `GET /auth/me` (retail) → adds `student { instagram_username, university_name, … }` for form prefill.
+
+---
+
 ## Error Codes
 
 | Code | HTTP | Meaning |

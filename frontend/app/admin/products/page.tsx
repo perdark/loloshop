@@ -387,13 +387,22 @@ export default function AdminProductsPage() {
   return (
     <div dir="rtl" lang="ar" className="animate-page-in">
       {/* Masthead */}
-      <header className="mb-9 border-b border-ink/15 pb-6">
-        <h1 className="font-display text-4xl font-bold leading-[1.05] tracking-tight text-ink lg:text-5xl">
-          كتالوج المنتجات
-        </h1>
-        <p className="mt-2.5 max-w-xl text-base text-ink-soft">
-          الخيارات والأسعار، مع معاينة حية لتفصيل سعر الطالب
-        </p>
+      <header className="mb-9 flex flex-wrap items-end justify-between gap-4 border-b border-ink/15 pb-6">
+        <div>
+          <h1 className="font-display text-4xl font-bold leading-[1.05] tracking-tight text-ink lg:text-5xl">
+            كتالوج المنتجات
+          </h1>
+          <p className="mt-2.5 max-w-xl text-base text-ink-soft">
+            الخيارات والأسعار، مع معاينة حية لتفصيل سعر الطالب
+          </p>
+        </div>
+        <a
+          href="/admin/packages"
+          className="inline-flex min-h-10 items-center gap-2 rounded-full border border-orange/30 bg-orange/5 px-4 text-sm font-medium text-orange-ink transition-colors hover:bg-orange/10"
+        >
+          الباقات والأطقم
+          <span aria-hidden>←</span>
+        </a>
       </header>
 
       <div className="grid gap-8 lg:grid-cols-[256px_1fr_300px]">
@@ -669,6 +678,16 @@ export default function AdminProductsPage() {
                           () =>
                             updateCatalogOption(optId, {
                               requires_customer_image: v,
+                            }),
+                          "تم الحفظ"
+                        )
+                      }
+                      onToggleOptionText={(optId, v) =>
+                        run(
+                          optId,
+                          () =>
+                            updateCatalogOption(optId, {
+                              requires_customer_text: v,
                             }),
                           "تم الحفظ"
                         )
@@ -998,6 +1017,7 @@ function GroupBlock({
   onGroupImage,
   onCommitOptionPrice,
   onToggleOptionImage,
+  onToggleOptionText,
   onDeleteOption,
   onLockOption,
 }: {
@@ -1016,6 +1036,7 @@ function GroupBlock({
   onPersistGroup: (patch: Record<string, unknown>) => void;
   onDeleteGroup: () => void;
   onGroupImage: (groupId: string, file: File) => void;
+  onToggleOptionText: (optId: string, v: boolean) => void;
   onCommitOptionPrice: (optId: string, value: number) => void;
   onToggleOptionImage: (optId: string, v: boolean) => void;
   onDeleteOption: (optId: string, label: string) => void;
@@ -1075,6 +1096,13 @@ function GroupBlock({
             onChange={(v) => onPersistGroup({ requires_customer_image: v })}
           >
             تتطلب صورة من الزبون
+          </CheckRow>
+          <CheckRow
+            checked={!!group.requiresCustomerText}
+            disabled={busy}
+            onChange={(v) => onPersistGroup({ requires_customer_text: v })}
+          >
+            كتابة مطلوبة من الزبون
           </CheckRow>
           <CheckRow
             checked={group.hasImage}
@@ -1183,6 +1211,13 @@ function GroupBlock({
                   onChange={(v) => onToggleOptionImage(opt.id, v)}
                 >
                   <span className="text-xs">صورة مطلوبة</span>
+                </CheckRow>
+                <CheckRow
+                  checked={!!opt.requiresCustomerText}
+                  disabled={savingId === opt.id}
+                  onChange={(v) => onToggleOptionText(opt.id, v)}
+                >
+                  <span className="text-xs">كتابة مطلوبة</span>
                 </CheckRow>
                 <label className="flex cursor-pointer items-center gap-1.5 text-xs text-ink-soft">
                   <input

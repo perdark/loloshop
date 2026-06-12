@@ -110,6 +110,16 @@ async function loginVerifyOtp(req, res) {
 }
 
 async function me(req, res) {
+  // Retail accounts carry their student profile (signup captures instagram_username,
+  // university, …) so forms — e.g. the full-set wizard — can prefill from the login.
+  if (req.user.role === 'retail') {
+    const { rows } = await query(
+      `SELECT university_name, department, gender, study_type, instagram_username, wholesaler_id
+       FROM students WHERE user_id = $1`,
+      [req.user.id]
+    );
+    if (rows.length) return res.json({ ...req.user, student: rows[0] });
+  }
   res.json(req.user);
 }
 

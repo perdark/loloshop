@@ -371,6 +371,10 @@ export interface PackageTier {
   capProductId?: string;
   /** VIP tier (premium retail graduation bundle). */
   isVip?: boolean;
+  /** Full graduation set (robe + cap + sash). Mutually exclusive with isVip. */
+  isFullSet?: boolean;
+  /** Admin-chosen catalog products this package bundles (package_products). */
+  products?: { id: string; type: string; nameAr: string }[];
   description?: string | null;
   /** Ordered Arabic perks/benefits shown on the VIP showcase. */
   features?: string[];

@@ -115,13 +115,17 @@ async function listOrders(req, res) {
              u.name AS student_name, s.university_name,
              o.created_at,
              o.price, COALESCE(o.cost, 0) AS cost, COALESCE(o.profit, 0) AS profit,
-             p.name_ar AS product_name, p.type AS product_type, o.status
+             p.name_ar AS product_name, p.type AS product_type, o.status,
+             cg.customer_name AS intake_customer_name, cg.instagram_username AS intake_instagram,
+             cg.phone_primary, cg.phone_secondary, cg.governorate, cg.area_details,
+             cg.event_date::text AS event_date, cg.deposit, cg.notes AS intake_notes
       FROM orders o
       JOIN students s ON s.id = o.student_id
       JOIN users u ON u.id = s.user_id
       JOIN products p ON p.id = o.product_id
       LEFT JOIN wholesalers w ON w.id = s.wholesaler_id
       LEFT JOIN users wu ON wu.id = w.user_id
+      LEFT JOIN checkout_groups cg ON cg.id = o.checkout_group_id
       ${whereSql}
       ORDER BY o.checkout_group_id NULLS LAST, o.created_at ASC`;
     const { rows } = await query(bundleSql, params);
@@ -139,6 +143,18 @@ async function listOrders(req, res) {
           total_price: 0,
           total_cost: 0,
           total_profit: 0,
+          // full-set form bundles carry intake (delivery/phones/event/deposit); cart bundles don't
+          intake: row.intake_customer_name ? {
+            customer_name: row.intake_customer_name,
+            instagram_username: row.intake_instagram,
+            phone_primary: row.phone_primary,
+            phone_secondary: row.phone_secondary,
+            governorate: row.governorate,
+            area_details: row.area_details,
+            event_date: row.event_date,
+            deposit: Number(row.deposit) || 0,
+            notes: row.intake_notes,
+          } : null,
           items: [],
         });
       }
@@ -639,6 +655,313 @@ async function configurePackage(req, res) {
   });
 }
 
+// ---------- Full-set order (طقم كامل: روب + قبعة + وشاح) — the Instagram-form path ----------
+// One structured submission = 3 linked orders + a checkout_groups intake row holding what
+// the DM form captures per bundle: delivery address, two phones, event date, deposit.
+
+const IRAQ_GOVERNORATES = [
+  'بغداد', 'البصرة', 'نينوى', 'أربيل', 'النجف', 'كربلاء', 'كركوك', 'الأنبار', 'ديالى',
+  'السليمانية', 'دهوك', 'صلاح الدين', 'بابل', 'واسط', 'ميسان', 'ذي قار', 'المثنى', 'الديوانية',
+];
+
+// Customers type phone numbers with Arabic-Indic digits (٠٧٨٣...) — normalize before validating.
+function normalizeDigits(s) {
+  return String(s ?? '')
+    .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+    .replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)));
+}
+function cleanPhone(s) {
+  return normalizeDigits(s).replace(/[\s\-()+]/g, '');
+}
+const IQ_PHONE_RE = /^07\d{9}$/;
+
+function cleanText(v, max) {
+  const t = v == null ? '' : String(v).trim();
+  return t ? t.slice(0, max) : null;
+}
+
+const FULL_SET_LABEL_AR = { sash: 'الوشاح', robe: 'الروب', cap: 'القبعة' };
+
+async function configureFullSet(req, res) {
+  const { package_id, robe, cap, sash, delivery, event_date, notes } = req.body || {};
+  if (!package_id) {
+    return res.status(400).json({ error: 'الباقة مطلوبة', code: 'ERR_VALIDATION' });
+  }
+
+  const st = await query(
+    `SELECT id, gender, status, wholesaler_id FROM students WHERE user_id = $1`, [req.user.id]
+  );
+  if (!st.rows.length) {
+    return res.status(404).json({ error: 'حساب الطالب غير موجود', code: 'ERR_NOT_FOUND' });
+  }
+  const student = st.rows[0];
+  if (student.wholesaler_id && student.status !== 'approved') {
+    return res.status(403).json({ error: 'يجب موافقة الممثل أولاً', code: 'ERR_NOT_APPROVED' });
+  }
+
+  const pkg = await query(
+    `SELECT id, name_ar, price FROM packages
+     WHERE id = $1 AND active = TRUE AND is_full_set = TRUE`,
+    [package_id]
+  );
+  if (!pkg.rows.length) {
+    return res.status(404).json({ error: 'الطقم غير موجود', code: 'ERR_NOT_FOUND' });
+  }
+  const packageRow = pkg.rows[0];
+
+  // ── delivery / contact (group-level intake) ──
+  const d = delivery || {};
+  const customerName = cleanText(d.customer_name, 120);
+  if (!customerName) {
+    return res.status(400).json({ error: 'الاسم الكامل مطلوب', code: 'ERR_VALIDATION' });
+  }
+  const phonePrimary = cleanPhone(d.phone_primary);
+  if (!IQ_PHONE_RE.test(phonePrimary)) {
+    return res.status(400).json({ error: 'رقم الهاتف الأول غير صالح (07xxxxxxxxx)', code: 'ERR_VALIDATION' });
+  }
+  let phoneSecondary = null;
+  if (d.phone_secondary && String(d.phone_secondary).trim()) {
+    phoneSecondary = cleanPhone(d.phone_secondary);
+    if (!IQ_PHONE_RE.test(phoneSecondary)) {
+      return res.status(400).json({ error: 'رقم الهاتف الثاني غير صالح (07xxxxxxxxx)', code: 'ERR_VALIDATION' });
+    }
+  }
+  const governorate = cleanText(d.governorate, 40);
+  if (!governorate || !IRAQ_GOVERNORATES.includes(governorate)) {
+    return res.status(400).json({ error: 'يرجى اختيار المحافظة', code: 'ERR_VALIDATION' });
+  }
+  const areaDetails = cleanText(d.area_details, 300);
+  const instagram = cleanText(String(d.instagram_username || '').replace(/^@+/, ''), 60);
+
+  let eventDate = null;
+  if (event_date) {
+    const ed = new Date(normalizeDigits(event_date));
+    if (Number.isNaN(ed.getTime())) {
+      return res.status(400).json({ error: 'تاريخ الحفلة غير صالح', code: 'ERR_VALIDATION' });
+    }
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    if (ed < today) {
+      return res.status(400).json({ error: 'تاريخ الحفلة لا يمكن أن يكون في الماضي', code: 'ERR_VALIDATION' });
+    }
+    eventDate = ed.toISOString().slice(0, 10);
+  }
+  const groupNotes = cleanText(notes, 500);
+
+  // ── robe measurements (فصال) — same fields the DM form asks for, with typo guards ──
+  const m = (robe && robe.measurements) || {};
+  const meas = {
+    shoulder_cm: Number(normalizeDigits(m.shoulder_cm)),
+    robe_length_cm: Number(normalizeDigits(m.robe_length_cm)),
+    sleeve_length_cm: Number(normalizeDigits(m.sleeve_length_cm)),
+  };
+  const MEAS_RANGE = { shoulder_cm: [25, 80], robe_length_cm: [70, 190], sleeve_length_cm: [30, 100] };
+  for (const [k, [lo, hi]] of Object.entries(MEAS_RANGE)) {
+    if (!isFinite(meas[k]) || meas[k] < lo || meas[k] > hi) {
+      return res.status(400).json({
+        error: `قياسات الروب غير صالحة — ${k === 'shoulder_cm' ? 'عرض الكتف' : k === 'robe_length_cm' ? 'طول الروب' : 'طول الردن'} يجب أن يكون بين ${lo} و ${hi} سم`,
+        code: 'ERR_VALIDATION',
+      });
+    }
+  }
+
+  // ── sash text zones (يمين / يسار / خلف) — manufacturing content, not options ──
+  const z = (sash && sash.zones) || {};
+  const rightText = cleanText(z.right_text, 120);
+  if (!rightText) {
+    return res.status(400).json({ error: 'اسم الخريج على الجهة اليمنى مطلوب', code: 'ERR_VALIDATION' });
+  }
+  const leftMode = ['logo_year', 'text', 'plain'].includes(z.left_mode) ? z.left_mode : 'plain';
+  const leftText = cleanText(z.left_text, 200);
+  const leftLogoUrl = cleanText(z.left_logo_url, 500);
+  if (leftMode === 'logo_year' && !leftLogoUrl) {
+    return res.status(400).json({ error: 'يرجى رفع شعار الكلية للجهة اليسرى', code: 'ERR_VALIDATION' });
+  }
+  if (leftMode === 'text' && !leftText) {
+    return res.status(400).json({ error: 'يرجى كتابة نص الجهة اليسرى', code: 'ERR_VALIDATION' });
+  }
+  const backText = cleanText(z.back_text, 300);
+
+  // ── resolve the three products + price each item's selections ──
+  // The package's admin-chosen composition (package_products) wins; any type it
+  // doesn't pin falls back to the first active product of that type.
+  const role = await priceRoleForUser(req.user);
+  const byType = {};
+  const pinned = await query(
+    `SELECT p.id, p.type FROM package_products pl
+     JOIN products p ON p.id = pl.product_id
+     WHERE pl.package_id = $1 AND p.active = TRUE AND p.type IN ('sash','robe','cap')`,
+    [package_id]
+  );
+  for (const p of pinned.rows) byType[p.type] = p.id;
+  const prods = await query(
+    `SELECT id, type FROM products WHERE type IN ('sash','robe','cap') AND active = TRUE
+     ORDER BY type, featured DESC, sort, created_at`
+  );
+  for (const p of prods.rows) if (!byType[p.type]) byType[p.type] = p.id;
+  if (!byType.sash || !byType.robe || !byType.cap) {
+    return res.status(500).json({ error: 'منتجات الطقم غير مكتملة في النظام', code: 'ERR_CONFIG' });
+  }
+
+  const priced = {};
+  for (const type of ['robe', 'cap', 'sash']) {
+    const body = { robe, cap, sash }[type] || {};
+    const p = await priceSelections({
+      productId: byType[type], role,
+      selections: body.selections || [],
+      studentGender: student.gender,
+    });
+    if (!p.ok) {
+      return res.status(p.status).json({
+        error: `${FULL_SET_LABEL_AR[type]} — ${p.error}`, code: p.code,
+      });
+    }
+    // Package pricing: the bundle price replaces the items' base prices; only option
+    // deltas (e.g. ردن بكتابة +5000) are added on top.
+    p.deltas = p.total - p.items[0].price;
+    p.optionLines = p.items.slice(1);
+    priced[type] = p;
+  }
+
+  const itemPrice = {
+    sash: Number(packageRow.price) + priced.sash.deltas,
+    robe: priced.robe.deltas,
+    cap: priced.cap.deltas,
+  };
+  const total = itemPrice.sash + itemPrice.robe + itemPrice.cap;
+
+  // Sash always carries name embroidery in the form path; robe/cap only when an
+  // option requires text/image. Same routing rules as configureOrder.
+  const itemFlags = {
+    sash: { has_embroidery: true, status: 'design_complete' },
+    robe: { has_embroidery: priced.robe.hasEmbroidery, status: priced.robe.hasEmbroidery ? 'design_complete' : 'preparing' },
+    cap: { has_embroidery: priced.cap.hasEmbroidery, status: priced.cap.hasEmbroidery ? 'design_complete' : 'preparing' },
+  };
+
+  // rep students auto-attach to their wholesaler's latest batch (same as configureOrder)
+  let resolvedBatchId = null;
+  if (student.wholesaler_id) {
+    const b = await query(
+      `SELECT id FROM batches WHERE wholesaler_id = $1 ORDER BY created_at DESC LIMIT 1`,
+      [student.wholesaler_id]
+    );
+    resolvedBatchId = b.rows[0]?.id || null;
+  }
+
+  // Synthesized manufacturing lines for the sash zones (group/option NULL is fine —
+  // staff views render label + customer_text/image like any other order item).
+  const zoneLines = [
+    { label: 'الجهة اليمنى — اسم الخريج', customer_text: rightText, customer_image_url: null },
+    leftMode === 'logo_year'
+      ? { label: 'الجهة اليسرى — شعار الكلية وسنة التخرج', customer_text: leftText, customer_image_url: leftLogoUrl }
+      : leftMode === 'text'
+        ? { label: 'الجهة اليسرى — كتابة', customer_text: leftText, customer_image_url: null }
+        : { label: 'الجهة اليسرى — سادة', customer_text: null, customer_image_url: null },
+    backText
+      ? { label: 'الوشاح من الخلف — كتابة', customer_text: backText, customer_image_url: null }
+      : { label: 'الوشاح من الخلف — سادة', customer_text: null, customer_image_url: null },
+  ];
+
+  const result = await tx(async (client) => {
+    // Reuse the intake row when the student re-submits the same bundle (their previous
+    // full-set orders share a checkout_group_id that exists in checkout_groups).
+    const prevGroup = await client.query(
+      `SELECT cg.id FROM checkout_groups cg
+       JOIN orders o ON o.checkout_group_id = cg.id
+       WHERE o.student_id = $1 AND o.status <> 'cancelled'
+       ORDER BY cg.created_at DESC LIMIT 1`,
+      [student.id]
+    );
+    let cgId;
+    const cgParams = [
+      customerName, instagram, phonePrimary, phoneSecondary,
+      governorate, areaDetails, eventDate, groupNotes,
+    ];
+    if (prevGroup.rows.length) {
+      cgId = prevGroup.rows[0].id;
+      await client.query(
+        `UPDATE checkout_groups SET customer_name=$1, instagram_username=$2, phone_primary=$3,
+           phone_secondary=$4, governorate=$5, area_details=$6, event_date=$7, notes=$8
+         WHERE id = $9`,
+        [...cgParams, cgId]
+      );
+    } else {
+      const cg = await client.query(
+        `INSERT INTO checkout_groups
+           (customer_name, instagram_username, phone_primary, phone_secondary,
+            governorate, area_details, event_date, notes)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+        cgParams
+      );
+      cgId = cg.rows[0].id;
+    }
+
+    const ids = {};
+    for (const type of ['sash', 'robe', 'cap']) {
+      const prodId = byType[type];
+      const flags = itemFlags[type];
+      const measurementsJson = type === 'robe' ? JSON.stringify(meas) : null;
+      const existing = await client.query(
+        `SELECT id FROM orders
+         WHERE student_id = $1 AND product_id = $2 AND design_id IS NULL AND status <> 'cancelled'`,
+        [student.id, prodId]
+      );
+      let oid;
+      if (existing.rows.length) {
+        oid = existing.rows[0].id;
+        await client.query(
+          `UPDATE orders SET price=$1, batch_id=$2, package_id=$3, checkout_group_id=$4,
+             status=$5, has_embroidery=$6, needs_pressing=FALSE, measurements=$7
+           WHERE id = $8`,
+          [itemPrice[type], resolvedBatchId, package_id, cgId, flags.status, flags.has_embroidery, measurementsJson, oid]
+        );
+        await client.query(`DELETE FROM order_items WHERE order_id = $1`, [oid]);
+      } else {
+        const o = await client.query(
+          `INSERT INTO orders (student_id, product_id, batch_id, package_id, checkout_group_id,
+                               price, status, has_embroidery, needs_pressing, measurements)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,FALSE,$9) RETURNING id`,
+          [student.id, prodId, resolvedBatchId, package_id, cgId,
+           itemPrice[type], flags.status, flags.has_embroidery, measurementsJson]
+        );
+        oid = o.rows[0].id;
+      }
+
+      // base line: the package price sits on the sash order so bundle totals stay exact
+      const baseLine = type === 'sash'
+        ? { label: `طقم: ${packageRow.name_ar}`, price: Number(packageRow.price) }
+        : { label: `ضمن طقم: ${packageRow.name_ar}`, price: 0 };
+      const lines = [
+        baseLine,
+        ...priced[type].optionLines,
+        ...(type === 'sash' ? zoneLines.map((l) => ({ ...l, price: 0 })) : []),
+      ];
+      for (const it of lines) {
+        await client.query(
+          `INSERT INTO order_items (order_id, group_id, option_id, label_snapshot, price_snapshot, qty,
+                                    customer_image_url, customer_text)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+          [oid, it.group_id || null, it.option_id || null, it.label, it.price || 0, it.qty || 1,
+           it.customer_image_url || null, it.customer_text || null]
+        );
+      }
+      ids[type] = oid;
+    }
+    return { cgId, ids };
+  });
+
+  publish({ type: 'order_new', orderId: result.ids.sash });
+  res.status(201).json({
+    data: {
+      checkout_group_id: result.cgId,
+      package_id,
+      package_name: packageRow.name_ar,
+      total,
+      items: ['sash', 'robe', 'cap'].map((t) => ({ type: t, order_id: result.ids[t], price: itemPrice[t] })),
+      orders: result.ids,
+    },
+  });
+}
+
 // ---------- VIP upgrade (retail) ----------
 // A bundle can be upgraded only while every piece is still pre-production.
 const VIP_UPGRADEABLE_STATUSES = ['pending_approval', 'designing', 'design_complete', 'preparing'];
@@ -842,7 +1165,7 @@ async function getOrderBreakdown(req, res) {
 }
 
 module.exports = {
-  listOrders, updateStatus, configureOrder, configurePackage, getOrderBreakdown,
+  listOrders, updateStatus, configureOrder, configurePackage, configureFullSet, getOrderBreakdown,
   vipUpgradeContext, upgradeToVip,
   priceSelections, canStaffTransition, TRANSITIONS, STATUS_LABEL_AR, ALL_STATUSES,
 };

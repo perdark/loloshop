@@ -1,7 +1,7 @@
 # LoloShop — PROGRESS.md
 
 ## Status: 🟡 In Progress
-## Last Updated: 2026-06-05 (VIP page rebuilt to light "Stitch" editorial design + motion)
+## Last Updated: 2026-06-12 (Full-set order wizard — storefront)
 
 ---
 
@@ -95,6 +95,14 @@
 - `app/(student)/product/[id]/page.tsx`: New state — `customerTexts`, `measurements` (`RobeMeasurements`), `showErrors`. `setGroupValue` also clears matching `customerTexts` keys + resets `showErrors`. New memos: `customerTextError`, `measurementsError` (robe only: all 3 fields > 0). `handleAddToCart` + `handleConfirm` validate text+measurements, set `showErrors` then toast on failure. Both API calls pass `customerTexts` to `buildConfigureSelections` and `measurements` to cart/configureOrder for robes. Robe products render a "فصال الروب" `<fieldset>` with 3 numeric inputs (كتف / طول الروب / طول الردن) each with "سم" suffix, error highlight on `showErrors`, accessible `id`/`htmlFor`. Submit buttons no longer pre-disabled; they set `showErrors` on click so inline errors appear.
 
 ## 🔄 Current Task
+**Full-set packages frontend (admin + staff) DONE (2026-06-12)**
+- `lib/admin.ts`: `PackagePayload` + `PackageTier` gain `isFullSet` / `is_full_set`; mapper populates it. `AdminBundle` + `ApiBundle` gain `intake: BundleIntake | null` (mapped from API). `listAdminPackages` now fetches with `all=1` (no role filter) to include full-set packages. Added `updateCheckoutGroup(id, payload)` wrapper + `CheckoutGroupPayload` / `BundleIntake` types.
+- `lib/types.ts`: `PackageTier.isFullSet?: boolean` added.
+- `app/admin/packages/page.tsx`: `Draft.isVip boolean` replaced with `Draft.kind: PackageKind` (3-way: `wholesale` | `vip` | `full_set`). KIND selector (3 pill buttons) replaces the VIP checkbox. Story image + badge/accent only shown for `vip` kind. Sash-type rule hidden for `full_set` kind. `draftToPayload` sets `is_vip`/`is_full_set` from kind; sets `role: wholesaler` for wholesale kind. Sidebar badge shows «طقم كامل» for full-set packages.
+- `app/admin/orders/page.tsx`: `BundleCard` extended — intake strip renders customer name/@instagram, location, tel: phones, event date + countdown chip (red when ≤7 days), deposit + remaining. Inline deposit editor (small edit button → input + save/cancel → PATCH + optimistic update). `OrdersSectionProps` gains `onBundlesChange` + `activeSource` for optimistic bundle state propagation.
+- `lib/staff-types.ts`: New `OrderIntake` interface. `ProductionOrderDetail.order` gains `intake?: OrderIntake | null` + `checkout_group_id?: string | null`.
+- `app/staff/orders/[orderId]/page.tsx`: `IntakeCard` component (name, @instagram, phones with WhatsApp links, location, event date + `EventChip` countdown, deposit + remaining, notes). `InstaCopyButton` fetches sibling orders on click, builds the exact operational DM template from items[] option values, copies to clipboard via `navigator.clipboard`. Both rendered when `order.intake` is present, below the student info card.
+
 **Order bundle system (checkout_group_id) DONE (2026-05-31)**
 - Migration `db/migrations/011_order_bundles.sql`: `ALTER TABLE orders ADD COLUMN IF NOT EXISTS checkout_group_id UUID` + index. Applied to live Neon DB — column confirmed.
 - **C1 schema fix**: In `db/schema.sql`, `CREATE TABLE packages` + `CREATE TABLE package_rules` moved to BEFORE `ALTER TABLE orders ADD COLUMN package_id` (fresh `npm run migrate` previously failed because the FK target didn't exist yet). `checkout_group_id` column + index also added to schema.sql in the same section.
@@ -318,6 +326,16 @@ Held for decision (business-logic, not auto-fixed): VipShowcase "اعتمد/اخ
 - While suppressed, `/` shows a floating return pill («العودة للوحة التحكم» / «العودة لصفحة الموظف») that clears the flag (re-arms redirect) and returns to the panel. Pill is portaled to `<body>` — `<main>`'s `animate-page-in` transform hijacks `position:fixed` otherwise.
 - Helpers in `lib/auth.ts`: `dashboardPathFor`, `set/clear/shouldSkipDashboardRedirect`; `logout()` clears the flag.
 - Verified in browser (admin seed login, desktop 1440 + mobile 375): redirect, suppress, refresh-persist, pill return + re-arm, staff branch, logged-out unaffected.
+
+## Full-set packages + structured order form (طقم كامل) (2026-06-12)
+The Instagram DM order form, digitized end-to-end. A full-set package = روب + قبعة + وشاح at one retail price, ordered through a structured wizard instead of the designer path.
+- **DB (migration 021 + schema.sql):** `packages.is_full_set` flag; new `checkout_groups` table = per-bundle intake (customer_name, instagram_username, phone_primary/secondary, governorate, area_details, event_date, deposit عربون, notes). `orders.checkout_group_id` points to it for form bundles only (no FK — legacy cart groups have no row; always LEFT JOIN).
+- **Seed (`npm run seed:fullset`, idempotent):** the real form's fields as admin-editable option groups — robe (لون/قماش كوبرا اندنوسي/فصال ملكي/ردن سادة-بكتابة), cap (لون/الشكل عادية-مثلثة/الجانب/الأعلى), sash (نوع عادي-ملكي/عرض ١٢-١٥/لون التطريز/برتقالي color). Supersedes legacy placeholder groups by deactivating them (reversible). + sample package «طقم التخرج الكامل» 95,000.
+- **Backend:** `POST /orders/configure-full-set` (retail) — validates required groups via `priceSelections`, robe measurements (ranges 25-80/70-190/30-100 cm), Iraqi phones `^07\d{9}$` with Arabic-digit normalization, 18-governorate whitelist, sash zones (يمين name required; يسار logo_year/text/plain; خلف). One tx: intake row + 3 orders (sash carries package price + deltas; robe/cap carry own deltas; sash→design_complete w/ embroidery, robe/cap→preparing unless embroidery). Idempotent re-submission (reuses orders + intake row). `GET /catalog/packages?full_set=1`, shop feed `full_set_packages` (retail/guest), `PATCH /admin/checkout-groups/:id` (deposit etc., audit-logged), intake joined into `/production/orders/:id` (deposit hidden unless manager/embroiderer/admin; presser → event_date only) and `/admin/orders?group=bundle`. `/auth/me` now returns `student{instagram_username,…}` for retail → wizard prefill from the login.
+- **Frontend:** wizard `app/(student)/full-set/[id]` — 5 steps (روب+قياسات → قبعة → وشاح+مناطق النص → توصيل prefilled from login → مراجعة DM-style), live total, sessionStorage persistence, per-step validation; home `FullSetBand`; admin `/admin/packages` 3-way kind selector (وكلاء/VIP/طقم كامل); admin bundles show intake + event-countdown chip + inline deposit editor; staff order detail gets intake card (tel:/wa.me links) + «نسخ بصيغة الانستا» button reproducing the exact DM form from bundle data.
+- **Package composition (migration 022):** `package_products` table + `PUT /catalog/packages/:id/products` — admin picks WHICH robe/cap/sash the طقم bundles (one per type, validated); `configureFullSet` + the wizard resolve pinned products first, falling back to first-active-by-type. `/admin/packages` editor gets 3 composition selects (full-set kind); `/admin/products` masthead links to «الباقات والأطقم».
+- **Catalog editor:** «كتابة مطلوبة» checkbox added beside «صورة مطلوبة» on both groups and options (backend `requires_customer_text` existed since 017 — this exposes it to the admin). Student-facing hint label simplified to «صورة توضيحية».
+- **Verified:** `backend/test-full-set.js` — 20/20 checks incl. the real sample order (سيف الدين مهند ضياء، ديالى، ٠٧٨٣١٢٦٢٥٥٧ Arabic digits، حفلة 22/3، واصل 25) + package-products endpoint. `tsc --noEmit` clean, prod build OK, user verified wizard + قبعة تيست text-required flow in browser.
 
 ## Fix: 500 on create option group (2026-06-05)
 - `POST /api/catalog/products/:id/groups` 500'd when `input_type` was omitted: `COALESCE($3,'single_select')` resolved to `text`, rejected by enum column `option_input`. Fixed with `$3::option_input` cast (same pattern as the existing `price_role` cast at catalogController.js:442). Swept backend for other uncasted `COALESCE($n,'literal')` — none.

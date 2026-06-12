@@ -1,4 +1,4 @@
-const { query } = require('../lib/db');
+const { query, tx } = require('../lib/db');
 const { publicUrl } = require('../lib/upload');
 const { publish } = require('../lib/eventBus');
 
@@ -148,14 +148,26 @@ async function getShop(req, res) {
   if (role === 'wholesaler') {
     const pk = await query(
       `SELECT id, name_ar, price, image_url, sort FROM packages
-       WHERE active = TRUE AND role = $1 ORDER BY sort, created_at`,
+       WHERE active = TRUE AND role = $1 AND is_full_set = FALSE ORDER BY sort, created_at`,
       [role]
     );
     packages = pk.rows;
   }
+  // Full-set tiers (طقم كامل) ARE a retail storefront entity — the form-wizard funnel.
+  let full_set_packages = [];
+  if (audience !== 'wholesaler_student') {
+    const fs = await query(
+      `SELECT id, name_ar, price, image_url, story_image_url, sort, description,
+              badge_label, accent, features, included_items
+       FROM packages
+       WHERE active = TRUE AND role = 'retail' AND is_full_set = TRUE
+       ORDER BY sort, created_at`
+    );
+    full_set_packages = fs.rows;
+  }
   const by_type = {};
   products.rows.forEach((p) => (by_type[p.type] ||= []).push(p));
-  res.json({ data: { price_role: role, audience, packages, by_type } });
+  res.json({ data: { price_role: role, audience, packages, full_set_packages, by_type } });
 }
 
 // ---------- ADMIN: list all products (incl. inactive) for catalog editor ----------
@@ -404,18 +416,28 @@ async function unlockGroupOption(req, res) {
 async function listPackages(req, res) {
   const role = await priceRoleForUser(req.user, req.query.role);
   const wantVip = req.query.vip === '1' || req.query.vip === 'true';
+  const wantFullSet = req.query.full_set === '1' || req.query.full_set === 'true';
   // Admins may request inactive rows too (for the admin management list).
   const includeInactive =
     (req.query.all === '1' || req.query.all === 'true') && req.user && req.user.role === 'admin';
   const where = ['p.role = $1'];
   if (!includeInactive) where.push('p.active = TRUE');
   if (wantVip) where.push('p.is_vip = TRUE');
+  else if (wantFullSet) where.push('p.is_full_set = TRUE');
+  // Full-set tiers order through the form wizard, not the legacy package/upsell flows —
+  // keep them out of unfiltered lists (the admin all=1 list still sees everything).
+  else if (!includeInactive) where.push('p.is_full_set = FALSE');
   const { rows } = await query(
     `SELECT p.id, p.name_ar, p.price, p.image_url, p.sort, p.active,
-            p.is_vip, p.description, p.features, p.included_items, p.badge_label, p.accent,
+            p.is_vip, p.is_full_set, p.description, p.features, p.included_items, p.badge_label, p.accent,
             p.story_image_url,
             pr.sash_type_option_id,
-            o.label_ar AS sash_type_label
+            o.label_ar AS sash_type_label,
+            COALESCE((
+              SELECT json_agg(json_build_object('id', pp2.id, 'type', pp2.type, 'name_ar', pp2.name_ar) ORDER BY pp2.type)
+              FROM package_products pl JOIN products pp2 ON pp2.id = pl.product_id
+              WHERE pl.package_id = p.id AND pp2.active = TRUE
+            ), '[]'::json) AS products
      FROM packages p
      LEFT JOIN package_rules pr ON pr.package_id = p.id
      LEFT JOIN options o ON o.id = pr.sash_type_option_id
@@ -426,30 +448,67 @@ async function listPackages(req, res) {
   res.json({ data: rows });
 }
 
+// ---------- ADMIN: package composition — which catalog products the package bundles ----------
+async function setPackageProducts(req, res) {
+  const { id } = req.params;
+  const ids = Array.isArray(req.body.product_ids) ? [...new Set(req.body.product_ids)].slice(0, 10) : [];
+  const pkg = await query(`SELECT id FROM packages WHERE id = $1`, [id]);
+  if (!pkg.rows.length) return res.status(404).json({ error: 'غير موجود', code: 'ERR_NOT_FOUND' });
+  let valid = [];
+  if (ids.length) {
+    const { rows } = await query(
+      `SELECT id, type FROM products WHERE id = ANY($1::uuid[]) AND active = TRUE`, [ids]
+    );
+    if (rows.length !== ids.length) {
+      return res.status(400).json({ error: 'منتج غير صالح', code: 'ERR_VALIDATION' });
+    }
+    // one product per type — a full set is one robe + one cap + one sash
+    const types = rows.map((r) => r.type);
+    if (new Set(types).size !== types.length) {
+      return res.status(400).json({ error: 'منتج واحد فقط لكل نوع داخل الباقة', code: 'ERR_VALIDATION' });
+    }
+    valid = rows;
+  }
+  await tx(async (client) => {
+    await client.query(`DELETE FROM package_products WHERE package_id = $1`, [id]);
+    for (const pid of ids) {
+      await client.query(
+        `INSERT INTO package_products (package_id, product_id) VALUES ($1, $2)`, [id, pid]
+      );
+    }
+  });
+  await auditPackage(req, 'package_set_products', id, { product_ids: ids });
+  publish({ type: 'catalog', resource: 'package', id });
+  res.json({ data: { package_id: id, products: valid } });
+}
+
 // ---------- ADMIN: package CRUD (incl. VIP tier) ----------
 async function createPackage(req, res) {
-  const { name_ar, price, role, image_url, story_image_url, sort, is_vip, description, badge_label, accent } = req.body;
+  const { name_ar, price, role, image_url, story_image_url, sort, is_vip, is_full_set, description, badge_label, accent } = req.body;
   if (!name_ar || price == null) {
     return res.status(400).json({ error: 'بيانات ناقصة', code: 'ERR_VALIDATION' });
   }
   if (accent && !HEX_RE.test(accent)) {
     return res.status(400).json({ error: 'لون غير صالح', code: 'ERR_VALIDATION' });
   }
-  // VIP is retail-only: default role to 'retail' when the VIP flag is set.
-  const effectiveRole = role || (is_vip ? 'retail' : null);
+  if (is_vip && is_full_set) {
+    return res.status(400).json({ error: 'الباقة إما VIP أو طقم كامل، ليس كلاهما', code: 'ERR_VALIDATION' });
+  }
+  // VIP and full-set are retail-only tiers: default role to 'retail' when either flag is set.
+  const effectiveRole = role || (is_vip || is_full_set ? 'retail' : null);
   const { rows } = await query(
     `INSERT INTO packages
-       (name_ar, price, role, image_url, sort, is_vip, description, features, included_items, badge_label, accent, story_image_url)
+       (name_ar, price, role, image_url, sort, is_vip, is_full_set, description, features, included_items, badge_label, accent, story_image_url)
      VALUES ($1, $2, COALESCE($3::price_role,'wholesaler'), $4, COALESCE($5,0),
-             COALESCE($6,FALSE), $7, $8::jsonb, $9::jsonb, $10, $11, $12)
+             COALESCE($6,FALSE), COALESCE($7,FALSE), $8, $9::jsonb, $10::jsonb, $11, $12, $13)
      RETURNING id`,
     [
       name_ar, price, effectiveRole, image_url || null, sort || null,
-      !!is_vip, description || null, jsonArray(req.body.features), jsonArray(req.body.included_items),
+      !!is_vip, !!is_full_set, description || null, jsonArray(req.body.features), jsonArray(req.body.included_items),
       badge_label || null, accent || null, story_image_url || null,
     ]
   );
-  await auditPackage(req, 'package_create', rows[0].id, { name_ar, is_vip: !!is_vip });
+  await auditPackage(req, 'package_create', rows[0].id, { name_ar, is_vip: !!is_vip, is_full_set: !!is_full_set });
   publish({ type: 'catalog', resource: 'package', id: rows[0].id });
   res.status(201).json({ data: { id: rows[0].id } });
 }
@@ -464,7 +523,7 @@ async function updatePackage(req, res) {
   const upd = buildUpdate(
     'packages',
     ['name_ar', 'price', 'role', 'image_url', 'story_image_url', 'sort', 'active',
-     'is_vip', 'description', 'features', 'included_items', 'badge_label', 'accent'],
+     'is_vip', 'is_full_set', 'description', 'features', 'included_items', 'badge_label', 'accent'],
     req.body, req.params.id
   );
   if (!upd) return res.status(400).json({ error: 'لا تغييرات', code: 'ERR_VALIDATION' });
@@ -562,5 +621,5 @@ module.exports = {
   createOption, updateOption, deleteOption,
   setOptionPriceRole, setProductPriceRole, uploadImage,
   lockGroupOption, unlockGroupOption,
-  listPackages, createPackage, updatePackage, deletePackage, setPackageRule,
+  listPackages, createPackage, updatePackage, deletePackage, setPackageRule, setPackageProducts,
 };

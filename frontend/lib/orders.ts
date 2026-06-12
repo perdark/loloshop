@@ -1,4 +1,4 @@
-import { api } from "./api";
+import { api, apiUploadFile } from "./api";
 import type {
   CatalogProduct,
   ConfigureOrderResult,
@@ -107,6 +107,100 @@ export async function configureOrder(payload: {
     breakdown: breakdown.map(mapBreakdownLine),
   };
 }
+
+// ─── Full-Set Wizard types ────────────────────────────────────────────────────
+
+export interface FullSetSelectionPayload {
+  group_id: string;
+  option_id: string;
+  qty?: number;
+  customer_text?: string;
+  customer_image_url?: string;
+}
+
+export interface FullSetSashZones {
+  right_text: string;
+  left_mode: "logo_year" | "text" | "plain";
+  left_text?: string;
+  left_logo_url?: string;
+  back_text?: string;
+}
+
+export interface FullSetMeasurements {
+  shoulder_cm: number;
+  robe_length_cm: number;
+  sleeve_length_cm: number;
+}
+
+export interface FullSetDelivery {
+  customer_name: string;
+  instagram_username?: string;
+  phone_primary: string;
+  phone_secondary?: string;
+  governorate: string;
+  area_details?: string;
+}
+
+export interface ConfigureFullSetPayload {
+  package_id: string;
+  robe: {
+    selections: FullSetSelectionPayload[];
+    measurements: FullSetMeasurements;
+  };
+  cap: {
+    selections: FullSetSelectionPayload[];
+  };
+  sash: {
+    selections: FullSetSelectionPayload[];
+    zones: FullSetSashZones;
+  };
+  delivery: FullSetDelivery;
+  event_date?: string;
+  notes?: string;
+}
+
+export interface FullSetOrderItem {
+  type: "sash" | "robe" | "cap";
+  order_id: string;
+  price: number;
+}
+
+export interface ConfigureFullSetResult {
+  checkout_group_id: string;
+  package_id: string;
+  package_name: string;
+  total: number;
+  items: FullSetOrderItem[];
+  orders: {
+    sash: string;
+    robe: string;
+    cap: string;
+  };
+}
+
+export async function configureFullSet(
+  payload: ConfigureFullSetPayload
+): Promise<ConfigureFullSetResult> {
+  const { data } = await api.post<{ data: ConfigureFullSetResult }>(
+    "/orders/configure-full-set",
+    payload
+  );
+  return data.data;
+}
+
+export async function uploadSashLogo(file: File): Promise<string> {
+  const result = (await apiUploadFile("/designs/uploads/logo", file)) as {
+    data: { url: string };
+  };
+  const url: string = result.data.url;
+  const base =
+    process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ||
+    "http://localhost:4000";
+  if (url.startsWith("http")) return url;
+  return `${base}${url.startsWith("/") ? "" : "/"}${url}`;
+}
+
+// ─── Order breakdown ──────────────────────────────────────────────────────────
 
 export async function getOrderBreakdown(
   orderId: string

@@ -24,7 +24,7 @@ import {
 } from "@/lib/staff";
 import { getApiErrorMessage } from "@/lib/api";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
-import type { ProductionOrderDetail } from "@/lib/staff-types";
+import type { ProductionOrderDetail, ProductionOrderItem } from "@/lib/staff-types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -146,6 +146,363 @@ function FinalDesignUpload({
         onChange={handleChange}
       />
     </article>
+  );
+}
+
+// ─── Intake helpers ───────────────────────────────────────────────────────────
+
+function daysUntil(dateStr: string | null): number | null {
+  if (!dateStr) return null;
+  const diff = new Date(dateStr).getTime() - Date.now();
+  return Math.round(diff / 86_400_000);
+}
+
+function iqPhone(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const d = raw.replace(/\D/g, "");
+  return d ? (d.startsWith("0") ? `964${d.slice(1)}` : d) : null;
+}
+
+/** Countdown chip shared between intake card and Instagram copy. */
+function EventChip({ eventDate }: { eventDate: string | null }) {
+  const days = daysUntil(eventDate);
+  if (days === null) return null;
+  return (
+    <span
+      className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${
+        days === 0
+          ? "bg-danger/15 text-danger"
+          : days < 0
+            ? "bg-ink/10 text-ink-soft"
+            : days <= 7
+              ? "bg-danger/10 text-danger"
+              : "bg-ink/8 text-ink-soft"
+      }`}
+    >
+      {days === 0 ? "اليوم" : days < 0 ? `قبل ${Math.abs(days)} يوم` : `حفلتهم بعد ${days} يوم`}
+    </span>
+  );
+}
+
+// ─── Intake Card ──────────────────────────────────────────────────────────────
+
+function IntakeCard({
+  intake,
+  totalPrice,
+}: {
+  intake: NonNullable<ProductionOrderDetail["order"]["intake"]>;
+  totalPrice?: number;
+}) {
+  const phone1 = iqPhone(intake.phone_primary);
+  const phone2 = iqPhone(intake.phone_secondary);
+  const remaining =
+    totalPrice !== undefined && intake.deposit !== undefined
+      ? totalPrice - intake.deposit
+      : null;
+
+  return (
+    <article className="rounded-2xl border border-orange-ink/20 bg-orange-ink/5 p-5 shadow-[var(--shadow-soft)]">
+      <h3 className="mb-3 font-display-ar text-sm font-bold text-ink">بيانات الطلبية (انستا)</h3>
+      <dl className="space-y-2.5 text-sm">
+        {intake.customer_name && (
+          <div className="flex justify-between gap-4 border-b border-orange-ink/10 pb-2.5">
+            <dt className="text-muted">الاسم</dt>
+            <dd className="font-medium text-ink">{intake.customer_name}</dd>
+          </div>
+        )}
+        {intake.instagram_username && (
+          <div className="flex justify-between gap-4 border-b border-orange-ink/10 pb-2.5">
+            <dt className="text-muted">انستغرام</dt>
+            <dd>
+              <a
+                href={`https://instagram.com/${intake.instagram_username}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium text-orange-ink underline underline-offset-2"
+                dir="ltr"
+              >
+                @{intake.instagram_username}
+              </a>
+            </dd>
+          </div>
+        )}
+        {phone1 && (
+          <div className="flex justify-between gap-4 border-b border-orange-ink/10 pb-2.5">
+            <dt className="text-muted">الهاتف الأول</dt>
+            <dd className="flex gap-2">
+              <a href={`tel:+${phone1}`} className="font-medium text-ink tabular-nums" dir="ltr">
+                +{phone1}
+              </a>
+              <a
+                href={`https://wa.me/${phone1}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-full bg-[#25D366]/15 px-2 py-0.5 text-xs font-semibold text-[#128C7E]"
+              >
+                واتساب
+              </a>
+            </dd>
+          </div>
+        )}
+        {phone2 && (
+          <div className="flex justify-between gap-4 border-b border-orange-ink/10 pb-2.5">
+            <dt className="text-muted">الهاتف الثاني</dt>
+            <dd className="flex gap-2">
+              <a href={`tel:+${phone2}`} className="font-medium text-ink tabular-nums" dir="ltr">
+                +{phone2}
+              </a>
+              <a
+                href={`https://wa.me/${phone2}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-full bg-[#25D366]/15 px-2 py-0.5 text-xs font-semibold text-[#128C7E]"
+              >
+                واتساب
+              </a>
+            </dd>
+          </div>
+        )}
+        {(intake.governorate || intake.area_details) && (
+          <div className="flex justify-between gap-4 border-b border-orange-ink/10 pb-2.5">
+            <dt className="text-muted">العنوان</dt>
+            <dd className="font-medium text-ink">
+              {[intake.governorate, intake.area_details].filter(Boolean).join(" / ")}
+            </dd>
+          </div>
+        )}
+        {intake.event_date && (
+          <div className="flex justify-between gap-4 border-b border-orange-ink/10 pb-2.5">
+            <dt className="text-muted">تاريخ الحفلة</dt>
+            <dd className="flex items-center gap-2">
+              <span className="font-medium text-ink">{intake.event_date}</span>
+              <EventChip eventDate={intake.event_date} />
+            </dd>
+          </div>
+        )}
+        {intake.deposit !== undefined && (
+          <div className="flex justify-between gap-4 border-b border-orange-ink/10 pb-2.5">
+            <dt className="text-muted">واصل</dt>
+            <dd className="font-semibold tabular-nums text-ink" dir="ltr">
+              {intake.deposit.toLocaleString("ar-IQ")} د.ع
+            </dd>
+          </div>
+        )}
+        {remaining !== null && (
+          <div className="flex justify-between gap-4 border-b border-orange-ink/10 pb-2.5">
+            <dt className="text-muted">المتبقي</dt>
+            <dd className="font-semibold tabular-nums text-ink" dir="ltr">
+              {Math.max(0, remaining).toLocaleString("ar-IQ")} د.ع
+            </dd>
+          </div>
+        )}
+        {intake.notes && (
+          <div className="border-b border-orange-ink/10 pb-2.5">
+            <dt className="mb-1 text-muted">ملاحظة</dt>
+            <dd className="rounded-lg border border-orange-ink/15 bg-surface px-3 py-2 text-xs text-ink-soft">
+              {intake.notes}
+            </dd>
+          </div>
+        )}
+      </dl>
+    </article>
+  );
+}
+
+// ─── Instagram-format copy button ─────────────────────────────────────────────
+
+/** Parse label_snapshot 'GROUP: OPTION' → option value. Returns null if zone line. */
+function parseOptionValue(label: string): { group: string; value: string } | null {
+  const colonIdx = label.indexOf(":");
+  if (colonIdx < 0) return null;
+  return { group: label.slice(0, colonIdx).trim(), value: label.slice(colonIdx + 1).trim() };
+}
+
+/** Find option value in items[] by partial group name match. */
+function findOpt(items: ProductionOrderItem[], groupPartial: string): string {
+  const norm = groupPartial.trim();
+  for (const item of items) {
+    const parsed = parseOptionValue(item.label_snapshot);
+    if (parsed && parsed.group.includes(norm)) return parsed.value;
+    // Zone lines like 'الجهة اليمنى — اسم الخريج'
+    if (!parsed && item.label_snapshot.includes(norm) && item.customer_text) {
+      return item.customer_text;
+    }
+  }
+  return "";
+}
+
+function buildInstaText(
+  intake: NonNullable<ProductionOrderDetail["order"]["intake"]>,
+  ordersByType: {
+    robe?: { items: ProductionOrderItem[]; measurements?: { shoulder_cm: number; robe_length_cm: number; sleeve_length_cm: number } | null };
+    cap?: { items: ProductionOrderItem[] };
+    sash?: { items: ProductionOrderItem[] };
+  },
+  totalPrice?: number,
+  deposit?: number
+): string {
+  const r = ordersByType.robe;
+  const c = ordersByType.cap;
+  const s = ordersByType.sash;
+
+  const line = (label: string, value: string | null | undefined) =>
+    value?.trim() ? `${label} / ${value.trim()}` : null;
+
+  const lines: (string | null)[] = [
+    line("يوزر الانستا", intake.instagram_username),
+    line("الأسم", intake.customer_name),
+  ];
+
+  if (r) {
+    lines.push(
+      line("لون الروب", findOpt(r.items, "لون")),
+      line("قماش الروب", findOpt(r.items, "قماش")),
+      line("فصال روب", findOpt(r.items, "فصال")),
+      r.measurements ? `طول الروب / ${r.measurements.robe_length_cm}` : null,
+      r.measurements ? `طول الردن / ${r.measurements.sleeve_length_cm}` : null,
+      r.measurements ? `عرض الكتف / ${r.measurements.shoulder_cm}` : null,
+      line("ردن الروب", findOpt(r.items, "ردن")),
+      "___",
+    );
+  }
+
+  if (c) {
+    lines.push(
+      line("القبعة اللون", findOpt(c.items, "اللون")),
+      line("القبعة عادية ام مثلثة", findOpt(c.items, "عادية")),
+      line("القبعة من الجانب", findOpt(c.items, "الجانب")),
+      line("القبعة من الأعلى", findOpt(c.items, "الأعلى")),
+      "____",
+    );
+  }
+
+  if (s) {
+    lines.push(
+      line("الوشاح لون الوشاح", findOpt(s.items, "لون الوشاح")),
+      line("نوع الوشاح", findOpt(s.items, "نوع الوشاح")),
+      line("عرض الوشاح", findOpt(s.items, "عرض الوشاح")),
+      line("لون تطريز", findOpt(s.items, "تطريز")),
+    );
+    // Zone lines
+    const rightZone = s.items.find((i) => i.label_snapshot.includes("اليمن") || i.label_snapshot.includes("يمين"));
+    const leftZone = s.items.find((i) => i.label_snapshot.includes("اليسر") || i.label_snapshot.includes("يسار"));
+    const backZone = s.items.find((i) => i.label_snapshot.includes("الخلف") || i.label_snapshot.includes("خلف"));
+    if (backZone?.customer_text) lines.push(`الوشاح من الخلف / ${backZone.customer_text}`);
+    if (leftZone?.customer_text) lines.push(`الوشاح من الجهة اليسرة / ${leftZone.customer_text}`);
+    if (rightZone?.customer_text) lines.push(`الوشاح من الجهة اليمين / ${rightZone.customer_text}`);
+    lines.push("————————");
+  }
+
+  if (intake.notes) lines.push(line("ملاحظة", intake.notes));
+  lines.push("__");
+  const loc = [intake.governorate, intake.area_details].filter(Boolean).join(" / ");
+  if (loc) lines.push(`العنوان / ${loc}`);
+
+  if (intake.phone_primary || intake.phone_secondary) {
+    lines.push("رقمين");
+    if (intake.phone_primary) lines.push(`الاول ${intake.phone_primary}`);
+    if (intake.phone_secondary) lines.push(`الثاني ${intake.phone_secondary}`);
+  }
+
+  if (totalPrice !== undefined && deposit !== undefined) {
+    const totalK = Math.round(totalPrice / 1000);
+    const depositK = Math.round(deposit / 1000);
+    lines.push(`${totalK} واصل ${depositK}`);
+  }
+
+  if (intake.event_date) lines.push(`حفلتهم ${intake.event_date}`);
+
+  return lines.filter((l): l is string => l !== null && l !== "").join("\n");
+}
+
+function InstaCopyButton({
+  intake,
+  order,
+  currentItems,
+  currentType,
+  bundle,
+}: {
+  intake: NonNullable<ProductionOrderDetail["order"]["intake"]>;
+  order: ProductionOrderDetail["order"];
+  currentItems: ProductionOrderItem[];
+  currentType: string;
+  bundle: ProductionOrderDetail["bundle"];
+}) {
+  const [copying, setCopying] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopy() {
+    if (!intake.customer_name && !intake.instagram_username) {
+      toast.error("لا تتوفر بيانات الانستا لهذا الطلب");
+      return;
+    }
+
+    setCopying(true);
+    try {
+      // Build ordersByType starting from the current order
+      const ordersByType: Parameters<typeof buildInstaText>[1] = {};
+
+      const setType = (
+        type: string,
+        its: ProductionOrderItem[],
+        meas?: { shoulder_cm: number; robe_length_cm: number; sleeve_length_cm: number } | null
+      ) => {
+        if (type === "robe") ordersByType.robe = { items: its, measurements: meas };
+        else if (type === "cap") ordersByType.cap = { items: its };
+        else if (type === "sash") ordersByType.sash = { items: its };
+      };
+      setType(currentType, currentItems, order.measurements);
+
+      // Fetch siblings from bundle[]
+      if (bundle) {
+        const { api } = await import("@/lib/api");
+        await Promise.all(
+          bundle
+            .filter((bi) => !bi.is_current)
+            .map(async (bi) => {
+              try {
+                const { data } = await api.get<{ data: ProductionOrderDetail }>(
+                  `/production/orders/${bi.id}`
+                );
+                const sibling = data.data;
+                setType(
+                  sibling.order.product_type,
+                  sibling.items,
+                  sibling.order.measurements
+                );
+              } catch {
+                // Non-critical — silently skip
+              }
+            })
+        );
+      }
+
+      const text = buildInstaText(
+        intake,
+        ordersByType,
+        order.price,
+        intake.deposit
+      );
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      toast.success("تم النسخ");
+      setTimeout(() => setCopied(false), 3000);
+    } catch {
+      toast.error("تعذر النسخ — يرجى المحاولة يدوياً");
+    } finally {
+      setCopying(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      disabled={copying}
+      onClick={handleCopy}
+      className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl border border-orange-ink/30 bg-surface-sink px-4 py-2 text-sm font-semibold text-orange-ink transition-colors hover:bg-orange-ink/10 disabled:opacity-60"
+    >
+      {copying ? "جارٍ التحضير..." : copied ? "تم النسخ" : "نسخ بصيغة الانستا"}
+    </button>
   );
 }
 
@@ -348,6 +705,7 @@ export default function ProductionOrderDetailPage() {
   }
 
   const { order, design, items, package_orders, bundle, can_see_design, available_actions } = detail;
+  const intake = order.intake ?? null;
   const productLabel = PRODUCT_TYPE_LABELS[order.product_type as keyof typeof PRODUCT_TYPE_LABELS] ?? "المنتج";
   const isAdmin = user?.role === "admin";
 
@@ -616,6 +974,20 @@ export default function ProductionOrderDetailPage() {
               </div>
             </dl>
           </article>
+
+          {/* Intake card — full-set form bundles only */}
+          {intake && (
+            <>
+              <IntakeCard intake={intake} totalPrice={order.price} />
+              <InstaCopyButton
+                intake={intake}
+                order={order}
+                currentItems={items}
+                currentType={order.product_type}
+                bundle={bundle}
+              />
+            </>
+          )}
 
           {/* Measurements */}
           {order.measurements && (

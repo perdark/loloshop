@@ -76,7 +76,7 @@ export function OptionGroupField({
       {(group.hintAr || group.imageUrl) && (
         <div className="mb-3 rounded-xl border border-ink/8 bg-cream/60 p-2.5">
           <p className="text-[11px] font-medium text-[var(--shop-muted)]">
-            صورة توضيحية من الأدمن
+            صورة توضيحية
           </p>
           {group.hintAr && (
             <p className="mt-1 text-xs text-ink-soft">{group.hintAr}</p>

@@ -203,6 +203,19 @@ export interface AdminBundleItem {
   profit: number;
 }
 
+/** Intake data from the full-set DM form (delivery / contact / event / deposit). */
+export interface BundleIntake {
+  customer_name: string;
+  instagram_username: string | null;
+  phone_primary: string;
+  phone_secondary: string | null;
+  governorate: string | null;
+  area_details: string | null;
+  event_date: string | null;
+  deposit: number;
+  notes: string | null;
+}
+
 /** A grouped bundle card returned by GET /admin/orders?group=bundle */
 export interface AdminBundle {
   checkout_group_id: string | null;
@@ -213,6 +226,8 @@ export interface AdminBundle {
   total_cost: number;
   total_profit: number;
   items: AdminBundleItem[];
+  /** Present only for full-set form bundles (null for cart/legacy bundles). */
+  intake: BundleIntake | null;
 }
 
 interface ApiBundleItem {
@@ -234,6 +249,17 @@ interface ApiBundle {
   total_cost: number;
   total_profit: number;
   items: ApiBundleItem[];
+  intake?: {
+    customer_name: string;
+    instagram_username: string | null;
+    phone_primary: string;
+    phone_secondary: string | null;
+    governorate: string | null;
+    area_details: string | null;
+    event_date: string | null;
+    deposit: string | number;
+    notes: string | null;
+  } | null;
 }
 
 function mapBundle(raw: ApiBundle): AdminBundle {
@@ -254,6 +280,19 @@ function mapBundle(raw: ApiBundle): AdminBundle {
       cost: Number(item.cost),
       profit: Number(item.profit),
     })),
+    intake: raw.intake
+      ? {
+          customer_name: raw.intake.customer_name,
+          instagram_username: raw.intake.instagram_username,
+          phone_primary: raw.intake.phone_primary,
+          phone_secondary: raw.intake.phone_secondary,
+          governorate: raw.intake.governorate,
+          area_details: raw.intake.area_details,
+          event_date: raw.intake.event_date,
+          deposit: Number(raw.intake.deposit) || 0,
+          notes: raw.intake.notes,
+        }
+      : null,
   };
 }
 
@@ -625,6 +664,8 @@ export interface PackagePayload {
   sort?: number;
   active?: boolean;
   is_vip?: boolean;
+  /** Full graduation set (robe + cap + sash). Mutually exclusive with is_vip. */
+  is_full_set?: boolean;
   description?: string | null;
   features?: string[];
   included_items?: string[];
@@ -646,18 +687,31 @@ function mapAdminPackage(raw: Record<string, unknown>): PackageTier {
     sashTypeOptionId: String(raw.sash_type_option_id ?? ""),
     sashTypeLabel: String(raw.sash_type_label ?? ""),
     isVip: !!raw.is_vip,
+    isFullSet: !!raw.is_full_set,
     description: (raw.description as string | null) ?? null,
     features: arr(raw.features),
     includedItems: arr(raw.included_items),
     badgeLabel: (raw.badge_label as string | null) ?? null,
     accent: (raw.accent as string | null) ?? null,
+    products: Array.isArray(raw.products)
+      ? (raw.products as Record<string, unknown>[]).map((p) => ({
+          id: String(p.id),
+          type: String(p.type),
+          nameAr: String(p.name_ar ?? ""),
+        }))
+      : [],
   };
 }
 
-/** Admin list — retail packages incl. inactive (active + VIP both shown). */
+/** Replace the package's bundled catalog products (one per type — robe/cap/sash). */
+export async function setPackageProducts(id: string, productIds: string[]): Promise<void> {
+  await api.put(`/catalog/packages/${id}/products`, { product_ids: productIds });
+}
+
+/** Admin list — all packages incl. inactive (VIP + full-set + wholesale all shown). */
 export async function listAdminPackages(): Promise<PackageTier[]> {
   const { data } = await api.get<{ data: Record<string, unknown>[] }>("/catalog/packages", {
-    params: { role: "retail", all: 1 },
+    params: { all: 1 },
   });
   return (data.data || []).map(mapAdminPackage);
 }
@@ -673,6 +727,51 @@ export async function updatePackage(id: string, patch: Partial<PackagePayload>):
 
 export async function deletePackage(id: string): Promise<void> {
   await api.delete(`/catalog/packages/${id}`);
+}
+
+// ─── Checkout Group (intake edit) ─────────────────────────────────────────────
+
+export interface CheckoutGroupPayload {
+  deposit?: number;
+  notes?: string | null;
+  event_date?: string | null;
+  customer_name?: string;
+  instagram_username?: string | null;
+  phone_primary?: string;
+  phone_secondary?: string | null;
+  governorate?: string | null;
+  area_details?: string | null;
+}
+
+/** PATCH /admin/checkout-groups/:id — update any intake fields. Returns the updated row. */
+export async function updateCheckoutGroup(
+  id: string,
+  payload: CheckoutGroupPayload
+): Promise<BundleIntake> {
+  const { data } = await api.patch<{ data: {
+    id: string;
+    customer_name: string;
+    instagram_username: string | null;
+    phone_primary: string;
+    phone_secondary: string | null;
+    governorate: string | null;
+    area_details: string | null;
+    event_date: string | null;
+    deposit: string | number;
+    notes: string | null;
+  } }>(`/admin/checkout-groups/${id}`, payload);
+  const r = data.data;
+  return {
+    customer_name: r.customer_name,
+    instagram_username: r.instagram_username,
+    phone_primary: r.phone_primary,
+    phone_secondary: r.phone_secondary,
+    governorate: r.governorate,
+    area_details: r.area_details,
+    event_date: r.event_date,
+    deposit: Number(r.deposit) || 0,
+    notes: r.notes,
+  };
 }
 
 export async function setPackageRule(id: string, sashTypeOptionId: string): Promise<void> {

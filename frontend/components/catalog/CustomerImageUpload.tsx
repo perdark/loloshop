@@ -70,7 +70,7 @@ export function CustomerImageUpload({
       {(group.hintAr || hintUrl) && (
         <div className="mt-3 rounded-xl border border-ink/10 bg-beige/80 p-2.5">
           <p className="text-[11px] font-medium text-[var(--shop-muted)]">
-            صورة توضيحية من الأدمن (للتوجيه فقط)
+            صورة توضيحية
           </p>
           {group.hintAr && (
             <p className="mt-1 text-xs text-ink-soft">{group.hintAr}</p>

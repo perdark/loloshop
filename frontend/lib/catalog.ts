@@ -35,6 +35,9 @@ function mapOption(raw: Record<string, unknown>): CatalogOption {
     requiresCustomerImage: Boolean(
       raw.requires_customer_image ?? raw.requiresCustomerImage
     ),
+    requiresCustomerText: Boolean(
+      raw.requires_customer_text ?? raw.requiresCustomerText
+    ),
   };
 }
 
@@ -384,4 +387,55 @@ export async function getCatalogProduct(
   } catch {
     return null;
   }
+}
+
+// ─── Full-Set Packages ────────────────────────────────────────────────────────
+
+export interface FullSetPackage {
+  id: string;
+  nameAr: string;
+  price: number;
+  imageUrl: string | null;
+  storyImageUrl: string | null;
+  sort: number;
+  description: string | null;
+  badgeLabel: string | null;
+  accent: string | null;
+  features: string[];
+  includedItems: string[];
+  /** Admin-chosen products composing the set (one per type); empty → defaults by type. */
+  products: { id: string; type: string; nameAr: string }[];
+}
+
+function mapFullSetPackage(raw: Record<string, unknown>): FullSetPackage {
+  return {
+    id: String(raw.id),
+    nameAr: String(raw.name_ar ?? raw.nameAr),
+    price: Number(raw.price ?? 0),
+    imageUrl: resolveCatalogMediaUrl(raw.image_url as string | null),
+    storyImageUrl: resolveCatalogMediaUrl(
+      raw.story_image_url as string | null
+    ),
+    sort: Number(raw.sort ?? 0),
+    description: (raw.description as string | null) ?? null,
+    badgeLabel: (raw.badge_label as string | null) ?? null,
+    accent: (raw.accent as string | null) ?? null,
+    features: (raw.features as string[] | null) ?? [],
+    includedItems: (raw.included_items as string[] | null) ?? [],
+    products: Array.isArray(raw.products)
+      ? (raw.products as Record<string, unknown>[]).map((p) => ({
+          id: String(p.id),
+          type: String(p.type),
+          nameAr: String(p.name_ar ?? ""),
+        }))
+      : [],
+  };
+}
+
+export async function listFullSetPackages(): Promise<FullSetPackage[]> {
+  const { data } = await api.get<{ data: Record<string, unknown>[] }>(
+    "/catalog/packages",
+    { params: { full_set: 1 } }
+  );
+  return (data.data || []).map(mapFullSetPackage);
 }

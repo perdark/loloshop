@@ -10,7 +10,8 @@
     "seed:mock": "node seed-mock-pipeline.js",
     "seed:orders": "node seed-mock-orders.js",
     "migrate": "node migrate.js",
-    "migrate:file": "node migrate.js"
+    "migrate:file": "node migrate.js",
+    "seed:fullset": "node seed-full-set.js"
   },
   "keywords": [],
   "author": "",

@@ -43,5 +43,6 @@ router.post('/packages', c.createPackage);
 router.patch('/packages/:id', c.updatePackage);
 router.delete('/packages/:id', c.deletePackage);
 router.put('/packages/:id/rule', c.setPackageRule);
+router.put('/packages/:id/products', c.setPackageProducts);
 
 module.exports = router;

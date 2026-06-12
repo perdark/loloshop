@@ -8,19 +8,29 @@ import {
   createPackage,
   deletePackage,
   listAdminPackages,
+  setPackageProducts,
   setPackageRule,
   updatePackage,
   type PackagePayload,
 } from "@/lib/admin";
-import { getProductFull, getShopFeed, resolveCatalogMediaUrl, uploadCatalogImage } from "@/lib/catalog";
+import {
+  getProductFull,
+  getShopFeed,
+  listCatalogProductsAdmin,
+  resolveCatalogMediaUrl,
+  uploadCatalogImage,
+} from "@/lib/catalog";
 import { formatIQD } from "@/lib/format";
-import type { CatalogOption, PackageTier } from "@/lib/types";
+import type { CatalogOption, CatalogProductSummary, PackageTier } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Modal } from "@/components/ui/Modal";
 
 const fieldCls =
   "min-h-10 w-full rounded-lg border border-ink/15 bg-white px-3 py-1.5 text-sm text-ink outline-none transition-colors focus:border-orange-ink focus:ring-2 focus:ring-orange-ink/15";
+
+/** Mutually-exclusive package kind (maps to two boolean backend flags). */
+type PackageKind = "wholesale" | "vip" | "full_set";
 
 interface Draft {
   id: string | null;
@@ -35,8 +45,10 @@ interface Draft {
   includedItems: string[];
   sort: string;
   active: boolean;
-  isVip: boolean;
+  kind: PackageKind;
   sashTypeOptionId: string;
+  /** Full-set composition — one chosen product per type ('' = default by type). */
+  productIds: { robe: string; cap: string; sash: string };
 }
 
 const DEFAULT_ACCENT = "#b8860b";
@@ -55,9 +67,16 @@ function emptyDraft(): Draft {
     includedItems: ["روب التخرج", "وشاح مطرّز", "قبعة التخرج"],
     sort: "0",
     active: true,
-    isVip: true,
+    kind: "vip",
     sashTypeOptionId: "",
+    productIds: { robe: "", cap: "", sash: "" },
   };
+}
+
+function kindFromPackage(p: PackageTier): PackageKind {
+  if (p.isVip) return "vip";
+  if (p.isFullSet) return "full_set";
+  return "wholesale";
 }
 
 function draftFromPackage(p: PackageTier): Draft {
@@ -74,26 +93,34 @@ function draftFromPackage(p: PackageTier): Draft {
     includedItems: p.includedItems?.length ? p.includedItems : [""],
     sort: String(p.sort ?? 0),
     active: p.active ?? true,
-    isVip: p.isVip ?? false,
+    kind: kindFromPackage(p),
     sashTypeOptionId: p.sashTypeOptionId || "",
+    productIds: {
+      robe: p.products?.find((x) => x.type === "robe")?.id ?? "",
+      cap: p.products?.find((x) => x.type === "cap")?.id ?? "",
+      sash: p.products?.find((x) => x.type === "sash")?.id ?? "",
+    },
   };
 }
 
 function draftToPayload(d: Draft): PackagePayload {
+  const isVip = d.kind === "vip";
+  const isFullSet = d.kind === "full_set";
   return {
     name_ar: d.nameAr.trim(),
     price: Number(d.price) || 0,
-    role: "retail",
+    role: d.kind === "wholesale" ? "wholesaler" : "retail",
     image_url: d.imageUrl,
-    story_image_url: d.storyImageUrl,
+    story_image_url: isVip ? d.storyImageUrl : null,
     badge_label: d.badgeLabel.trim() || null,
-    accent: d.accent || null,
+    accent: isVip ? (d.accent || null) : null,
     description: d.description.trim() || null,
     features: d.features.map((f) => f.trim()).filter(Boolean),
     included_items: d.includedItems.map((f) => f.trim()).filter(Boolean),
     sort: Number(d.sort) || 0,
     active: d.active,
-    is_vip: d.isVip,
+    is_vip: isVip,
+    is_full_set: isFullSet,
   };
 }
 
@@ -101,6 +128,7 @@ export default function AdminPackagesPage() {
   const [packages, setPackages] = useState<PackageTier[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [sashOptions, setSashOptions] = useState<CatalogOption[]>([]);
+  const [allProducts, setAllProducts] = useState<CatalogProductSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -140,10 +168,21 @@ export default function AdminPackagesPage() {
     }
   }, []);
 
+  // Catalog products for the full-set composition pickers (one per type).
+  const loadProducts = useCallback(async () => {
+    try {
+      const list = await listCatalogProductsAdmin();
+      setAllProducts(list.filter((p) => p.active));
+    } catch {
+      /* pickers degrade to type defaults if unavailable */
+    }
+  }, []);
+
   useEffect(() => {
     load();
     loadSashOptions();
-  }, [load, loadSashOptions]);
+    loadProducts();
+  }, [load, loadSashOptions, loadProducts]);
 
   function patch(p: Partial<Draft>) {
     setDraft((d) => (d ? { ...d, ...p } : d));
@@ -203,6 +242,11 @@ export default function AdminPackagesPage() {
       // Persist the sash-type rule if chosen (needs a saved package id).
       if (id && draft.sashTypeOptionId) {
         await setPackageRule(id, draft.sashTypeOptionId);
+      }
+      // Persist the full-set composition (which robe/cap/sash the طقم bundles).
+      if (id && draft.kind === "full_set") {
+        const ids = [draft.productIds.robe, draft.productIds.cap, draft.productIds.sash].filter(Boolean);
+        await setPackageProducts(id, ids);
       }
       toast.success(draft.id ? "تم حفظ الباقة" : "تم إنشاء الباقة");
       await load(id);
@@ -306,10 +350,15 @@ export default function AdminPackagesPage() {
                       VIP
                     </span>
                   )}
+                  {p.isFullSet && !p.isVip && (
+                    <span className="shrink-0 rounded-full bg-ink/10 px-2 py-0.5 text-[10px] font-bold text-ink">
+                      طقم كامل
+                    </span>
+                  )}
                 </button>
               );
             })}
-            {!packages.length && <EmptyState message="لا توجد باقات بعد — أنشئ باقة VIP للبدء." />}
+            {!packages.length && <EmptyState message="لا توجد باقات بعد — أنشئ باقة للبدء." />}
           </nav>
         </aside>
 
@@ -359,61 +408,92 @@ export default function AdminPackagesPage() {
                 </Field>
               </div>
 
-              {/* Images — hero (cover) + story band, both shown on the VIP page */}
+              {/* Package Kind selector */}
+              <div>
+                <span className="mb-2 block text-sm font-medium text-ink-soft">نوع الباقة</span>
+                <div className="flex flex-wrap gap-2">
+                  {(
+                    [
+                      { value: "wholesale", label: "باقة وكلاء" },
+                      { value: "vip", label: "VIP" },
+                      { value: "full_set", label: "طقم كامل" },
+                    ] as { value: PackageKind; label: string }[]
+                  ).map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => patch({ kind: opt.value })}
+                      className={`inline-flex min-h-[44px] items-center rounded-full border px-5 py-2 text-sm font-semibold transition-colors ${
+                        draft.kind === opt.value
+                          ? "border-orange-ink bg-orange-ink text-white"
+                          : "border-line bg-surface text-ink-soft hover:border-orange-ink/40 hover:text-ink"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Images — hero (cover) always shown; story band only for VIP */}
               <div className="grid gap-5 sm:grid-cols-2">
                 <ImagePicker
                   label="صورة الغلاف (الهيرو)"
-                  hint="تظهر أعلى صفحة VIP خلف العنوان."
+                  hint={draft.kind === "vip" ? "تظهر أعلى صفحة VIP خلف العنوان." : "صورة تعريفية للباقة."}
                   value={draft.imageUrl}
-                  inputId="vip-img"
+                  inputId="pkg-img"
                   busy={saving}
                   onPick={(f) => handleImage(f, "imageUrl")}
                   onRemove={() => removeImage("imageUrl")}
                 />
-                <ImagePicker
-                  label="صورة القصة (الشريط السفلي)"
-                  hint="تظهر في شريط «لأن لحظة التخرج لا تتكرر»."
-                  value={draft.storyImageUrl}
-                  inputId="vip-story-img"
-                  busy={saving}
-                  onPick={(f) => handleImage(f, "storyImageUrl")}
-                  onRemove={() => removeImage("storyImageUrl")}
-                />
+                {draft.kind === "vip" && (
+                  <ImagePicker
+                    label="صورة القصة (الشريط السفلي)"
+                    hint="تظهر في شريط «لأن لحظة التخرج لا تتكرر»."
+                    value={draft.storyImageUrl}
+                    inputId="vip-story-img"
+                    busy={saving}
+                    onPick={(f) => handleImage(f, "storyImageUrl")}
+                    onRemove={() => removeImage("storyImageUrl")}
+                  />
+                )}
               </div>
 
-              {/* Badge + accent */}
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="نص الشارة (Badge)" htmlFor="pkg-badgeLabel">
-                  <input
-                    id="pkg-badgeLabel"
-                    name="badgeLabel"
-                    value={draft.badgeLabel}
-                    onChange={(e) => patch({ badgeLabel: e.target.value })}
-                    placeholder="VIP"
-                    className={fieldCls}
-                  />
-                </Field>
-                <Field label="لون التميّز (الشارة فقط)" htmlFor="pkg-accent">
-                  <div className="flex items-center gap-2.5">
+              {/* Badge + accent — VIP only */}
+              {draft.kind === "vip" && (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label="نص الشارة (Badge)" htmlFor="pkg-badgeLabel">
                     <input
-                      type="color"
-                      value={/^#[0-9a-fA-F]{6}$/.test(draft.accent) ? draft.accent : DEFAULT_ACCENT}
-                      onChange={(e) => patch({ accent: e.target.value })}
-                      className="h-10 w-12 cursor-pointer rounded-lg border border-ink/15 bg-white p-1"
-                      aria-label="لون التميّز"
+                      id="pkg-badgeLabel"
+                      name="badgeLabel"
+                      value={draft.badgeLabel}
+                      onChange={(e) => patch({ badgeLabel: e.target.value })}
+                      placeholder="VIP"
+                      className={fieldCls}
                     />
-                    <input
-                      id="pkg-accent"
-                      name="accent"
-                      value={draft.accent}
-                      onChange={(e) => patch({ accent: e.target.value })}
-                      dir="ltr"
-                      placeholder="#b8860b"
-                      className={`${fieldCls} flex-1 tabular-nums`}
-                    />
-                  </div>
-                </Field>
-              </div>
+                  </Field>
+                  <Field label="لون التميّز (الشارة فقط)" htmlFor="pkg-accent">
+                    <div className="flex items-center gap-2.5">
+                      <input
+                        type="color"
+                        value={/^#[0-9a-fA-F]{6}$/.test(draft.accent) ? draft.accent : DEFAULT_ACCENT}
+                        onChange={(e) => patch({ accent: e.target.value })}
+                        className="h-10 w-12 cursor-pointer rounded-lg border border-ink/15 bg-white p-1"
+                        aria-label="لون التميّز"
+                      />
+                      <input
+                        id="pkg-accent"
+                        name="accent"
+                        value={draft.accent}
+                        onChange={(e) => patch({ accent: e.target.value })}
+                        dir="ltr"
+                        placeholder="#b8860b"
+                        className={`${fieldCls} flex-1 tabular-nums`}
+                      />
+                    </div>
+                  </Field>
+                </div>
+              )}
 
               {/* Description */}
               <Field label="وصف الباقة" htmlFor="pkg-description">
@@ -444,8 +524,48 @@ export default function AdminPackagesPage() {
                 onChange={(includedItems) => patch({ includedItems })}
               />
 
-              {/* Sash rule */}
-              {sashOptions.length > 0 && (
+              {/* Full-set composition — admin picks which catalog products the طقم bundles */}
+              {draft.kind === "full_set" && (
+                <fieldset className="rounded-xl border border-ink/10 bg-cream/40 p-4">
+                  <legend className="px-1 text-sm font-semibold text-ink">منتجات الطقم</legend>
+                  <p className="mb-3 text-xs text-[var(--shop-muted)]">
+                    اختر المنتج الذي يمثل كل قطعة — حقول الطلب (الألوان، القماش، القياسات…) تأتي من خيارات هذه المنتجات في الكتالوج. اتركه فارغاً ليُستخدم أول منتج فعّال من نفس النوع.
+                  </p>
+                  <div className="grid gap-4 sm:grid-cols-3">
+                    {(
+                      [
+                        { type: "robe", label: "الروب" },
+                        { type: "cap", label: "القبعة" },
+                        { type: "sash", label: "الوشاح" },
+                      ] as const
+                    ).map(({ type, label }) => (
+                      <Field key={type} label={label} htmlFor={`pkg-product-${type}`}>
+                        <select
+                          id={`pkg-product-${type}`}
+                          name={`product-${type}`}
+                          value={draft.productIds[type]}
+                          onChange={(e) =>
+                            patch({ productIds: { ...draft.productIds, [type]: e.target.value } })
+                          }
+                          className={fieldCls}
+                        >
+                          <option value="">تلقائي (أول منتج {label})</option>
+                          {allProducts
+                            .filter((p) => p.type === type)
+                            .map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.nameAr}
+                              </option>
+                            ))}
+                        </select>
+                      </Field>
+                    ))}
+                  </div>
+                </fieldset>
+              )}
+
+              {/* Sash rule — hidden for full-set (no single sash type applies) */}
+              {sashOptions.length > 0 && draft.kind !== "full_set" && (
                 <Field label="نوع الوشاح المرتبط (اختياري)" htmlFor="pkg-sashTypeOptionId">
                   <select
                     id="pkg-sashTypeOptionId"
@@ -464,7 +584,7 @@ export default function AdminPackagesPage() {
                 </Field>
               )}
 
-              {/* Flags */}
+              {/* Sort + active */}
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label="الترتيب" htmlFor="pkg-sort">
                   <input
@@ -478,15 +598,6 @@ export default function AdminPackagesPage() {
                   />
                 </Field>
                 <div className="flex items-end gap-6 pb-1">
-                  <label className="flex cursor-pointer items-center gap-2 text-sm text-ink-soft">
-                    <input
-                      type="checkbox"
-                      checked={draft.isVip}
-                      onChange={(e) => patch({ isVip: e.target.checked })}
-                      className="h-4 w-4 accent-orange-ink"
-                    />
-                    باقة VIP
-                  </label>
                   <label className="flex cursor-pointer items-center gap-2 text-sm text-ink-soft">
                     <input
                       type="checkbox"
@@ -539,10 +650,10 @@ function Masthead() {
   return (
     <header className="mb-9 border-b border-ink/15 pb-6">
       <h1 className="font-display text-4xl font-bold leading-[1.05] tracking-tight text-ink lg:text-5xl">
-        باقات VIP
+        الباقات
       </h1>
       <p className="mt-2.5 max-w-xl text-base text-ink-soft">
-        الباقات الفاخرة للطلاب — الاسم والسعر والمزايا والشارة، بتحكّم كامل.
+        باقات الوكلاء · VIP · الطقم الكامل — الاسم والسعر والمزايا، بتحكّم كامل.
       </p>
     </header>
   );

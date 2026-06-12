@@ -10,6 +10,7 @@ router.get('/analytics', c.analytics);
 router.get('/accounting', c.accounting);
 router.get('/orders', orders.listOrders);
 router.patch('/orders/:id/cost', c.updateOrderCost);
+router.patch('/checkout-groups/:id', c.updateCheckoutGroup);
 router.get('/wholesalers', c.listWholesalers);
 router.post('/wholesalers', c.createWholesaler);
 router.patch('/wholesalers/:id/deadline', c.updateDeadline);
