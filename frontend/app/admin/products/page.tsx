@@ -89,6 +89,10 @@ const PlusIcon = (
   <Icon d={<><path d="M12 5v14M5 12h14" /></>} />
 );
 
+const PencilIcon = (
+  <Icon d={<><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></>} />
+);
+
 /* A quiet labelled checkbox row used for group/option boolean settings. */
 function CheckRow({
   checked,
@@ -125,6 +129,10 @@ export default function AdminProductsPage() {
   const [previewRole, setPreviewRole] = useState<PriceRole>("retail");
   const [previewSel, setPreviewSel] = useState<OptionSelection>({});
   const [savingId, setSavingId] = useState<string | null>(null);
+
+  // Inline name-edit state
+  const [editingName, setEditingName] = useState(false);
+  const [editingNameValue, setEditingNameValue] = useState("");
 
   // Confirm-delete modals (replaces window.confirm)
   const [deleteProductTarget, setDeleteProductTarget] = useState<{ id: string; name: string } | null>(null);
@@ -185,6 +193,7 @@ export default function AdminProductsPage() {
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch on selection/role change
+    setEditingName(false);
     if (selectedId) loadProduct(selectedId, previewRole);
     else setProduct(null);
   }, [selectedId, previewRole, loadProduct]);
@@ -200,9 +209,15 @@ export default function AdminProductsPage() {
   }, [selectedId, previewRole, loadProduct]);
 
   const selectedSummary = summaries.find((s) => s.id === selectedId);
-  const parents = summaries.filter((s) => !s.parentId);
+  const activeParents = summaries.filter((s) => !s.parentId && s.active);
+  const parents = activeParents;
   const childrenOf = (pid: string) =>
     summaries.filter((s) => s.parentId === pid);
+  const activeChildrenOf = (pid: string) =>
+    summaries.filter((s) => s.parentId === pid && s.active);
+  const inactiveProducts = summaries.filter((s) => !s.active);
+  // parents list used in create form includes only active parents
+  const activeParentsForSelect = summaries.filter((s) => !s.parentId && s.active);
 
   /* ── Actions ─────────────────────────────────────────── */
 
@@ -245,7 +260,7 @@ export default function AdminProductsPage() {
 
   function handleDeleteProduct() {
     if (!product) return;
-    if (childrenOf(product.id).length) {
+    if (activeChildrenOf(product.id).length) {
       toast.error("احذف المنتجات الفرعية أولاً");
       return;
     }
@@ -258,9 +273,13 @@ export default function AdminProductsPage() {
     setDeleteProductTarget(null);
     setSavingId("delete-product");
     try {
-      await deleteCatalogProduct(id);
-      toast.success("تم حذف المنتج");
-      const next = summaries.find((s) => s.id !== id)?.id ?? null;
+      const result = await deleteCatalogProduct(id);
+      if (result.mode === "archived") {
+        toast.success("المنتج مرتبط بطلبات سابقة — تم نقله إلى المؤرشفة");
+      } else {
+        toast.success("تم حذف المنتج نهائياً");
+      }
+      const next = summaries.find((s) => s.id !== id && s.active)?.id ?? null;
       setSelectedId(next);
       await loadList(next ?? undefined);
     } catch (e) {
@@ -283,6 +302,19 @@ export default function AdminProductsPage() {
     const { id } = deleteOptionTarget;
     setDeleteOptionTarget(null);
     await run(id, () => deleteCatalogOption(id));
+  }
+
+  async function commitNameEdit() {
+    if (!product) return;
+    const trimmed = editingNameValue.trim();
+    setEditingName(false);
+    if (!trimmed || trimmed === product.nameAr) return;
+    await run(
+      "name-edit",
+      () => updateCatalogProduct(product.id, { name_ar: trimmed }),
+      "تم تغيير الاسم"
+    );
+    await loadList();
   }
 
   async function handleCreateGroup() {
@@ -423,17 +455,26 @@ export default function AdminProductsPage() {
 
           {newOpen && (
             <div className="mb-4 space-y-2.5 rounded-xl border border-ink/10 bg-beige p-3">
-              <select
-                value={npType}
-                onChange={(e) => setNpType(e.target.value as ProductType)}
-                className={`${fieldCls} w-full`}
-              >
-                {Object.entries(PRODUCT_TYPE_LABELS).map(([v, label]) => (
-                  <option key={v} value={v}>
-                    {label}
-                  </option>
-                ))}
-              </select>
+              {/* Type select — disabled when parent is chosen (type follows parent) */}
+              <div>
+                <select
+                  value={npType}
+                  onChange={(e) => setNpType(e.target.value as ProductType)}
+                  disabled={!!npParent}
+                  className={`${fieldCls} w-full disabled:opacity-60`}
+                >
+                  {Object.entries(PRODUCT_TYPE_LABELS).map(([v, label]) => (
+                    <option key={v} value={v}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+                {npParent && (
+                  <p className="mt-1 text-xs text-[var(--shop-muted)]">
+                    النوع يتبع المنتج الأساسي
+                  </p>
+                )}
+              </div>
               <input
                 value={npName}
                 onChange={(e) => setNpName(e.target.value)}
@@ -450,11 +491,18 @@ export default function AdminProductsPage() {
               />
               <select
                 value={npParent}
-                onChange={(e) => setNpParent(e.target.value)}
+                onChange={(e) => {
+                  const pid = e.target.value;
+                  setNpParent(pid);
+                  if (pid) {
+                    const parentProduct = activeParentsForSelect.find((p) => p.id === pid);
+                    if (parentProduct) setNpType(parentProduct.type);
+                  }
+                }}
                 className={`${fieldCls} w-full`}
               >
                 <option value="">منتج مستقل (بدون أساسي)</option>
-                {parents.map((p) => (
+                {activeParentsForSelect.map((p) => (
                   <option key={p.id} value={p.id}>
                     منتج فرعي لـ: {p.nameAr}
                   </option>
@@ -472,7 +520,7 @@ export default function AdminProductsPage() {
                 <Button
                   size="sm"
                   variant="ghost"
-                  onClick={() => setNewOpen(false)}
+                  onClick={() => { setNewOpen(false); setNpParent(""); setNpType("sash"); }}
                 >
                   إلغاء
                 </Button>
@@ -482,7 +530,7 @@ export default function AdminProductsPage() {
 
           <nav className="space-y-1">
             {parents.map((p) => {
-              const kids = childrenOf(p.id);
+              const kids = activeChildrenOf(p.id);
               return (
                 <div key={p.id}>
                   <ProductRailItem
@@ -490,6 +538,13 @@ export default function AdminProductsPage() {
                     selected={selectedId === p.id}
                     isParent={kids.length > 0}
                     onSelect={() => setSelectedId(p.id)}
+                    onAddChild={() => {
+                      setNpParent(p.id);
+                      setNpType(p.type);
+                      setNpName("");
+                      setNpPrice("");
+                      setNewOpen(true);
+                    }}
                   />
                   {kids.map((c) => (
                     <ProductRailItem
@@ -507,6 +562,23 @@ export default function AdminProductsPage() {
               <EmptyState message="لا توجد منتجات بعد — أضف منتجاً للبدء." />
             )}
           </nav>
+
+          {/* Archived products disclosure */}
+          {inactiveProducts.length > 0 && (
+            <ArchivedSection
+              products={inactiveProducts}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              onRestore={async (id) => {
+                await run(
+                  `restore-${id}`,
+                  () => updateCatalogProduct(id, { active: true }),
+                  "تمت استعادة المنتج"
+                );
+                await loadList();
+              }}
+            />
+          )}
         </aside>
 
         {/* ── Editor ── */}
@@ -533,9 +605,37 @@ export default function AdminProductsPage() {
               <div className="flex flex-wrap items-start justify-between gap-4 border-b border-ink/10 pb-6">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2.5">
-                    <h2 className="font-display text-3xl font-bold leading-tight text-ink">
-                      {product.nameAr}
-                    </h2>
+                    {editingName ? (
+                      <input
+                        autoFocus
+                        value={editingNameValue}
+                        onChange={(e) => setEditingNameValue(e.target.value)}
+                        onBlur={commitNameEdit}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") { e.preventDefault(); commitNameEdit(); }
+                          if (e.key === "Escape") { setEditingName(false); }
+                        }}
+                        disabled={savingId === "name-edit"}
+                        className={`${fieldCls} font-display text-3xl font-bold leading-tight w-64`}
+                        aria-label="تعديل اسم المنتج"
+                      />
+                    ) : (
+                      <h2 className="font-display text-3xl font-bold leading-tight text-ink">
+                        {product.nameAr}
+                      </h2>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingNameValue(product.nameAr);
+                        setEditingName(true);
+                      }}
+                      disabled={savingId === "name-edit"}
+                      aria-label="تعديل اسم المنتج"
+                      className="rounded-full p-1.5 text-ink-soft transition-colors hover:bg-ink/[0.06] hover:text-ink disabled:opacity-50"
+                    >
+                      {PencilIcon}
+                    </button>
                     <span className="rounded-full bg-ink/[0.06] px-2.5 py-0.5 text-xs font-medium text-ink-soft">
                       {PRODUCT_TYPE_LABELS[product.type]}
                     </span>
@@ -608,31 +708,65 @@ export default function AdminProductsPage() {
                 </div>
               </div>
 
-              {/* Audience / visibility */}
-              <div className="rounded-2xl border border-ink/10 bg-[var(--shop-sink)] p-4">
-                <CheckRow
-                  checked={!!product.wholesalerOnly}
-                  disabled={savingId === "wholesaler-only"}
-                  onChange={(v) =>
-                    run(
-                      "wholesaler-only",
-                      () =>
-                        updateCatalogProduct(product.id, {
-                          wholesaler_only: v,
-                        }),
-                      v
-                        ? "أصبح المنتج خاصاً بطلاب الممثل"
-                        : "أصبح المنتج متاحاً للجميع"
-                    )
-                  }
-                >
-                  خاص بطلاب الممثل فقط
-                </CheckRow>
-                <p className="mt-1.5 text-xs text-[var(--shop-muted)]">
-                  عند التفعيل، يظهر المنتج فقط للطلاب الذين انضموا عبر رابط الممثل
-                  (ولا يراه الطلاب العاديون).
-                </p>
-              </div>
+              {/* Audience / visibility — 3-way radio */}
+              {(() => {
+                type AudienceChoice = "all" | "wholesaler" | "retail";
+                const current: AudienceChoice = product.wholesalerOnly
+                  ? "wholesaler"
+                  : product.retailOnly
+                  ? "retail"
+                  : "all";
+                const audienceOptions: { value: AudienceChoice; label: string; hint: string }[] = [
+                  {
+                    value: "all",
+                    label: "متاح للجميع",
+                    hint: "يظهر لجميع الطلاب بغض النظر عن طريقة التسجيل.",
+                  },
+                  {
+                    value: "wholesaler",
+                    label: "خاص بطلاب الممثل فقط",
+                    hint: "يظهر فقط للطلاب المنضمين عبر رابط الممثل.",
+                  },
+                  {
+                    value: "retail",
+                    label: "خاص بطلاب التجزئة فقط",
+                    hint: "يظهر فقط للطلاب العاديين، ويُخفى عن طلاب الممثلين.",
+                  },
+                ];
+                const isBusy = savingId === "audience";
+                return (
+                  <div className="rounded-2xl border border-ink/10 bg-[var(--shop-sink)] p-4">
+                    <p className="mb-3 text-sm font-semibold text-ink">الجمهور المستهدف</p>
+                    <div className="space-y-3" role="radiogroup" aria-label="الجمهور المستهدف">
+                      {audienceOptions.map((opt) => (
+                        <label key={opt.value} className="flex cursor-pointer items-start gap-2.5">
+                          <input
+                            type="radio"
+                            name="audience"
+                            value={opt.value}
+                            checked={current === opt.value}
+                            disabled={isBusy}
+                            onChange={() => {
+                              const patch =
+                                opt.value === "wholesaler"
+                                  ? { wholesaler_only: true, retail_only: false }
+                                  : opt.value === "retail"
+                                  ? { retail_only: true, wholesaler_only: false }
+                                  : { wholesaler_only: false, retail_only: false };
+                              run("audience", () => updateCatalogProduct(product.id, patch), opt.label);
+                            }}
+                            className="mt-0.5 h-4 w-4 shrink-0 accent-orange-ink"
+                          />
+                          <span>
+                            <span className="block text-sm text-ink">{opt.label}</span>
+                            <span className="block text-xs text-[var(--shop-muted)]">{opt.hint}</span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Option groups */}
               <div>
@@ -897,7 +1031,7 @@ export default function AdminProductsPage() {
         }
       >
         <p className="text-sm text-ink-soft">
-          سيُحذف المنتج «{deleteProductTarget?.name}» نهائياً ويختفي من المتجر. لا يمكن التراجع.
+          سيُحذف المنتج «{deleteProductTarget?.name}» من المتجر. إذا كان مرتبطاً بطلبات سابقة، سيُنقل إلى الأرشيف بدلاً من الحذف النهائي.
         </p>
       </Modal>
 
@@ -949,52 +1083,116 @@ function ProductRailItem({
   isParent,
   child,
   onSelect,
+  onAddChild,
 }: {
   summary: CatalogProductSummary;
   selected: boolean;
   isParent?: boolean;
   child?: boolean;
   onSelect: () => void;
+  onAddChild?: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className={`flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-right transition-colors ${
-        child ? "ms-3 border-s border-ink/10 ps-3" : ""
-      } ${
-        selected
-          ? "bg-orange/10 font-semibold text-orange-ink"
-          : "text-ink hover:bg-[var(--shop-sink)]"
-      } ${!summary.active ? "opacity-50" : ""}`}
-    >
-      <span
-        className={`relative shrink-0 overflow-hidden rounded-md bg-peach/40 ${
-          child ? "h-8 w-8" : "h-10 w-10"
+    <div className={`flex items-center gap-0.5 ${child ? "ms-3" : ""}`}>
+      <button
+        type="button"
+        onClick={onSelect}
+        className={`flex flex-1 min-w-0 items-center gap-2.5 rounded-xl px-2.5 py-2 text-right transition-colors ${
+          child ? "border-s border-ink/10 ps-3" : ""
+        } ${
+          selected
+            ? "bg-orange/10 font-semibold text-orange-ink"
+            : "text-ink hover:bg-[var(--shop-sink)]"
         }`}
       >
-        {summary.imageUrl && (
-          <Image
-            src={resolveCatalogMediaUrl(summary.imageUrl) || summary.imageUrl}
-            alt=""
-            fill
-            className="object-cover"
-            unoptimized
-          />
+        <span
+          className={`relative shrink-0 overflow-hidden rounded-md bg-peach/40 ${
+            child ? "h-8 w-8" : "h-10 w-10"
+          }`}
+        >
+          {summary.imageUrl && (
+            <Image
+              src={resolveCatalogMediaUrl(summary.imageUrl) || summary.imageUrl}
+              alt=""
+              fill
+              className="object-cover"
+              unoptimized
+            />
+          )}
+        </span>
+        <span className="min-w-0 flex-1 text-sm">
+          <span className="block truncate">{summary.nameAr}</span>
+          <span className="mt-0.5 block text-xs font-normal text-[var(--shop-muted)]">
+            {PRODUCT_TYPE_LABELS[summary.type]} · {summary.groupCount} مجموعة
+          </span>
+        </span>
+        {isParent && (
+          <span className="shrink-0 rounded-full bg-orange/15 px-2 py-0.5 text-[10px] font-semibold text-orange-ink">
+            أساسي
+          </span>
         )}
-      </span>
-      <span className="min-w-0 flex-1 text-sm">
-        <span className="block truncate">{summary.nameAr}</span>
-        <span className="mt-0.5 block text-xs font-normal text-[var(--shop-muted)]">
-          {PRODUCT_TYPE_LABELS[summary.type]} · {summary.groupCount} مجموعة
-        </span>
-      </span>
-      {isParent && (
-        <span className="shrink-0 rounded-full bg-orange/15 px-2 py-0.5 text-[10px] font-semibold text-orange-ink">
-          أساسي
-        </span>
+      </button>
+      {onAddChild && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onAddChild(); }}
+          aria-label={`إضافة منتج فرعي لـ ${summary.nameAr}`}
+          className="shrink-0 rounded-full p-1.5 text-ink-soft transition-colors hover:bg-orange/10 hover:text-orange-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-ink min-h-[44px] min-w-[44px] flex items-center justify-center"
+        >
+          {PlusIcon}
+        </button>
       )}
-    </button>
+    </div>
+  );
+}
+
+/* ── Archived products disclosure ── */
+function ArchivedSection({
+  products,
+  selectedId,
+  onSelect,
+  onRestore,
+}: {
+  products: CatalogProductSummary[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+  onRestore: (id: string) => void;
+}) {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <div className="mt-3 border-t border-ink/10 pt-2">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-2 px-1 py-1 text-xs text-[var(--shop-muted)] hover:text-ink-soft transition-colors"
+        aria-expanded={open}
+      >
+        <span>المؤرشفة ({products.length})</span>
+        <span aria-hidden className="transition-transform" style={{ display: "inline-block", transform: open ? "rotate(180deg)" : "rotate(0deg)" }}>▾</span>
+      </button>
+      {open && (
+        <ul className="mt-1 space-y-0.5">
+          {products.map((p) => (
+            <li key={p.id} className="flex items-center gap-1 rounded-xl px-2.5 py-1.5 text-[var(--shop-muted)] hover:bg-[var(--shop-sink)] transition-colors">
+              <button
+                type="button"
+                className="flex-1 min-w-0 text-right text-xs truncate"
+                onClick={() => onSelect(p.id)}
+              >
+                {p.nameAr}
+              </button>
+              <button
+                type="button"
+                onClick={() => onRestore(p.id)}
+                className="shrink-0 rounded-full border border-ink/15 px-2 py-0.5 text-[10px] font-medium text-ink-soft hover:border-orange/40 hover:text-orange-ink transition-colors"
+              >
+                استعادة
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

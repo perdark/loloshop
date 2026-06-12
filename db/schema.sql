@@ -443,6 +443,9 @@ ALTER TABLE products ADD COLUMN IF NOT EXISTS parent_id UUID REFERENCES products
 -- Migration 008: wholesaler-only product visibility
 ALTER TABLE products ADD COLUMN IF NOT EXISTS wholesaler_only BOOLEAN NOT NULL DEFAULT FALSE;
 
+-- Migration 023: retail-only product visibility flag
+ALTER TABLE products ADD COLUMN IF NOT EXISTS retail_only BOOLEAN NOT NULL DEFAULT FALSE;
+
 -- Migration 009: per-wholesaler sash side lock.
 -- Wholesaler-joined students design only one side; the other (locked) side
 -- shows the admin/wholesaler's saved default Fabric JSON, read-only.

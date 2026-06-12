@@ -284,6 +284,7 @@ export interface CatalogProduct {
   active?: boolean;
   featured?: boolean;
   wholesalerOnly?: boolean;
+  retailOnly?: boolean;
   sort?: number;
   imageUrl: string | null;
   images: ProductImage[];
@@ -304,6 +305,7 @@ export interface CatalogProductSummary {
   active: boolean;
   featured: boolean;
   wholesalerOnly: boolean;
+  retailOnly: boolean;
   sort: number;
   imageUrl: string | null;
   groupCount: number;

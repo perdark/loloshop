@@ -339,3 +339,11 @@ The Instagram DM order form, digitized end-to-end. A full-set package = روب +
 
 ## Fix: 500 on create option group (2026-06-05)
 - `POST /api/catalog/products/:id/groups` 500'd when `input_type` was omitted: `COALESCE($3,'single_select')` resolved to `text`, rejected by enum column `option_input`. Fixed with `$3::option_input` cast (same pattern as the existing `price_role` cast at catalogController.js:442). Swept backend for other uncasted `COALESCE($n,'literal')` — none.
+
+## Admin catalog editor: rename, real delete, retail-only audience, quick sub-products (2026-06-12)
+Four admin/products complaints fixed (backend + frontend agents in parallel):
+- **Rename:** product name in the editor header is now inline-editable (pencil → input, Enter/blur commits, Escape cancels) via existing `PATCH name_ar`; rail refreshes.
+- **Delete actually deletes:** `DELETE /catalog/products/:id` now hard-deletes (catalog children cascade); only when order history blocks it (FK 23503, order_items RESTRICT) it falls back to `active=FALSE` and returns `mode:'deleted'|'archived'`. New guard 400 `ERR_HAS_CHILDREN` for parents. Rail shows only active products; soft-deleted ones live in a collapsed «المؤرشفة (N)» disclosure with «استعادة» (re-activate).
+- **Audience (migration 023):** new `products.retail_only` flag; admin card is now a 3-way radio متاح للجميع / خاص بطلاب الممثل فقط / خاص بطلاب التجزئة فقط (mutual exclusivity enforced server-side). Also fixed: `wholesaler_only` was stored but never enforced — `getShop` now filters by audience (guest/retail hide wholesaler_only; wholesaler-students hide retail_only) and `getProductFull` 404s for the wrong audience (admin/staff exempt).
+- **Quick sub-product:** parent rail rows get a «+» (إضافة منتج فرعي) that opens the create form with parent preset and type locked to the parent's type («النوع يتبع المنتج الأساسي»).
+- Verified: migration applied to Neon, backend smoke test (create → retail_only toggle → mutual exclusivity → hard delete), `tsc --noEmit` clean on touched files, prod build OK.

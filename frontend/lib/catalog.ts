@@ -124,6 +124,7 @@ function mapProductFull(raw: Record<string, unknown>): CatalogProduct {
     active: raw.active !== false,
     featured: Boolean(raw.featured),
     wholesalerOnly: Boolean(raw.wholesaler_only ?? raw.wholesalerOnly),
+    retailOnly: Boolean(raw.retail_only ?? raw.retailOnly),
     sort: Number(raw.sort ?? 0),
     imageUrl: resolveCatalogMediaUrl(raw.image_url as string | null),
     images: gallery.map(mapProductImage),
@@ -148,6 +149,7 @@ function mapProductSummary(raw: Record<string, unknown>): CatalogProductSummary 
     active: raw.active !== false,
     featured: Boolean(raw.featured),
     wholesalerOnly: Boolean(raw.wholesaler_only ?? raw.wholesalerOnly),
+    retailOnly: Boolean(raw.retail_only ?? raw.retailOnly),
     sort: Number(raw.sort ?? 0),
     imageUrl: resolveCatalogMediaUrl(raw.image_url as string | null),
     groupCount: Number(raw.group_count ?? raw.groupCount ?? 0),
@@ -242,9 +244,14 @@ export async function updateCatalogProduct(
   await api.patch(`/catalog/products/${id}`, body);
 }
 
-/** Soft-deletes the product (backend sets active = FALSE to keep order history). */
-export async function deleteCatalogProduct(id: string): Promise<void> {
-  await api.delete(`/catalog/products/${id}`);
+/** Deletes (or archives) the product. Returns mode: 'deleted' | 'archived'. */
+export async function deleteCatalogProduct(
+  id: string
+): Promise<{ id: string; mode: "deleted" | "archived" }> {
+  const { data } = await api.delete<{
+    data: { id: string; mode: "deleted" | "archived" };
+  }>(`/catalog/products/${id}`);
+  return data.data;
 }
 
 export async function createCatalogGroup(

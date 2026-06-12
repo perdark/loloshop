@@ -37,7 +37,7 @@ async function getProductFull(req, res) {
   const role = await priceRoleForUser(req.user, req.query.role);
   const prod = await query(
     `SELECT p.id, p.type, p.name_ar, p.description, p.customizable, p.gender_restriction,
-            p.image_url, p.featured, p.parent_id, p.wholesaler_only,
+            p.image_url, p.featured, p.parent_id, p.wholesaler_only, p.retail_only,
             par.name_ar AS parent_name_ar, par.image_url AS parent_image_url,
             COALESCE(ppr.base_price, p.base_price) AS base_price
      FROM products p
@@ -50,6 +50,17 @@ async function getProductFull(req, res) {
     return res.status(404).json({ error: 'المنتج غير موجود', code: 'ERR_NOT_FOUND' });
   }
   const row = prod.rows[0];
+
+  // Enforce audience visibility for non-admin/staff users
+  const isPrivileged = req.user && (req.user.role === 'admin' || req.user.role === 'staff');
+  if (!isPrivileged) {
+    if (row.wholesaler_only && role !== 'wholesaler') {
+      return res.status(404).json({ error: 'المنتج غير موجود', code: 'ERR_NOT_FOUND' });
+    }
+    if (row.retail_only && role === 'wholesaler') {
+      return res.status(404).json({ error: 'المنتج غير موجود', code: 'ERR_NOT_FOUND' });
+    }
+  }
 
   const gallery = await query(
     `SELECT id, url, sort FROM product_images WHERE product_id = $1 ORDER BY sort, created_at`,
@@ -129,6 +140,13 @@ async function getShop(req, res) {
   // Audience drives the funnel: wholesaler-students see only the package form (FE redirect),
   // retail browses products + cart, guests browse anonymously.
   const audience = !req.user ? 'guest' : role === 'wholesaler' ? 'wholesaler_student' : 'retail';
+  // Audience-based visibility filter:
+  //   guest / retail  → hide wholesaler_only products
+  //   wholesaler_student → hide retail_only products
+  const audienceFilter =
+    audience === 'wholesaler_student'
+      ? 'AND p.retail_only = FALSE'
+      : 'AND p.wholesaler_only = FALSE';
   const products = await query(
     `SELECT p.id, p.type, p.name_ar, p.description, p.customizable, p.gender_restriction,
             p.image_url, p.featured, p.sort,
@@ -136,6 +154,7 @@ async function getShop(req, res) {
      FROM products p
      LEFT JOIN product_price_roles ppr ON ppr.product_id = p.id AND ppr.role = $1
      WHERE p.active = TRUE
+       ${audienceFilter}
        AND NOT EXISTS (
          SELECT 1 FROM products c WHERE c.parent_id = p.id AND c.active = TRUE
        )
@@ -175,7 +194,7 @@ async function listProductsAdmin(req, res) {
   const { rows } = await query(
     `SELECT p.id, p.type, p.name_ar, p.description, p.base_price, p.customizable,
             p.gender_restriction, p.image_url, p.featured, p.sort, p.active,
-            p.wholesaler_only, p.parent_id,
+            p.wholesaler_only, p.retail_only, p.parent_id,
             par.name_ar AS parent_name,
             (SELECT COUNT(*)::int FROM option_groups g WHERE g.product_id = p.id) AS group_count,
             (SELECT COUNT(*)::int FROM product_images i WHERE i.product_id = p.id) AS image_count
@@ -236,9 +255,13 @@ function buildUpdate(table, allowed, body, id, returning = 'id') {
 }
 
 async function updateProduct(req, res) {
+  // Mutual exclusivity: wholesaler_only and retail_only cannot both be true.
+  if (req.body.retail_only === true) req.body.wholesaler_only = false;
+  if (req.body.wholesaler_only === true) req.body.retail_only = false;
+
   const upd = buildUpdate(
     'products',
-    ['name_ar', 'description', 'base_price', 'customizable', 'gender_restriction', 'image_url', 'featured', 'sort', 'active', 'wholesaler_only', 'parent_id'],
+    ['name_ar', 'description', 'base_price', 'customizable', 'gender_restriction', 'image_url', 'featured', 'sort', 'active', 'wholesaler_only', 'retail_only', 'parent_id'],
     req.body, req.params.id
   );
   if (!upd) return res.status(400).json({ error: 'لا تغييرات', code: 'ERR_VALIDATION' });
@@ -248,12 +271,36 @@ async function updateProduct(req, res) {
 }
 
 async function deleteProduct(req, res) {
-  // soft delete to preserve order history
-  const { rows } = await query(
-    `UPDATE products SET active = FALSE WHERE id = $1 RETURNING id`, [req.params.id]
+  const { id } = req.params;
+
+  // Guard: refuse if this product is a parent of other products.
+  // The FK is ON DELETE SET NULL, so a hard delete would silently orphan children.
+  const children = await query(
+    `SELECT 1 FROM products WHERE parent_id = $1 LIMIT 1`, [id]
   );
-  if (!rows.length) return res.status(404).json({ error: 'غير موجود', code: 'ERR_NOT_FOUND' });
-  res.json({ data: rows[0] });
+  if (children.rows.length) {
+    return res.status(400).json({ error: 'احذف المنتجات الفرعية أولاً', code: 'ERR_HAS_CHILDREN' });
+  }
+
+  // Attempt hard delete — cascades to option_groups, product_images, price roles,
+  // locked options, package_products (all ON DELETE CASCADE).
+  try {
+    const { rows } = await query(
+      `DELETE FROM products WHERE id = $1 RETURNING id`, [id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'غير موجود', code: 'ERR_NOT_FOUND' });
+    return res.json({ data: { id: rows[0].id, mode: 'deleted' } });
+  } catch (err) {
+    // FK violation: product is referenced by order_items (ON DELETE RESTRICT) or similar history.
+    if (err.code === '23503') {
+      const { rows } = await query(
+        `UPDATE products SET active = FALSE WHERE id = $1 RETURNING id`, [id]
+      );
+      if (!rows.length) return res.status(404).json({ error: 'غير موجود', code: 'ERR_NOT_FOUND' });
+      return res.json({ data: { id: rows[0].id, mode: 'archived' } });
+    }
+    throw err;
+  }
 }
 
 // ---------- ADMIN: option groups ----------
