@@ -134,12 +134,17 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
         const [feed, my] = await Promise.all([getShopFeed(), getMyDesign()]);
         if (cancelled) return;
 
+        let resolvedGender: "male" | "female" | null = null;
         if (my.student_gender === "male" || my.student_gender === "female") {
+          resolvedGender = my.student_gender;
           setGender(my.student_gender);
           localStorage.setItem(GENDER_KEY, my.student_gender);
         } else {
           const saved = localStorage.getItem(GENDER_KEY);
-          if (saved === "male" || saved === "female") setGender(saved);
+          if (saved === "male" || saved === "female") {
+            resolvedGender = saved;
+            setGender(saved);
+          }
         }
 
         setEditException(!!my.edit_exception);
@@ -154,8 +159,15 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
         setEditableSide(editSide);
         lockedSideRef.current = editSide ? (my.locked_side_design ?? null) : null;
 
-        // Check for preset from product page (consumes it once)
-        const preset = readSessionJson<{ productId: string; selections: OptionSelection }>(SASH_PRESET_KEY);
+        // Check for preset from product page (consumes it once). The product page
+        // also forwards any color photo/text the student already entered there, so
+        // they never re-do it in the designer.
+        const preset = readSessionJson<{
+          productId: string;
+          selections: OptionSelection;
+          customerImages?: Record<string, string>;
+          customerTexts?: Record<string, string>;
+        }>(SASH_PRESET_KEY);
         if (preset) {
           try { sessionStorage.removeItem(SASH_PRESET_KEY); } catch { /* ignore */ }
         }
@@ -192,11 +204,20 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
           if (Object.keys(mergedSelection).length > 0) {
             setSelection(mergedSelection);
           }
-          if (savedCustomerImages && Object.keys(savedCustomerImages).length > 0) {
-            setCustomerImages(savedCustomerImages);
+          // Preset photo/text (from the product page) take priority over any saved draft.
+          const mergedCustomerImages = {
+            ...(savedCustomerImages ?? {}),
+            ...(preset?.customerImages ?? {}),
+          };
+          const mergedCustomerTexts = {
+            ...(savedCustomerTexts ?? {}),
+            ...(preset?.customerTexts ?? {}),
+          };
+          if (Object.keys(mergedCustomerImages).length > 0) {
+            setCustomerImages(mergedCustomerImages);
           }
-          if (savedCustomerTexts && Object.keys(savedCustomerTexts).length > 0) {
-            setCustomerTexts(savedCustomerTexts);
+          if (Object.keys(mergedCustomerTexts).length > 0) {
+            setCustomerTexts(mergedCustomerTexts);
           }
 
           if (my.data) {
@@ -225,13 +246,26 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
             else setLeftJson(lockedSideRef.current);
           }
 
+          // Arriving from a product page with a complete configuration (color +
+          // any required photo/text) → skip the options step and open the canvas
+          // (step 2) directly, so the student doesn't re-pick what they just set.
+          const presetComplete =
+            !!preset &&
+            !validateSelection(full, mergedSelection, resolvedGender) &&
+            !validateCustomerImages(full, mergedSelection, mergedCustomerImages) &&
+            !validateCustomerTexts(full, mergedSelection, mergedCustomerTexts);
+
           const hasCanvas = !!(my.data?.left_canvas || my.data?.right_canvas);
-          let restoredStep: 1 | 2 | 3 = hasCanvas ? 2 : 1;
+          let restoredStep: 1 | 2 | 3 = hasCanvas || presetComplete ? 2 : 1;
           const savedStepRaw =
             typeof sessionStorage !== "undefined"
               ? sessionStorage.getItem(DRAFT_STEP_KEY)
               : null;
-          if (savedStepRaw === "1" || savedStepRaw === "2" || savedStepRaw === "3") {
+          // A fresh, complete preset wins over a stale saved step.
+          if (
+            !presetComplete &&
+            (savedStepRaw === "1" || savedStepRaw === "2" || savedStepRaw === "3")
+          ) {
             restoredStep = Number(savedStepRaw) as 1 | 2 | 3;
           }
           setStep(restoredStep);

@@ -418,9 +418,16 @@ export default function StudentProductPage() {
               type="button"
               className="btn-shine flex min-h-12 w-full items-center justify-center gap-2 rounded-pill bg-orange-ink font-display text-base font-bold text-white shadow-[var(--shadow-float)] transition-transform duration-200 hover:-translate-y-0.5 active:translate-y-0"
               onClick={() => {
+                // Forward the color + any photo/text entered here so the designer
+                // can carry it and open the canvas directly (no re-entry).
                 sessionStorage.setItem(
                   "loloshop_sash_preset",
-                  JSON.stringify({ productId: id, selections: selection })
+                  JSON.stringify({
+                    productId: id,
+                    selections: selection,
+                    customerImages,
+                    customerTexts,
+                  })
                 );
                 router.push("/design");
               }}
