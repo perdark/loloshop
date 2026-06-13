@@ -32,7 +32,7 @@ export function ProductTile({ product }: { product: ShopProductCard }) {
       </figure>
 
       <figcaption className="px-0.5 pt-2.5">
-        <h3 className="line-clamp-1 font-display text-[0.95rem] font-semibold leading-tight text-ink">
+        <h3 className="truncate font-display text-[1.1rem] font-semibold leading-[1.6] pb-[3px] text-ink">
           {product.nameAr}
         </h3>
         <p className="mt-1 flex items-baseline gap-1.5" dir="ltr">
@@ -77,7 +77,7 @@ export function PackageTile({ pkg }: { pkg: ShopPackageCard }) {
         <span className="mb-1.5 inline-block rounded-full border border-orange-ink/20 px-2.5 py-0.5 font-display text-[10px] font-semibold tracking-wide text-orange-ink">
           إطلالة كاملة
         </span>
-        <h3 className="line-clamp-1 font-display text-[0.95rem] font-semibold leading-tight text-ink">
+        <h3 className="truncate font-display text-[1.1rem] font-semibold leading-[1.6] pb-[3px] text-ink">
           {pkg.nameAr}
         </h3>
         <p className="mt-0.5 text-xs text-[var(--shop-muted)]">روب + وشاح + قبعة</p>

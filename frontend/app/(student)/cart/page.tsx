@@ -110,7 +110,7 @@ function CartRow({
 
       {/* Details */}
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <p className="line-clamp-2 font-display-ar text-sm font-semibold leading-snug text-ink">
+        <p className="line-clamp-2 font-display-ar text-sm font-semibold leading-relaxed text-ink">
           {item.productName}
         </p>
         <p className="text-xs text-[var(--shop-muted)]" dir="ltr">

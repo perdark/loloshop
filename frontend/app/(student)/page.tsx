@@ -28,6 +28,24 @@ function featuredFirst(list: ShopProductCard[]): ShopProductCard[] {
   return [...list].sort((a, b) => Number(b.featured) - Number(a.featured));
 }
 
+/**
+ * Round-robin interleave across type buckets: bucket0[0], bucket1[0], …,
+ * bucket0[1], bucket1[1], … so the "all" grid alternates categories
+ * (sash, cap, robe, sash, …) instead of showing each type in a block.
+ * Deterministic — guarantees a mixed look with no clumping (which a random
+ * shuffle can't promise) and no hydration mismatch.
+ */
+function interleaveByType(buckets: ShopProductCard[][]): ShopProductCard[] {
+  const out: ShopProductCard[] = [];
+  const max = buckets.reduce((m, b) => Math.max(m, b.length), 0);
+  for (let i = 0; i < max; i++) {
+    for (const b of buckets) {
+      if (i < b.length) out.push(b[i]);
+    }
+  }
+  return out;
+}
+
 function ShopSkeleton() {
   return (
     <div className="animate-fade-page-in space-y-10" aria-busy="true" aria-live="polite">
@@ -153,10 +171,11 @@ export default function StudentHomePage() {
     [feed]
   );
 
-  // Flat, featured-first product list across every category (the "الكل" view).
+  // Interleaved product list across every category (the "الكل" view) — mixes
+  // types so it never reads as "4 sashes, then 2 caps, then 5 robes".
   const allProducts = useMemo<ShopProductCard[]>(() => {
     if (!feed) return [];
-    return availableTypes.flatMap((t) => featuredFirst(feed.byType[t] ?? []));
+    return interleaveByType(availableTypes.map((t) => featuredFirst(feed.byType[t] ?? [])));
   }, [feed, availableTypes]);
 
   const visibleProducts = useMemo<ShopProductCard[]>(() => {
