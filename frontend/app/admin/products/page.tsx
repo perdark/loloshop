@@ -774,6 +774,54 @@ export default function AdminProductsPage() {
                 );
               })()}
 
+              {/* Image fit — how this product's photo fills its tile + gallery */}
+              {(() => {
+                const current = product.imageFit === "contain" ? "contain" : "cover";
+                const fitOptions: { value: "cover" | "contain"; label: string; hint: string }[] = [
+                  {
+                    value: "cover",
+                    label: "ملء الإطار",
+                    hint: "تُقصّ الصورة لتملأ المربع بالكامل (الوضع الافتراضي).",
+                  },
+                  {
+                    value: "contain",
+                    label: "إظهار كامل الصورة",
+                    hint: "تصغير الصورة لإظهارها كاملة دون قص (مناسبة للصور الطويلة/العريضة).",
+                  },
+                ];
+                const isBusy = savingId === "image_fit";
+                return (
+                  <div className="rounded-2xl border border-ink/10 bg-[var(--shop-sink)] p-4">
+                    <p className="mb-3 text-sm font-semibold text-ink">عرض الصورة</p>
+                    <div className="space-y-3" role="radiogroup" aria-label="عرض الصورة">
+                      {fitOptions.map((opt) => (
+                        <label key={opt.value} className="flex cursor-pointer items-start gap-2.5">
+                          <input
+                            type="radio"
+                            name="image_fit"
+                            value={opt.value}
+                            checked={current === opt.value}
+                            disabled={isBusy}
+                            onChange={() =>
+                              run(
+                                "image_fit",
+                                () => updateCatalogProduct(product.id, { image_fit: opt.value }),
+                                opt.label
+                              )
+                            }
+                            className="mt-0.5 h-4 w-4 shrink-0 accent-orange-ink"
+                          />
+                          <span>
+                            <span className="block text-sm text-ink">{opt.label}</span>
+                            <span className="block text-xs text-[var(--shop-muted)]">{opt.hint}</span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Option groups */}
               <div>
                 <div className="section-heading mb-1">

@@ -295,6 +295,7 @@ export interface CatalogProduct {
   retailOnly?: boolean;
   sort?: number;
   imageUrl: string | null;
+  imageFit: ImageFit;
   images: ProductImage[];
   priceRole?: PriceRole;
   optionGroups: CatalogOptionGroup[];
@@ -316,6 +317,7 @@ export interface CatalogProductSummary {
   retailOnly: boolean;
   sort: number;
   imageUrl: string | null;
+  imageFit: ImageFit;
   groupCount: number;
   imageCount: number;
   parentId?: string | null;
@@ -330,6 +332,9 @@ export interface ShopPackageCard {
   sort: number;
 }
 
+/** How a product photo fills its frame: crop-to-fill vs zoom-out-to-whole. */
+export type ImageFit = "cover" | "contain";
+
 export interface ShopProductCard {
   id: string;
   type: ProductType;
@@ -337,6 +342,7 @@ export interface ShopProductCard {
   description: string | null;
   basePrice: number;
   imageUrl: string | null;
+  imageFit: ImageFit;
   featured: boolean;
   customizable: boolean;
   genderRestriction: GenderRestriction;

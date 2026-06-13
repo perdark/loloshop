@@ -5,7 +5,7 @@ import { useState } from "react";
 import { resolveCatalogMediaUrl } from "@/lib/catalog";
 import { BrandMark } from "@/components/ui/BrandLogo";
 import { productImageVT } from "@/lib/view-transition";
-import type { ProductImage } from "@/lib/types";
+import type { ImageFit, ProductImage } from "@/lib/types";
 
 interface ProductMediaGalleryProps {
   nameAr: string;
@@ -13,6 +13,8 @@ interface ProductMediaGalleryProps {
   images: ProductImage[];
   /** product id — names the hero so the storefront card morphs into it */
   productId?: string | number;
+  /** "contain" zooms the hero out to show the whole photo (matches the tile). */
+  imageFit?: ImageFit;
 }
 
 export function ProductMediaGallery({
@@ -20,6 +22,7 @@ export function ProductMediaGallery({
   imageUrl,
   images,
   productId,
+  imageFit = "cover",
 }: ProductMediaGalleryProps) {
   const heroVT =
     productId != null ? { viewTransitionName: productImageVT(productId) } : undefined;
@@ -53,7 +56,9 @@ export function ProductMediaGallery({
             src={resolveCatalogMediaUrl(hero) || hero}
             alt={nameAr}
             fill
-            className="object-cover transition-transform duration-500 group-hover:scale-105"
+            className={`${
+              imageFit === "contain" ? "object-contain" : "object-cover"
+            } transition-transform duration-500 group-hover:scale-105`}
             priority
             unoptimized
           />

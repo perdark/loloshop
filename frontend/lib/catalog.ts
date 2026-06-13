@@ -82,6 +82,11 @@ function mapGroup(
   };
 }
 
+/** Coerce the raw image_fit value to a known fit, defaulting to "cover". */
+function mapImageFit(raw: unknown): import("./types").ImageFit {
+  return raw === "contain" ? "contain" : "cover";
+}
+
 function mapProductImage(raw: Record<string, unknown>): ProductImage {
   return {
     id: String(raw.id),
@@ -98,6 +103,7 @@ function mapShopProduct(raw: Record<string, unknown>): ShopProductCard {
     description: (raw.description as string | null) ?? null,
     basePrice: Number(raw.base_price ?? raw.basePrice ?? 0),
     imageUrl: resolveCatalogMediaUrl(raw.image_url as string | null),
+    imageFit: mapImageFit(raw.image_fit ?? raw.imageFit),
     featured: Boolean(raw.featured),
     customizable: Boolean(raw.customizable),
     genderRestriction:
@@ -138,6 +144,7 @@ function mapProductFull(raw: Record<string, unknown>): CatalogProduct {
     retailOnly: Boolean(raw.retail_only ?? raw.retailOnly),
     sort: Number(raw.sort ?? 0),
     imageUrl: resolveCatalogMediaUrl(raw.image_url as string | null),
+    imageFit: mapImageFit(raw.image_fit ?? raw.imageFit),
     images: gallery.map(mapProductImage),
     priceRole: (raw.price_role as PriceRole) ?? undefined,
     optionGroups: groups.map((g) => mapGroup(g, id)),
@@ -163,6 +170,7 @@ function mapProductSummary(raw: Record<string, unknown>): CatalogProductSummary 
     retailOnly: Boolean(raw.retail_only ?? raw.retailOnly),
     sort: Number(raw.sort ?? 0),
     imageUrl: resolveCatalogMediaUrl(raw.image_url as string | null),
+    imageFit: mapImageFit(raw.image_fit ?? raw.imageFit),
     groupCount: Number(raw.group_count ?? raw.groupCount ?? 0),
     imageCount: Number(raw.image_count ?? raw.imageCount ?? 0),
     parentId: (raw.parent_id as string | null) ?? null,

@@ -21,7 +21,9 @@ export function ProductTile({ product }: { product: ShopProductCard }) {
             src={product.imageUrl}
             alt={product.nameAr}
             fill
-            className="object-cover transition-transform duration-[900ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:scale-[1.045]"
+            className={`${
+              product.imageFit === "contain" ? "object-contain" : "object-cover"
+            } transition-transform duration-[900ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:scale-[1.045]`}
             sizes="(max-width: 639px) 44vw, (max-width: 1023px) 30vw, 22vw"
           />
         ) : (

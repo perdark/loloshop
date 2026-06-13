@@ -446,6 +446,10 @@ ALTER TABLE products ADD COLUMN IF NOT EXISTS wholesaler_only BOOLEAN NOT NULL D
 -- Migration 023: retail-only product visibility flag
 ALTER TABLE products ADD COLUMN IF NOT EXISTS retail_only BOOLEAN NOT NULL DEFAULT FALSE;
 
+-- Migration 026: per-product image fit ('cover' crop-to-fill, 'contain' zoom-out-whole)
+ALTER TABLE products ADD COLUMN IF NOT EXISTS image_fit TEXT NOT NULL DEFAULT 'cover'
+  CHECK (image_fit IN ('cover', 'contain'));
+
 -- Migration 009: per-wholesaler sash side lock.
 -- Wholesaler-joined students design only one side; the other (locked) side
 -- shows the admin/wholesaler's saved default Fabric JSON, read-only.

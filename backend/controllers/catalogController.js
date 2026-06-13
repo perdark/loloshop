@@ -37,7 +37,7 @@ async function getProductFull(req, res) {
   const role = await priceRoleForUser(req.user, req.query.role);
   const prod = await query(
     `SELECT p.id, p.type, p.name_ar, p.description, p.customizable, p.gender_restriction,
-            p.image_url, p.featured, p.parent_id, p.wholesaler_only, p.retail_only,
+            p.image_url, p.image_fit, p.featured, p.parent_id, p.wholesaler_only, p.retail_only,
             par.name_ar AS parent_name_ar, par.image_url AS parent_image_url,
             COALESCE(ppr.base_price, p.base_price) AS base_price
      FROM products p
@@ -152,7 +152,7 @@ async function getShop(req, res) {
       : 'AND p.wholesaler_only = FALSE';
   const products = await query(
     `SELECT p.id, p.type, p.name_ar, p.description, p.customizable, p.gender_restriction,
-            p.image_url, p.featured, p.sort,
+            p.image_url, p.image_fit, p.featured, p.sort,
             COALESCE(ppr.base_price, p.base_price) AS base_price
      FROM products p
      LEFT JOIN product_price_roles ppr ON ppr.product_id = p.id AND ppr.role = $1
@@ -196,7 +196,7 @@ async function getShop(req, res) {
 async function listProductsAdmin(req, res) {
   const { rows } = await query(
     `SELECT p.id, p.type, p.name_ar, p.description, p.base_price, p.customizable,
-            p.gender_restriction, p.image_url, p.featured, p.sort, p.active,
+            p.gender_restriction, p.image_url, p.image_fit, p.featured, p.sort, p.active,
             p.wholesaler_only, p.retail_only, p.parent_id,
             par.name_ar AS parent_name,
             (SELECT COUNT(*)::int FROM option_groups g WHERE g.product_id = p.id) AS group_count,
@@ -262,9 +262,15 @@ async function updateProduct(req, res) {
   if (req.body.retail_only === true) req.body.wholesaler_only = false;
   if (req.body.wholesaler_only === true) req.body.retail_only = false;
 
+  // image_fit is a closed set ('cover' | 'contain'); reject bad values before
+  // hitting the DB CHECK constraint so the client gets a clean 400.
+  if (req.body.image_fit != null && !['cover', 'contain'].includes(req.body.image_fit)) {
+    return res.status(400).json({ error: 'قيمة عرض الصورة غير صالحة', code: 'ERR_VALIDATION' });
+  }
+
   const upd = buildUpdate(
     'products',
-    ['name_ar', 'description', 'base_price', 'customizable', 'gender_restriction', 'image_url', 'featured', 'sort', 'active', 'wholesaler_only', 'retail_only', 'parent_id'],
+    ['name_ar', 'description', 'base_price', 'customizable', 'gender_restriction', 'image_url', 'image_fit', 'featured', 'sort', 'active', 'wholesaler_only', 'retail_only', 'parent_id'],
     req.body, req.params.id
   );
   if (!upd) return res.status(400).json({ error: 'لا تغييرات', code: 'ERR_VALIDATION' });
