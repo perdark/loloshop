@@ -38,6 +38,10 @@ function mapOption(raw: Record<string, unknown>): CatalogOption {
     requiresCustomerText: Boolean(
       raw.requires_customer_text ?? raw.requiresCustomerText
     ),
+    customerTextPromptAr:
+      (raw.customer_text_prompt_ar as string | null) ?? null,
+    customerTextPlaceholderAr:
+      (raw.customer_text_placeholder_ar as string | null) ?? null,
   };
 }
 
@@ -62,6 +66,13 @@ function mapGroup(
     requiresCustomerImage: Boolean(
       raw.requires_customer_image ?? raw.requiresCustomerImage
     ),
+    requiresCustomerText: Boolean(
+      raw.requires_customer_text ?? raw.requiresCustomerText
+    ),
+    customerTextPromptAr:
+      (raw.customer_text_prompt_ar as string | null) ?? null,
+    customerTextPlaceholderAr:
+      (raw.customer_text_placeholder_ar as string | null) ?? null,
     inherited: Boolean((raw as Record<string, unknown>)._inherited ?? (raw as Record<string, unknown>).inherited ?? false),
     lockedOptionId:
       (raw.locked_option_id as string | null) ??

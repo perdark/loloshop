@@ -346,7 +346,7 @@ async function priceSelections({ productId, role, selections, studentGender }) {
     // customer must provide embroidery text when group or option requires it
     const needsText = g.requires_customer_text || opt.requires_customer_text;
     if (needsText && (!s.customer_text || !String(s.customer_text).trim())) {
-      return { ok: false, status: 400, error: `يرجى كتابة تفاصيل التطريز لـ ${g.name_ar}`, code: 'ERR_CUSTOMER_TEXT_REQUIRED' };
+      return { ok: false, status: 400, error: `يرجى كتابة التفاصيل المطلوبة لـ ${g.name_ar}`, code: 'ERR_CUSTOMER_TEXT_REQUIRED' };
     }
     // Track embroidery: any option requiring image OR text means embroidery work
     if (needsImage || needsText) hasEmbroidery = true;

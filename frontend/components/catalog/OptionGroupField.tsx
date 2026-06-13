@@ -73,7 +73,7 @@ export function OptionGroupField({
         )}
       </legend>
 
-      {(group.hintAr || group.imageUrl) && (
+      {group.hasImage && (group.hintAr || group.imageUrl) && (
         <div className="mb-3 rounded-xl border border-ink/8 bg-cream/60 p-2.5">
           <p className="text-[11px] font-medium text-[var(--shop-muted)]">
             صورة توضيحية

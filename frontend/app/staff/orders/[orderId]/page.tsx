@@ -1048,7 +1048,7 @@ export default function ProductionOrderDetailPage() {
                     </div>
                     {item.customer_text && (
                       <p className="rounded-lg border border-line bg-surface-sink px-3 py-2 text-xs text-ink-soft">
-                        <span className="font-medium text-ink">تفاصيل التطريز: </span>
+                        <span className="font-medium text-ink">كتابة الزبون: </span>
                         {item.customer_text}
                       </p>
                     )}

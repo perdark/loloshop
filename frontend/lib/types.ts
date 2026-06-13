@@ -240,8 +240,12 @@ export interface CatalogOption {
   active: boolean;
   /** Customer → admin: must upload photo for this option value */
   requiresCustomerImage: boolean;
-  /** Customer → admin: must type an embroidery instruction for this option value */
+  /** Customer → admin: must type an instruction for this option value */
   requiresCustomerText?: boolean;
+  /** Admin-set prompt shown to the customer when text is required (overrides group-level). */
+  customerTextPromptAr?: string | null;
+  /** Admin-set example shown inside the text box (overrides group-level). */
+  customerTextPlaceholderAr?: string | null;
 }
 
 export interface CatalogOptionGroup {
@@ -259,8 +263,12 @@ export interface CatalogOptionGroup {
   genderRestriction: GenderRestriction;
   /** Customer → admin: must upload for any selection in this group */
   requiresCustomerImage: boolean;
-  /** Customer → admin: must type an embroidery instruction for any selection in this group */
+  /** Customer → admin: must type an instruction for any selection in this group */
   requiresCustomerText?: boolean;
+  /** Admin-set prompt shown to the customer when text is required (group-level default). */
+  customerTextPromptAr?: string | null;
+  /** Admin-set example shown inside the text box (group-level default). */
+  customerTextPlaceholderAr?: string | null;
   options: CatalogOption[];
   inherited?: boolean;
   /** Admin locked this group to a single fixed option (student can't change it). */

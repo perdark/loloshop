@@ -34,12 +34,18 @@ export function CustomerImageUpload({
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const opt = group.options.find((o) => o.id === optionId);
-  const hintUrl = group.imageUrl || opt?.imageUrl || null;
+  const hintUrl = (group.hasImage ? group.imageUrl : null) || opt?.imageUrl || null;
   const previewUrl = value ? resolveCatalogMediaUrl(value) : null;
   const needsText = customerTextRequired(group, optionId);
+  const needsImage = group.requiresCustomerImage || Boolean(opt?.requiresCustomerImage);
+  // Derive the admin-set text prompt + placeholder: option-level overrides group-level.
+  const textPrompt =
+    opt?.customerTextPromptAr ?? group.customerTextPromptAr ?? null;
+  const textPlaceholder =
+    opt?.customerTextPlaceholderAr ?? group.customerTextPlaceholderAr ?? null;
 
   const textMissing = needsText && !textValue?.trim();
-  const imageMissing = !value;
+  const imageMissing = needsImage && !value;
 
   async function handleFile(file: File) {
     setUploading(true);
@@ -58,21 +64,23 @@ export function CustomerImageUpload({
     <div className="mt-3 rounded-2xl border border-orange/40 bg-orange/5 p-4 ring-1 ring-orange/10">
       <p className="inline-flex items-center gap-1.5 text-sm font-semibold text-ink">
         <span aria-hidden className="h-2 w-2 rounded-full bg-brand-gradient" />
-        {needsText ? "تفاصيل التطريز مطلوبة" : "صورة مطلوبة منك"}
+        {needsText ? (textPrompt ? textPrompt : "كتابة مطلوبة منك") : "صورة مطلوبة منك"}
         <span className="text-orange-ink">*</span>
       </p>
       <p className="mt-1 text-xs leading-relaxed text-ink-soft">
         {needsText
-          ? "اكتب تفاصيل التطريز وارفع صورة مرجعية — كلاهما مطلوب."
+          ? needsImage
+            ? "اكتب التفاصيل المطلوبة وارفع صورة مرجعية — كلاهما مطلوب."
+            : "اكتب التفاصيل المطلوبة."
           : "ارفع صورة مرجعية للطباعة — يختلف عن صورة التوضيح من الأدمن أدناه."}
       </p>
 
-      {(group.hintAr || hintUrl) && (
+      {((group.hasImage && group.hintAr) || hintUrl) && (
         <div className="mt-3 rounded-xl border border-ink/10 bg-beige/80 p-2.5">
           <p className="text-[11px] font-medium text-[var(--shop-muted)]">
             صورة توضيحية
           </p>
-          {group.hintAr && (
+          {group.hasImage && group.hintAr && (
             <p className="mt-1 text-xs text-ink-soft">{group.hintAr}</p>
           )}
           {hintUrl && (
@@ -93,14 +101,14 @@ export function CustomerImageUpload({
       {needsText && (
         <div className="mt-3">
           <label className="block text-xs font-semibold text-ink" htmlFor={`cust-text-${group.id}`}>
-            شنو تريد تطرّز؟ اكتب التفاصيل
+            {textPrompt ? textPrompt : "اكتب التفاصيل المطلوبة"}
             <span className="text-orange-ink"> *</span>
           </label>
           <textarea
             id={`cust-text-${group.id}`}
             dir="rtl"
             rows={3}
-            placeholder="مثال: اسمي علي محمد — بالخط الديواني"
+            placeholder={textPlaceholder || "اكتب هنا التفاصيل المطلوبة…"}
             value={textValue ?? ""}
             onChange={(e) => onTextChange?.(e.target.value)}
             className={`mt-1.5 w-full resize-none rounded-xl border px-3.5 py-3 text-sm leading-relaxed text-ink placeholder:text-ink/35 outline-none transition-colors focus:ring-2 focus:ring-orange/30 ${
@@ -111,7 +119,7 @@ export function CustomerImageUpload({
           />
           {showErrors && textMissing && (
             <p role="alert" className="mt-1 text-xs font-medium text-red-500">
-              يرجى كتابة تفاصيل التطريز
+              يرجى كتابة التفاصيل المطلوبة
             </p>
           )}
         </div>
@@ -130,9 +138,13 @@ export function CustomerImageUpload({
         }}
       />
 
+      {/* Image upload section — mandatory when needsImage, optional when only text is required */}
       <p className={`mt-3 text-xs font-semibold text-ink ${needsText ? "" : "sr-only"}`}>
-        {needsText ? "صورة مرجعية" : ""}
-        {needsText && <span className="text-orange-ink"> *</span>}
+        {needsText
+          ? needsImage
+            ? <>صورة مرجعية<span className="text-orange-ink"> *</span></>
+            : "صورة مرجعية (اختياري)"
+          : ""}
       </p>
 
       {previewUrl ? (

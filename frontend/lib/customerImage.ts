@@ -80,7 +80,7 @@ export function validateCustomerTexts(
     if (!customerTextRequired(group, optionId)) continue;
     const key = selectionKey(group.id, optionId!);
     if (!customerTexts[key]?.trim()) {
-      return `نص التطريز مطلوب: ${group.nameAr}`;
+      return `الكتابة مطلوبة: ${group.nameAr}`;
     }
   }
   return null;

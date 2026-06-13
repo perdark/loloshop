@@ -172,19 +172,25 @@ export default function AdminProductsPage() {
     }
   }, []);
 
-  const loadProduct = useCallback(async (id: string, role: PriceRole) => {
-    setLoadingProduct(true);
-    try {
-      const full = await getProductFull(id, role);
-      setProduct(full);
-      setPreviewSel({});
-    } catch (e) {
-      toast.error(getApiErrorMessage(e, "تعذر تحميل المنتج"));
-      setProduct(null);
-    } finally {
-      setLoadingProduct(false);
-    }
-  }, []);
+  const loadProduct = useCallback(
+    async (id: string, role: PriceRole, opts?: { silent?: boolean }) => {
+      // Silent mode (post-save refresh): refetch data in the background without the
+      // skeleton — keeps the editor mounted so focus, scroll, and inline edits survive.
+      const silent = opts?.silent ?? false;
+      if (!silent) setLoadingProduct(true);
+      try {
+        const full = await getProductFull(id, role);
+        setProduct(full);
+        if (!silent) setPreviewSel({});
+      } catch (e) {
+        toast.error(getApiErrorMessage(e, "تعذر تحميل المنتج"));
+        if (!silent) setProduct(null);
+      } finally {
+        if (!silent) setLoadingProduct(false);
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- initial fetch
@@ -204,7 +210,7 @@ export default function AdminProductsPage() {
   }, [product, previewSel, previewRole]);
 
   const reloadProduct = useCallback(() => {
-    if (selectedId) return loadProduct(selectedId, previewRole);
+    if (selectedId) return loadProduct(selectedId, previewRole, { silent: true });
     return Promise.resolve();
   }, [selectedId, previewRole, loadProduct]);
 
@@ -378,7 +384,7 @@ export default function AdminProductsPage() {
     setSavingId(groupId);
     try {
       const url = await uploadCatalogImage(file);
-      await updateCatalogGroup(groupId, { image_url: url });
+      await updateCatalogGroup(groupId, { image_url: url, has_image: true });
       await reloadProduct();
       toast.success("تم رفع الصورة");
     } catch (e) {
@@ -829,6 +835,13 @@ export default function AdminProductsPage() {
                       onDeleteOption={(optId, label) => {
                         setDeleteOptionTarget({ id: optId, name: label });
                       }}
+                      onRenameOption={(optId, newLabel) =>
+                        run(
+                          optId,
+                          () => updateCatalogOption(optId, { label_ar: newLabel }),
+                          "تم تغيير الاسم"
+                        )
+                      }
                       onLockOption={(optId) =>
                         run(
                           `lock-${group.id}`,
@@ -1217,6 +1230,7 @@ function GroupBlock({
   onToggleOptionImage,
   onToggleOptionText,
   onDeleteOption,
+  onRenameOption,
   onLockOption,
 }: {
   group: CatalogOptionGroup;
@@ -1238,6 +1252,8 @@ function GroupBlock({
   onCommitOptionPrice: (optId: string, value: number) => void;
   onToggleOptionImage: (optId: string, v: boolean) => void;
   onDeleteOption: (optId: string, label: string) => void;
+  /** Rename an option label (non-inherited groups only). */
+  onRenameOption: (optId: string, newLabel: string) => void;
   /** Pass an option id to lock the group to it, or null to clear the lock. */
   onLockOption: (optId: string | null) => void;
 }) {
@@ -1247,12 +1263,64 @@ function GroupBlock({
   const lockedOptionId = group.lockedOptionId ?? null;
   const lockedOption = group.options.find((o) => o.id === lockedOptionId);
 
+  // Inline group-name edit state
+  const [editingGroupName, setEditingGroupName] = useState(false);
+  const [editingGroupNameValue, setEditingGroupNameValue] = useState("");
+
+  // Inline option-label edit state — one at a time (option id or null)
+  const [editingOptId, setEditingOptId] = useState<string | null>(null);
+  const [editingOptValue, setEditingOptValue] = useState("");
+
+  function commitGroupName() {
+    setEditingGroupName(false);
+    const v = editingGroupNameValue.trim();
+    if (!v || v === group.nameAr) return;
+    onPersistGroup({ name_ar: v });
+  }
+
+  function commitOptLabel(optId: string, original: string) {
+    setEditingOptId(null);
+    const v = editingOptValue.trim();
+    if (!v || v === original) return;
+    onRenameOption(optId, v);
+  }
+
   return (
     <div className="border-t border-ink/10 py-6 first:border-t-0">
       {/* Group header */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2.5">
-          <h4 className="font-semibold text-ink">{group.nameAr}</h4>
+          {editingGroupName && !inherited ? (
+            <input
+              autoFocus
+              value={editingGroupNameValue}
+              onChange={(e) => setEditingGroupNameValue(e.target.value)}
+              onBlur={commitGroupName}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") { e.preventDefault(); commitGroupName(); }
+                if (e.key === "Escape") setEditingGroupName(false);
+              }}
+              disabled={busy}
+              className={`${fieldCls} w-44 font-semibold`}
+              aria-label="تعديل اسم المجموعة"
+            />
+          ) : (
+            <h4 className="font-semibold text-ink">{group.nameAr}</h4>
+          )}
+          {!inherited && !editingGroupName && (
+            <button
+              type="button"
+              onClick={() => {
+                setEditingGroupNameValue(group.nameAr);
+                setEditingGroupName(true);
+              }}
+              disabled={busy}
+              aria-label="تعديل اسم المجموعة"
+              className="rounded-full p-1 text-ink-soft transition-colors hover:bg-ink/[0.06] hover:text-ink disabled:opacity-50"
+            >
+              {PencilIcon}
+            </button>
+          )}
           <span className="rounded-full bg-ink/[0.06] px-2 py-0.5 text-[11px] font-medium text-ink-soft">
             {INPUT_TYPE_LABELS[group.inputType]}
           </span>
@@ -1331,6 +1399,80 @@ function GroupBlock({
               رفع صورة توضيحية
             </span>
           </label>
+
+          {/* What the customer must type — admin controls the title + the in-box example. */}
+          {(group.requiresCustomerText ||
+            group.options.some((o) => o.requiresCustomerText)) && (
+            <div className="w-full max-w-md rounded-xl border border-orange/25 bg-orange/5 p-3">
+              <p className="mb-2 text-xs font-semibold text-orange-ink">
+                ما الذي يكتبه الزبون؟
+              </p>
+              <div className="space-y-2.5">
+                <div>
+                  <label
+                    className="block text-[11px] font-medium text-ink-soft"
+                    htmlFor={`ctp-${group.id}`}
+                  >
+                    السؤال / العنوان
+                  </label>
+                  <input
+                    id={`ctp-${group.id}`}
+                    key={`ctp-${group.id}-${group.customerTextPromptAr ?? ""}`}
+                    defaultValue={group.customerTextPromptAr ?? ""}
+                    placeholder="مثال: ما هو لون الوشاح المطلوب؟"
+                    disabled={busy}
+                    onBlur={(e) => {
+                      const v = e.target.value.trim();
+                      if (v !== (group.customerTextPromptAr ?? "")) {
+                        onPersistGroup({ customer_text_prompt_ar: v || null });
+                      }
+                    }}
+                    className={`${fieldCls} mt-1 w-full`}
+                  />
+                </div>
+                <div>
+                  <label
+                    className="block text-[11px] font-medium text-ink-soft"
+                    htmlFor={`ctph-${group.id}`}
+                  >
+                    مثال داخل الخانة
+                  </label>
+                  <input
+                    id={`ctph-${group.id}`}
+                    key={`ctph-${group.id}-${group.customerTextPlaceholderAr ?? ""}`}
+                    defaultValue={group.customerTextPlaceholderAr ?? ""}
+                    placeholder="مثال: أحمر غامق"
+                    disabled={busy}
+                    onBlur={(e) => {
+                      const v = e.target.value.trim();
+                      if (v !== (group.customerTextPlaceholderAr ?? "")) {
+                        onPersistGroup({ customer_text_placeholder_ar: v || null });
+                      }
+                    }}
+                    className={`${fieldCls} mt-1 w-full`}
+                  />
+                </div>
+              </div>
+
+              {/* Live preview of exactly what the student will see */}
+              <div className="mt-3 rounded-lg border border-ink/10 bg-white p-2.5">
+                <p className="text-[10px] font-medium text-[var(--shop-muted)]">
+                  ما يراه الطالب:
+                </p>
+                <p className="mt-1 text-xs font-semibold text-ink">
+                  {group.customerTextPromptAr?.trim() || "اكتب التفاصيل المطلوبة"}
+                  <span className="text-orange-ink"> *</span>
+                </p>
+                <div className="mt-1 rounded-md border border-ink/15 px-2 py-1.5 text-xs text-ink/35">
+                  {group.customerTextPlaceholderAr?.trim() ||
+                    "اكتب هنا التفاصيل المطلوبة…"}
+                </div>
+              </div>
+              <p className="mt-2 text-[11px] text-[var(--shop-muted)]">
+                اتركهما فارغين للنص الافتراضي. لا علاقة بالتطريز — اكتب ما يناسب منتجك.
+              </p>
+            </div>
+          )}
         </div>
       )}
 
@@ -1363,9 +1505,39 @@ function GroupBlock({
             key={opt.id}
             className="flex flex-wrap items-center gap-3 border-b border-ink/8 py-2.5 last:border-0"
           >
-            <span className="min-w-[6rem] flex-1 font-medium text-ink">
-              {opt.labelAr}
-            </span>
+            {!inherited && editingOptId === opt.id ? (
+              <input
+                autoFocus
+                value={editingOptValue}
+                onChange={(e) => setEditingOptValue(e.target.value)}
+                onBlur={() => commitOptLabel(opt.id, opt.labelAr)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") { e.preventDefault(); commitOptLabel(opt.id, opt.labelAr); }
+                  if (e.key === "Escape") setEditingOptId(null);
+                }}
+                disabled={savingId === opt.id}
+                className={`${fieldCls} min-w-[6rem] flex-1`}
+                aria-label={`تعديل اسم ${opt.labelAr}`}
+              />
+            ) : (
+              <span className="flex min-w-[6rem] flex-1 items-center gap-1.5 font-medium text-ink">
+                {opt.labelAr}
+                {!inherited && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingOptId(opt.id);
+                      setEditingOptValue(opt.labelAr);
+                    }}
+                    disabled={savingId === opt.id}
+                    aria-label={`تعديل اسم ${opt.labelAr}`}
+                    className="rounded-full p-1 text-ink-soft transition-colors hover:bg-ink/[0.06] hover:text-ink disabled:opacity-50"
+                  >
+                    {PencilIcon}
+                  </button>
+                )}
+              </span>
+            )}
             {inherited ? (
               <>
                 <span className="text-sm tabular-nums text-ink-soft" dir="ltr">
