@@ -17,7 +17,7 @@ import {
   validateSelection,
   type OptionSelection,
 } from "@/lib/pricing";
-import { validateCustomerImages } from "@/lib/customerImage";
+import { validateCustomerImages, validateCustomerTexts } from "@/lib/customerImage";
 import type { CatalogProduct } from "@/lib/types";
 import { getApiErrorMessage } from "@/lib/api";
 
@@ -25,6 +25,7 @@ const GENDER_KEY = "loloshop_student_gender";
 const AUTO_SAVE_MS = 8_000;
 const DRAFT_SELECTION_KEY = "loloshop_draft_selection";
 const DRAFT_CUSTOMER_IMAGES_KEY = "loloshop_draft_customer_images";
+const DRAFT_CUSTOMER_TEXTS_KEY = "loloshop_draft_customer_texts";
 const DRAFT_STEP_KEY = "loloshop_draft_step";
 const SASH_PRESET_KEY = "loloshop_sash_preset";
 const DRAFT_PRODUCT_ID_KEY = "loloshop_draft_product_id";
@@ -66,6 +67,7 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
   const [product, setProduct] = useState<CatalogProduct | null>(null);
   const [selection, setSelection] = useState<OptionSelection>({});
   const [customerImages, setCustomerImages] = useState<Record<string, string>>({});
+  const [customerTexts, setCustomerTexts] = useState<Record<string, string>>({});
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [leftJson, setLeftJson] = useState<unknown | null>(null);
@@ -178,6 +180,9 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
           const savedCustomerImages = readSessionJson<Record<string, string>>(
             DRAFT_CUSTOMER_IMAGES_KEY
           );
+          const savedCustomerTexts = readSessionJson<Record<string, string>>(
+            DRAFT_CUSTOMER_TEXTS_KEY
+          );
 
           // Preset selections take priority, fall back to saved session
           const mergedSelection: OptionSelection = {
@@ -189,6 +194,9 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
           }
           if (savedCustomerImages && Object.keys(savedCustomerImages).length > 0) {
             setCustomerImages(savedCustomerImages);
+          }
+          if (savedCustomerTexts && Object.keys(savedCustomerTexts).length > 0) {
+            setCustomerTexts(savedCustomerTexts);
           }
 
           if (my.data) {
@@ -250,6 +258,11 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
     if (!enabled || bootLoading) return;
     writeSessionJson(DRAFT_CUSTOMER_IMAGES_KEY, customerImages);
   }, [enabled, bootLoading, customerImages]);
+
+  useEffect(() => {
+    if (!enabled || bootLoading) return;
+    writeSessionJson(DRAFT_CUSTOMER_TEXTS_KEY, customerTexts);
+  }, [enabled, bootLoading, customerTexts]);
 
   useEffect(() => {
     if (!enabled || bootLoading) return;
@@ -350,13 +363,17 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
 
   function setGroupValue(groupId: string, value: OptionSelection[string]) {
     setSelection((prev) => ({ ...prev, [groupId]: value }));
-    setCustomerImages((prev) => {
+    // Changing the option invalidates any per-selection image/text the customer
+    // supplied for the previous choice — clear both so stale data never ships.
+    const clearForGroup = (prev: Record<string, string>) => {
       const next = { ...prev };
       for (const k of Object.keys(next)) {
         if (k.startsWith(`${groupId}:`)) delete next[k];
       }
       return next;
-    });
+    };
+    setCustomerImages(clearForGroup);
+    setCustomerTexts(clearForGroup);
   }
 
   function goToCanvas() {
@@ -365,6 +382,8 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
     if (err) return toast.error(err);
     const imgErr = validateCustomerImages(product, selection, customerImages);
     if (imgErr) return toast.error(imgErr);
+    const txtErr = validateCustomerTexts(product, selection, customerTexts);
+    if (txtErr) return toast.error(txtErr);
     setStep(2);
     persist(true).catch(() => {});
   }
@@ -384,6 +403,20 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
     const err = validateSelection(product, selection, gender);
     if (err) {
       toast.error(err);
+      return false;
+    }
+    // Mirror the backend's customer-image/text requirements so a missing color
+    // photo or color text is caught here, not as a raw 400 on add-to-cart.
+    const imgErr = validateCustomerImages(product, selection, customerImages);
+    if (imgErr) {
+      toast.error(imgErr);
+      setStep(1);
+      return false;
+    }
+    const txtErr = validateCustomerTexts(product, selection, customerTexts);
+    if (txtErr) {
+      toast.error(txtErr);
+      setStep(1);
       return false;
     }
 
@@ -407,7 +440,7 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
           await configureOrder({
             productId: product.id,
             designId,
-            selections: buildConfigureSelections(product, selection, customerImages),
+            selections: buildConfigureSelections(product, selection, customerImages, customerTexts),
           });
         } catch (e) {
           toast.error(getApiErrorMessage(e, "تعذر تسعير الطلب — تواصل مع الدعم"));
@@ -426,7 +459,7 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
         try {
           await addToCart(
             product.id,
-            buildConfigureSelections(product, selection, customerImages),
+            buildConfigureSelections(product, selection, customerImages, customerTexts),
             { designId }
           );
         } catch (e) {
@@ -475,6 +508,8 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
     selection,
     customerImages,
     setCustomerImages,
+    customerTexts,
+    setCustomerTexts,
     step,
     setStep,
     leftJson,

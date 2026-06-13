@@ -18,6 +18,7 @@ import { BrandMark } from "@/components/ui/BrandLogo";
 import { uploadDesignImage, uploadLogo } from "@/lib/designer";
 import {
   customerImageRequired,
+  customerTextRequired,
   getSelectedOptionId,
   selectionKey,
 } from "@/lib/customerImage";
@@ -57,6 +58,8 @@ export default function DesignPage() {
     selection,
     customerImages,
     setCustomerImages,
+    customerTexts,
+    setCustomerTexts,
     step,
     setStep,
     leftJson,
@@ -279,6 +282,9 @@ export default function DesignPage() {
               const optionId = getSelectedOptionId(group, selection);
               const needsImage =
                 optionId != null && customerImageRequired(group, optionId);
+              const needsText =
+                optionId != null && customerTextRequired(group, optionId);
+              const showUploadBlock = needsImage || needsText;
               const key =
                 optionId != null ? selectionKey(group.id, optionId) : null;
               return (
@@ -289,13 +295,17 @@ export default function DesignPage() {
                     role={role}
                     onChange={setGroupValue}
                   />
-                  {needsImage && key && optionId && (
+                  {showUploadBlock && key && optionId && (
                     <CustomerImageUpload
                       group={group}
                       optionId={optionId}
                       value={customerImages[key]}
                       onChange={(url) =>
                         setCustomerImages((prev) => ({ ...prev, [key]: url }))
+                      }
+                      textValue={customerTexts[key]}
+                      onTextChange={(text) =>
+                        setCustomerTexts((prev) => ({ ...prev, [key]: text }))
                       }
                     />
                   )}
