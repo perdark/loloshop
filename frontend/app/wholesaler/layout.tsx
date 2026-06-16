@@ -47,8 +47,6 @@ export default function WholesalerLayout({
           {[
             { href: "/wholesaler", label: "الرئيسية" },
             { href: "/wholesaler/students", label: "الطلاب" },
-            { href: "/wholesaler/batch", label: "الدفعة" },
-            { href: "/wholesaler/package", label: "الباقات" },
           ].map((item) => {
             const active = pathname === item.href;
             return (

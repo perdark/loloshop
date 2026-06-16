@@ -17,6 +17,7 @@ router.put('/sash-config', c.updateSashConfig);
 // Rep-entered full-set order (WhatsApp intake form → الطقم الكامل)
 router.get('/full-set-packages', c.fullSetPackages);
 router.get('/students/:studentId', c.getStudent);
+router.get('/students/:studentId/full-set-order', c.getStudentOrder);
 router.post('/students/:studentId/full-set-order', c.createFullSetOrder);
 router.post('/uploads/image', imageUpload.single('file'), c.uploadImage);
 

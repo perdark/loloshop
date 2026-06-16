@@ -2,6 +2,7 @@ const { query, tx } = require('../lib/db');
 const { priceRoleForUser } = require('./catalogController');
 const { publish } = require('../lib/eventBus');
 const { staffScopeAllows } = require('../middleware/auth');
+const { persistFullSetOrder, readFullSetOrder } = require('../lib/fullSetOrder');
 
 const ALL_STATUSES = [
   'pending_approval', 'designing', 'design_complete', 'converting',
@@ -1164,8 +1165,54 @@ async function getOrderBreakdown(req, res) {
   });
 }
 
+// ── Rep-student self-service full-set order (the WhatsApp form, student-filled) ──
+// A wholesaler-linked student fills their OWN طقم order instead of browsing the shop.
+// Shares the exact persist/read logic with the rep "fill on behalf" endpoint.
+
+// Form context in one call: is this a rep student? approved? + full-set packages + any existing order.
+async function repFullSetContext(req, res) {
+  const st = await query(
+    `SELECT id, status, wholesaler_id FROM students WHERE user_id = $1`, [req.user.id]
+  );
+  const student = st.rows[0];
+  const isRep = !!(student && student.wholesaler_id);
+  const approved = !!(student && student.status === 'approved');
+  let packages = [];
+  let existing = null;
+  if (isRep) {
+    const pk = await query(
+      `SELECT id, name_ar, price FROM packages
+       WHERE active = TRUE AND is_full_set = TRUE ORDER BY sort, created_at`
+    );
+    packages = pk.rows;
+    if (approved) existing = await readFullSetOrder(student.id);
+  }
+  res.json({ data: { is_rep_student: isRep, approved, packages, existing } });
+}
+
+// Student creates/updates their own full-set order.
+async function configureRepFullSet(req, res) {
+  const st = await query(
+    `SELECT s.id, s.status, s.wholesaler_id, u.name, u.phone
+     FROM students s JOIN users u ON u.id = s.user_id WHERE s.user_id = $1`,
+    [req.user.id]
+  );
+  if (!st.rows.length) return res.status(404).json({ error: 'حساب الطالب غير موجود', code: 'ERR_NOT_FOUND' });
+  const student = st.rows[0];
+  if (!student.wholesaler_id) {
+    return res.status(403).json({ error: 'هذه الخدمة لطلاب الممثلين فقط', code: 'ERR_FORBIDDEN' });
+  }
+  if (student.status !== 'approved') {
+    return res.status(403).json({ error: 'يجب موافقة الممثل أولاً', code: 'ERR_NOT_APPROVED' });
+  }
+  const { status, json } = await persistFullSetOrder({
+    student, body: req.body, actorUserId: req.user.id,
+  });
+  res.status(status).json(json);
+}
+
 module.exports = {
   listOrders, updateStatus, configureOrder, configurePackage, configureFullSet, getOrderBreakdown,
-  vipUpgradeContext, upgradeToVip,
+  vipUpgradeContext, upgradeToVip, repFullSetContext, configureRepFullSet,
   priceSelections, canStaffTransition, TRANSITIONS, STATUS_LABEL_AR, ALL_STATUSES,
 };

@@ -250,3 +250,67 @@ export async function uploadWholesalerImage(file: File): Promise<string> {
   };
   return res.data.url;
 }
+
+/** Existing full-set order reconstructed into form shape (for EDIT pre-fill). */
+export interface FullSetExistingOrder {
+  package_id: string | null;
+  measurements: {
+    robe_length_cm: number;
+    sleeve_length_cm: number;
+    shoulder_cm: number;
+  } | null;
+  sash_type: PieceType | null;
+  cap_type: PieceType | null;
+  embroidery: {
+    sash_front: EmbroideryZone;
+    sash_back: EmbroideryZone;
+    cap_side: EmbroideryZone;
+    cap_top: EmbroideryZone;
+  };
+  notes: string;
+}
+
+/** Rep reads back a student's existing order to pre-fill the edit form. */
+export async function getWholesalerStudentOrder(
+  studentId: string
+): Promise<FullSetExistingOrder | null> {
+  const { data } = await api.get<{ data: FullSetExistingOrder | null }>(
+    `/wholesaler/students/${studentId}/full-set-order`
+  );
+  return data.data;
+}
+
+// ── Student self-service (rep-linked student fills their OWN order) ──
+
+export interface RepFullSetContext {
+  isRepStudent: boolean;
+  approved: boolean;
+  packages: FullSetPackage[];
+  existing: FullSetExistingOrder | null;
+}
+
+export async function getRepFullSetContext(): Promise<RepFullSetContext> {
+  const { data } = await api.get<{
+    data: {
+      is_rep_student: boolean;
+      approved: boolean;
+      packages: FullSetPackage[];
+      existing: FullSetExistingOrder | null;
+    };
+  }>("/orders/rep-full-set");
+  return {
+    isRepStudent: data.data.is_rep_student,
+    approved: data.data.approved,
+    packages: data.data.packages || [],
+    existing: data.data.existing,
+  };
+}
+
+export async function submitRepFullSetOrder(
+  payload: CreateFullSetPayload
+): Promise<{ total: number; packageName: string }> {
+  const { data } = await api.post<{
+    data: { total: number; package_name: string };
+  }>("/orders/rep-full-set", payload);
+  return { total: data.data.total, packageName: data.data.package_name };
+}
