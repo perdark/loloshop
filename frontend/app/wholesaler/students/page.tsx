@@ -216,6 +216,16 @@ export default function WholesalerStudentsPage() {
                     </span>
                   </div>
                 </div>
+                {s.status === "approved" && (
+                  <div className="mt-3 flex justify-end border-t border-line pt-3">
+                    <Link
+                      href={`/wholesaler/students/${s.id}/order`}
+                      className="inline-flex min-h-11 items-center rounded-xl bg-orange-ink px-4 text-sm font-semibold text-white shadow-[var(--shadow-soft)] transition-transform hover:-translate-y-0.5"
+                    >
+                      {s.isCompleted ? "تعديل الطلب" : "إضافة طلب"}
+                    </Link>
+                  </div>
+                )}
               </li>
             ))}
           </ul>
