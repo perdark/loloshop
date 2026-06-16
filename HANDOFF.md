@@ -6,6 +6,75 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
+## 2026-06-16 (c) — طقم add-ons (شال امريكي + كسرة الكتف) · student inherits rep جامعة/قسم · clickable staff bundle rows
+
+Four user-requested changes. Committed to **main** this session.
+
+**What changed**
+1. **شال امريكي (نعم/لا + mandatory photo)** — new toggle in the shared
+   `frontend/components/wholesaler/FullSetOrderForm.tsx` → appears on BOTH the rep
+   form (`/wholesaler/students/[id]/order`) and the student form (`/my-order`). When
+   نعم, a photo is required (client + backend). Stored as a `شال امريكي` spec line on
+   the **sash** order (`customer_text='نعم'`, `customer_image_url`).
+2. **كسرة الكتف (نعم/لا)** — new toggle inside فصال الروب; stored as a `كسرة الكتف`
+   spec line on the **robe** order (`نعم`/`لا`).
+3. **Student inherits the rep's جامعة/قسم** — join form no longer asks for them.
+   Migration **027** adds `wholesalers.university_name` + `department`; admin create
+   requires them; NEW `PATCH /admin/wholesalers/:id` (`updateWholesaler`) + a "تعديل"
+   modal lets admins set/fix existing reps; `joinController` resolves them from the rep.
+4. **Staff bundle rows fully clickable** — `app/staff/orders/[orderId]/page.tsx`
+   "الباقة الكاملة" sibling rows (وشاح/روب/قبعة) are now whole-row `Link`s.
+
+**How it works (gotchas)**
+- Single source of truth held: all order writes/reads still go through
+  `backend/lib/fullSetOrder.js` (`persistFullSetOrder`/`readFullSetOrder`), so rep +
+  student paths stay byte-identical. The two new fields are in the payload as
+  `shoulder_pleat: boolean` and `american_shawl: { enabled, image_url }`.
+- A shawl photo routes the **sash** to `design_complete` even with no front/back
+  embroidery (new `sashHasDesign = sashHasEmb || shawlEnabled`); `has_embroidery`
+  stays accurate (only true for real embroidery). Status logic stays backend-only.
+- New spec lines render to staff automatically — the "خيارات الطلب" block is generic
+  (label_snapshot + customer_text + "صورة العميل" link). كسرة الكتف shows on the robe
+  order, شال امريكي (+photo) on the sash order.
+- Join page now calls `GET /join/:code` (extended with university/department) to show
+  the rep + cohort as read-only context and to detect an invalid code up front.
+- `JoinPayload.university_name`/`department` made optional (legacy fallback only —
+  the page no longer sends them; the rep's value always wins in `joinController`).
+
+**Verified** (project norm: backend e2e + types/lint/build; live click-through = user)
+- Backend **end-to-end on the live Neon DB**: shawl-without-image→400
+  (`صورة الشال الأمريكي مطلوبة`), valid→201, `readFullSetOrder` reconstructs
+  `shoulder_pleat` + `american_shawl`, sash status flips `design_complete`↔`preparing`
+  with the shawl, toggle-off is idempotent. Admin: create-without-university→400,
+  `updateWholesaler`→200. Join inheritance proven by replaying the controller's exact
+  INSERT in a **rolled-back tx** (student row got the rep's جامعة/قسم; no junk left).
+- `tsc --noEmit` 0 errors · `eslint` 0 errors (1 pre-existing unused-directive
+  warning in the admin page's `load` effect, untouched) · **`next build` succeeds**.
+- Test fixture updated: rep `TESTREP` now has جامعة بغداد / هندسة الحاسوب (was NULL),
+  so the join-inherit demo works. Rep login still phone `07700000001` / `test1234` /
+  OTP `111111`, approved student "احمد سمير".
+
+**Open follow-ups**
+- Live in-browser click-through not done by me (verified by backend e2e + types/lint +
+  build). Redeploy then drive: rep/student طقم form (toggle شال + كسرة, save, re-open
+  to confirm pre-fill), a fresh join via `/join/TESTREP` (no university field; cohort
+  shown), admin create/تعديل rep, staff order detail row clicks.
+- Existing reps created before this have NULL جامعة/قسم → set via the new "تعديل"
+  modal, else their students inherit NULL. New reps require them at creation.
+- نوع عادي/ملكي + شال/كسرة are still captured as manufacturing spec labels, not
+  priced options / sub-products (same as the prior طقم entry).
+
+**Files touched**
+- backend: `lib/fullSetOrder.js`, `controllers/{joinController,adminController}.js`,
+  `routes/admin.js`, NEW `db/migrations/027_wholesaler_university_department.sql`,
+  `db/schema.sql`
+- frontend: `components/wholesaler/FullSetOrderForm.tsx`, `app/join/[code]/page.tsx`,
+  `app/admin/wholesalers/page.tsx`, `app/staff/orders/[orderId]/page.tsx`,
+  `lib/{wholesaler,admin,types}.ts`
+- docs: `PROGRESS.md`, `HANDOFF.md`
+
+---
+
 ## 2026-06-16 (b) — Student-facing طقم form + edit pre-fill + dashboard cleanup + image lightbox
 
 Follow-up to entry (a) below, after live testing on lolo-shop96.com. Commit `2154638`

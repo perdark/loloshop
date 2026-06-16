@@ -87,6 +87,8 @@ interface ApiWholesalerRow {
   name: string;
   phone: string;
   email?: string;
+  university_name?: string | null;
+  department?: string | null;
   referral_code: string;
   referral_url: string;
   student_count: number;
@@ -121,6 +123,8 @@ function mapWholesaler(row: ApiWholesalerRow): AdminWholesaler {
     name: row.name,
     phone: row.phone,
     email: row.email,
+    universityName: row.university_name ?? null,
+    department: row.department ?? null,
     studentCount: row.student_count,
     pendingCount: row.pending_count,
     deadline: row.deadline,
@@ -335,10 +339,23 @@ export async function createWholesaler(
     password: payload.password,
     referral_code: payload.referralCode,
     deadline: payload.deadline,
+    university_name: payload.universityName,
+    department: payload.department,
     commission_rate: payload.commissionRate ?? 0,
   });
   const row = data.data;
   return { id: row.id, referralUrl: row.referral_url };
+}
+
+/** Edit a wholesaler's جامعة/قسم (inherited by students who join via their link). */
+export async function updateWholesaler(
+  id: string,
+  payload: { universityName: string; department: string }
+): Promise<void> {
+  await api.patch(`/admin/wholesalers/${id}`, {
+    university_name: payload.universityName,
+    department: payload.department,
+  });
 }
 
 export async function extendWholesalerDeadline(

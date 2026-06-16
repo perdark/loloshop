@@ -8,6 +8,7 @@ import {
   extendWholesalerDeadline,
   getAdminWholesalers,
   getWholesalerSashConfig,
+  updateWholesaler,
   updateWholesalerCommission,
   updateWholesalerSashConfig,
   type WholesalerSashConfig,
@@ -34,6 +35,7 @@ export default function AdminWholesalersPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [extendOpen, setExtendOpen] = useState(false);
   const [commissionOpen, setCommissionOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AdminWholesaler | null>(null);
   const [sashOpen, setSashOpen] = useState(false);
   const [sashConfig, setSashConfig] = useState<WholesalerSashConfig | null>(null);
@@ -50,8 +52,12 @@ export default function AdminWholesalersPage() {
   const [referralCode, setReferralCode] = useState("");
   const [deadline, setDeadline] = useState("");
   const [commission, setCommission] = useState("0");
+  const [university, setUniversity] = useState("");
+  const [department, setDepartment] = useState("");
   const [newDeadline, setNewDeadline] = useState("");
   const [newCommission, setNewCommission] = useState("0");
+  const [editUniversity, setEditUniversity] = useState("");
+  const [editDepartment, setEditDepartment] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -83,6 +89,8 @@ export default function AdminWholesalersPage() {
     else if (!SLUG_RE.test(referralCode))
       e.referralCode = "أحرف إنجليزية صغيرة وأرقام وشرطة فقط";
     if (!deadline) e.deadline = "الموعد النهائي مطلوب";
+    if (!university.trim()) e.university = "اسم الجامعة مطلوب";
+    if (!department.trim()) e.department = "القسم / التخصص مطلوب";
     setErrors(e);
     return Object.keys(e).length === 0;
   }
@@ -98,6 +106,8 @@ export default function AdminWholesalersPage() {
         password,
         referralCode,
         deadline,
+        universityName: university.trim(),
+        department: department.trim(),
         commissionRate: Number(commission) || 0,
       });
       toast.success("تم إنشاء الممثل");
@@ -109,9 +119,34 @@ export default function AdminWholesalersPage() {
       setReferralCode("");
       setDeadline("");
       setCommission("0");
+      setUniversity("");
+      setDepartment("");
       load();
     } catch (err) {
       toast.error(getApiErrorMessage(err, "تعذر إنشاء الممثل"));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleEdit() {
+    if (!selected) return;
+    if (!editUniversity.trim() || !editDepartment.trim()) {
+      toast.error("اسم الجامعة والقسم مطلوبان");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await updateWholesaler(selected.id, {
+        universityName: editUniversity.trim(),
+        department: editDepartment.trim(),
+      });
+      toast.success("تم تحديث بيانات الممثل");
+      setEditOpen(false);
+      setSelected(null);
+      load();
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "تعذر تحديث البيانات"));
     } finally {
       setSubmitting(false);
     }
@@ -224,6 +259,13 @@ export default function AdminWholesalersPage() {
                 <div>
                   <h3 className="font-display text-lg font-bold text-ink">{w.name}</h3>
                   <p className="text-sm text-ink-soft" dir="ltr">{w.phone}</p>
+                  {(w.universityName || w.department) && (
+                    <p className="mt-1 text-sm text-ink">
+                      {w.universityName}
+                      {w.universityName && w.department ? " — " : ""}
+                      {w.department}
+                    </p>
+                  )}
                   <p className="mt-2 text-sm">
                     <span className="text-[var(--shop-muted)]">الطلاب: </span>
                     <span className="font-medium tabular-nums text-ink">{w.studentCount}</span>
@@ -254,6 +296,17 @@ export default function AdminWholesalersPage() {
                   >
                     عرض الطلاب
                   </Link>
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      setSelected(w);
+                      setEditUniversity(w.universityName ?? "");
+                      setEditDepartment(w.department ?? "");
+                      setEditOpen(true);
+                    }}
+                  >
+                    تعديل
+                  </Button>
                   <Button
                     variant="ghost"
                     onClick={() => {
@@ -349,6 +402,20 @@ export default function AdminWholesalersPage() {
             error={errors.referralCode}
             dir="ltr"
           />
+          <Input
+            label="الجامعة"
+            autoComplete="off"
+            value={university}
+            onChange={(e) => setUniversity(e.target.value)}
+            error={errors.university}
+          />
+          <Input
+            label="القسم / التخصص"
+            autoComplete="off"
+            value={department}
+            onChange={(e) => setDepartment(e.target.value)}
+            error={errors.department}
+          />
           <div dir="rtl" className="flex flex-col gap-1">
             <label className="text-xs font-semibold text-muted">الموعد النهائي</label>
             <input
@@ -399,6 +466,40 @@ export default function AdminWholesalersPage() {
           value={newCommission}
           onChange={(e) => setNewCommission(e.target.value)}
         />
+      </Modal>
+
+      <Modal
+        open={editOpen}
+        onClose={() => setEditOpen(false)}
+        title={`تعديل بيانات — ${selected?.name ?? ""}`}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setEditOpen(false)}>
+              إلغاء
+            </Button>
+            <Button onClick={handleEdit} loading={submitting}>
+              حفظ
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-ink-soft">
+            الجامعة والقسم يُورّثان لكل طالب يسجّل عبر رابط هذا الممثل.
+          </p>
+          <Input
+            label="الجامعة"
+            autoComplete="off"
+            value={editUniversity}
+            onChange={(e) => setEditUniversity(e.target.value)}
+          />
+          <Input
+            label="القسم / التخصص"
+            autoComplete="off"
+            value={editDepartment}
+            onChange={(e) => setEditDepartment(e.target.value)}
+          />
+        </div>
       </Modal>
 
       <Modal

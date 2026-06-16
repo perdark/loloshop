@@ -5,7 +5,7 @@ const { createOtp } = require('../lib/otp');
 async function getReferral(req, res) {
   const { code } = req.params;
   const { rows } = await query(
-    `SELECT u.name AS wholesaler_name, w.deadline
+    `SELECT u.name AS wholesaler_name, w.deadline, w.university_name, w.department
      FROM wholesalers w JOIN users u ON u.id = w.user_id
      WHERE w.referral_code = $1`,
     [code]
@@ -13,7 +13,13 @@ async function getReferral(req, res) {
   if (!rows.length) {
     return res.status(404).json({ error: 'الرابط غير صالح', code: 'ERR_REFERRAL_INVALID' });
   }
-  res.json({ wholesaler_name: rows[0].wholesaler_name, deadline: rows[0].deadline, valid: true });
+  res.json({
+    wholesaler_name: rows[0].wholesaler_name,
+    deadline: rows[0].deadline,
+    university_name: rows[0].university_name,
+    department: rows[0].department,
+    valid: true,
+  });
 }
 
 async function joinReferral(req, res) {
@@ -44,12 +50,8 @@ async function joinReferral(req, res) {
   if (gender && !['male', 'female'].includes(gender)) {
     return res.status(400).json({ error: 'الجنس غير صالح', code: 'ERR_VALIDATION' });
   }
-  if (!university_name || !String(university_name).trim()) {
-    return res.status(400).json({ error: 'اسم الجامعة مطلوب', code: 'ERR_VALIDATION' });
-  }
-  if (!department || !String(department).trim()) {
-    return res.status(400).json({ error: 'القسم/التخصص مطلوب', code: 'ERR_VALIDATION' });
-  }
+  // University + department are NOT collected from the student here — they are inherited
+  // from the wholesaler whose referral link the student joined (resolved below).
   if (!study_type || !['morning', 'evening'].includes(study_type)) {
     return res.status(400).json({ error: 'الدراسة (صباحي/مسائي) مطلوبة', code: 'ERR_VALIDATION' });
   }
@@ -58,13 +60,21 @@ async function joinReferral(req, res) {
   }
   const cleanInstagram = String(instagram_username).trim().replace(/^@/, '');
   const { rows: wRows } = await query(
-    `SELECT id FROM wholesalers WHERE referral_code = $1`,
+    `SELECT id, university_name, department FROM wholesalers WHERE referral_code = $1`,
     [code]
   );
   if (!wRows.length) {
     return res.status(404).json({ error: 'الرابط غير صالح', code: 'ERR_REFERRAL_INVALID' });
   }
   const wholesalerId = wRows[0].id;
+  // Student inherits the wholesaler's جامعة/قسم. Fall back to anything the body sent
+  // (legacy clients) so older flows still work, but the link's cohort wins.
+  const finalUniversity =
+    (wRows[0].university_name && String(wRows[0].university_name).trim()) ||
+    (university_name ? String(university_name).trim() : null);
+  const finalDepartment =
+    (wRows[0].department && String(wRows[0].department).trim()) ||
+    (department ? String(department).trim() : null);
   const exists = await query(
     `SELECT phone, email FROM users WHERE phone = $1 OR (email IS NOT NULL AND email = $2)`,
     [phone, email || null]
@@ -85,7 +95,7 @@ async function joinReferral(req, res) {
     const s = await client.query(
       `INSERT INTO students (user_id, wholesaler_id, full_name_third, university_name, department, gender, study_type, instagram_username, status)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending_approval') RETURNING id`,
-      [u.rows[0].id, wholesalerId, studentName, String(university_name).trim(), String(department).trim(), gender || null, study_type, cleanInstagram]
+      [u.rows[0].id, wholesalerId, studentName, finalUniversity, finalDepartment, gender || null, study_type, cleanInstagram]
     );
     await client.query(
       `INSERT INTO notifications (user_id, type, title_ar, body_ar, link)

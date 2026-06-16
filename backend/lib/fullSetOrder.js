@@ -72,6 +72,16 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
   };
   const groupNotes = clean(notes, 500);
 
+  // كسرة الكتف (robe shoulder pleat) — yes/no tailoring flag, captured as a spec line.
+  const shoulderPleat =
+    body.shoulder_pleat === true || body.shoulder_pleat === 'true' || body.shoulder_pleat === 'نعم';
+  // شال امريكي (American shawl) — yes/no; when enabled a reference photo is REQUIRED.
+  const shawlIn = body.american_shawl || {};
+  const shawlEnabled =
+    shawlIn.enabled === true || shawlIn.enabled === 'true' || shawlIn.enabled === 'نعم';
+  const shawlImage = clean(shawlIn.image_url, 500);
+  if (shawlEnabled && !shawlImage) return err(400, 'صورة الشال الأمريكي مطلوبة');
+
   // resolve sash/robe/cap: package-pinned wins, else first active per type
   const byType = {};
   const pinned = await query(
@@ -93,8 +103,11 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
 
   const sashHasEmb = !!(emb.sash_front.text || emb.sash_front.image_url || emb.sash_back.text || emb.sash_back.image_url);
   const capHasEmb = !!(emb.cap_side.text || emb.cap_side.image_url || emb.cap_top.text || emb.cap_top.image_url);
+  // A شال امريكي carries a custom reference photo, so the sash needs design attention
+  // even without front/back embroidery → route it to design_complete like an embroidered piece.
+  const sashHasDesign = sashHasEmb || shawlEnabled;
   const itemFlags = {
-    sash: { has_embroidery: sashHasEmb, status: sashHasEmb ? 'design_complete' : 'preparing' },
+    sash: { has_embroidery: sashHasEmb, status: sashHasDesign ? 'design_complete' : 'preparing' },
     cap: { has_embroidery: capHasEmb, status: capHasEmb ? 'design_complete' : 'preparing' },
     robe: { has_embroidery: false, status: 'preparing' },
   };
@@ -102,6 +115,8 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
   const specLines = {
     sash: [
       { label: 'نوع الوشاح', customer_text: sashType },
+      ...(shawlEnabled
+        ? [{ label: 'شال امريكي', customer_text: 'نعم', customer_image_url: shawlImage }] : []),
       ...(emb.sash_front.text || emb.sash_front.image_url
         ? [{ label: 'تطريز الوشاح من الأمام', customer_text: emb.sash_front.text, customer_image_url: emb.sash_front.image_url }] : []),
       ...(emb.sash_back.text || emb.sash_back.image_url
@@ -114,7 +129,9 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
       ...(emb.cap_top.text || emb.cap_top.image_url
         ? [{ label: 'تطريز القبعة من الأعلى', customer_text: emb.cap_top.text, customer_image_url: emb.cap_top.image_url }] : []),
     ],
-    robe: [],
+    robe: [
+      { label: 'كسرة الكتف', customer_text: shoulderPleat ? 'نعم' : 'لا' },
+    ],
   };
 
   let resolvedBatchId = null;
@@ -245,10 +262,12 @@ async function readFullSetOrder(studentId) {
     items.rows.find((i) => i.order_id === oid && i.label_snapshot === label) || null;
   const sashId = byType.sash?.id || null;
   const capId = byType.cap?.id || null;
+  const robeId = byType.robe?.id || null;
   const z = (oid, label) => {
     const l = oid ? lineFor(oid, label) : null;
     return { text: l?.customer_text || '', image_url: l?.customer_image_url || '' };
   };
+  const shawlLine = sashId ? lineFor(sashId, 'شال امريكي') : null;
 
   return {
     package_id: set[0].package_id,
@@ -256,6 +275,8 @@ async function readFullSetOrder(studentId) {
     measurements: byType.robe?.measurements || null,
     sash_type: sashId ? lineFor(sashId, 'نوع الوشاح')?.customer_text || null : null,
     cap_type: capId ? lineFor(capId, 'نوع القبعة')?.customer_text || null : null,
+    shoulder_pleat: robeId ? lineFor(robeId, 'كسرة الكتف')?.customer_text === 'نعم' : false,
+    american_shawl: { enabled: !!shawlLine, image_url: shawlLine?.customer_image_url || '' },
     embroidery: {
       sash_front: z(sashId, 'تطريز الوشاح من الأمام'),
       sash_back: z(sashId, 'تطريز الوشاح من الخلف'),

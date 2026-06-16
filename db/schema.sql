@@ -655,4 +655,8 @@ ALTER TABLE options       ADD COLUMN IF NOT EXISTS customer_text_prompt_ar TEXT;
 ALTER TABLE option_groups ADD COLUMN IF NOT EXISTS customer_text_placeholder_ar TEXT;
 ALTER TABLE options       ADD COLUMN IF NOT EXISTS customer_text_placeholder_ar TEXT;
 
+-- Migration 027: wholesaler carries جامعة/قسم; students inherit them on join.
+ALTER TABLE wholesalers ADD COLUMN IF NOT EXISTS university_name TEXT;
+ALTER TABLE wholesalers ADD COLUMN IF NOT EXISTS department      TEXT;
+
 COMMIT;

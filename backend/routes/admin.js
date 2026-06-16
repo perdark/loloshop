@@ -13,6 +13,7 @@ router.patch('/orders/:id/cost', c.updateOrderCost);
 router.patch('/checkout-groups/:id', c.updateCheckoutGroup);
 router.get('/wholesalers', c.listWholesalers);
 router.post('/wholesalers', c.createWholesaler);
+router.patch('/wholesalers/:id', c.updateWholesaler);
 router.patch('/wholesalers/:id/deadline', c.updateDeadline);
 router.patch('/wholesalers/:id/commission', c.updateCommission);
 router.get('/wholesalers/:id/sash-config', c.getWholesalerSashConfig);

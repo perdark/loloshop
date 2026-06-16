@@ -1071,39 +1071,49 @@ export default function ProductionOrderDetailPage() {
             <article className="rounded-2xl border-2 border-orange-ink/20 bg-orange-ink/5 p-5 shadow-[var(--shadow-soft)]">
               <h3 className="mb-3 font-display-ar text-sm font-bold text-ink">الباقة الكاملة</h3>
               <ul className="space-y-2">
-                {bundle.map((bi) => (
-                  <li
-                    key={bi.id}
-                    className={`flex min-h-[44px] items-center justify-between gap-2 rounded-xl px-3 py-2 text-sm transition-colors ${
-                      bi.is_current
-                        ? "border border-orange-ink/30 bg-orange-ink/10"
-                        : "border border-line bg-surface hover:bg-surface-sink"
-                    }`}
-                  >
-                    <div className="flex min-w-0 flex-1 items-center gap-2">
-                      {bi.is_current ? (
-                        <span className="font-semibold text-orange-ink" aria-label="الطلب الحالي">
-                          {bi.product_name}
-                        </span>
-                      ) : (
-                        <Link
-                          href={`/staff/orders/${bi.id}`}
-                          className="font-medium text-ink hover:text-orange-ink hover:underline"
+                {bundle.map((bi) => {
+                  // The whole row is the click target for sibling pieces (not just the
+                  // product-name text), so tapping anywhere on وشاح/روب/قبعة navigates.
+                  const rowClass = `flex min-h-[44px] items-center justify-between gap-2 rounded-xl px-3 py-2 text-sm transition-colors ${
+                    bi.is_current
+                      ? "border border-orange-ink/30 bg-orange-ink/10"
+                      : "border border-line bg-surface hover:border-orange-ink/40 hover:bg-surface-sink"
+                  }`;
+                  const rowInner = (
+                    <>
+                      <div className="flex min-w-0 flex-1 items-center gap-2">
+                        <span
+                          className={
+                            bi.is_current ? "font-semibold text-orange-ink" : "font-medium text-ink"
+                          }
                         >
                           {bi.product_name}
+                        </span>
+                        {bi.is_current && (
+                          <span className="shrink-0 rounded-full bg-orange-ink px-1.5 py-0.5 text-[10px] font-bold text-white">
+                            الحالي
+                          </span>
+                        )}
+                      </div>
+                      <span className="shrink-0 rounded-full border border-line bg-surface-sink px-2 py-0.5 text-xs text-ink-soft">
+                        {ORDER_STATUS_LABELS[bi.status] ?? bi.status}
+                      </span>
+                    </>
+                  );
+                  return (
+                    <li key={bi.id}>
+                      {bi.is_current ? (
+                        <div className={rowClass} aria-label="الطلب الحالي" aria-current="true">
+                          {rowInner}
+                        </div>
+                      ) : (
+                        <Link href={`/staff/orders/${bi.id}`} className={rowClass}>
+                          {rowInner}
                         </Link>
                       )}
-                      {bi.is_current && (
-                        <span className="shrink-0 rounded-full bg-orange-ink px-1.5 py-0.5 text-[10px] font-bold text-white">
-                          الحالي
-                        </span>
-                      )}
-                    </div>
-                    <span className="shrink-0 rounded-full border border-line bg-surface-sink px-2 py-0.5 text-xs text-ink-soft">
-                      {ORDER_STATUS_LABELS[bi.status] ?? bi.status}
-                    </span>
-                  </li>
-                ))}
+                    </li>
+                  );
+                })}
               </ul>
             </article>
           )}

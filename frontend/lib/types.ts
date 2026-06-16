@@ -115,6 +115,8 @@ export interface AdminWholesaler {
   name: string;
   phone: string;
   email?: string;
+  universityName?: string | null;
+  department?: string | null;
   studentCount: number;
   pendingCount: number;
   deadline: string | null;
@@ -133,6 +135,8 @@ export interface CreateWholesalerPayload {
   password: string;
   referralCode: string;
   deadline: string;
+  universityName: string;
+  department: string;
   commissionRate?: number;
 }
 
@@ -167,9 +171,12 @@ export interface JoinPayload {
   phone: string;
   email: string;
   password: string;
-  /** Mandatory signup fields (batch update). */
-  university_name: string;
-  department: string;
+  /**
+   * جامعة/قسم are inherited from the wholesaler's referral link (the student no longer
+   * enters them). Optional here for any legacy caller that still sends them.
+   */
+  university_name?: string;
+  department?: string;
   study_type: StudyType;
   instagram_username: string;
 }

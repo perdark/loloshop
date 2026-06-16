@@ -70,6 +70,12 @@ export function FullSetOrderForm({
     capTop: seedZone(initial?.embroidery.cap_top),
   });
   const [notes, setNotes] = useState(initial?.notes || "");
+  const [shoulderPleat, setShoulderPleat] = useState(initial?.shoulder_pleat ?? false);
+  const [shawlEnabled, setShawlEnabled] = useState(
+    initial?.american_shawl?.enabled ?? false
+  );
+  const [shawlImage, setShawlImage] = useState(initial?.american_shawl?.image_url || "");
+  const [shawlUploading, setShawlUploading] = useState(false);
 
   function setZone(key: ZoneKey, patch: Partial<ZoneState>) {
     setZones((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
@@ -86,6 +92,18 @@ export function FullSetOrderForm({
     }
   }
 
+  async function handleShawlUpload(file: File) {
+    setShawlUploading(true);
+    try {
+      const url = await onUploadImage(file);
+      setShawlImage(url);
+    } catch {
+      toast.error("تعذر رفع الصورة");
+    } finally {
+      setShawlUploading(false);
+    }
+  }
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!packageId) return toast.error("يرجى اختيار الطقم");
@@ -93,8 +111,10 @@ export function FullSetOrderForm({
       return toast.error("يرجى إدخال قياسات الروب كاملة");
     if (!sashType) return toast.error("يرجى اختيار نوع الوشاح");
     if (!capType) return toast.error("يرجى اختيار نوع القبعة");
-    if (Object.values(zones).some((z) => z.uploading))
+    if (shawlUploading || Object.values(zones).some((z) => z.uploading))
       return toast.error("يرجى الانتظار حتى انتهاء رفع الصور");
+    if (shawlEnabled && !shawlImage)
+      return toast.error("صورة الشال الأمريكي مطلوبة");
 
     const zone = (z: ZoneState) => ({
       text: z.text.trim() || undefined,
@@ -109,6 +129,11 @@ export function FullSetOrderForm({
       },
       sash_type: sashType,
       cap_type: capType,
+      shoulder_pleat: shoulderPleat,
+      american_shawl: {
+        enabled: shawlEnabled,
+        image_url: shawlEnabled ? shawlImage : undefined,
+      },
       embroidery: {
         sash_front: zone(zones.sashFront),
         sash_back: zone(zones.sashBack),
@@ -187,6 +212,13 @@ export function FullSetOrderForm({
             placeholder="49"
           />
         </div>
+        <div className="mt-3">
+          <YesNoToggle
+            label="كسرة الكتف"
+            value={shoulderPleat}
+            onChange={setShoulderPleat}
+          />
+        </div>
       </Section>
 
       {/* ── النوع ── */}
@@ -194,6 +226,58 @@ export function FullSetOrderForm({
         <div className="space-y-3">
           <TypeToggle label="نوع الوشاح" value={sashType} onChange={setSashType} />
           <TypeToggle label="نوع القبعة" value={capType} onChange={setCapType} />
+        </div>
+      </Section>
+
+      {/* ── شال امريكي ── */}
+      <Section title="شال امريكي" hint="صورة الشال إجبارية عند الاختيار">
+        <div className="space-y-3">
+          <YesNoToggle
+            label="إضافة شال امريكي"
+            value={shawlEnabled}
+            onChange={setShawlEnabled}
+          />
+          {shawlEnabled && (
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-ink">
+                صورة الشال <span className="text-danger">*</span>
+              </p>
+              <div className="flex items-center gap-2.5">
+                {shawlImage ? (
+                  <>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={resolveDesignMediaUrl(shawlImage)}
+                      alt="صورة الشال الأمريكي"
+                      className="h-16 w-16 rounded-lg border border-line object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShawlImage("")}
+                      className="min-h-11 text-sm font-medium text-danger hover:underline"
+                    >
+                      إزالة الصورة
+                    </button>
+                  </>
+                ) : (
+                  <label className="inline-flex min-h-11 cursor-pointer items-center rounded-xl border border-line bg-beige px-3.5 text-sm font-medium text-ink-soft transition-colors hover:border-orange/40 hover:text-orange-ink">
+                    {shawlUploading ? "جارٍ الرفع…" : "إرفاق صورة الشال"}
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      className="sr-only"
+                      disabled={shawlUploading}
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) handleShawlUpload(f);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </Section>
 
@@ -302,6 +386,38 @@ function TypeToggle({
             {o}
           </Button>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function YesNoToggle({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <div>
+      <p className="mb-1.5 text-sm font-medium text-ink">{label}</p>
+      <div className="grid grid-cols-2 gap-2">
+        <Button
+          type="button"
+          variant={value ? "primary" : "ghost"}
+          onClick={() => onChange(true)}
+        >
+          نعم
+        </Button>
+        <Button
+          type="button"
+          variant={!value ? "primary" : "ghost"}
+          onClick={() => onChange(false)}
+        >
+          لا
+        </Button>
       </div>
     </div>
   );

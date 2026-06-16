@@ -143,6 +143,29 @@ export async function updateMySashConfig(
   });
 }
 
+export interface ReferralInfo {
+  wholesalerName: string;
+  universityName: string | null;
+  department: string | null;
+  deadline: string | null;
+}
+
+/** Look up a referral code → the rep's name + cohort (جامعة/قسم) for the join screen. */
+export async function getReferralInfo(code: string): Promise<ReferralInfo> {
+  const { data } = await api.get<{
+    wholesaler_name: string;
+    deadline: string | null;
+    university_name: string | null;
+    department: string | null;
+  }>(`/join/${code}`);
+  return {
+    wholesalerName: data.wholesaler_name,
+    universityName: data.university_name,
+    department: data.department,
+    deadline: data.deadline,
+  };
+}
+
 export async function joinWithCode(
   code: string,
   payload: JoinPayload
@@ -225,6 +248,10 @@ export interface CreateFullSetPayload {
   };
   sash_type: PieceType;
   cap_type: PieceType;
+  /** فصال الروب: كسرة الكتف (yes/no). */
+  shoulder_pleat?: boolean;
+  /** شال امريكي (yes/no) — image required when enabled. */
+  american_shawl?: { enabled: boolean; image_url?: string };
   embroidery: {
     cap_side?: EmbroideryZone;
     cap_top?: EmbroideryZone;
@@ -261,6 +288,8 @@ export interface FullSetExistingOrder {
   } | null;
   sash_type: PieceType | null;
   cap_type: PieceType | null;
+  shoulder_pleat: boolean;
+  american_shawl: { enabled: boolean; image_url: string };
   embroidery: {
     sash_front: EmbroideryZone;
     sash_back: EmbroideryZone;

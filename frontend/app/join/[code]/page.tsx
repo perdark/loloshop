@@ -1,13 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { toast } from "sonner";
-import { joinWithCode } from "@/lib/wholesaler";
+import { getReferralInfo, joinWithCode, type ReferralInfo } from "@/lib/wholesaler";
 import { getApiErrorMessage } from "@/lib/api";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { AuthCard } from "@/components/auth/AuthCard";
+import { GradCapLoader } from "@/components/ui/GradCapLoader";
 import { STUDY_TYPE_LABELS } from "@/lib/constants";
 
 // Inline checkmark — warm brick on cream surface, no emoji, no gradient fill.
@@ -30,6 +31,12 @@ export default function JoinPage() {
   const params = useParams();
   const code = params.code as string;
 
+  // Resolve the referral code → the rep's name + cohort (جامعة/قسم). The student
+  // inherits these, so we show them as read-only context instead of asking for them.
+  const [info, setInfo] = useState<ReferralInfo | null>(null);
+  const [infoLoading, setInfoLoading] = useState(true);
+  const [invalid, setInvalid] = useState(false);
+
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -39,11 +46,26 @@ export default function JoinPage() {
     email: "",
     password: "",
     confirmPassword: "",
-    university_name: "",
-    department: "",
     study_type: "" as "" | "morning" | "evening",
     instagram_username: "",
   });
+
+  useEffect(() => {
+    let alive = true;
+    getReferralInfo(code)
+      .then((data) => {
+        if (alive) setInfo(data);
+      })
+      .catch(() => {
+        if (alive) setInvalid(true);
+      })
+      .finally(() => {
+        if (alive) setInfoLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [code]);
 
   function validate(): boolean {
     const e: Record<string, string> = {};
@@ -54,8 +76,6 @@ export default function JoinPage() {
       e.password = "كلمة المرور ٦ أحرف على الأقل";
     if (form.password !== form.confirmPassword)
       e.confirmPassword = "كلمتا المرور غير متطابقتين";
-    if (!form.university_name.trim()) e.university_name = "اسم الجامعة مطلوب";
-    if (!form.department.trim()) e.department = "القسم / التخصص مطلوب";
     if (!form.study_type) e.study_type = "الدراسة الصباحية أو المسائية مطلوبة";
     if (!form.instagram_username.trim()) e.instagram_username = "يوزر الانستا مطلوب";
     setErrors(e);
@@ -73,8 +93,7 @@ export default function JoinPage() {
         phone: form.phone.trim(),
         email: form.email.trim(),
         password: form.password,
-        university_name: form.university_name.trim(),
-        department: form.department.trim(),
+        // الجامعة/القسم تُورَّث من ممثل الجامعة تلقائياً — لا يُدخلها الطالب.
         study_type: form.study_type as "morning" | "evening",
         instagram_username: form.instagram_username.trim().replace(/^@+/, ""),
       });
@@ -84,6 +103,30 @@ export default function JoinPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  if (infoLoading) {
+    return (
+      <div
+        dir="rtl"
+        className="flex min-h-[60vh] flex-col items-center justify-center gap-4"
+      >
+        <GradCapLoader size={72} />
+        <p className="text-xs font-medium tracking-wide text-[var(--shop-muted)]">
+          جارٍ التحميل…
+        </p>
+      </div>
+    );
+  }
+
+  if (invalid) {
+    return (
+      <AuthCard title="الرابط غير صالح">
+        <p className="text-sm text-ink-soft">
+          رابط الدعوة غير صحيح أو لم يعد فعّالاً. تأكد من الرابط مع ممثل جامعتك.
+        </p>
+      </AuthCard>
+    );
   }
 
   if (submitted) {
@@ -104,11 +147,26 @@ export default function JoinPage() {
 
   return (
     <AuthCard title="التسجيل بدعوة الممثل">
-      {/* Invite code badge — a quiet inset strip, not a dark header block */}
-      <div className="mb-6 rounded-[12px] border border-ink/10 bg-[var(--shop-sink)] px-4 py-3 text-center">
-        <p className="text-xs text-[var(--shop-muted)]">رمز الدعوة</p>
-        <p className="mt-0.5 font-mono text-sm font-semibold tracking-widest text-ink" dir="ltr">
-          {code}
+      {/* Cohort context — the rep's name + جامعة/قسم the student is joining under.
+          These are inherited automatically, so they are shown, not entered. */}
+      <div className="mb-6 space-y-2 rounded-[12px] border border-ink/10 bg-[var(--shop-sink)] px-4 py-3">
+        {info?.wholesalerName && (
+          <p className="text-center text-sm text-ink">
+            <span className="text-[var(--shop-muted)]">ممثل: </span>
+            <span className="font-semibold">{info.wholesalerName}</span>
+          </p>
+        )}
+        {(info?.universityName || info?.department) && (
+          <p className="text-center text-sm text-ink">
+            {info?.universityName && <span className="font-semibold">{info.universityName}</span>}
+            {info?.universityName && info?.department && (
+              <span className="mx-1.5 text-ink/30">·</span>
+            )}
+            {info?.department && <span>{info.department}</span>}
+          </p>
+        )}
+        <p className="text-center text-xs text-[var(--shop-muted)]">
+          ستُسجَّل ضمن هذه الجامعة والقسم تلقائياً
         </p>
       </div>
 
@@ -175,19 +233,6 @@ export default function JoinPage() {
           onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })}
           error={errors.confirmPassword}
           autoComplete="new-password"
-        />
-
-        <Input
-          label="الجامعة"
-          value={form.university_name}
-          onChange={(e) => setForm({ ...form, university_name: e.target.value })}
-          error={errors.university_name}
-        />
-        <Input
-          label="القسم / التخصص"
-          value={form.department}
-          onChange={(e) => setForm({ ...form, department: e.target.value })}
-          error={errors.department}
         />
 
         {/* Study schedule — required pill toggles */}

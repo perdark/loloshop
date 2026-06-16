@@ -154,6 +154,7 @@ async function updateCheckoutGroup(req, res) {
 async function listWholesalers(req, res) {
   const { rows } = await query(
     `SELECT w.id, u.name, u.phone, u.email, w.referral_code, w.deadline, w.commission_rate, w.created_at,
+       w.university_name, w.department,
        (SELECT COUNT(*)::int FROM students s WHERE s.wholesaler_id = w.id) AS student_count,
        (SELECT COUNT(*)::int FROM students s WHERE s.wholesaler_id = w.id AND s.status = 'pending_approval') AS pending_count,
        COALESCE((
@@ -178,13 +179,21 @@ function parseCommission(v) {
 }
 
 async function createWholesaler(req, res) {
-  const { name, phone, email, password, referral_code, deadline } = req.body;
+  const { name, phone, email, password, referral_code, deadline, university_name, department } = req.body;
   const commissionRate = parseCommission(req.body.commission_rate ?? 0);
   if (commissionRate === null) {
     return res.status(400).json({ error: 'نسبة عمولة غير صالحة (0-100)', code: 'ERR_VALIDATION' });
   }
   if (!name || !phone || !password || !referral_code) {
     return res.status(400).json({ error: 'بيانات ناقصة', code: 'ERR_VALIDATION' });
+  }
+  // The wholesaler's جامعة/قسم are inherited by every student who joins via their link,
+  // so they are required at creation.
+  if (!university_name || !String(university_name).trim()) {
+    return res.status(400).json({ error: 'اسم الجامعة مطلوب', code: 'ERR_VALIDATION' });
+  }
+  if (!department || !String(department).trim()) {
+    return res.status(400).json({ error: 'القسم/التخصص مطلوب', code: 'ERR_VALIDATION' });
   }
   const slugOk = /^[a-z0-9-]+$/.test(referral_code);
   if (!slugOk) {
@@ -206,9 +215,9 @@ async function createWholesaler(req, res) {
       [name, phone, email || null, hash]
     );
     const w = await client.query(
-      `INSERT INTO wholesalers (user_id, referral_code, deadline, commission_rate, approved_by_admin)
-       VALUES ($1, $2, $3, $4, TRUE) RETURNING id, referral_code`,
-      [u.rows[0].id, referral_code, deadline || null, commissionRate]
+      `INSERT INTO wholesalers (user_id, referral_code, deadline, commission_rate, approved_by_admin, university_name, department)
+       VALUES ($1, $2, $3, $4, TRUE, $5, $6) RETURNING id, referral_code`,
+      [u.rows[0].id, referral_code, deadline || null, commissionRate, String(university_name).trim(), String(department).trim()]
     );
     await client.query(
       `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
@@ -223,6 +232,33 @@ async function createWholesaler(req, res) {
       referral_url: `${process.env.FRONTEND_URL}/join/${result.referral_code}`,
     },
   });
+}
+
+// Edit a wholesaler's جامعة/قسم (so existing reps can be filled in / corrected — these
+// flow to every student who joins via the rep's link).
+async function updateWholesaler(req, res) {
+  const { id } = req.params;
+  const { university_name, department } = req.body;
+  if (!university_name || !String(university_name).trim()) {
+    return res.status(400).json({ error: 'اسم الجامعة مطلوب', code: 'ERR_VALIDATION' });
+  }
+  if (!department || !String(department).trim()) {
+    return res.status(400).json({ error: 'القسم/التخصص مطلوب', code: 'ERR_VALIDATION' });
+  }
+  const { rows } = await query(
+    `UPDATE wholesalers SET university_name = $1, department = $2
+     WHERE id = $3 RETURNING id, university_name, department`,
+    [String(university_name).trim(), String(department).trim(), id]
+  );
+  if (!rows.length) {
+    return res.status(404).json({ error: 'الممثل غير موجود', code: 'ERR_NOT_FOUND' });
+  }
+  await query(
+    `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
+     VALUES ($1, 'update_wholesaler', 'wholesaler', $2, $3)`,
+    [req.user.id, id, JSON.stringify({ university_name: rows[0].university_name, department: rows[0].department })]
+  );
+  res.json({ data: rows[0] });
 }
 
 async function updateDeadline(req, res) {
@@ -486,7 +522,7 @@ async function deleteStaff(req, res) {
 
 module.exports = {
   analytics, accounting, updateOrderCost, updateCheckoutGroup,
-  listWholesalers, createWholesaler, updateDeadline, updateCommission, deleteWholesaler,
+  listWholesalers, createWholesaler, updateWholesaler, updateDeadline, updateCommission, deleteWholesaler,
   getWholesalerSashConfig, updateWholesalerSashConfig,
   wholesalerStudents, toggleEditException,
   listStaff, createStaff, updateStaffType, updateStaffScope, updateStaffPassword, deleteStaff,
