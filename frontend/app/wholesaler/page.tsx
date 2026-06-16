@@ -5,14 +5,11 @@ import { toast } from "sonner";
 import {
   approveStudent,
   bulkSetStudentStatus,
-  getMySashConfig,
   getPendingStudents,
   getWholesalerDashboard,
   rejectStudent,
-  updateMySashConfig,
-  type WholesalerSashConfig,
 } from "@/lib/wholesaler";
-import { SashSideLockEditor } from "@/components/designer/SashSideLockEditor";
+import { QRCodeSVG } from "qrcode.react";
 import { getApiErrorMessage } from "@/lib/api";
 import { formatDateIQ, formatDateShort, formatIQD, getJoinUrl } from "@/lib/format";
 import type { PendingStudent, WholesalerDashboard } from "@/lib/types";
@@ -33,10 +30,6 @@ export default function WholesalerDashboardPage() {
   const [reject, setReject] = useState<
     { ids: string[]; label: string } | null
   >(null);
-  const [sashOpen, setSashOpen] = useState(false);
-  const [sashConfig, setSashConfig] = useState<WholesalerSashConfig | null>(null);
-  const [sashLoading, setSashLoading] = useState(false);
-  const [sashSaving, setSashSaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -105,33 +98,6 @@ export default function WholesalerDashboardPage() {
     }
   }
 
-  async function openSashConfig() {
-    setSashConfig(null);
-    setSashOpen(true);
-    setSashLoading(true);
-    try {
-      setSashConfig(await getMySashConfig());
-    } catch (err) {
-      toast.error(getApiErrorMessage(err, "تعذر تحميل إعدادات الوشاح"));
-      setSashOpen(false);
-    } finally {
-      setSashLoading(false);
-    }
-  }
-
-  async function handleSashSave(cfg: WholesalerSashConfig) {
-    setSashSaving(true);
-    try {
-      await updateMySashConfig(cfg);
-      toast.success("تم حفظ إعدادات الوشاح");
-      setSashOpen(false);
-    } catch (err) {
-      toast.error(getApiErrorMessage(err, "تعذر حفظ الإعدادات"));
-    } finally {
-      setSashSaving(false);
-    }
-  }
-
   async function confirmReject() {
     if (!reject) return;
     const { ids } = reject;
@@ -189,6 +155,19 @@ export default function WholesalerDashboardPage() {
       {/* Referral URL — legible, no gradients */}
       <section className="surface-card rounded-2xl p-5">
         <p className="mb-2 text-sm font-semibold text-ink">رابط الدعوة</p>
+
+        {/* Scannable QR — students scan to open the join link directly */}
+        <div className="mb-3 flex justify-center">
+          <div className="rounded-2xl border border-line bg-white p-3 shadow-[var(--shadow-soft)]">
+            <QRCodeSVG
+              value={joinUrl}
+              size={168}
+              marginSize={1}
+              aria-label="رمز QR لرابط الدعوة"
+            />
+          </div>
+        </div>
+
         <p
           className="break-all rounded-xl border border-line bg-[var(--shop-sink)] px-3 py-2.5 text-xs text-ink-soft"
           dir="ltr"
@@ -206,16 +185,6 @@ export default function WholesalerDashboardPage() {
             مشاركة واتساب
           </a>
         </div>
-      </section>
-
-      <section className="surface-card rounded-2xl p-5">
-        <p className="mb-1 text-sm font-semibold text-ink">تصميم الوشاح للطلاب</p>
-        <p className="mb-3 text-xs text-ink-soft">
-          حدّد الجانب الذي يصمّمه الطلاب وارسم الجانب الآخر مسبقاً.
-        </p>
-        <Button variant="ghost" fullWidth onClick={openSashConfig}>
-          إعدادات الوشاح
-        </Button>
       </section>
 
       <section className="pb-28">
@@ -353,23 +322,6 @@ export default function WholesalerDashboardPage() {
         <p className="text-sm text-ink-soft">
           هل تريد رفض {reject?.label}؟ لا يمكن التراجع عن هذا الإجراء.
         </p>
-      </Modal>
-
-      <Modal
-        open={sashOpen}
-        onClose={() => (sashSaving ? null : setSashOpen(false))}
-        title="إعدادات الوشاح"
-      >
-        {sashLoading || !sashConfig ? (
-          <PageLoader />
-        ) : (
-          <SashSideLockEditor
-            editableSide={sashConfig.editable_sash_side}
-            lockedSideDesign={sashConfig.locked_side_design}
-            saving={sashSaving}
-            onSave={handleSashSave}
-          />
-        )}
       </Modal>
     </div>
   );

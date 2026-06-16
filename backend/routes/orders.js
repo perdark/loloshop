@@ -15,6 +15,10 @@ router.post('/configure-package', authRequired, requireRole('wholesaler', 'retai
 // Retail student: full-set order (طقم كامل روب+قبعة+وشاح) via the structured form wizard
 router.post('/configure-full-set', authRequired, requireRole('retail'), c.configureFullSet);
 
+// Rep-linked student: fill THEIR OWN full-set order via the WhatsApp form (no shop/cart)
+router.get('/rep-full-set', authRequired, requireRole('retail'), c.repFullSetContext);
+router.post('/rep-full-set', authRequired, requireRole('retail'), c.configureRepFullSet);
+
 // Retail student: VIP upgrade of an existing bundle (+ context probe for the upsell)
 router.get('/vip-upgrade-context', authRequired, requireRole('retail'), c.vipUpgradeContext);
 router.post('/upgrade-vip', authRequired, requireRole('retail'), c.upgradeToVip);

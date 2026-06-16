@@ -134,9 +134,10 @@ export default function StudentHomePage() {
     setLoadError(null);
     getShopFeed()
       .then((feedData) => {
-        // Wholesaler-students have no product grid — send them straight to the package form.
+        // Wholesaler-students have no product grid — send them straight to the
+        // طقم order form (the WhatsApp intake form), not the shop/package picker.
         if (feedData.audience === "wholesaler_student") {
-          router.replace("/package");
+          router.replace("/my-order");
           return;
         }
         setFeed(feedData);
