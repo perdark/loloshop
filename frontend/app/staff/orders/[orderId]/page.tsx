@@ -1026,34 +1026,42 @@ export default function ProductionOrderDetailPage() {
             </article>
           )}
 
-          {/* Options breakdown — filter out the synthetic base-price row (group_id=null) */}
-          {items.filter((i) => i.group_id !== null).length > 0 && (
+          {/* Order specs — real priced options AND customer-entered type/embroidery
+              (نوع الوشاح/القبعة, تطريز…). These last carry no group_id, so we keep any
+              row that has a group OR customer content; only the contentless synthetic
+              package base-price row ("طقم: …") is hidden. */}
+          {items.filter(
+            (i) => i.group_id !== null || !!i.customer_text || !!i.customer_image_url
+          ).length > 0 && (
             <article className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
               <h3 className="mb-3 text-sm font-semibold text-ink">خيارات الطلب</h3>
               <ul className="space-y-3">
-                {items.filter((i) => i.group_id !== null).map((item, idx) => (
-                  <li key={idx} className="space-y-1.5">
-                    <div className="flex items-center justify-between gap-2 text-sm">
-                      <span className="text-ink-soft">{item.label_snapshot}</span>
-                      {item.customer_image_url && (
-                        <a
-                          href={resolveImageUrl(item.customer_image_url) ?? "#"}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex min-h-[44px] items-center rounded-lg border border-orange-ink/25 bg-surface-sink px-3 py-1 text-xs font-medium text-orange-ink transition-colors hover:bg-orange-ink/10"
-                        >
-                          صورة العميل
-                        </a>
-                      )}
-                    </div>
-                    {item.customer_text && (
-                      <p className="rounded-lg border border-line bg-surface-sink px-3 py-2 text-xs text-ink-soft">
-                        <span className="font-medium text-ink">كتابة الزبون: </span>
-                        {item.customer_text}
-                      </p>
-                    )}
-                  </li>
-                ))}
+                {items
+                  .filter(
+                    (i) => i.group_id !== null || !!i.customer_text || !!i.customer_image_url
+                  )
+                  .map((item, idx) => (
+                    <li key={idx} className="space-y-1.5">
+                      <div className="flex items-center justify-between gap-2 text-sm">
+                        <span className="text-ink-soft">{item.label_snapshot}</span>
+                        <div className="flex items-center gap-2">
+                          {item.customer_text && (
+                            <span className="font-semibold text-ink">{item.customer_text}</span>
+                          )}
+                          {item.customer_image_url && (
+                            <a
+                              href={resolveImageUrl(item.customer_image_url) ?? "#"}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex min-h-[44px] items-center rounded-lg border border-orange-ink/25 bg-surface-sink px-3 py-1 text-xs font-medium text-orange-ink transition-colors hover:bg-orange-ink/10"
+                            >
+                              صورة العميل
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    </li>
+                  ))}
               </ul>
             </article>
           )}

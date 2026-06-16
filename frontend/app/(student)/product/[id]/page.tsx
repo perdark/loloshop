@@ -284,7 +284,6 @@ export default function StudentProductPage() {
             imageUrl={product.imageUrl}
             images={product.images}
             productId={id}
-            imageFit={product.imageFit}
           />
         </div>
 
