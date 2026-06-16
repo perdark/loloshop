@@ -6,7 +6,78 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
-## 2026-06-16 — Wholesaler full-set order entry (WhatsApp intake form digitized)
+## 2026-06-16 (b) — Student-facing طقم form + edit pre-fill + dashboard cleanup + image lightbox
+
+Follow-up to entry (a) below, after live testing on lolo-shop96.com. Commit `2154638`
+on branch `feat/wholesaler-fullset-order` (NOT yet on main — user merges/deploys).
+
+**What changed**
+1. **Student fills the form too** (user decision: "both student + wholesaler"). A
+   wholesaler-linked **approved** student logs in → the home redirect for
+   `wholesaler_student` audience now sends them to **`/my-order`** (was `/package`) →
+   they fill the same طقم form and confirm themselves. NEW
+   `frontend/app/(student)/my-order/page.tsx`. Backend: `GET/POST /orders/rep-full-set`
+   (context+create) in `orderController` (retail-role, self).
+2. **Single source of truth**: extracted the order logic to NEW
+   `backend/lib/fullSetOrder.js` — `persistFullSetOrder({student, body, actorUserId})`
+   + `readFullSetOrder(studentId)`. BOTH the rep "fill on behalf"
+   (`wholesalerController`) and the student "fill my own" (`orderController`) paths are
+   now thin auth wrappers over it, so they write byte-identical orders.
+3. **Bug fix — edit saved nothing**: the form opened **blank** on edit (required
+   fields empty → `حفظ الطلب` blocked by validation, looked dead). Added read-back
+   (`GET /wholesaler/students/:id/full-set-order` + the student context) that
+   reconstructs the saved order, so the form now **pre-fills** on edit. Shared form UI
+   pulled into NEW `frontend/components/wholesaler/FullSetOrderForm.tsx` (used by both
+   the rep page and the student page).
+4. **Wholesaler dashboard** (`app/wholesaler/page.tsx`): added a **QR code** for the
+   referral link (`qrcode.react`); **removed** the "تصميم الوشاح للطلاب" (sash-side
+   lock) section + its modal + dead handlers/imports; **removed الدفعة + الباقات** from
+   the bottom nav (`app/wholesaler/layout.tsx`) — now just الرئيسية + الطلاب.
+5. **Product photo lightbox** (`components/catalog/ProductMediaGallery.tsx`): the detail
+   hero was only ever **cropped** (`object-cover`) with no enlarge. Added a
+   click-to-zoom **fullscreen lightbox** showing the FULL image (`object-contain`) +
+   prev/next + Esc/backdrop close. The admin's per-product `image_fit` grid choice is
+   untouched.
+
+**How it works (gotchas)**
+- The home→`/my-order` redirect relies on `getShop` returning `audience ===
+  'wholesaler_student'` for rep-linked students (pre-existing mechanism, confirmed live).
+- `/my-order` self-guards: non-rep student → redirect to `/`; rep but not approved →
+  "بانتظار موافقة الممثل"; approved → the form (pre-filled if an order exists).
+- Student photo upload reuses `/designs/uploads/image` (retail role); rep uses
+  `/wholesaler/uploads/image`. The shared form takes `onUploadImage` as a prop.
+- Type عادي/ملكي + embroidery are still captured as `order_items` spec lines (not
+  priced options); production routing + statuses are unchanged from entry (a).
+
+**Verified**
+- Backend **end-to-end on the live Neon DB**: rep create→201, rep read-back
+  reconstructs measurements/type/embroidery, student context returns
+  is_rep_student/approved/packages/existing, student self-create→201. All idempotent.
+- `tsc` 0 errors; `eslint` clean on new files (one pre-existing warning in Cursor's
+  `wholesaler/page.tsx` effect, untouched).
+
+**Open follow-ups**
+- **Live browser click-through still not done by me** — verified by backend e2e +
+  types/lint. User tests on prod; needs a redeploy of this commit.
+- The `(student)` layout's `StudentNav` still shows shop/cart chrome to a
+  wholesaler-student on `/my-order` (the home link just bounces them back via the
+  redirect). Hide nav for rep-students if it bothers them.
+- `/package` is unchanged and still used by retail-from-cart; only the rep-student
+  redirect target moved off it.
+
+**Files touched**
+- NEW: `backend/lib/fullSetOrder.js`, `frontend/app/(student)/my-order/page.tsx`,
+  `frontend/components/wholesaler/FullSetOrderForm.tsx`
+- `backend/controllers/{wholesalerController,orderController}.js`,
+  `backend/routes/{wholesaler,orders}.js`
+- `frontend/app/(student)/page.tsx`, `frontend/app/wholesaler/{layout,page}.tsx`,
+  `frontend/app/wholesaler/students/[studentId]/order/page.tsx`,
+  `frontend/components/catalog/ProductMediaGallery.tsx`, `frontend/lib/wholesaler.ts`,
+  `frontend/package.json` (+ qrcode.react)
+
+---
+
+## 2026-06-16 (a) — Wholesaler full-set order entry (WhatsApp intake form digitized)
 
 **What changed**
 - Reps can now enter a student's full طقم order **in-app** instead of over WhatsApp.
