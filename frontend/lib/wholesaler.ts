@@ -1,4 +1,4 @@
-import { api } from "./api";
+import { api, apiUploadFile } from "./api";
 import type {
   JoinPayload,
   OrderStatus,
@@ -156,4 +156,97 @@ export async function joinWithCode(
     data.message_ar ||
     "طلبك بانتظار موافقة الممثل";
   return { message: msg };
+}
+
+// ── Rep-entered full-set order (WhatsApp intake form → الطقم الكامل) ──
+
+export interface FullSetPackage {
+  id: string;
+  name_ar: string;
+  price: number;
+}
+
+export async function getFullSetPackages(): Promise<FullSetPackage[]> {
+  const { data } = await api.get<{ data: FullSetPackage[] }>(
+    "/wholesaler/full-set-packages"
+  );
+  return data.data || [];
+}
+
+export interface WholesalerStudentDetail {
+  id: string;
+  name: string;
+  phone: string;
+  status: "pending_approval" | "approved" | "rejected";
+  universityName: string | null;
+  department: string | null;
+  hasOrder: boolean;
+}
+
+export async function getWholesalerStudent(
+  studentId: string
+): Promise<WholesalerStudentDetail> {
+  const { data } = await api.get<{
+    data: {
+      id: string;
+      name: string;
+      phone: string;
+      status: "pending_approval" | "approved" | "rejected";
+      university_name: string | null;
+      department: string | null;
+      has_order: boolean;
+    };
+  }>(`/wholesaler/students/${studentId}`);
+  const r = data.data;
+  return {
+    id: r.id,
+    name: r.name,
+    phone: r.phone,
+    status: r.status,
+    universityName: r.university_name,
+    department: r.department,
+    hasOrder: Boolean(r.has_order),
+  };
+}
+
+export type PieceType = "عادي" | "ملكي";
+
+export interface EmbroideryZone {
+  text?: string;
+  image_url?: string;
+}
+
+export interface CreateFullSetPayload {
+  package_id: string;
+  measurements: {
+    robe_length_cm: number | string;
+    sleeve_length_cm: number | string;
+    shoulder_cm: number | string;
+  };
+  sash_type: PieceType;
+  cap_type: PieceType;
+  embroidery: {
+    cap_side?: EmbroideryZone;
+    cap_top?: EmbroideryZone;
+    sash_front?: EmbroideryZone;
+    sash_back?: EmbroideryZone;
+  };
+  notes?: string;
+}
+
+export async function createWholesalerFullSetOrder(
+  studentId: string,
+  payload: CreateFullSetPayload
+): Promise<{ total: number; packageName: string }> {
+  const { data } = await api.post<{
+    data: { total: number; package_name: string };
+  }>(`/wholesaler/students/${studentId}/full-set-order`, payload);
+  return { total: data.data.total, packageName: data.data.package_name };
+}
+
+export async function uploadWholesalerImage(file: File): Promise<string> {
+  const res = (await apiUploadFile("/wholesaler/uploads/image", file)) as {
+    data: { url: string };
+  };
+  return res.data.url;
 }
