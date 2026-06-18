@@ -126,6 +126,26 @@ export async function advanceOrder(id: string): Promise<{ id: string; status: Or
   return data.data;
 }
 
+export interface DeliveryConfirmPayload {
+  delivery_method: "delivery" | "pickup";
+  recipient_name: string;
+  delivery_address?: string;
+  delivery_phone?: string;
+  delivery_notes?: string;
+}
+
+/** Confirm hand-off of a «جاهز» order: records method (توصيل/استلام)، المستلم، العنوان/الرقم. */
+export async function confirmDelivery(
+  id: string,
+  payload: DeliveryConfirmPayload
+): Promise<{ id: string; status: OrderStatus }> {
+  const { data } = await api.post<{ data: { id: string; status: OrderStatus } }>(
+    `/production/orders/${id}/deliver`,
+    payload
+  );
+  return data.data;
+}
+
 /**
  * POST /production/designs/:id/approve
  * Designer / manager only.

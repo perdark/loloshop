@@ -67,7 +67,6 @@ function getNavLinks(
     return [
       { href: "/staff", label: "المتابعة", icon: iconBarChart() },
       { href: "/staff/queue", label: "جميع الطلبات", icon: iconClipboard(), prefix: true },
-      { href: "/staff/wholesalers", label: "طلاب الممثلين", icon: iconUsers(), prefix: true },
     ];
   }
   // Every production-role staffer also gets the live production console — the same
@@ -85,7 +84,6 @@ function getNavLinks(
       return [
         { href: "/staff", label: "مراجعة التصاميم", icon: iconClipboard() },
         consoleLink,
-        { href: "/staff/wholesalers", label: "طلاب الممثلين", icon: iconUsers(), prefix: true },
       ];
     case "digitizer":
       return [
@@ -113,7 +111,6 @@ function getNavLinks(
       return [
         { href: "/staff", label: "لوحة الطلبات", icon: iconClipboard() },
         consoleLink,
-        { href: "/staff/wholesalers", label: "طلاب الممثلين", icon: iconUsers(), prefix: true },
       ];
   }
 }

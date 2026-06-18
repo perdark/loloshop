@@ -16,6 +16,7 @@ router.get('/monitor', requireStaffType(), c.monitor); // no types → manager s
 router.get('/completed', c.completed);
 router.get('/orders/:id', c.getOrder);
 router.post('/orders/:id/advance', c.advance);
+router.post('/orders/:id/deliver', c.deliver);
 router.post('/orders/:id/revert', c.revert);
 router.post('/orders/:id/claim', c.claim);
 router.post('/orders/:id/release', c.release);

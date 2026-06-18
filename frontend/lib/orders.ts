@@ -4,7 +4,9 @@ import type {
   ConfigureOrderResult,
   OrderBreakdownDetail,
   OrderBreakdownLine,
+  OrderStatus,
   PriceRole,
+  ProductType,
   RobeMeasurements,
 } from "./types";
 import type { OptionSelection } from "./pricing";
@@ -225,4 +227,35 @@ export async function getOrderBreakdown(
         (l.customer_image_url as string | null) ?? null,
     })),
   };
+}
+
+// ─── Student order tracking ────────────────────────────────────────────────
+export interface StudentOrder {
+  id: string;
+  productName: string;
+  productType: ProductType;
+  status: OrderStatus;
+  createdAt: string;
+  deliveredAt: string | null;
+  deliveryMethod: "delivery" | "pickup" | null;
+  /** Designer verdict on the linked sash design (drives the "needs edit" note). */
+  designApprovalStatus: "pending" | "approved" | "rejected" | null;
+  rejectionReason: string | null;
+}
+
+/** GET /orders/mine — the signed-in student's own orders, newest first. */
+export async function getMyOrders(): Promise<StudentOrder[]> {
+  const { data } = await api.get<{ data: Record<string, unknown>[] }>("/orders/mine");
+  return (data.data ?? []).map((r) => ({
+    id: String(r.id),
+    productName: String(r.product_name ?? ""),
+    productType: r.product_type as ProductType,
+    status: r.status as OrderStatus,
+    createdAt: String(r.created_at ?? ""),
+    deliveredAt: (r.delivered_at as string | null) ?? null,
+    deliveryMethod: (r.delivery_method as "delivery" | "pickup" | null) ?? null,
+    designApprovalStatus:
+      (r.design_approval_status as "pending" | "approved" | "rejected" | null) ?? null,
+    rejectionReason: (r.rejection_reason as string | null) ?? null,
+  }));
 }

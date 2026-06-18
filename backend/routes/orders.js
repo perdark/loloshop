@@ -2,6 +2,9 @@ const router = require('express').Router();
 const { authRequired, requireRole } = require('../middleware/auth');
 const c = require('../controllers/orderController');
 
+// Retail student: list MY own orders + their status (order tracking)
+router.get('/mine', authRequired, requireRole('retail'), c.myOrders);
+
 // Staff/admin: list + status transitions
 router.get('/', authRequired, requireRole('admin', 'staff'), c.listOrders);
 router.patch('/:id/status', authRequired, requireRole('admin', 'staff'), c.updateStatus);

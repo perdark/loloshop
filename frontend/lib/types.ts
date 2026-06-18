@@ -402,6 +402,8 @@ export interface PackageTier {
   imageUrl?: string | null;
   /** Second editorial photo for the VIP "story" band (admin-managed). */
   storyImageUrl?: string | null;
+  /** Ordered photos that auto-rotate on the storefront package card (admin-managed). */
+  gallery?: string[];
   sort?: number;
   active?: boolean;
   sashTypeOptionId: string;

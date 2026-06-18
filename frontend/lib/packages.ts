@@ -22,6 +22,7 @@ function mapPackage(raw: Record<string, unknown>): PackageTier {
     price: Number(raw.price ?? 0),
     imageUrl: resolveCatalogMediaUrl(raw.image_url as string | null),
     storyImageUrl: resolveCatalogMediaUrl(raw.story_image_url as string | null),
+    gallery: strArray(raw.gallery).map((u) => resolveCatalogMediaUrl(u) || u),
     sort: Number(raw.sort ?? 0),
     active: raw.active === undefined ? undefined : !!raw.active,
     sashTypeOptionId: String(

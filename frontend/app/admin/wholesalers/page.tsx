@@ -95,7 +95,6 @@ export default function AdminWholesalersPage() {
     const e: Record<string, string> = {};
     if (!name.trim()) e.name = "الاسم مطلوب";
     if (!phone.trim()) e.phone = "رقم الهاتف مطلوب";
-    if (!email.trim()) e.email = "البريد مطلوب";
     if (!password || password.length < 6)
       e.password = "كلمة المرور ٦ أحرف على الأقل";
     if (!referralCode.trim()) e.referralCode = "رمز الدعوة مطلوب";
@@ -416,7 +415,7 @@ export default function AdminWholesalersPage() {
             error={errors.phone}
           />
           <Input
-            label="البريد الإلكتروني"
+            label="البريد الإلكتروني (اختياري)"
             type="email"
             autoComplete="email"
             value={email}

@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { logout } from "@/lib/auth";
 import { toast } from "sonner";
 import { PageLoader } from "@/components/ui/Spinner";
+import { NotificationBell } from "@/components/NotificationBell";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 
 export default function WholesalerLayout({
@@ -30,13 +31,16 @@ export default function WholesalerLayout({
       <header className="sticky top-0 z-20 border-b border-line bg-cream shadow-[var(--shadow-soft)]">
         <div className="mx-auto flex max-w-md items-center justify-between px-4 py-3.5">
           <h1 className="font-display text-lg font-bold text-ink">لوحة الممثل</h1>
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="min-h-11 rounded-xl px-4 text-sm font-medium text-ink-soft transition-colors hover:bg-ink/5"
-          >
-            خروج
-          </button>
+          <div className="flex items-center gap-1">
+            <NotificationBell />
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="min-h-11 rounded-xl px-4 text-sm font-medium text-ink-soft transition-colors hover:bg-ink/5"
+            >
+              خروج
+            </button>
+          </div>
         </div>
       </header>
 

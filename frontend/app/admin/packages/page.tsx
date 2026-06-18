@@ -38,6 +38,8 @@ interface Draft {
   price: string;
   imageUrl: string | null;
   storyImageUrl: string | null;
+  /** Photos that auto-rotate on the storefront package card. */
+  gallery: string[];
   badgeLabel: string;
   accent: string;
   description: string;
@@ -60,6 +62,7 @@ function emptyDraft(): Draft {
     price: "",
     imageUrl: null,
     storyImageUrl: null,
+    gallery: [],
     badgeLabel: "VIP",
     accent: DEFAULT_ACCENT,
     description: "",
@@ -86,6 +89,7 @@ function draftFromPackage(p: PackageTier): Draft {
     price: String(p.price ?? 0),
     imageUrl: p.imageUrl ?? null,
     storyImageUrl: p.storyImageUrl ?? null,
+    gallery: p.gallery ?? [],
     badgeLabel: p.badgeLabel ?? "VIP",
     accent: p.accent ?? DEFAULT_ACCENT,
     description: p.description ?? "",
@@ -112,6 +116,7 @@ function draftToPayload(d: Draft): PackagePayload {
     role: d.kind === "wholesale" ? "wholesaler" : "retail",
     image_url: d.imageUrl,
     story_image_url: isVip ? d.storyImageUrl : null,
+    gallery: d.gallery,
     badge_label: d.badgeLabel.trim() || null,
     accent: isVip ? (d.accent || null) : null,
     description: d.description.trim() || null,
@@ -217,6 +222,45 @@ export default function AdminPackagesPage() {
     try {
       await updatePackage(pid, field === "imageUrl" ? { image_url: null } : { story_image_url: null });
       setPackages((ps) => ps.map((p) => (p.id === pid ? { ...p, [field]: null } : p)));
+      toast.success("تمت إزالة الصورة");
+    } catch (e) {
+      toast.error(getApiErrorMessage(e, "تعذر الحفظ"));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // Append a photo to the auto-rotating gallery (persisted immediately when saved).
+  async function addGalleryImage(file: File) {
+    if (!draft) return;
+    setSaving(true);
+    try {
+      const url = await uploadCatalogImage(file);
+      const next = [...draft.gallery, url];
+      patch({ gallery: next });
+      if (draft.id) {
+        const pid = draft.id;
+        await updatePackage(pid, { gallery: next });
+        setPackages((ps) => ps.map((p) => (p.id === pid ? { ...p, gallery: next } : p)));
+      }
+      toast.success("تمت إضافة الصورة");
+    } catch (e) {
+      toast.error(getApiErrorMessage(e, "تعذر رفع الصورة"));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removeGalleryImage(idx: number) {
+    if (!draft) return;
+    const next = draft.gallery.filter((_, i) => i !== idx);
+    patch({ gallery: next });
+    if (!draft.id) return;
+    const pid = draft.id;
+    setSaving(true);
+    try {
+      await updatePackage(pid, { gallery: next });
+      setPackages((ps) => ps.map((p) => (p.id === pid ? { ...p, gallery: next } : p)));
       toast.success("تمت إزالة الصورة");
     } catch (e) {
       toast.error(getApiErrorMessage(e, "تعذر الحفظ"));
@@ -458,6 +502,14 @@ export default function AdminPackagesPage() {
                   />
                 )}
               </div>
+
+              {/* Auto-rotating gallery — multiple photos that cycle on the storefront card */}
+              <GalleryManager
+                images={draft.gallery}
+                busy={saving}
+                onAdd={addGalleryImage}
+                onRemove={removeGalleryImage}
+              />
 
               {/* Badge + accent — VIP only */}
               {draft.kind === "vip" && (
@@ -727,6 +779,73 @@ function ImagePicker({
           {hint && <p className="mt-1.5 text-xs text-[var(--shop-muted)]">{hint}</p>}
         </div>
       </div>
+    </Field>
+  );
+}
+
+/* Multi-photo gallery — admin adds several photos; the storefront card auto-rotates
+   through them. Order = display order; the single hero photo is shown first. */
+function GalleryManager({
+  images,
+  busy,
+  onAdd,
+  onRemove,
+}: {
+  images: string[];
+  busy?: boolean;
+  onAdd: (file: File) => void;
+  onRemove: (idx: number) => void;
+}) {
+  return (
+    <Field label="معرض الصور المتغيّرة (تتبدّل تلقائياً في المتجر)">
+      <div className="flex flex-wrap items-center gap-3">
+        {images.map((url, idx) => (
+          <span
+            key={`${url}-${idx}`}
+            className="relative h-20 w-20 shrink-0 overflow-hidden rounded-xl border border-ink/10 bg-peach/30"
+          >
+            <Image
+              src={resolveCatalogMediaUrl(url) || url}
+              alt=""
+              fill
+              className="object-cover"
+              unoptimized
+            />
+            <button
+              type="button"
+              onClick={() => onRemove(idx)}
+              disabled={busy}
+              aria-label="إزالة الصورة"
+              className="absolute end-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-ink/70 text-xs font-bold text-white hover:bg-danger disabled:opacity-50"
+            >
+              ✕
+            </button>
+          </span>
+        ))}
+        <input
+          type="file"
+          accept="image/*"
+          id="pkg-gallery-add"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) onAdd(f);
+            e.target.value = "";
+          }}
+        />
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => document.getElementById("pkg-gallery-add")?.click()}
+          className="flex h-20 w-20 shrink-0 flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-ink/20 text-xs font-medium text-ink-soft transition-colors hover:border-orange-ink/50 hover:text-orange-ink disabled:opacity-50"
+        >
+          <span aria-hidden className="text-lg leading-none">+</span>
+          إضافة صورة
+        </button>
+      </div>
+      <p className="mt-1.5 text-xs text-[var(--shop-muted)]">
+        أضف عدة صور لتتبدّل تلقائياً على بطاقة الباقة في المتجر. تُعرض صورة الغلاف أولاً.
+      </p>
     </Field>
   );
 }

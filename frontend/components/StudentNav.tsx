@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { BrandMark } from "@/components/ui/BrandLogo";
+import { NotificationBell } from "@/components/NotificationBell";
 import { getToken, logout } from "@/lib/auth";
 import { getCart } from "@/lib/cart";
 
@@ -125,6 +126,8 @@ export function StudentNav() {
           </Link>
 
           <div className="flex items-center gap-2">
+            {/* Notification bell — only for signed-in students */}
+            {authed && <NotificationBell />}
             {/* Cart icon — always visible for retail students; hidden until auth resolved */}
             {authed && (
               <Link

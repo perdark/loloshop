@@ -185,6 +185,8 @@ async function getOrder(req, res) {
             o.batch_id, o.student_id,
             o.has_embroidery, o.needs_pressing, o.measurements, o.final_design_url,
             o.working_staff_id, o.working_since,
+            o.delivered_at, o.delivery_method, o.recipient_name, o.delivery_address,
+            o.delivery_phone, o.delivery_notes, du.name AS delivered_by_name,
             u.name AS student_name, u.phone AS student_phone,
             s.university_name, s.department, s.gender, s.study_type, s.instagram_username,
             p.name_ar AS product_name, p.type AS product_type,
@@ -204,6 +206,7 @@ async function getOrder(req, res) {
      LEFT JOIN wholesalers w ON w.id = s.wholesaler_id
      LEFT JOIN users wu ON wu.id = w.user_id
      LEFT JOIN users wk ON wk.id = o.working_staff_id
+     LEFT JOIN users du ON du.id = o.delivered_by
      LEFT JOIN checkout_groups cg ON cg.id = o.checkout_group_id
      WHERE o.id = $1`,
     [id]
@@ -238,6 +241,14 @@ async function getOrder(req, res) {
   // Presser gets no customer contact/address — just the event date for urgency.
   if (presserOnly && order.intake) {
     order.intake = { event_date: order.intake.event_date };
+  }
+  // Delivery details are PII (address + phone of the recipient) — keep them off the
+  // presser view as well (tailor is already stripped by the allow-list above).
+  if (presserOnly) {
+    order.delivery_address = null;
+    order.delivery_phone = null;
+    order.recipient_name = null;
+    order.delivery_notes = null;
   }
   // Tailor (مفصل) is the most-restricted role: ONLY student name + sash/shawl spec lines
   // (the items[] below). Rebuild `order` from an ALLOW-LIST so nothing else can ever leak
@@ -413,6 +424,85 @@ async function advance(req, res) {
   });
   emitOrderChanged(id, updated.status);
   emitPresence(id, null, null); // advancing clears the working_staff
+  res.json({ data: updated });
+}
+
+// ---------- Confirm delivery (ready → delivered) with hand-off details ----------
+// Captures HOW the order was handed over so the shop can see, afterwards, which
+// orders were delivered, who received them, and whether by توصيل (delivery, with
+// address + phone) or استلام من المحل (pickup).
+async function deliver(req, res) {
+  const { id } = req.params;
+  const method = String(req.body.delivery_method || '').trim();
+  const recipientName = String(req.body.recipient_name || '').trim();
+  const address = String(req.body.delivery_address || '').trim();
+  const phone = String(req.body.delivery_phone || '').trim();
+  const dnotes = String(req.body.delivery_notes || '').trim();
+
+  if (method !== 'delivery' && method !== 'pickup') {
+    return res.status(400).json({ error: 'حدّد طريقة التسليم (توصيل أو استلام من المحل)', code: 'ERR_VALIDATION' });
+  }
+  if (!recipientName) {
+    return res.status(400).json({ error: 'اسم مستلم الطلب مطلوب', code: 'ERR_VALIDATION' });
+  }
+  if (method === 'delivery' && (!address || !phone)) {
+    return res.status(400).json({ error: 'عنوان ورقم هاتف التوصيل مطلوبان', code: 'ERR_VALIDATION' });
+  }
+
+  const cur = await query(
+    `SELECT o.id, o.status, s.user_id, s.wholesaler_id
+     FROM orders o JOIN students s ON s.id = o.student_id WHERE o.id = $1`,
+    [id]
+  );
+  if (!cur.rows.length) return res.status(404).json({ error: 'الطلب غير موجود', code: 'ERR_NOT_FOUND' });
+  const order = cur.rows[0];
+  if (!staffScopeAllows(req.user, order.wholesaler_id == null)) {
+    return res.status(403).json({ error: 'هذا الطلب خارج نطاقك', code: 'ERR_FORBIDDEN' });
+  }
+  const from = order.status;
+  if (from !== 'ready') {
+    return res.status(409).json({ error: 'لا يمكن تأكيد تسليم هذا الطلب', code: 'ERR_INVALID_TRANSITION' });
+  }
+  if (!canStaffTransition(req.user, 'ready', 'delivered')) {
+    return res.status(403).json({ error: 'ممنوع', code: 'ERR_FORBIDDEN' });
+  }
+  const updated = await tx(async (client) => {
+    const { rows } = await client.query(
+      `UPDATE orders SET status = 'delivered', delivered_at = NOW(),
+              delivery_method = $1, recipient_name = $2,
+              delivery_address = $3, delivery_phone = $4, delivery_notes = $5,
+              delivered_by = $6, working_staff_id = NULL, working_since = NULL
+       WHERE id = $7 AND status = 'ready' RETURNING id, status`,
+      [method, recipientName,
+       method === 'delivery' ? address : null,
+       method === 'delivery' ? phone : null,
+       dnotes || null, req.user.id, id]
+    );
+    if (!rows.length) {
+      throw Object.assign(new Error('لا يمكن تأكيد تسليم هذا الطلب'), {
+        expose: true, status: 409, code: 'ERR_INVALID_TRANSITION',
+      });
+    }
+    await client.query(
+      `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
+       VALUES ($1, 'delivery_confirmed', 'order', $2, $3)`,
+      [req.user.id, id, JSON.stringify({ from, to: 'delivered', delivery_method: method, recipient_name: recipientName })]
+    );
+    await client.query(
+      `INSERT INTO staff_activity_log (user_id, action, order_id, from_stage, to_stage)
+       VALUES ($1, 'advance', $2, $3, 'delivered')`,
+      [req.user.id, id, from]
+    );
+    await client.query(
+      `INSERT INTO notifications (user_id, type, title_ar, body_ar, link)
+       VALUES ($1, 'status_change', $2, $3, '/')`,
+      [order.user_id, 'تم تسليم طلبك',
+       method === 'delivery' ? 'تم تسليم طلبك عبر التوصيل' : 'تم تسليم طلبك من المحل']
+    );
+    return rows[0];
+  });
+  emitOrderChanged(id, updated.status);
+  emitPresence(id, null, null);
   res.json({ data: updated });
 }
 
@@ -683,6 +773,6 @@ async function monitor(req, res) {
 }
 
 module.exports = {
-  getQueue, getOrder, advance, revert, claim, release, completed, uploadFinalDesign, monitor,
+  getQueue, getOrder, advance, deliver, revert, claim, release, completed, uploadFinalDesign, monitor,
   streamEvents,
 };

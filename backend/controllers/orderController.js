@@ -262,6 +262,7 @@ async function listOrders(req, res) {
            o.checkout_group_id,
            o.working_staff_id,
            CASE WHEN o.working_since > NOW() - INTERVAL '90 seconds' THEN wk.name END AS working_staff_name,
+           o.delivery_method, o.recipient_name, o.delivered_at,
            o.price, o.cost, o.profit, o.status, o.created_at
     FROM orders o
     JOIN students s ON s.id = o.student_id
@@ -1283,8 +1284,33 @@ async function configureRepFullSet(req, res) {
   res.status(status).json(json);
 }
 
+// ---------- Retail student: list MY own orders + their live status ----------
+// Powers the student order-tracking view (shown on the cart once it empties).
+// Surfaces approval / progress / delivery, and a returned-for-edit note when the
+// designer rejected the linked design (the real "بيه خلل/ملاحظة" signal).
+async function myOrders(req, res) {
+  const stu = await query(`SELECT id FROM students WHERE user_id = $1`, [req.user.id]);
+  if (!stu.rows.length) {
+    return res.status(403).json({ error: 'هذه الخدمة للطلاب فقط', code: 'ERR_FORBIDDEN' });
+  }
+  const { rows } = await query(
+    `SELECT o.id, o.status, o.created_at, o.delivered_at, o.notes,
+            o.delivery_method, o.recipient_name, o.checkout_group_id,
+            p.name_ar AS product_name, p.type AS product_type,
+            d.approval_status AS design_approval_status, d.rejection_reason
+     FROM orders o
+     JOIN products p ON p.id = o.product_id
+     LEFT JOIN designs d ON d.id = o.design_id
+     WHERE o.student_id = $1
+     ORDER BY o.created_at DESC
+     LIMIT 100`,
+    [stu.rows[0].id]
+  );
+  res.json({ data: rows });
+}
+
 module.exports = {
-  listOrders, updateStatus, configureOrder, configurePackage, configureFullSet, getOrderBreakdown,
+  listOrders, myOrders, updateStatus, configureOrder, configurePackage, configureFullSet, getOrderBreakdown,
   vipUpgradeContext, upgradeToVip, repFullSetContext, configureRepFullSet,
   priceSelections, canStaffTransition, TRANSITIONS, STATUS_LABEL_AR, ALL_STATUSES,
   orderZoneClause,

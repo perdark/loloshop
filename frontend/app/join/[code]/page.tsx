@@ -71,7 +71,6 @@ export default function JoinPage() {
     const e: Record<string, string> = {};
     if (!form.full_name_third.trim()) e.full_name_third = "الاسم الثلاثي مطلوب";
     if (!form.phone.trim()) e.phone = "رقم الهاتف مطلوب";
-    if (!form.email.trim()) e.email = "البريد الإلكتروني مطلوب";
     if (!form.password || form.password.length < 6)
       e.password = "كلمة المرور ٦ أحرف على الأقل";
     if (form.password !== form.confirmPassword)
@@ -211,7 +210,7 @@ export default function JoinPage() {
         </div>
 
         <Input
-          label="البريد الإلكتروني"
+          label="البريد الإلكتروني (اختياري)"
           type="email"
           value={form.email}
           onChange={(e) => setForm({ ...form, email: e.target.value })}

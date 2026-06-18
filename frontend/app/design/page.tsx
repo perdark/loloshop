@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
+import Image from "next/image";
 import Link from "next/link";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 import { useDesignDraft } from "@/hooks/useDesignDraft";
@@ -46,6 +47,8 @@ export default function DesignPage() {
   const [editingSide, setEditingSide] = useState<"left" | "right" | null>(null);
   const draft = useDesignDraft(!authLoading && !!user, !!editingSide);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  // Which sash card is currently being loaded from the chooser (shows a spinner).
+  const [selectingId, setSelectingId] = useState<string | null>(null);
 
   const {
     router,
@@ -55,6 +58,8 @@ export default function DesignPage() {
     completedLocked,
     isRepStudent,
     product,
+    sashChoices,
+    selectSashProduct,
     selection,
     customerImages,
     setCustomerImages,
@@ -174,6 +179,90 @@ export default function DesignPage() {
         <Button variant="primary" onClick={() => router.push("/")}>
           العودة للرئيسية
         </Button>
+      </div>
+    );
+  }
+
+  // Choose-a-sash step — no specific sash picked yet. A fresh account must pick a
+  // sash (with its colors) here FIRST; we never auto-drop them into the canvas of
+  // an arbitrary sash. Arriving from a product page (preset) skips this entirely.
+  if (!product) {
+    return (
+      <div className="mx-auto min-h-screen max-w-4xl bg-cream">
+        <header className="flex items-center gap-3 border-b border-line bg-surface px-4 py-3">
+          <BrandMark size={40} />
+          <h1 className="font-display-ar text-xl font-semibold text-ink">صمّم وشاحك</h1>
+        </header>
+        <main className="px-4 py-8 animate-page-in">
+          <Link href="/" className="inline-block text-sm text-orange-ink hover:underline">
+            ← المتجر
+          </Link>
+          {sashChoices.length === 0 ? (
+            <p className="p-10 text-center text-ink-soft">لا يوجد وشاح متاح حالياً</p>
+          ) : (
+            <>
+              <div className="mb-5 mt-3 text-center">
+                <h2 className="font-display-ar text-2xl font-bold text-ink">
+                  اختر الوشاح الذي تريد تصميمه
+                </h2>
+                <p className="mt-1.5 text-sm text-ink-soft">
+                  اختر وشاحاً وحدّد لونه، ثم ابدأ التصميم
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                {sashChoices.map((sash) => {
+                  const loading = selectingId === sash.id;
+                  return (
+                    <button
+                      key={sash.id}
+                      type="button"
+                      disabled={!!selectingId}
+                      onClick={async () => {
+                        setSelectingId(sash.id);
+                        try {
+                          await selectSashProduct(sash.id);
+                        } finally {
+                          setSelectingId(null);
+                        }
+                      }}
+                      className="group flex flex-col overflow-hidden rounded-2xl border border-line bg-surface text-start shadow-[var(--shadow-soft)] transition-all hover:border-orange-ink/40 hover:shadow-[var(--shadow-pop)] active:scale-[0.98] disabled:opacity-60"
+                    >
+                      <div className="relative aspect-[3/4] w-full overflow-hidden bg-surface-sink">
+                        {sash.imageUrl ? (
+                          <Image
+                            src={sash.imageUrl}
+                            alt={sash.nameAr}
+                            fill
+                            unoptimized
+                            sizes="(max-width: 640px) 45vw, 240px"
+                            className={`${sash.imageFit === "contain" ? "object-contain" : "object-cover"} transition-transform duration-500 group-hover:scale-105`}
+                          />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center text-muted">
+                            <BrandMark size={48} />
+                          </div>
+                        )}
+                        {loading && (
+                          <div className="absolute inset-0 flex items-center justify-center bg-cream/70">
+                            <Spinner />
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex flex-1 flex-col gap-1 p-3">
+                        <p className="line-clamp-2 text-sm font-semibold text-ink">
+                          {sash.nameAr}
+                        </p>
+                        <p className="mt-auto text-sm font-bold text-orange-ink">
+                          {new Intl.NumberFormat("ar-IQ").format(sash.basePrice)} د.ع
+                        </p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </main>
       </div>
     );
   }

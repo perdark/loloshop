@@ -24,4 +24,12 @@ async function markRead(req, res) {
   res.json({ data: rows[0] });
 }
 
-module.exports = { list, markRead };
+async function markAllRead(req, res) {
+  const { rowCount } = await query(
+    `UPDATE notifications SET read = TRUE WHERE user_id = $1 AND read = FALSE`,
+    [req.user.id]
+  );
+  res.json({ data: { updated: rowCount } });
+}
+
+module.exports = { list, markRead, markAllRead };

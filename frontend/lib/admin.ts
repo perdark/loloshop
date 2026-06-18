@@ -746,6 +746,8 @@ export interface PackagePayload {
   role?: "retail" | "wholesaler";
   image_url?: string | null;
   story_image_url?: string | null;
+  /** Ordered photos that auto-rotate on the storefront card. */
+  gallery?: string[];
   sort?: number;
   active?: boolean;
   is_vip?: boolean;
@@ -767,6 +769,7 @@ function mapAdminPackage(raw: Record<string, unknown>): PackageTier {
     price: Number(raw.price ?? 0),
     imageUrl: (raw.image_url as string | null) ?? null,
     storyImageUrl: (raw.story_image_url as string | null) ?? null,
+    gallery: arr(raw.gallery),
     sort: Number(raw.sort ?? 0),
     active: !!raw.active,
     sashTypeOptionId: String(raw.sash_type_option_id ?? ""),

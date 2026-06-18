@@ -15,6 +15,7 @@ import { formatDateIQ } from "@/lib/format";
 import {
   getProductionOrder,
   advanceOrder,
+  confirmDelivery,
   revertOrder,
   claimOrder,
   releaseOrder,
@@ -530,6 +531,15 @@ export default function ProductionOrderDetailPage() {
   const [revertOpen, setRevertOpen] = useState(false);
   const [revertSubmitting, setRevertSubmitting] = useState(false);
 
+  // Delivery confirmation modal (ready → delivered)
+  const [deliverOpen, setDeliverOpen] = useState(false);
+  const [deliverSubmitting, setDeliverSubmitting] = useState(false);
+  const [deliveryMethod, setDeliveryMethod] = useState<"delivery" | "pickup">("delivery");
+  const [recipientName, setRecipientName] = useState("");
+  const [deliveryAddress, setDeliveryAddress] = useState("");
+  const [deliveryPhone, setDeliveryPhone] = useState("");
+  const [deliveryNote, setDeliveryNote] = useState("");
+
   const hasClaimedRef = useRef(false);
   // Someone else already has this order's tab open — warn instead of stealing it.
   const [conflictOwner, setConflictOwner] = useState<string | null>(null);
@@ -602,6 +612,40 @@ export default function ProductionOrderDetailPage() {
       toast.error(getApiErrorMessage(err, "تعذر تحديث الحالة"));
     } finally {
       setActionLoading(false);
+    }
+  }
+
+  async function handleConfirmDelivery() {
+    if (!detail) return;
+    const method = deliveryMethod;
+    const recipient = recipientName.trim();
+    if (!recipient) {
+      toast.error("اكتب اسم مستلم الطلب");
+      return;
+    }
+    if (method === "delivery" && (!deliveryAddress.trim() || !deliveryPhone.trim())) {
+      toast.error("عنوان ورقم هاتف التوصيل مطلوبان");
+      return;
+    }
+    setDeliverSubmitting(true);
+    try {
+      await confirmDelivery(detail.order.id, {
+        delivery_method: method,
+        recipient_name: recipient,
+        delivery_address: method === "delivery" ? deliveryAddress.trim() : undefined,
+        delivery_phone: method === "delivery" ? deliveryPhone.trim() : undefined,
+        delivery_notes: deliveryNote.trim() || undefined,
+      });
+      toast.success("تم تأكيد التسليم");
+      setDeliverOpen(false);
+      await releaseOrder(orderId).catch(() => undefined);
+      hasClaimedRef.current = false;
+      router.refresh();
+      router.push("/staff");
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "تعذر تأكيد التسليم"));
+    } finally {
+      setDeliverSubmitting(false);
     }
   }
 
@@ -739,9 +783,16 @@ export default function ProductionOrderDetailPage() {
   const advanceLabel = available_actions.advance?.label ?? "تقدم للمرحلة التالية";
 
   // Approve and advance never apply to the same order, presented as ONE primary button.
+  // The final ready→delivered advance opens a delivery-confirmation modal first so we
+  // capture HOW it was handed over (توصيل/استلام · المستلم · العنوان/الرقم).
   const showPrimaryAction = canApprove || showAdvance;
+  const isDeliveryAction = !canApprove && showAdvance && order.status === "ready";
   const primaryLabel = canApprove ? "موافقة على التصميم" : advanceLabel;
-  const onPrimaryAction = canApprove ? handleApprove : handleAdvance;
+  const onPrimaryAction = canApprove
+    ? handleApprove
+    : isDeliveryAction
+      ? () => setDeliverOpen(true)
+      : handleAdvance;
 
   const exportInput =
     showCanvas && design
@@ -925,6 +976,65 @@ export default function ProductionOrderDetailPage() {
             onUploaded={handleFinalDesignUploaded}
           />
         </div>
+      )}
+
+      {/* ── Delivery details — shown once the order is delivered ── */}
+      {order.status === "delivered" && order.delivery_method && (
+        <section className="mb-4 rounded-2xl border border-orange-ink/25 bg-orange-ink/[0.06] p-4 shadow-[var(--shadow-soft)]">
+          <div className="mb-3 flex items-center gap-2">
+            <span aria-hidden className="text-orange-ink">✓</span>
+            <h2 className="font-display-ar text-base font-bold text-ink">تم التسليم</h2>
+            <span className="rounded-full bg-surface px-2.5 py-0.5 text-xs font-semibold text-ink-soft">
+              {order.delivery_method === "delivery" ? "توصيل" : "استلام من المحل"}
+            </span>
+          </div>
+          <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+            {order.recipient_name && (
+              <div className="flex gap-2">
+                <dt className="text-muted">المستلم:</dt>
+                <dd className="font-semibold text-ink">{order.recipient_name}</dd>
+              </div>
+            )}
+            {order.delivered_at && (
+              <div className="flex gap-2">
+                <dt className="text-muted">وقت التسليم:</dt>
+                <dd className="font-semibold text-ink">{formatDateIQ(order.delivered_at)}</dd>
+              </div>
+            )}
+            {order.delivery_method === "delivery" && order.delivery_address && (
+              <div className="flex gap-2 sm:col-span-2">
+                <dt className="text-muted">العنوان:</dt>
+                <dd className="font-semibold text-ink">{order.delivery_address}</dd>
+              </div>
+            )}
+            {order.delivery_method === "delivery" && order.delivery_phone && (
+              <div className="flex gap-2">
+                <dt className="text-muted">الهاتف:</dt>
+                <dd>
+                  <a
+                    href={`tel:${order.delivery_phone}`}
+                    className="font-semibold text-orange-ink hover:underline"
+                    dir="ltr"
+                  >
+                    {order.delivery_phone}
+                  </a>
+                </dd>
+              </div>
+            )}
+            {order.delivered_by_name && (
+              <div className="flex gap-2">
+                <dt className="text-muted">أكّد التسليم:</dt>
+                <dd className="font-semibold text-ink">{order.delivered_by_name}</dd>
+              </div>
+            )}
+            {order.delivery_notes && (
+              <div className="flex gap-2 sm:col-span-2">
+                <dt className="text-muted">ملاحظة:</dt>
+                <dd className="text-ink">{order.delivery_notes}</dd>
+              </div>
+            )}
+          </dl>
+        </section>
       )}
 
       <div className="grid gap-4 lg:grid-cols-2 lg:gap-8">
@@ -1392,6 +1502,105 @@ export default function ProductionOrderDetailPage() {
         <p className="text-sm text-ink-soft">
           سيتم إرجاع الطلب للمرحلة السابقة. هل أنت متأكد؟
         </p>
+      </Modal>
+
+      {/* ── Delivery confirmation modal (ready → delivered) ── */}
+      <Modal
+        open={deliverOpen}
+        onClose={() => !deliverSubmitting && setDeliverOpen(false)}
+        title="تأكيد تسليم الطلب"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setDeliverOpen(false)} disabled={deliverSubmitting}>
+              إلغاء
+            </Button>
+            <Button loading={deliverSubmitting} onClick={handleConfirmDelivery}>
+              تأكيد التسليم
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div>
+            <p className="mb-2 text-sm font-semibold text-ink">طريقة التسليم</p>
+            <div className="grid grid-cols-2 gap-2">
+              {([
+                { v: "delivery", label: "توصيل (عنوان)" },
+                { v: "pickup", label: "استلام من المحل" },
+              ] as const).map((opt) => (
+                <button
+                  key={opt.v}
+                  type="button"
+                  onClick={() => setDeliveryMethod(opt.v)}
+                  className={`min-h-11 rounded-xl border px-3 text-sm font-semibold transition-colors ${
+                    deliveryMethod === opt.v
+                      ? "border-orange-ink bg-orange-ink/10 text-orange-ink"
+                      : "border-line bg-beige text-ink-soft hover:border-orange-ink/40"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm font-semibold text-ink">
+              اسم المستلم
+            </label>
+            <input
+              value={recipientName}
+              onChange={(e) => setRecipientName(e.target.value)}
+              placeholder="من استلم الطلب"
+              className="w-full rounded-xl border border-line bg-beige px-4 py-2.5 text-sm text-ink outline-none transition-colors focus:border-orange-ink focus:ring-2 focus:ring-orange-ink/20"
+              dir="rtl"
+            />
+          </div>
+
+          {deliveryMethod === "delivery" && (
+            <>
+              <div>
+                <label className="mb-1 block text-sm font-semibold text-ink">
+                  عنوان التوصيل
+                </label>
+                <input
+                  value={deliveryAddress}
+                  onChange={(e) => setDeliveryAddress(e.target.value)}
+                  placeholder="المحافظة / المنطقة / أقرب نقطة دالة"
+                  className="w-full rounded-xl border border-line bg-beige px-4 py-2.5 text-sm text-ink outline-none transition-colors focus:border-orange-ink focus:ring-2 focus:ring-orange-ink/20"
+                  dir="rtl"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-semibold text-ink">
+                  رقم هاتف التوصيل
+                </label>
+                <input
+                  value={deliveryPhone}
+                  onChange={(e) => setDeliveryPhone(e.target.value)}
+                  placeholder="07XXXXXXXXX"
+                  inputMode="tel"
+                  className="w-full rounded-xl border border-line bg-beige px-4 py-2.5 text-sm text-ink outline-none transition-colors focus:border-orange-ink focus:ring-2 focus:ring-orange-ink/20"
+                  dir="ltr"
+                />
+              </div>
+            </>
+          )}
+
+          <div>
+            <label className="mb-1 block text-sm font-semibold text-ink">
+              ملاحظة (اختياري)
+            </label>
+            <textarea
+              value={deliveryNote}
+              onChange={(e) => setDeliveryNote(e.target.value)}
+              rows={2}
+              placeholder="أي تفاصيل عن التسليم"
+              className="w-full resize-none rounded-xl border border-line bg-beige px-4 py-2.5 text-sm text-ink outline-none transition-colors focus:border-orange-ink focus:ring-2 focus:ring-orange-ink/20"
+              dir="rtl"
+            />
+          </div>
+        </div>
       </Modal>
     </div>
   );

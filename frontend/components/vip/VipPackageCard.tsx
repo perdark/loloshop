@@ -1,9 +1,9 @@
 "use client";
 
-import Image from "next/image";
 import type { CSSProperties } from "react";
 import { formatIQD } from "@/lib/format";
 import type { PackageTier } from "@/lib/types";
+import { AutoRotatingImage } from "@/components/ui/AutoRotatingImage";
 import { VipBadge } from "./VipBadge";
 import { vipAccent } from "./vipAccent";
 
@@ -22,20 +22,20 @@ export function VipPackageCard({
   busy?: boolean;
 }) {
   const a = vipAccent(pkg.accent);
+  // Cover photo first, then the admin-set gallery — these auto-rotate on the card.
+  const photos = [...new Set([pkg.imageUrl, ...(pkg.gallery ?? [])].filter((u): u is string => !!u))];
   return (
     <article
       className="vip-tilt vip-border group relative flex flex-col overflow-hidden rounded-[var(--radius-card)] bg-surface shadow-[var(--shadow-card)]"
       style={{ "--vip-accent": a } as CSSProperties}
     >
       <figure className="relative aspect-[4/5] overflow-hidden bg-[var(--shop-sink)]">
-        {pkg.imageUrl ? (
-          <Image
-            src={pkg.imageUrl}
+        {photos.length > 0 ? (
+          <AutoRotatingImage
+            images={photos}
             alt={pkg.nameAr}
-            fill
-            unoptimized
-            className="object-cover transition-transform duration-[900ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:scale-[1.05]"
             sizes="(max-width: 639px) 88vw, 360px"
+            imgClassName="object-cover transition-transform duration-[900ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:scale-[1.05]"
           />
         ) : (
           <div

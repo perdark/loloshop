@@ -17,8 +17,10 @@ import {
 import { formatIQD } from "@/lib/format";
 import { PRODUCT_TYPE_LABELS } from "@/lib/constants";
 import type { ProductType } from "@/lib/types";
+import { getMyOrders, type StudentOrder } from "@/lib/orders";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { MyOrdersList } from "@/components/student/MyOrdersList";
 import { VipUpsellCard } from "@/components/vip/VipUpsellCard";
 
 function CartSkeleton() {
@@ -209,6 +211,15 @@ export default function CartPage() {
   const [checkingOut, setCheckingOut] = useState(false);
   const [done, setDone] = useState(false);
   const [updatingIds, setUpdatingIds] = useState<Set<string>>(new Set());
+  // The student's submitted orders — shown when the cart is empty so a completed
+  // checkout doesn't dead-end on a blank cart.
+  const [myOrders, setMyOrders] = useState<StudentOrder[]>([]);
+
+  const loadMyOrders = useCallback(() => {
+    getMyOrders()
+      .then(setMyOrders)
+      .catch(() => setMyOrders([]));
+  }, []);
 
   const loadCart = useCallback(async () => {
     setLoading(true);
@@ -226,7 +237,8 @@ export default function CartPage() {
 
   useEffect(() => {
     loadCart();
-  }, [loadCart]);
+    loadMyOrders();
+  }, [loadCart, loadMyOrders]);
 
   async function handleUpdate(id: string, qty: number) {
     if (updatingIds.has(id)) return;
@@ -280,6 +292,7 @@ export default function CartPage() {
     try {
       await checkout();
       toast.success("تم تأكيد طلبك");
+      loadMyOrders();
       if (hasCustomizable) {
         router.push("/design");
       } else {
@@ -330,12 +343,21 @@ export default function CartPage() {
           <p className="max-w-[32ch] text-sm leading-relaxed text-ink-soft">
             سيصلك طلبك ويُدفع نقداً عند الاستلام. شكراً لثقتك بلولو شوب.
           </p>
-          <Link
-            href="/"
-            className="btn-shine inline-flex min-h-12 items-center gap-2 rounded-pill bg-brand-gradient px-7 text-sm font-bold text-white shadow-[var(--shadow-card)]"
-          >
-            متابعة التسوق
-          </Link>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <button
+              type="button"
+              onClick={() => setDone(false)}
+              className="inline-flex min-h-12 items-center gap-2 rounded-pill border border-orange-ink/30 bg-surface px-6 text-sm font-bold text-orange-ink transition-colors hover:bg-orange-ink/10"
+            >
+              عرض طلباتي
+            </button>
+            <Link
+              href="/"
+              className="btn-shine inline-flex min-h-12 items-center gap-2 rounded-pill bg-brand-gradient px-7 text-sm font-bold text-white shadow-[var(--shadow-card)]"
+            >
+              متابعة التسوق
+            </Link>
+          </div>
         </div>
       </div>
     );
@@ -357,18 +379,33 @@ export default function CartPage() {
       </div>
 
       {isEmpty ? (
-        <EmptyState
-          title="السلة فارغة"
-          message="أضف منتجات من المتجر لتبدأ طلبك."
-          action={
-            <Link
-              href="/"
-              className="btn-shine inline-flex min-h-11 items-center gap-2 rounded-pill bg-brand-gradient px-6 text-sm font-bold text-white shadow-[var(--shadow-soft)]"
-            >
-              تصفّح المتجر
-            </Link>
-          }
-        />
+        myOrders.length > 0 ? (
+          <div className="space-y-4">
+            <div className="rounded-2xl border border-line bg-surface-sink/60 px-4 py-3 text-sm text-ink-soft">
+              سلتك فارغة — في الأسفل طلباتك وحالتها.
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="font-display-ar text-lg font-bold text-ink">طلباتي</h2>
+              <Link href="/" className="text-sm font-semibold text-orange-ink hover:underline">
+                تصفّح المتجر
+              </Link>
+            </div>
+            <MyOrdersList orders={myOrders} />
+          </div>
+        ) : (
+          <EmptyState
+            title="السلة فارغة"
+            message="أضف منتجات من المتجر لتبدأ طلبك."
+            action={
+              <Link
+                href="/"
+                className="btn-shine inline-flex min-h-11 items-center gap-2 rounded-pill bg-brand-gradient px-6 text-sm font-bold text-white shadow-[var(--shadow-soft)]"
+              >
+                تصفّح المتجر
+              </Link>
+            }
+          />
+        )
       ) : (
         <>
           {/* Items */}

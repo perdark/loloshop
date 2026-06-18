@@ -486,7 +486,7 @@ async function listPackages(req, res) {
   const { rows } = await query(
     `SELECT p.id, p.name_ar, p.price, p.image_url, p.sort, p.active,
             p.is_vip, p.is_full_set, p.description, p.features, p.included_items, p.badge_label, p.accent,
-            p.story_image_url,
+            p.story_image_url, p.gallery,
             pr.sash_type_option_id,
             o.label_ar AS sash_type_label,
             COALESCE((
@@ -554,14 +554,14 @@ async function createPackage(req, res) {
   const effectiveRole = role || (is_vip || is_full_set ? 'retail' : null);
   const { rows } = await query(
     `INSERT INTO packages
-       (name_ar, price, role, image_url, sort, is_vip, is_full_set, description, features, included_items, badge_label, accent, story_image_url)
+       (name_ar, price, role, image_url, sort, is_vip, is_full_set, description, features, included_items, badge_label, accent, story_image_url, gallery)
      VALUES ($1, $2, COALESCE($3::price_role,'wholesaler'), $4, COALESCE($5,0),
-             COALESCE($6,FALSE), COALESCE($7,FALSE), $8, $9::jsonb, $10::jsonb, $11, $12, $13)
+             COALESCE($6,FALSE), COALESCE($7,FALSE), $8, $9::jsonb, $10::jsonb, $11, $12, $13, $14::jsonb)
      RETURNING id`,
     [
       name_ar, price, effectiveRole, image_url || null, sort || null,
       !!is_vip, !!is_full_set, description || null, jsonArray(req.body.features), jsonArray(req.body.included_items),
-      badge_label || null, accent || null, story_image_url || null,
+      badge_label || null, accent || null, story_image_url || null, jsonArray(req.body.gallery),
     ]
   );
   await auditPackage(req, 'package_create', rows[0].id, { name_ar, is_vip: !!is_vip, is_full_set: !!is_full_set });
@@ -576,10 +576,11 @@ async function updatePackage(req, res) {
   // Stringify JSONB arrays before they reach buildUpdate (pg array-literal pitfall).
   if (req.body.features !== undefined) req.body.features = jsonArray(req.body.features);
   if (req.body.included_items !== undefined) req.body.included_items = jsonArray(req.body.included_items);
+  if (req.body.gallery !== undefined) req.body.gallery = jsonArray(req.body.gallery);
   const upd = buildUpdate(
     'packages',
     ['name_ar', 'price', 'role', 'image_url', 'story_image_url', 'sort', 'active',
-     'is_vip', 'is_full_set', 'description', 'features', 'included_items', 'badge_label', 'accent'],
+     'is_vip', 'is_full_set', 'description', 'features', 'included_items', 'badge_label', 'accent', 'gallery'],
     req.body, req.params.id
   );
   if (!upd) return res.status(400).json({ error: 'لا تغييرات', code: 'ERR_VALIDATION' });

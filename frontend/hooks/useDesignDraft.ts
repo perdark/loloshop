@@ -23,7 +23,7 @@ import {
   getSelectedOptionId,
   selectionKey,
 } from "@/lib/customerImage";
-import type { CatalogProduct } from "@/lib/types";
+import type { CatalogProduct, ShopProductCard } from "@/lib/types";
 import { getApiErrorMessage } from "@/lib/api";
 
 const GENDER_KEY = "loloshop_student_gender";
@@ -70,6 +70,9 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
   const lockedSideRef = useRef<unknown | null>(null);
 
   const [product, setProduct] = useState<CatalogProduct | null>(null);
+  // Available sash products — used to render the "choose a sash" step when no
+  // specific sash has been picked yet (a fresh account must select one first).
+  const [sashChoices, setSashChoices] = useState<ShopProductCard[]>([]);
   const [selection, setSelection] = useState<OptionSelection>({});
   const [customerImages, setCustomerImages] = useState<Record<string, string>>({});
   const [customerTexts, setCustomerTexts] = useState<Record<string, string>>({});
@@ -184,13 +187,22 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
           try { sessionStorage.removeItem(SASH_PRESET_KEY); } catch { /* ignore */ }
         }
 
-        // Determine which sash product to load
+        // The sash catalog — drives the "choose your sash" step.
+        const sashList = feed.byType.sash ?? [];
+        setSashChoices(sashList);
+
+        // Determine which sash product to load. A NEW account that just opened
+        // «صمم وشاحك» with no chosen sash must NOT be dropped into an arbitrary
+        // auto-picked sash — leave the product unset so the chooser shows. We only
+        // fall back to the first sash when there is an existing design to render
+        // (returning student whose product id is no longer in this session).
         const savedProductId = typeof sessionStorage !== "undefined"
           ? sessionStorage.getItem(DRAFT_PRODUCT_ID_KEY)
           : null;
+        const hasExistingDesign = !!(my.data?.left_canvas || my.data?.right_canvas);
         const targetProductId = preset?.productId
           ?? savedProductId
-          ?? (feed.byType.sash ?? [])[0]?.id;
+          ?? (hasExistingDesign ? sashList[0]?.id : undefined);
 
         if (targetProductId) {
           const full = await getProductFull(targetProductId);
@@ -425,6 +437,40 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
     sashColor,
   ]);
 
+  // Explicitly load a sash the student picked from the chooser, then enter the
+  // options step. Restores any in-progress option/photo drafts for this session.
+  const selectSashProduct = useCallback(async (productId: string) => {
+    setBootError(null);
+    try {
+      const full = await getProductFull(productId);
+      setProduct(full);
+      try {
+        sessionStorage.setItem(DRAFT_PRODUCT_ID_KEY, productId);
+      } catch {
+        /* ignore */
+      }
+      const savedSelection = readSessionJson<OptionSelection>(DRAFT_SELECTION_KEY);
+      if (savedSelection && Object.keys(savedSelection).length > 0) {
+        setSelection(savedSelection);
+      }
+      const savedImages = readSessionJson<Record<string, string>>(
+        DRAFT_CUSTOMER_IMAGES_KEY
+      );
+      if (savedImages && Object.keys(savedImages).length > 0) {
+        setCustomerImages(savedImages);
+      }
+      const savedTexts = readSessionJson<Record<string, string>>(
+        DRAFT_CUSTOMER_TEXTS_KEY
+      );
+      if (savedTexts && Object.keys(savedTexts).length > 0) {
+        setCustomerTexts(savedTexts);
+      }
+      setStep(1);
+    } catch (e) {
+      toast.error(getApiErrorMessage(e, "تعذر تحميل الوشاح"));
+    }
+  }, []);
+
   function setGroupValue(groupId: string, value: OptionSelection[string]) {
     setSelection((prev) => ({ ...prev, [groupId]: value }));
     // Changing the option invalidates any per-selection image/text the customer
@@ -569,6 +615,8 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
     gender,
     pickGender,
     product,
+    sashChoices,
+    selectSashProduct,
     selection,
     customerImages,
     setCustomerImages,

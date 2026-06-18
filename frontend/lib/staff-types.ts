@@ -187,6 +187,16 @@ export interface ProductionOrderDetail {
     intake?: OrderIntake | null;
     /** Checkout group id this order belongs to (for sibling fetching). */
     checkout_group_id?: string | null;
+    /** Delivery confirmation details — populated once status = 'delivered'. */
+    delivered_at?: string | null;
+    /** 'delivery' = توصيل بعنوان ورقم · 'pickup' = استلام من المحل. */
+    delivery_method?: "delivery" | "pickup" | null;
+    recipient_name?: string | null;
+    delivery_address?: string | null;
+    delivery_phone?: string | null;
+    delivery_notes?: string | null;
+    /** Name of the staff member who confirmed delivery. */
+    delivered_by_name?: string | null;
   };
   design: {
     id: string;

@@ -423,6 +423,8 @@ ALTER TABLE packages ADD COLUMN IF NOT EXISTS included_items JSONB NOT NULL DEFA
 ALTER TABLE packages ADD COLUMN IF NOT EXISTS badge_label    TEXT;                                  -- e.g. VIP / الأفخم
 ALTER TABLE packages ADD COLUMN IF NOT EXISTS accent         TEXT;                                  -- hex for badge/halo ONLY
 ALTER TABLE packages ADD COLUMN IF NOT EXISTS story_image_url TEXT;                                  -- editorial "story" photo on the VIP page (migration 020)
+-- Migration 034: ordered list of photos that auto-rotate on the storefront package card.
+ALTER TABLE packages ADD COLUMN IF NOT EXISTS gallery JSONB NOT NULL DEFAULT '[]'::jsonb;
 CREATE INDEX IF NOT EXISTS idx_packages_vip ON packages(role, is_vip, active, sort) WHERE active = TRUE;
 
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS package_id UUID REFERENCES packages(id) ON DELETE SET NULL;
@@ -677,5 +679,16 @@ ALTER TABLE options       ADD COLUMN IF NOT EXISTS customer_text_placeholder_ar 
 -- Migration 027: wholesaler carries جامعة/قسم; students inherit them on join.
 ALTER TABLE wholesalers ADD COLUMN IF NOT EXISTS university_name TEXT;
 ALTER TABLE wholesalers ADD COLUMN IF NOT EXISTS department      TEXT;
+
+-- Migration 033: delivery confirmation details captured at «تأكيد التسليم».
+-- 'delivery' = توصيل بعنوان ورقم · 'pickup' = استلام من المحل.
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_method TEXT
+  CHECK (delivery_method IS NULL OR delivery_method IN ('delivery', 'pickup'));
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS recipient_name   TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_address TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_phone   TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_notes   TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivered_by     UUID REFERENCES users(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_orders_delivered ON orders(delivered_at DESC) WHERE status = 'delivered';
 
 COMMIT;
