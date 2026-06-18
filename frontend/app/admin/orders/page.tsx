@@ -8,11 +8,18 @@ import {
   getAdminOrders,
   getAdminOrderBundles,
   getAdminWholesalers,
+  getRepsOverview,
   updateOrderCost,
   updateCheckoutGroup,
 } from "@/lib/admin";
-import type { AdminBundle } from "@/lib/admin";
-import { ORDER_STATUS_LABELS, ORDER_STATUS_OPTIONS } from "@/lib/constants";
+import type { AdminBundle, RepOverview } from "@/lib/admin";
+import {
+  ORDER_STATUS_LABELS,
+  ORDER_STATUS_OPTIONS,
+  EMBROIDERY_ZONE_LABELS,
+  EMBROIDERY_ZONE_ORDER,
+  type EmbroideryZone,
+} from "@/lib/constants";
 import { formatDateShort, formatIQD } from "@/lib/format";
 import type { AdminOrder, AdminWholesaler, OrderStatus } from "@/lib/types";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -469,7 +476,14 @@ function OrdersSection({
                 key={order.id}
                 className="border-b border-ink/5 transition-colors odd:bg-cream/40 last:border-0 hover:bg-peach/25"
               >
-                <td className="px-4 py-3 font-medium text-ink">{order.studentName}</td>
+                <td className="px-4 py-3 font-medium text-ink">
+                  {order.studentName}
+                  {order.workingStaffName && (
+                    <span className="mt-1 block text-[11px] font-medium text-orange-ink">
+                      ⚙ الموظف {order.workingStaffName} يعمل عليه الآن
+                    </span>
+                  )}
+                </td>
                 <td className="px-4 py-3 text-ink-soft">{order.productName}</td>
                 <td className="px-4 py-3 tabular-nums text-ink-soft" dir="ltr">{formatIQD(order.price)}</td>
                 <td className="px-4 py-3 tabular-nums text-ink-soft" dir="ltr">
@@ -541,7 +555,14 @@ function OrdersSection({
             className="surface-card card-lift rounded-2xl p-4"
           >
             <div className="flex items-start justify-between gap-2">
-              <p className="font-semibold text-ink">{order.studentName}</p>
+              <div>
+                <p className="font-semibold text-ink">{order.studentName}</p>
+                {order.workingStaffName && (
+                  <p className="text-[11px] font-medium text-orange-ink">
+                    ⚙ الموظف {order.workingStaffName} يعمل عليه الآن
+                  </p>
+                )}
+              </div>
               <span className="shrink-0 text-xs text-muted">{formatDateShort(order.createdAt)}</span>
             </div>
             <p className="mt-1 text-sm text-ink-soft">
@@ -637,6 +658,11 @@ export default function AdminOrdersPage() {
   // Item-mode-only
   const [status, setStatus] = useState<OrderStatus | "">("");
   const [typeFilter, setTypeFilter] = useState("");
+  const [zoneFilter, setZoneFilter] = useState<EmbroideryZone | "">("");
+
+  // Reps drill-down (ممثلين tab): selected batch + the reps→batches landing grid
+  const [batchId, setBatchId] = useState("");
+  const [repsOverview, setRepsOverview] = useState<RepOverview[]>([]);
 
   // View mode
   const [viewMode, setViewMode] = useState<ViewMode>("item");
@@ -661,8 +687,12 @@ export default function AdminOrdersPage() {
     if (!silent) setLoading(true);
     setFetchError(false);
     try {
-      const [wholesalersData] = await Promise.all([getAdminWholesalers()]);
+      const [wholesalersData, repsData] = await Promise.all([
+        getAdminWholesalers(),
+        getRepsOverview(),
+      ]);
       setWholesalers(wholesalersData);
+      setRepsOverview(repsData);
 
       if (viewMode === "bundle") {
         const [retailB, wholesalerB] = await Promise.all([
@@ -688,14 +718,17 @@ export default function AdminOrdersPage() {
             dateFrom: dateFrom || undefined,
             dateTo: dateTo || undefined,
             type: typeFilter || undefined,
+            zone: zoneFilter || undefined,
           }),
           getAdminOrders({
             wholesalerId: wholesalerId || undefined,
+            batchId: batchId || undefined,
             source: "wholesaler",
             status: status || undefined,
             dateFrom: dateFrom || undefined,
             dateTo: dateTo || undefined,
             type: typeFilter || undefined,
+            zone: zoneFilter || undefined,
           }),
         ]);
         setRetailOrders(retailData);
@@ -714,7 +747,7 @@ export default function AdminOrdersPage() {
     } finally {
       setLoading(false);
     }
-  }, [viewMode, wholesalerId, status, dateFrom, dateTo, typeFilter]);
+  }, [viewMode, wholesalerId, batchId, status, dateFrom, dateTo, typeFilter, zoneFilter]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch on mount / filters
@@ -951,6 +984,37 @@ export default function AdminOrdersPage() {
         </div>
       )}
 
+      {/* ── Embroidery-zone / pleat filter — item mode (وشاح R/L/back · قبعة جانب/أعلى · روب كسرات) ── */}
+      {viewMode === "item" && (
+        <div className="mb-5 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setZoneFilter("")}
+            className={`inline-flex min-h-[44px] items-center rounded-full border px-4 py-2 text-sm font-medium transition-colors ${
+              zoneFilter === ""
+                ? "border-orange-ink bg-orange-ink text-white"
+                : "border-line bg-surface text-ink-soft hover:border-orange-ink/40 hover:text-ink"
+            }`}
+          >
+            كل التطريز
+          </button>
+          {EMBROIDERY_ZONE_ORDER.map((z) => (
+            <button
+              key={z}
+              type="button"
+              onClick={() => setZoneFilter(z)}
+              className={`inline-flex min-h-[44px] items-center rounded-full border px-4 py-2 text-sm font-medium transition-colors ${
+                zoneFilter === z
+                  ? "border-orange-ink bg-orange-ink text-white"
+                  : "border-line bg-surface text-ink-soft hover:border-orange-ink/40 hover:text-ink"
+              }`}
+            >
+              {EMBROIDERY_ZONE_LABELS[z]}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* ── Totals summary row (quick overview for active tab) ── */}
       {!loading && !fetchError && (
         <div className="mb-5 grid grid-cols-2 gap-3 rounded-2xl border border-orange-ink/15 bg-orange-ink/5 p-4 sm:grid-cols-4">
@@ -1015,25 +1079,113 @@ export default function AdminOrdersPage() {
         </div>
       )}
 
-      {/* ── Active source orders ── */}
-      <OrdersSection
-        orders={activeOrders}
-        bundles={activeBundles}
-        viewMode={viewMode}
-        loading={loading}
-        fetchError={fetchError}
-        costDraftById={costDraftById}
-        savingCostId={savingCostId}
-        sortKey={sortKey}
-        sortDir={sortDir}
-        typeFilter={typeFilter}
-        activeSource={activeSource}
-        onCostInput={handleCostInput}
-        onSaveCost={handleSaveCost}
-        onSort={handleSort}
-        onRetry={load}
-        onBundlesChange={handleBundlesChange}
-      />
+      {/* ── ممثلين drill-down: rep grid → click a rep → their students' orders ── */}
+      {activeSource === "wholesaler" && !wholesalerId ? (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {repsOverview.length === 0 ? (
+            <p className="text-sm text-ink-soft">لا يوجد ممثلون بعد.</p>
+          ) : (
+            repsOverview.map((rep) => (
+              <button
+                key={rep.id}
+                type="button"
+                onClick={() => {
+                  setWholesalerId(rep.id);
+                  setBatchId("");
+                }}
+                className="surface-card card-lift rounded-2xl p-4 text-start transition-colors hover:border-orange-ink/40"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-display-ar text-base font-bold text-ink">{rep.name}</span>
+                  <span className="shrink-0 rounded-full bg-orange-ink/10 px-2 py-0.5 text-xs font-bold tabular-nums text-orange-ink">
+                    {rep.order_count} طلب
+                  </span>
+                </div>
+                {rep.batches.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {rep.batches.map((b) => (
+                      <span
+                        key={b.id}
+                        className="rounded-full border border-line bg-surface-sink px-2 py-0.5 text-[11px] text-ink-soft"
+                      >
+                        {b.name_ar}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <p className="mt-2 text-xs font-medium text-orange-ink">عرض طلبات الممثل ←</p>
+              </button>
+            ))
+          )}
+        </div>
+      ) : (
+        <>
+          {/* When a rep is selected: back-to-all + their batch (دفعة) chips */}
+          {activeSource === "wholesaler" && wholesalerId && (
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setWholesalerId("");
+                  setBatchId("");
+                }}
+                className="inline-flex min-h-9 items-center gap-1 rounded-full border border-line bg-surface px-3 py-1 text-sm font-medium text-ink-soft transition-colors hover:border-orange-ink/40"
+              >
+                → كل الممثلين
+              </button>
+              {(repsOverview.find((r) => r.id === wholesalerId)?.batches.length ?? 0) > 0 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setBatchId("")}
+                    className={`min-h-9 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                      batchId === ""
+                        ? "border-orange-ink bg-orange-ink/10 text-orange-ink"
+                        : "border-line bg-surface-sink text-ink-soft hover:border-orange-ink/40"
+                    }`}
+                  >
+                    كل الدفعات
+                  </button>
+                  {repsOverview
+                    .find((r) => r.id === wholesalerId)
+                    ?.batches.map((b) => (
+                      <button
+                        key={b.id}
+                        type="button"
+                        onClick={() => setBatchId(b.id)}
+                        className={`min-h-9 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                          batchId === b.id
+                            ? "border-orange-ink bg-orange-ink/10 text-orange-ink"
+                            : "border-line bg-surface-sink text-ink-soft hover:border-orange-ink/40"
+                        }`}
+                      >
+                        {b.name_ar}
+                      </button>
+                    ))}
+                </>
+              )}
+            </div>
+          )}
+          <OrdersSection
+            orders={activeOrders}
+            bundles={activeBundles}
+            viewMode={viewMode}
+            loading={loading}
+            fetchError={fetchError}
+            costDraftById={costDraftById}
+            savingCostId={savingCostId}
+            sortKey={sortKey}
+            sortDir={sortDir}
+            typeFilter={typeFilter}
+            activeSource={activeSource}
+            onCostInput={handleCostInput}
+            onSaveCost={handleSaveCost}
+            onSort={handleSort}
+            onRetry={load}
+            onBundlesChange={handleBundlesChange}
+          />
+        </>
+      )}
 
       {/* Cross-source counts for admin awareness */}
       {!loading && !fetchError && (

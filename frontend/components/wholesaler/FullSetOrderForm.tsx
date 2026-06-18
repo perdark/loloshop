@@ -6,8 +6,10 @@ import type {
   CreateFullSetPayload,
   FullSetExistingOrder,
   FullSetPackage,
+  FullSetPricing,
   PieceType,
 } from "@/lib/wholesaler";
+import { DEFAULT_FULLSET_ADDONS } from "@/lib/wholesaler";
 import { resolveDesignMediaUrl } from "@/lib/designer";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -17,7 +19,13 @@ interface ZoneState {
   imageUrl: string;
   uploading: boolean;
 }
-type ZoneKey = "sashFront" | "sashBack" | "capSide" | "capTop";
+type ZoneKey =
+  | "sashFront"
+  | "sashBack"
+  | "capSide"
+  | "capTop"
+  | "robeSleeveRight"
+  | "robeSleeveLeft";
 
 const PRICE_FMT = new Intl.NumberFormat("ar-IQ");
 
@@ -29,6 +37,8 @@ export interface FullSetOrderFormProps {
   packages: FullSetPackage[];
   /** existing order to pre-fill (edit), or null for a fresh order */
   initial?: FullSetExistingOrder | null;
+  /** «التسعيرة»: rep/student base price + add-on surcharges (drives the live total). */
+  pricing?: FullSetPricing | null;
   submitting: boolean;
   submitLabel?: string;
   /** uploads a photo and resolves to its URL (endpoint differs per role) */
@@ -44,6 +54,7 @@ export interface FullSetOrderFormProps {
 export function FullSetOrderForm({
   packages,
   initial,
+  pricing,
   submitting,
   submitLabel = "حفظ الطلب",
   onUploadImage,
@@ -68,6 +79,8 @@ export function FullSetOrderForm({
     sashBack: seedZone(initial?.embroidery.sash_back),
     capSide: seedZone(initial?.embroidery.cap_side),
     capTop: seedZone(initial?.embroidery.cap_top),
+    robeSleeveRight: seedZone(initial?.embroidery.robe_sleeve_right),
+    robeSleeveLeft: seedZone(initial?.embroidery.robe_sleeve_left),
   });
   const [notes, setNotes] = useState(initial?.notes || "");
   const [shoulderPleat, setShoulderPleat] = useState(initial?.shoulder_pleat ?? false);
@@ -76,6 +89,9 @@ export function FullSetOrderForm({
   );
   const [shawlImage, setShawlImage] = useState(initial?.american_shawl?.image_url || "");
   const [shawlUploading, setShawlUploading] = useState(false);
+  const [colorText, setColorText] = useState(initial?.sash_color?.text || "");
+  const [colorImage, setColorImage] = useState(initial?.sash_color?.image_url || "");
+  const [colorUploading, setColorUploading] = useState(false);
 
   function setZone(key: ZoneKey, patch: Partial<ZoneState>) {
     setZones((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
@@ -104,6 +120,18 @@ export function FullSetOrderForm({
     }
   }
 
+  async function handleColorUpload(file: File) {
+    setColorUploading(true);
+    try {
+      const url = await onUploadImage(file);
+      setColorImage(url);
+    } catch {
+      toast.error("تعذر رفع الصورة");
+    } finally {
+      setColorUploading(false);
+    }
+  }
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!packageId) return toast.error("يرجى اختيار الطقم");
@@ -111,7 +139,8 @@ export function FullSetOrderForm({
       return toast.error("يرجى إدخال قياسات الروب كاملة");
     if (!sashType) return toast.error("يرجى اختيار نوع الوشاح");
     if (!capType) return toast.error("يرجى اختيار نوع القبعة");
-    if (shawlUploading || Object.values(zones).some((z) => z.uploading))
+    if (!colorText.trim()) return toast.error("يرجى كتابة لون الوشاح");
+    if (shawlUploading || colorUploading || Object.values(zones).some((z) => z.uploading))
       return toast.error("يرجى الانتظار حتى انتهاء رفع الصور");
     if (shawlEnabled && !shawlImage)
       return toast.error("صورة الشال الأمريكي مطلوبة");
@@ -129,6 +158,10 @@ export function FullSetOrderForm({
       },
       sash_type: sashType,
       cap_type: capType,
+      sash_color: {
+        text: colorText.trim(),
+        image_url: colorImage || undefined,
+      },
       shoulder_pleat: shoulderPleat,
       american_shawl: {
         enabled: shawlEnabled,
@@ -139,12 +172,41 @@ export function FullSetOrderForm({
         sash_back: zone(zones.sashBack),
         cap_side: zone(zones.capSide),
         cap_top: zone(zones.capTop),
+        robe_sleeve_right: zone(zones.robeSleeveRight),
+        robe_sleeve_left: zone(zones.robeSleeveLeft),
       },
       notes: notes.trim() || undefined,
     });
   }
 
   const selectedPkg = packages.find((p) => p.id === packageId);
+
+  // ── «التسعيرة»: live total = base + applicable add-ons (mirrors backend fullSetOrder.js) ──
+  const addons = pricing?.addons ?? DEFAULT_FULLSET_ADDONS;
+  const basePrice =
+    pricing && pricing.base > 0 ? pricing.base : selectedPkg?.price ?? 0;
+  const zoneHasContent = (z: ZoneState) => !!(z.text.trim() || z.imageUrl);
+  const capEmbCount =
+    (zoneHasContent(zones.capSide) ? 1 : 0) + (zoneHasContent(zones.capTop) ? 1 : 0);
+  const robeSleeveCount =
+    (zoneHasContent(zones.robeSleeveRight) ? 1 : 0) +
+    (zoneHasContent(zones.robeSleeveLeft) ? 1 : 0);
+  const addonRows: { label: string; amount: number }[] = [];
+  if (sashType === "ملكي" && addons.royal_sash > 0)
+    addonRows.push({ label: "وشاح ملكي", amount: addons.royal_sash });
+  if (sashType === "عادي" && capType === "ملكي" && addons.royal_cap_when_normal_sash > 0)
+    addonRows.push({ label: "قبعة ملكية", amount: addons.royal_cap_when_normal_sash });
+  if (capEmbCount >= 2 && addons.extra_cap_embroidery > 0)
+    addonRows.push({ label: "تطريز قبعة ثانٍ", amount: addons.extra_cap_embroidery });
+  if (robeSleeveCount > 0 && addons.robe_sleeve_each > 0)
+    addonRows.push({
+      label: `تطريز ردن الروب ×${robeSleeveCount}`,
+      amount: addons.robe_sleeve_each * robeSleeveCount,
+    });
+  if (shawlEnabled && addons.american_shawl > 0)
+    addonRows.push({ label: "شال امريكي", amount: addons.american_shawl });
+  const addonTotal = addonRows.reduce((s, r) => s + r.amount, 0);
+  const totalPrice = basePrice + addonTotal;
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
@@ -170,7 +232,10 @@ export function FullSetOrderForm({
               >
                 <span className="font-semibold text-ink">{p.name_ar}</span>
                 <span className="text-sm tabular-nums text-ink-soft">
-                  {PRICE_FMT.format(p.price)} د.ع
+                  {PRICE_FMT.format(
+                    pricing && pricing.base > 0 ? pricing.base : p.price
+                  )}{" "}
+                  د.ع
                 </span>
               </button>
             ))}
@@ -226,6 +291,53 @@ export function FullSetOrderForm({
         <div className="space-y-3">
           <TypeToggle label="نوع الوشاح" value={sashType} onChange={setSashType} />
           <TypeToggle label="نوع القبعة" value={capType} onChange={setCapType} />
+        </div>
+      </Section>
+
+      {/* ── لون الوشاح ── */}
+      <Section title="لون الوشاح" hint="مطلوب — اكتب اللون بالضبط · صورة اختيارية">
+        <div className="space-y-2.5">
+          <Input
+            label="اللون"
+            value={colorText}
+            onChange={(e) => setColorText(e.target.value)}
+            placeholder="مثال: أخضر زيتي غامق"
+            maxLength={200}
+          />
+          <div className="flex items-center gap-2.5">
+            {colorImage ? (
+              <>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={resolveDesignMediaUrl(colorImage)}
+                  alt="صورة اللون"
+                  className="h-16 w-16 rounded-lg border border-line object-cover"
+                />
+                <button
+                  type="button"
+                  onClick={() => setColorImage("")}
+                  className="min-h-11 text-sm font-medium text-danger hover:underline"
+                >
+                  إزالة الصورة
+                </button>
+              </>
+            ) : (
+              <label className="inline-flex min-h-11 cursor-pointer items-center rounded-xl border border-line bg-beige px-3.5 text-sm font-medium text-ink-soft transition-colors hover:border-orange/40 hover:text-orange-ink">
+                {colorUploading ? "جارٍ الرفع…" : "إرفاق صورة لون (اختياري)"}
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  className="sr-only"
+                  disabled={colorUploading}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) handleColorUpload(f);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+            )}
+          </div>
         </div>
       </Section>
 
@@ -312,6 +424,27 @@ export function FullSetOrderForm({
             onFile={(f) => handleUpload("capTop", f)}
             onClear={() => setZone("capTop", { imageUrl: "" })}
           />
+          <div className="border-t border-line pt-3.5">
+            <p className="mb-2 text-xs text-[var(--shop-muted)]">
+              تطريز ردن الروب — الروب له ردنان (الأيمن والأيسر)
+            </p>
+            <div className="space-y-3.5">
+              <EmbroideryField
+                label="تطريز ردن الروب الأيمن"
+                zone={zones.robeSleeveRight}
+                onText={(v) => setZone("robeSleeveRight", { text: v })}
+                onFile={(f) => handleUpload("robeSleeveRight", f)}
+                onClear={() => setZone("robeSleeveRight", { imageUrl: "" })}
+              />
+              <EmbroideryField
+                label="تطريز ردن الروب الأيسر"
+                zone={zones.robeSleeveLeft}
+                onText={(v) => setZone("robeSleeveLeft", { text: v })}
+                onFile={(f) => handleUpload("robeSleeveLeft", f)}
+                onClear={() => setZone("robeSleeveLeft", { imageUrl: "" })}
+              />
+            </div>
+          </div>
         </div>
       </Section>
 
@@ -327,6 +460,34 @@ export function FullSetOrderForm({
         />
       </Section>
 
+      {/* ── التسعيرة (الإجمالي المباشر) ── */}
+      {packageId && (
+        <Section title="التسعيرة">
+          <dl className="space-y-2 text-sm">
+            <div className="flex items-center justify-between">
+              <dt className="text-ink-soft">السعر الأساسي</dt>
+              <dd className="tabular-nums text-ink" dir="ltr">
+                {PRICE_FMT.format(basePrice)} د.ع
+              </dd>
+            </div>
+            {addonRows.map((r) => (
+              <div key={r.label} className="flex items-center justify-between">
+                <dt className="text-ink-soft">{r.label}</dt>
+                <dd className="tabular-nums text-ink" dir="ltr">
+                  + {PRICE_FMT.format(r.amount)} د.ع
+                </dd>
+              </div>
+            ))}
+            <div className="flex items-center justify-between border-t border-line pt-2">
+              <dt className="font-bold text-ink">الإجمالي</dt>
+              <dd className="font-display text-lg font-bold text-orange-ink tabular-nums" dir="ltr">
+                {PRICE_FMT.format(totalPrice)} د.ع
+              </dd>
+            </div>
+          </dl>
+        </Section>
+      )}
+
       <Button
         type="submit"
         fullWidth
@@ -334,8 +495,8 @@ export function FullSetOrderForm({
         loading={submitting}
         disabled={packages.length === 0}
       >
-        {selectedPkg
-          ? `${submitLabel} — ${PRICE_FMT.format(selectedPkg.price)} د.ع`
+        {packageId
+          ? `${submitLabel} — ${PRICE_FMT.format(totalPrice)} د.ع`
           : submitLabel}
       </Button>
     </form>

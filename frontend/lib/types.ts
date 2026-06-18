@@ -15,8 +15,9 @@ export type OrderStatus =
   | "delivered"
   | "cancelled";
 
-/** Staff job-types (production pipeline). Meaningful only when role === "staff". */
-export type StaffType = "designer" | "digitizer" | "embroiderer" | "presser" | "preparer" | "manager";
+/** Staff job-types (production pipeline). Meaningful only when role === "staff".
+ *  "tailor" (مفصل) is a read-only view role: sees only student name + sash + American-shawl info. */
+export type StaffType = "designer" | "digitizer" | "embroiderer" | "presser" | "preparer" | "manager" | "tailor";
 /** Student study schedule (mandatory at signup). */
 export type StudyType = "morning" | "evening";
 export type SalaryTxnType = "salary_set" | "bonus" | "deduction";
@@ -47,8 +48,10 @@ export interface User {
   phone: string;
   email?: string;
   role: UserRole;
-  /** Set for production staff; null/undefined for other roles. From GET /auth/me. */
+  /** Primary production role (= staff_types[0]); null/undefined for non-staff. From GET /auth/me. */
   staff_type?: StaffType | null;
+  /** All production roles this staff member holds (multi-role). From GET /auth/me. */
+  staff_types?: StaffType[] | null;
   /** Which order source this staff member can see. From GET /auth/me. */
   order_scope?: StaffOrderScope;
 }
@@ -108,6 +111,17 @@ export interface AdminOrder {
   createdAt: string;
   /** "retail" | "wholesaler" — populated from backend. */
   source?: "retail" | "wholesaler";
+  /** Name of the staff member actively working on this order right now (fresh presence). */
+  workingStaffName?: string | null;
+}
+
+/** «اضافات على السعر» — per-wholesaler add-on surcharges (IQD), added to the student price. */
+export interface WholesalerPricingAddons {
+  royal_sash: number;
+  royal_cap_when_normal_sash: number;
+  extra_cap_embroidery: number;
+  robe_sleeve_each: number;
+  american_shawl: number;
 }
 
 export interface AdminWholesaler {
@@ -123,8 +137,11 @@ export interface AdminWholesaler {
   referralCode: string;
   referralUrl: string;
   createdAt?: string;
-  commissionRate?: number;
-  totalCommission?: number;
+  /** «التسعيرة»: admin-private base price, rep/student base price, and add-on surcharges. */
+  adminPrice: number;
+  wholesalerPrice: number;
+  pricingAddons: WholesalerPricingAddons;
+  /** «المستحق» — now the price-gap profit (rep/student price − admin price) across orders. */
   earnedCommission?: number;
 }
 
@@ -137,7 +154,9 @@ export interface CreateWholesalerPayload {
   deadline: string;
   universityName: string;
   department: string;
-  commissionRate?: number;
+  adminPrice: number;
+  wholesalerPrice: number;
+  pricingAddons?: WholesalerPricingAddons;
 }
 
 export interface CreateWholesalerResult {

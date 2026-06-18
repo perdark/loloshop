@@ -23,6 +23,7 @@ export const STAFF_TYPE_LABELS: Record<StaffType, string> = {
   presser: "مكوجي",
   preparer: "مجهّز",
   manager: "مدير الإنتاج",
+  tailor: "مفصل",
 };
 
 /** Study schedule (mandatory at signup). */
@@ -72,6 +73,25 @@ export const ORDER_SOURCE_LABELS: Record<"retail" | "wholesaler", string> = {
   retail: "تجزئة",
   wholesaler: "ممثل",
 };
+
+/** Embroidery-zone / pleat filter keys → Arabic labels (staff queue + admin orders).
+ *  Lets design/embroidery/transfer/admin show only e.g. sashes with right-side embroidery. */
+export type EmbroideryZone =
+  | "sash_right" | "sash_left" | "sash_back"
+  | "cap_side" | "cap_top"
+  | "robe_pleat" | "robe_no_pleat";
+export const EMBROIDERY_ZONE_LABELS: Record<EmbroideryZone, string> = {
+  sash_right: "وشاح — تطريز يمين",
+  sash_left: "وشاح — تطريز يسار",
+  sash_back: "وشاح — تطريز خلف",
+  cap_side: "قبعة — تطريز جانب",
+  cap_top: "قبعة — تطريز أعلى",
+  robe_pleat: "روب — بكسرات",
+  robe_no_pleat: "روب — بدون كسرات",
+};
+export const EMBROIDERY_ZONE_ORDER: EmbroideryZone[] = [
+  "sash_right", "sash_left", "sash_back", "cap_side", "cap_top", "robe_pleat", "robe_no_pleat",
+];
 
 export const ORDER_STATUS_OPTIONS: OrderStatus[] = [
   "pending_approval",

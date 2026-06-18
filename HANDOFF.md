@@ -6,6 +6,200 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
+## 2026-06-18 — Phase-9 of the staff batch (migrations applied + security fixes) · sash color = typed free-text + optional photo · /staff/queue rebuilt as a stage-rail console
+
+Continuation of the `feat/staff-batch-2026-06-17` branch. **Still NOT merged to main, NOT
+deployed to prod.** Dev servers are up (frontend `next dev` :3000, backend nodemon :4000).
+**Migrations 028 → 031 are ALL APPLIED to the dev Neon DB and verified.**
+
+### A) Phase 9 of the 2026-06-17 batch — migrations applied + bugs found & fixed
+- **Applied `028 → 029 → 030` to Neon, in order, verified** (tailor enum present; `users.staff_types`
+  backfilled for all staff; color-group image/text flags cleared → retail color bug dead at the
+  data layer). `next build` passed.
+- A backend e2e + a `critic`-agent **security review** found real bugs (the batch's headline
+  tailor-confinement was NOT actually enforced). All fixed + re-verified live:
+  - **Multi-role was silently broken**: `pg` returns the custom enum array `staff_types staff_type[]`
+    as the raw string `"{designer,embroiderer}"`, so `Array.isArray(...)` was false and `staffTypesOf`
+    fell back to the single primary role everywhere (queue merge, requireStaffType, tailor/presser
+    detection). **Fix in `lib/db.js`**: at startup, look up the `_staff_type` array OID live (NOT
+    hardcoded — OIDs differ per DB) and register a `types.setTypeParser` that splits `{a,b}` → `['a','b']`;
+    plus `staffTypesOf` now also tolerates the string form defensively.
+  - **C1 (CRITICAL)**: `GET /api/orders/` (`listOrders`) is `requireRole('admin','staff')` and returned
+    `price/cost/profit` + intake PII to ANY staff incl. tailor — a side door around all per-field strips.
+    **Fix**: `listOrders` strips money/intake by role — only manager/admin see cost/profit + bundle
+    intake; price additionally to embroiderer (mirrors `getOrder`). Both flat + bundle modes.
+  - **H1/H2**: tailor `getOrder` still leaked `final_design_url` + demographics + non-sash items.
+    **Fix**: rebuild the tailor `order` from an **allow-list** (`id,status,created_at,student_name,
+    product_name,product_type` only) and filter `items` to content lines + null `price_snapshot`.
+  - **M1**: the read-only tailor could `POST /production/orders/:id/final-design`. **Fix**: route now
+    `requireStaffType('designer','digitizer','embroiderer')` (manager/admin auto-pass).
+- **Verified live** (signed JWTs vs :4000): multi-role queue now merges stages; tailor `getOrder`
+  leaks NOTHING (keys = the 6 allow-listed); `/api/orders` money stripped (flat + 69 bundles);
+  tailor final-design POST → 403.
+
+### B) Sash color → TYPED free-text color (required) + OPTIONAL photo — swatches removed
+User decision: replace the sash color swatch picker with a typed color + optional reference photo,
+on the **single sash product, `/design`, AND the full-set form**.
+- **Migration `031`** (applied + verified): sash «اللون» group → `requires_customer_text=TRUE`,
+  `requires_customer_image=FALSE` (scoped to `type='sash'` ONLY — robe/cap keep their real swatches).
+  The group already had a single option + prompt/placeholder, so this reuses the existing
+  customer_text/customer_image_url plumbing (same mechanism as embroidery).
+- **How it works**: `OptionGroupField` treats a color group with `requiresCustomerText` as "typed
+  color" → auto-selects the sole option + renders `null` (suppresses the swatch); the sibling
+  `CustomerImageUpload` (shown because text is required) becomes the whole color UI = required text +
+  optional photo. This covers product/[id] + /design + the full-set wizard at once. `useDesignDraft`
+  now derives `sashColor` from the typed `customerTexts` (not the option label) and restores it from
+  the saved design on reload. The **full-set form** (`FullSetOrderForm`) is NOT option-group-driven →
+  it got its own «لون الوشاح» section (required text + optional photo), persisted/read as a sash
+  spec line in `backend/lib/fullSetOrder.js` (label `لون الوشاح`).
+- **Gotcha**: requiring text on the sash color flips `hasEmbroidery=true` for that selection → the
+  sash routes to `design_complete`. That's correct (sashes are always designed), but be aware.
+- **Verified live**: option-group path (`priceSelections`): no text → 400 «يرجى كتابة التفاصيل
+  المطلوبة لـ اللون»; with text → stored; + optional photo stored. Full-set path: no color → 400
+  «لون الوشاح مطلوب»; with color → 201; read-back reconstructs `sash_color {text,image_url}`.
+
+### C) `/staff/queue` rebuilt as the «منصّة الإنتاج» stage-rail console
+Old card/board/feed designs didn't scale to 150+ orders; user picked the stage-rail console (one of
+3 scalable directions modeled on `/admin/orders`). It is the screen the admin opens 24/7 AND that
+staff use (role-scoped) — ONE route serves both.
+- **Backend**: added `o.final_design_url, o.has_embroidery` to the `getQueue` SELECT (drives the
+  missing-design alert). `ProductionQueueItem` type extended to match.
+- **Frontend**: full rewrite of `app/staff/queue/page.tsx`:
+  - **Stage rail** (sticky carded sidebar desktop / horizontal chip strip mobile) with per-stage
+    counts + load bars + overdue/missing dots → **tap = instant CLIENT-side filter**.
+  - **One fetch** `getQueue(undefined, undefined, zone)` returns all the user's allowed orders (backend
+    auto-scopes non-managers to their stages); stage/source/rep/batch/search/pagination are all
+    client-side. **Zone is the ONLY server-side filter** (label heuristic) → refetches on change.
+  - KPI strip · source tabs (الكل/تجزئة/ممثلين) · rep drill-down (derived from queue data, NO admin
+    endpoint — staff-safe) + دفعة chips · 30/page · 15s silent polling (`usePolling`).
+  - **Real-data semantics** (the mockup faked these): «متأخر» = past batch `deadline`; «تصميم مفقود»
+    = post-design stage AND (`has_embroidery`||`design_id`) AND no `final_design_url`; who's-working =
+    `working_staff_name`.
+  - **Integration fixes** I applied over the agent's first port: removed a DUPLICATE shell/header (it
+    built its own `min-h-screen`+brand bar inside the staff layout) → now uses `PageHeader` and fits
+    the layout's sidebar + padded `<main>`; recolored stage/product pills blue/purple → **warm brand**.
+- **Verified**: tsc 0 · `next build` 0 · **live desktop + mobile with REAL data** (190 orders, via a
+  temporary admin JWT injected into a headless browser) · no console errors. The screenshots showed
+  warm pills, sticky rail, KPI, source tabs, rep drill-down, «تصميم مفقود» badge all working.
+
+### Open follow-ups
+- **Not merged / not deployed.** Decide merge to main + VPS deploy (PM2). Nothing is live in prod.
+- **Formal `security-review` skill NOT run** this session — a critic-agent review was, and its
+  findings were fixed + re-verified, but run the real phase-10 skill before shipping.
+- **Live in-browser click-through by the USER still pending** for: the typed-color forms (product
+  page / `/design` / full-set rep+student), the tailor read-only view, and `/staff/queue` driven as a
+  real (non-admin) staff login. I verified backend e2e + a headless admin render only.
+- **Seed not updated** for the sash color change — only the live dev DB was migrated (031). Fresh
+  installs via the seed still create the old swatches; update `seed*.js` (or fold 031 into schema/seed).
+- **`public/queue-mockups/`** (index/table/grouped/console + data.js + tokens.css) left as reference —
+  delete the folder before shipping if not wanted (it would deploy under /queue-mockups).
+- Carried over from the 2026-06-17 entry and still open: tailor production queue shows all in-prod
+  orders (scope to `product_type='sash'`?); monitor throughput groups by primary `staff_type` only;
+  the «صمم وشاحك» overlay overlap bug (DEFERRED, needs browser QA); `PROGRESS.md` still not updated.
+
+### Files touched this session
+- backend: `lib/db.js`, `middleware/auth.js`, `controllers/{orderController,productionController}.js`,
+  `routes/production.js`, `lib/fullSetOrder.js`; NEW `db/migrations/031_sash_color_typed_text.sql`
+- frontend: `app/staff/queue/page.tsx` (full rewrite), `components/catalog/OptionGroupField.tsx`,
+  `hooks/useDesignDraft.ts`, `components/wholesaler/FullSetOrderForm.tsx`,
+  `lib/{wholesaler,staff-types}.ts`; NEW `public/queue-mockups/*` (design mockups — reference only)
+- docs: `HANDOFF.md`
+
+---
+
+## 2026-06-17 — Staff/admin batch: multi-role staff · مفصل (tailor) role · orders filter + reps drill-down · inline images + missing-design alert + "who's working" · embroidery-zone filter · retail color-bug fix
+
+Large user-requested batch. On branch **`feat/staff-batch-2026-06-17`** (NOT on main, NOT
+deployed). **Migrations 028–030 are written but NOT YET APPLIED to Neon.** 6 of 9 items done;
+one deferred, phase-9 (apply/build/deploy) outstanding — see follow-ups.
+
+**What changed**
+1. **Multi-role staff** (one employee can hold several production roles, e.g. تصميم + تطريز
+   + مفصل). NEW `users.staff_types staff_type[]` is the authoritative set; the existing
+   `users.staff_type` is kept in sync as the PRIMARY role (= `staff_types[1]`) so every legacy
+   single-role read keeps working. Admin staff/team UI now assigns roles via **toggle chips**
+   (multi-select). Also fixed a latent bug: `digitizer` was missing from `adminController`'s
+   `STAFF_TYPES` (couldn't assign محوّل التطريز).
+2. **«مفصل» (tailor) role** — NEW `staff_type` value `tailor`. READ-ONLY view: opening any order
+   shows ONLY **student name + sash spec lines + American-shawl info** — contact/intake/price/
+   design-canvas are stripped **server-side** (defence in depth) and the UI renders a dedicated
+   compact page. No new pipeline stage (per the locked decision).
+3. **Orders filter → تجزئة/ممثلين** (dropped «الكل» on the staff queue). **Reps drill-down**:
+   the admin «ممثلين» tab now lands on **rep cards** (name + their دفعات + order count) → click a
+   rep → their students' orders, with **batch (دفعة) chips** + "كل الممثلين" back.
+4. **Inline images** (no download step) for customer reference photos on staff/tailor order
+   detail. **Missing-design alert**: red banner when an order reached embroidery/pressing/…/
+   delivered but `final_design_url` IS NULL. **"الموظف فلان يعمل عليه الآن"** surfaced for admin in
+   the orders list (table + mobile cards) and reworded on the detail presence banner.
+5. **Embroidery-zone filter** (وشاح يمين/يسار/خلف · قبعة جانب/أعلى · روب بكسرات/بدون) — filter
+   chips on BOTH the staff queue and admin orders.
+6. **Retail full-package color bug fixed** — selecting a color falsely demanded an image upload
+   the form has no field for.
+
+**Why / root causes**
+- Color bug was **DATA, not logic**: the sash color group «اللون» (`387d6948…`) had group-level
+  `requires_customer_image = TRUE` (+ a stray option-level `requires_customer_text`). A color
+  swatch picker must not require an upload → `030_fix_color_group_flags.sql` clears the flags on
+  all color-picker groups. The frontend mirrors the same rule, so the data fix covers both sides.
+  (Confirmed by querying the live Neon DB via `node -e` with `backend/lib/db`.)
+
+**How it works (gotchas for future edits)**
+- **`staffTypesOf(user)`** (in `middleware/auth.js`, exported) is the single source of truth for
+  "which roles does this user have" — use it everywhere instead of reading `user.staff_type`.
+  `authRequired`/`authQuery`/`optionalAuth` now also SELECT `staff_types`.
+- Multi-role behaviour: `requireStaffType` passes if ANY role matches; the production **queue
+  merges the stages of all roles**; `canStaffTransition` allows an edge if any role may do it;
+  the designer "pending-only" filter is scoped to **`design_complete` only** so a designer+
+  embroiderer still sees their embroidery queue; the presser canvas-block applies only when
+  presser is the **sole** role.
+- **Migration ordering matters**: `028` (adds the `tailor` enum value) MUST run before `029`
+  (uses the enum / multi-role column) — `migrate.js` sends each file as one implicit transaction,
+  and Postgres forbids adding-and-using an enum value in the same transaction. `schema.sql` was
+  also updated (idempotent) for fresh installs.
+- **Zone filter** = `orderZoneClause(zone, alias)` in `orderController` (exported, reused by the
+  staff queue) → an `EXISTS` over `order_items.label_snapshot` with **ILIKE heuristics** (يمين/
+  يسار/خلف/جانب/أعلى/كسرة). Embroidery zones additionally require real content (text/image) so a
+  plain (سادة) zone is excluded; pleats encode نعم/لا in `customer_text`. The predicate is
+  constant text (zone is a validated key) → injection-safe.
+- **Reps drill-down**: NEW `GET /admin/reps-overview` (rep + batches + order_count) and a new
+  `batch_id` filter on `GET /admin/orders` (`listOrders`). `listOrders` also now returns fresh
+  `working_staff_name` (90s TTL, same as the queue).
+- **Tailor queue**: a tailor currently sees ALL in-production orders (read-only; recognises
+  sashes by name) because tailor isn't a real stage — see follow-up to scope it to sash.
+
+**Verified**
+- **Backend**: `node --check` clean on every edited file (auth, adminController, orderController,
+  productionController, routes/admin). No test suite exists.
+- **Frontend**: `tsc --noEmit` → **0 errors** after all edits.
+- **NOT verified**: migrations NOT applied to Neon; **no `next build` run**; no backend e2e; no
+  live in-browser click-through.
+
+**Open follow-ups (what's left)**
+- **Phase 9 not done** — apply `028 → 029 → 030` on Neon (in order), run `next build`, backend
+  e2e on live DB, `security-review`, then deploy. Nothing is live.
+- **Bug «صمم وشاحك» overlap — DEFERRED** (user's choice) to its own visual-QA pass: needs the dev
+  server + a real browser. Root cause is layout, not data: `Whiteboard.tsx` renders `fixed
+  inset-0 z-[60]` INSIDE `TextEditor`'s `fixed inset-0 z-[200]` overlay, with a `flex min-h-0
+  flex-1 overflow-y-auto` that can collapse on mobile RTL (`design/page.tsx:454`, `Whiteboard.tsx:357/379`).
+- Tailor queue shows all in-production orders — consider scoping to `product_type = 'sash'`.
+- Monitor throughput still groups by the single primary `staff_type` (display only).
+- Zone-filter ILIKE labels are heuristic — verify coverage across the retail full-set vs
+  wholesaler طقم label sets against live data when applying migrations.
+- The admin «ممثلين» tab still also has the old الممثل `<Select>` (now redundant with the rep
+  grid) — harmless; remove if it clutters.
+- `PROGRESS.md` not updated this session (only `HANDOFF.md`).
+
+**Files touched**
+- backend: `middleware/auth.js`, `controllers/{adminController,orderController,productionController}.js`,
+  `routes/admin.js`
+- db: NEW `migrations/028_staff_tailor_type.sql`, `029_staff_multi_role.sql`,
+  `030_fix_color_group_flags.sql`; `schema.sql` (staff_type enum + `users.staff_types`)
+- frontend: `lib/{types,constants,admin,staff}.ts`, `app/staff/team/page.tsx`, `app/staff/page.tsx`,
+  `app/staff/orders/[orderId]/page.tsx`, `app/admin/orders/page.tsx`
+- docs: `HANDOFF.md`
+
+---
+
 ## 2026-06-16 (c) — طقم add-ons (شال امريكي + كسرة الكتف) · student inherits rep جامعة/قسم · clickable staff bundle rows
 
 Four user-requested changes. Committed to **main** this session.

@@ -17,7 +17,12 @@ import {
   validateSelection,
   type OptionSelection,
 } from "@/lib/pricing";
-import { validateCustomerImages, validateCustomerTexts } from "@/lib/customerImage";
+import {
+  validateCustomerImages,
+  validateCustomerTexts,
+  getSelectedOptionId,
+  selectionKey,
+} from "@/lib/customerImage";
 import type { CatalogProduct } from "@/lib/types";
 import { getApiErrorMessage } from "@/lib/api";
 
@@ -92,10 +97,17 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
 
   const sashColor = useMemo(() => {
     if (!colorGroup) return "أبيض";
-    const id = selection[colorGroup.id];
-    const opt = colorGroup.options.find((o) => o.id === id);
+    const optId = getSelectedOptionId(colorGroup, selection);
+    // Typed-color group: the real color is the customer's free text, not the option label.
+    if (colorGroup.requiresCustomerText) {
+      const txt = optId
+        ? customerTexts[selectionKey(colorGroup.id, optId)]
+        : undefined;
+      return txt?.trim() || "أبيض";
+    }
+    const opt = colorGroup.options.find((o) => o.id === optId);
     return opt?.labelAr ?? "أبيض";
-  }, [colorGroup, selection]);
+  }, [colorGroup, selection, customerTexts]);
 
   const role = product?.priceRole ?? "retail";
   const preview = useMemo(() => {
@@ -230,9 +242,27 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
             loadedFonts.forEach((f) => usedFontsRef.current.add(f));
             setFontsUsed(loadedFonts);
             const cg = full.optionGroups.find((g) => g.nameAr.includes("لون"));
-            const match = cg?.options.find((o) => o.labelAr === my.data?.sash_color);
-            if (cg && match) {
-              setSelection((prev) => ({ ...prev, [cg.id]: match.id }));
+            const savedColor = my.data?.sash_color;
+            if (cg && savedColor) {
+              if (cg.requiresCustomerText) {
+                // Typed-color sash: auto-select the sole option + restore the typed text,
+                // unless a fresher preset/draft already supplied it.
+                const opt = cg.options.find((o) => o.active) ?? cg.options[0];
+                if (opt) {
+                  setSelection((prev) =>
+                    prev[cg.id] != null ? prev : { ...prev, [cg.id]: opt.id }
+                  );
+                  const ckey = selectionKey(cg.id, opt.id);
+                  setCustomerTexts((prev) =>
+                    prev[ckey] ? prev : { ...prev, [ckey]: savedColor }
+                  );
+                }
+              } else {
+                const match = cg.options.find((o) => o.labelAr === savedColor);
+                if (match) {
+                  setSelection((prev) => ({ ...prev, [cg.id]: match.id }));
+                }
+              }
             }
             if (my.data.completed && !my.edit_exception) {
               setCompletedLocked(true);

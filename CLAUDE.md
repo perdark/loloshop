@@ -2,6 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Latest handoff (read first)
+The most recent session handoff — what was just changed, how it works, and open
+follow-ups. Read it before starting any work. It is auto-loaded via this import:
+@HANDOFF.md
+
 ## Commands
 Backend (`backend/`):
 - `npm run dev` — Express API w/ nodemon on :4000

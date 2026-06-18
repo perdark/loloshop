@@ -1,10 +1,17 @@
 const { query, tx } = require('../lib/db');
 const { publicUrl } = require('../lib/upload');
-const { persistFullSetOrder, readFullSetOrder } = require('../lib/fullSetOrder');
+const { persistFullSetOrder, readFullSetOrder, loadWholesalerPricing } = require('../lib/fullSetOrder');
 
 async function getWholesalerId(userId) {
   const { rows } = await query(`SELECT id FROM wholesalers WHERE user_id = $1`, [userId]);
   return rows[0]?.id;
+}
+
+// Rep/student-facing pricing for the full-set form: base طقم price (0 = fall back to the
+// package price client-side) + the add-on surcharges. NEVER exposes the admin-private price.
+async function publicPricingFor(wholesalerId) {
+  const p = await loadWholesalerPricing(wholesalerId);
+  return { base: p.wholesalerPrice, addons: p.addons };
 }
 
 async function dashboard(req, res) {
@@ -18,7 +25,7 @@ async function dashboard(req, res) {
        (SELECT COUNT(*) FROM students s JOIN designs d ON d.student_id = s.id
          WHERE s.wholesaler_id = w.id AND d.completed = TRUE) AS completed_designs,
        COALESCE((
-         SELECT ROUND(SUM(o.price) * w.commission_rate / 100)::bigint
+         SELECT SUM(o.profit)::bigint
          FROM students s JOIN orders o ON o.student_id = s.id
          WHERE s.wholesaler_id = w.id AND o.status <> 'cancelled'
        ), 0) AS earned_commission
@@ -191,13 +198,14 @@ async function uploadImage(req, res) {
   res.json({ data: { url: publicUrl(req, 'images', req.file.filename) } });
 }
 
-// Active full-set packages the rep can order (الطقم الكامل).
+// Active full-set packages the rep can order (الطقم الكامل) + the rep's «التسعيرة».
 async function fullSetPackages(req, res) {
+  const wId = await getWholesalerId(req.user.id);
   const { rows } = await query(
     `SELECT id, name_ar, price FROM packages
      WHERE active = TRUE AND is_full_set = TRUE ORDER BY sort, created_at`
   );
-  res.json({ data: rows });
+  res.json({ data: { packages: rows, pricing: await publicPricingFor(wId) } });
 }
 
 // One student's basics (scoped to this rep) — feeds the order form header + guard.

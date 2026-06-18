@@ -1,8 +1,8 @@
 const { query, tx } = require('../lib/db');
 const { priceRoleForUser } = require('./catalogController');
 const { publish } = require('../lib/eventBus');
-const { staffScopeAllows } = require('../middleware/auth');
-const { persistFullSetOrder, readFullSetOrder } = require('../lib/fullSetOrder');
+const { staffScopeAllows, staffTypesOf } = require('../middleware/auth');
+const { persistFullSetOrder, readFullSetOrder, loadWholesalerPricing } = require('../lib/fullSetOrder');
 
 const ALL_STATUSES = [
   'pending_approval', 'designing', 'design_complete', 'converting',
@@ -54,10 +54,12 @@ const STAGE_AUTHZ = {
 
 function canStaffTransition(user, from, to) {
   if (user.role === 'admin') return true;
-  if (user.staff_type === 'manager') return true;
+  const mine = staffTypesOf(user);
+  if (mine.includes('manager')) return true;
   if (to === 'cancelled') return false;
   const allowed = STAGE_AUTHZ[`${from}→${to}`];
-  return Array.isArray(allowed) && allowed.includes(user.staff_type);
+  // Multi-role: a transition is permitted if ANY of the user's roles may perform it.
+  return Array.isArray(allowed) && allowed.some((t) => mine.includes(t));
 }
 
 const STATUS_LABEL_AR = {
@@ -78,17 +80,57 @@ const STATUS_LABEL_AR = {
 // Valid product types for the `type` filter
 const VALID_PRODUCT_TYPES = ['sash', 'robe', 'cap', 'shawl'];
 
+// Embroidery-zone / pleat filter. Maps a zone key → a SQL EXISTS predicate over the order's
+// spec lines (order_items.label_snapshot / customer_text). Shared by the admin orders list
+// and the staff production queue so design/embroidery/transfer/admin can filter to e.g.
+// "only sashes with right-side embroidery" or "robes with shoulder pleats". The clause uses
+// only constant text (zone is a validated key, never raw input) → injection-safe.
+const ORDER_ZONE_MATCH = {
+  sash_right:    `(oi.label_snapshot ILIKE '%يمين%' OR oi.label_snapshot ILIKE '%اليمن%')`,
+  sash_left:     `(oi.label_snapshot ILIKE '%يسار%' OR oi.label_snapshot ILIKE '%اليسر%')`,
+  sash_back:     `(oi.label_snapshot ILIKE '%خلف%')`,
+  cap_side:      `(oi.label_snapshot ILIKE '%جانب%')`,
+  cap_top:       `(oi.label_snapshot ILIKE '%أعلى%' OR oi.label_snapshot ILIKE '%اعلى%')`,
+  robe_pleat:    `(oi.label_snapshot ILIKE '%كسرة%' AND oi.customer_text = 'نعم')`,
+  robe_no_pleat: `(oi.label_snapshot ILIKE '%كسرة%' AND oi.customer_text = 'لا')`,
+};
+// Embroidery zones additionally require the zone to carry real content (text/image), so
+// "بيها تطريز" excludes a plain (سادة) zone. Pleats encode their yes/no in customer_text.
+const ZONE_NEEDS_CONTENT = new Set(['sash_right', 'sash_left', 'sash_back', 'cap_side', 'cap_top']);
+
+function orderZoneClause(zone, alias = 'o') {
+  const match = ORDER_ZONE_MATCH[zone];
+  if (!match) return null;
+  const content = ZONE_NEEDS_CONTENT.has(zone)
+    ? ` AND ((oi.customer_text IS NOT NULL AND btrim(oi.customer_text) <> '') OR oi.customer_image_url IS NOT NULL)`
+    : '';
+  return `EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = ${alias}.id AND ${match}${content})`;
+}
+
 async function listOrders(req, res) {
-  const { wholesaler_id, status, from, to, source, type, group } = req.query;
+  const { wholesaler_id, batch_id, status, from, to, source, type, group, zone } = req.query;
+  // FIELD VISIBILITY (mirrors getOrder): this route is reachable by any staff role
+  // (incl. read-only tailor/presser), so cost/profit and intake PII must NOT leak.
+  // Only manager/admin see cost/profit + intake; price additionally to embroiderer.
+  const myTypes = staffTypesOf(req.user);
+  const canSeeMoney = req.user.role === 'admin' || myTypes.includes('manager');
+  const canSeePrice = canSeeMoney || myTypes.includes('embroiderer');
   const params = [];
   const where = [];
   if (wholesaler_id) {
     params.push(wholesaler_id);
     where.push(`s.wholesaler_id = $${params.length}`);
   }
+  if (batch_id) {
+    params.push(batch_id);
+    where.push(`o.batch_id = $${params.length}`);
+  }
   // Source filter: retail = independent students (no wholesaler), wholesaler = rep-linked.
   if (source === 'retail') where.push('s.wholesaler_id IS NULL');
   else if (source === 'wholesaler') where.push('s.wholesaler_id IS NOT NULL');
+  // Embroidery-zone / pleat filter (no bound param — predicate is constant text).
+  const zoneClause = zone ? orderZoneClause(zone, 'o') : null;
+  if (zoneClause) where.push(zoneClause);
   if (status) {
     params.push(status);
     where.push(`o.status = $${params.length}`);
@@ -174,7 +216,22 @@ async function listOrders(req, res) {
       });
     }
 
-    return res.json({ data: { bundles: Array.from(bundleMap.values()) } });
+    let bundles = Array.from(bundleMap.values());
+    if (!canSeeMoney || !canSeePrice) {
+      bundles = bundles.map((b) => {
+        const out = { ...b };
+        if (!canSeeMoney) { out.intake = null; delete out.total_cost; delete out.total_profit; }
+        if (!canSeePrice) delete out.total_price;
+        out.items = out.items.map((it) => {
+          const i = { ...it };
+          if (!canSeeMoney) { delete i.cost; delete i.profit; }
+          if (!canSeePrice) delete i.price;
+          return i;
+        });
+        return out;
+      });
+    }
+    return res.json({ data: { bundles } });
   }
 
   // ── Default flat mode (existing behavior + optional type filter) ──
@@ -203,6 +260,8 @@ async function listOrders(req, res) {
            wu.name AS wholesaler_name,
            CASE WHEN s.wholesaler_id IS NULL THEN 'retail' ELSE 'wholesaler' END AS source,
            o.checkout_group_id,
+           o.working_staff_id,
+           CASE WHEN o.working_since > NOW() - INTERVAL '90 seconds' THEN wk.name END AS working_staff_name,
            o.price, o.cost, o.profit, o.status, o.created_at
     FROM orders o
     JOIN students s ON s.id = o.student_id
@@ -210,11 +269,20 @@ async function listOrders(req, res) {
     JOIN products p ON p.id = o.product_id
     LEFT JOIN wholesalers w ON w.id = s.wholesaler_id
     LEFT JOIN users wu ON wu.id = w.user_id
+    LEFT JOIN users wk ON wk.id = o.working_staff_id
     ${flatWhereSql}
     ORDER BY o.created_at DESC
     LIMIT $${dataParams.length - 1} OFFSET $${dataParams.length}`;
   const { rows } = await query(sql, dataParams);
-  res.json({ data: rows, total: countRes.rows[0].total, limit, offset });
+  const data = (!canSeeMoney || !canSeePrice)
+    ? rows.map((r) => {
+        const o = { ...r };
+        if (!canSeeMoney) { delete o.cost; delete o.profit; }
+        if (!canSeePrice) delete o.price;
+        return o;
+      })
+    : rows;
+  res.json({ data, total: countRes.rows[0].total, limit, offset });
 }
 
 async function updateStatus(req, res) {
@@ -1179,15 +1247,19 @@ async function repFullSetContext(req, res) {
   const approved = !!(student && student.status === 'approved');
   let packages = [];
   let existing = null;
+  let pricing = null;
   if (isRep) {
     const pk = await query(
       `SELECT id, name_ar, price FROM packages
        WHERE active = TRUE AND is_full_set = TRUE ORDER BY sort, created_at`
     );
     packages = pk.rows;
+    // Rep/student-facing pricing only (base + add-ons) — never the admin-private price.
+    const p = await loadWholesalerPricing(student.wholesaler_id);
+    pricing = { base: p.wholesalerPrice, addons: p.addons };
     if (approved) existing = await readFullSetOrder(student.id);
   }
-  res.json({ data: { is_rep_student: isRep, approved, packages, existing } });
+  res.json({ data: { is_rep_student: isRep, approved, packages, existing, pricing } });
 }
 
 // Student creates/updates their own full-set order.
@@ -1215,4 +1287,5 @@ module.exports = {
   listOrders, updateStatus, configureOrder, configurePackage, configureFullSet, getOrderBreakdown,
   vipUpgradeContext, upgradeToVip, repFullSetContext, configureRepFullSet,
   priceSelections, canStaffTransition, TRANSITIONS, STATUS_LABEL_AR, ALL_STATUSES,
+  orderZoneClause,
 };

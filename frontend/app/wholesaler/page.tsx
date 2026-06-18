@@ -141,10 +141,10 @@ export default function WholesalerDashboardPage() {
         <StatCard label="تصاميم مكتملة" value={String(dashboard.completedDesigns)} accent="profit" />
       </div>
 
-      {(dashboard.commissionRate ?? 0) > 0 && (
+      {(dashboard.earnedCommission ?? 0) > 0 && (
         <section className="surface-card rounded-2xl p-5 text-center">
           <p className="text-xs font-medium text-[var(--shop-muted)]">
-            عمولتك المستحقة ({dashboard.commissionRate}%)
+            أرباحك المستحقة
           </p>
           <p className="mt-1.5 font-display text-3xl font-bold text-ink" dir="ltr">
             {formatIQD(dashboard.earnedCommission ?? 0)}

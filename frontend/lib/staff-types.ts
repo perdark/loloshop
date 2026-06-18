@@ -85,6 +85,10 @@ export interface ProductionQueueItem {
   working_staff_id?: string | null;
   working_staff_name?: string | null;
   working_since?: string | null;
+  /** Final rendered design image — null when not yet uploaded (drives the missing-design alert). */
+  final_design_url?: string | null;
+  /** Whether this piece carries embroidery work (drives the missing-design alert). */
+  has_embroidery?: boolean;
 }
 
 /** One item in the `items[]` array on the production order detail */

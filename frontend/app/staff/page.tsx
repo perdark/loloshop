@@ -18,6 +18,9 @@ import {
   ORDER_SCOPE_LABELS,
   ORDER_SOURCE_LABELS,
   STAFF_TYPE_LABELS,
+  EMBROIDERY_ZONE_LABELS,
+  EMBROIDERY_ZONE_ORDER,
+  type EmbroideryZone,
 } from "@/lib/constants";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 import { useProductionEvents } from "@/hooks/useProductionEvents";
@@ -78,7 +81,6 @@ interface SourceFilterProps {
 
 function SourceFilterControl({ value, onChange }: SourceFilterProps) {
   const options: { v: SourceFilter; label: string }[] = [
-    { v: "", label: "الكل" },
     { v: "retail", label: ORDER_SOURCE_LABELS.retail },
     { v: "wholesaler", label: ORDER_SOURCE_LABELS.wholesaler },
   ];
@@ -196,7 +198,8 @@ function QueueView({
   const [items, setItems] = useState<ProductionQueueItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);
-  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("");
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("retail");
+  const [zoneFilter, setZoneFilter] = useState<EmbroideryZone | "">("");
 
   const meta = QUEUE_META[staffType] ?? {
     title: "قائمة الطلبات",
@@ -209,7 +212,7 @@ function QueueView({
       if (!silent) setLoading(true);
       setFetchError(false);
       try {
-        const data = await getQueue(undefined, sourceFilter || undefined);
+        const data = await getQueue(undefined, sourceFilter || undefined, zoneFilter || undefined);
         setItems(data);
       } catch (err) {
         if (!silent) {
@@ -220,7 +223,7 @@ function QueueView({
         if (!silent) setLoading(false);
       }
     },
-    [sourceFilter]
+    [sourceFilter, zoneFilter]
   );
 
   useEffect(() => {
@@ -303,6 +306,35 @@ function QueueView({
             </div>
           ) : null}
 
+          {/* Embroidery-zone / pleat filter (sash R/L/back · cap side/top · robe pleats) */}
+          <div className="mb-4 flex flex-wrap gap-1.5" role="group" aria-label="تصفية حسب التطريز">
+            <button
+              type="button"
+              onClick={() => setZoneFilter("")}
+              className={`min-h-9 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                zoneFilter === ""
+                  ? "border-orange-ink bg-orange-ink/10 text-orange-ink"
+                  : "border-line bg-surface-sink text-ink-soft hover:border-orange-ink/40"
+              }`}
+            >
+              كل الطلبات
+            </button>
+            {EMBROIDERY_ZONE_ORDER.map((z) => (
+              <button
+                key={z}
+                type="button"
+                onClick={() => setZoneFilter(z)}
+                className={`min-h-9 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                  zoneFilter === z
+                    ? "border-orange-ink bg-orange-ink/10 text-orange-ink"
+                    : "border-line bg-surface-sink text-ink-soft hover:border-orange-ink/40"
+                }`}
+              >
+                {EMBROIDERY_ZONE_LABELS[z]}
+              </button>
+            ))}
+          </div>
+
           {loading ? (
             <QueueSkeleton />
           ) : fetchError ? (
@@ -376,7 +408,7 @@ function MonitorDashboard({
   const [data, setData] = useState<MonitorDataExtended | null>(null);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);
-  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("");
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("retail");
   const [activeTab, setActiveTab] = useState<"monitor" | "completed">("monitor");
 
   // Quick bonus/deduction straight from the performance table (admin only —

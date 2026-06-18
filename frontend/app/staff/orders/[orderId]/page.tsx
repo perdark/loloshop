@@ -25,6 +25,7 @@ import {
 import { getApiErrorMessage } from "@/lib/api";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 import type { ProductionOrderDetail, ProductionOrderItem } from "@/lib/staff-types";
+import type { StaffType } from "@/lib/types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -758,6 +759,86 @@ export default function ProductionOrderDetailPage() {
   // Show price only when backend returns it (admin + embroiderer)
   const showPrice = typeof order.price === "number" && order.price > 0;
 
+  // Multi-role: مفصل (tailor) read-only view — only when tailor is the user's sole role
+  // (a tailor who is also a designer sees the full view). Mirrors the backend strip.
+  const myRoles: StaffType[] =
+    user?.staff_types ?? (user?.staff_type ? [user.staff_type] : []);
+  const isTailorOnly =
+    user?.role === "staff" && myRoles.length > 0 && myRoles.every((r) => r === "tailor");
+
+  // Missing final-design alert: order reached a stage where a final design should exist
+  // (it has embroidery/a design) but none was uploaded.
+  const designExpected = !!order.has_embroidery || !!design || !!order.design_id;
+  const designStageReached = ["embroidery", "pressing", "preparing", "ready", "delivered"].includes(order.status);
+  const missingFinalDesign = designExpected && designStageReached && !order.final_design_url;
+
+  // ── مفصل (tailor): stripped read-only view — student name + sash/shawl info only ──
+  if (isTailorOnly) {
+    const sashItems = items.filter(
+      (i) => i.group_id !== null || !!i.customer_text || !!i.customer_image_url
+    );
+    return (
+      <div dir="rtl" lang="ar">
+        <div className="mb-4">
+          <Link
+            href="/staff"
+            className="inline-flex items-center gap-1 text-sm font-medium text-orange-ink hover:underline"
+          >
+            <span aria-hidden>→</span> العودة
+          </Link>
+        </div>
+        <PageHeader title={order.student_name} subtitle={order.product_name} />
+        <div className="space-y-4">
+          <article className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
+            <h2 className="font-display-ar text-lg font-bold text-ink">بيانات الطالب</h2>
+            <p className="mt-2 text-sm">
+              <span className="text-muted">الاسم: </span>
+              <span className="font-semibold text-ink">{order.student_name}</span>
+            </p>
+          </article>
+          <article className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
+            <h3 className="mb-3 text-sm font-semibold text-ink">معلومات الوشاح والشال الأمريكي</h3>
+            {sashItems.length > 0 ? (
+              <ul className="space-y-3">
+                {sashItems.map((item, idx) => (
+                  <li key={idx} className="space-y-1.5">
+                    <div className="flex items-center justify-between gap-2 text-sm">
+                      <span className="text-ink-soft">{item.label_snapshot}</span>
+                      {item.customer_text && (
+                        <span className="font-semibold text-ink">{item.customer_text}</span>
+                      )}
+                    </div>
+                    {item.customer_image_url && (
+                      <a
+                        href={resolveImageUrl(item.customer_image_url) ?? "#"}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block w-fit"
+                        aria-label={`عرض صورة ${item.label_snapshot} بالحجم الكامل`}
+                      >
+                        <Image
+                          src={resolveImageUrl(item.customer_image_url) ?? ""}
+                          alt={`صورة — ${item.label_snapshot}`}
+                          width={240}
+                          height={240}
+                          className="max-h-56 w-auto rounded-lg border border-line object-contain"
+                          loading="lazy"
+                          unoptimized
+                        />
+                      </a>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-ink-soft">لا توجد تفاصيل وشاح لهذا الطلب.</p>
+            )}
+          </article>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div dir="rtl" lang="ar">
       {/* Back link */}
@@ -776,14 +857,28 @@ export default function ProductionOrderDetailPage() {
         {...(isAdmin ? { backHref: "/admin", backLabel: "العودة للوحة التحكم" } : {})}
       />
 
-      {/* Presence banner */}
+      {/* Presence banner — admin/staff see which employee is working on this order */}
       {presenceOwner && (
         <div
           role="alert"
           className="mb-4 flex items-center gap-2 rounded-xl border border-orange-ink/25 bg-orange-ink/8 px-4 py-3 text-sm font-medium text-orange-ink"
         >
           <span aria-hidden>⚠</span>
-          يعمل عليه: {presenceOwner}
+          الموظف {presenceOwner} يعمل على هذا الطلب ({order.product_name})
+        </div>
+      )}
+
+      {/* Missing final-design alert — finished embroidery/design but no final image uploaded */}
+      {missingFinalDesign && (
+        <div
+          role="alert"
+          className="mb-4 flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm font-medium text-danger"
+        >
+          <span aria-hidden>⚠</span>
+          <span>
+            تنبيه: لم تُرفع صورة التصميم النهائي رغم وصول الطلب إلى مرحلة «
+            {ORDER_STATUS_LABELS[order.status] ?? order.status}». يرجى رفع التصميم النهائي للطلب.
+          </span>
         </div>
       )}
 
@@ -1044,22 +1139,30 @@ export default function ProductionOrderDetailPage() {
                     <li key={idx} className="space-y-1.5">
                       <div className="flex items-center justify-between gap-2 text-sm">
                         <span className="text-ink-soft">{item.label_snapshot}</span>
-                        <div className="flex items-center gap-2">
-                          {item.customer_text && (
-                            <span className="font-semibold text-ink">{item.customer_text}</span>
-                          )}
-                          {item.customer_image_url && (
-                            <a
-                              href={resolveImageUrl(item.customer_image_url) ?? "#"}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex min-h-[44px] items-center rounded-lg border border-orange-ink/25 bg-surface-sink px-3 py-1 text-xs font-medium text-orange-ink transition-colors hover:bg-orange-ink/10"
-                            >
-                              صورة العميل
-                            </a>
-                          )}
-                        </div>
+                        {item.customer_text && (
+                          <span className="font-semibold text-ink">{item.customer_text}</span>
+                        )}
                       </div>
+                      {/* Customer reference photo shown inline (no download step) */}
+                      {item.customer_image_url && (
+                        <a
+                          href={resolveImageUrl(item.customer_image_url) ?? "#"}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block w-fit"
+                          aria-label={`عرض صورة ${item.label_snapshot} بالحجم الكامل`}
+                        >
+                          <Image
+                            src={resolveImageUrl(item.customer_image_url) ?? ""}
+                            alt={`صورة العميل — ${item.label_snapshot}`}
+                            width={240}
+                            height={240}
+                            className="max-h-56 w-auto rounded-lg border border-line object-contain"
+                            loading="lazy"
+                            unoptimized
+                          />
+                        </a>
+                      )}
                     </li>
                   ))}
               </ul>

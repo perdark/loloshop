@@ -16,7 +16,7 @@ async function authRequired(req, res, next) {
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
     const { rows } = await query(
-      `SELECT id, name, phone, email, role, staff_type, order_scope, phone_verified FROM users WHERE id = $1`,
+      `SELECT id, name, phone, email, role, staff_type, staff_types, order_scope, phone_verified FROM users WHERE id = $1`,
       [payload.sub]
     );
     if (!rows.length) return res.status(401).json({ error: 'المستخدم غير موجود', code: 'ERR_AUTH' });
@@ -43,7 +43,7 @@ async function authQuery(req, res, next) {
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
     const { rows } = await query(
-      `SELECT id, name, phone, email, role, staff_type, order_scope, phone_verified FROM users WHERE id = $1`,
+      `SELECT id, name, phone, email, role, staff_type, staff_types, order_scope, phone_verified FROM users WHERE id = $1`,
       [payload.sub]
     );
     if (!rows.length) return res.status(401).json({ error: 'المستخدم غير موجود', code: 'ERR_AUTH' });
@@ -52,6 +52,23 @@ async function authQuery(req, res, next) {
   } catch {
     return res.status(401).json({ error: 'الجلسة منتهية', code: 'ERR_AUTH' });
   }
+}
+
+/**
+ * The full set of job-types a staff member holds. Multi-role (Migration 029):
+ * `users.staff_types[]` is authoritative; fall back to the single `staff_type` for any
+ * row not yet backfilled. Returns [] for non-staff. Use this everywhere instead of
+ * reading `user.staff_type` directly so a multi-role employee is treated as all roles.
+ */
+function staffTypesOf(user) {
+  if (!user) return [];
+  let st = user.staff_types;
+  // Defensive: if the `staff_type[]` array parser wasn't registered (fresh DB / startup
+  // race), pg hands back the raw literal "{designer,embroiderer}" — normalize it here so
+  // multi-role logic never silently collapses to the single primary role.
+  if (typeof st === 'string') st = st.replace(/^{|}$/g, '').split(',').filter(Boolean);
+  if (Array.isArray(st) && st.length) return st;
+  return user.staff_type ? [user.staff_type] : [];
 }
 
 function requireRole(...roles) {
@@ -75,8 +92,9 @@ function requireStaffType(...types) {
     if (!req.user) return res.status(401).json({ error: 'غير مصرح', code: 'ERR_AUTH' });
     const u = req.user;
     if (u.role === 'admin') return next();
-    if (u.role === 'staff' && (u.staff_type === 'manager' || types.includes(u.staff_type))) {
-      return next();
+    if (u.role === 'staff') {
+      const mine = staffTypesOf(u);
+      if (mine.includes('manager') || types.some((t) => mine.includes(t))) return next();
     }
     return res.status(403).json({ error: 'ممنوع', code: 'ERR_FORBIDDEN' });
   };
@@ -88,7 +106,7 @@ function requireStaffType(...types) {
  * must match the order's source. `isRetailOrder` = the order's student has no wholesaler.
  */
 function staffScopeAllows(user, isRetailOrder) {
-  if (user.role === 'admin' || user.staff_type === 'manager') return true;
+  if (user.role === 'admin' || staffTypesOf(user).includes('manager')) return true;
   const scope = user.order_scope || 'both';
   if (scope === 'both') return true;
   return scope === (isRetailOrder ? 'retail' : 'wholesaler');
@@ -102,7 +120,7 @@ async function optionalAuth(req, res, next) {
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
     const { rows } = await query(
-      `SELECT id, name, phone, email, role, staff_type, order_scope, phone_verified FROM users WHERE id = $1`,
+      `SELECT id, name, phone, email, role, staff_type, staff_types, order_scope, phone_verified FROM users WHERE id = $1`,
       [payload.sub]
     );
     if (rows.length) req.user = rows[0];
@@ -112,4 +130,4 @@ async function optionalAuth(req, res, next) {
   next();
 }
 
-module.exports = { signToken, authRequired, authQuery, requireRole, requireStaffType, staffScopeAllows, optionalAuth };
+module.exports = { signToken, authRequired, authQuery, requireRole, requireStaffType, staffScopeAllows, staffTypesOf, optionalAuth };

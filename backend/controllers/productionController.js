@@ -1,6 +1,6 @@
 const { query, tx } = require('../lib/db');
-const { canStaffTransition, STATUS_LABEL_AR, TRANSITIONS } = require('./orderController');
-const { staffScopeAllows } = require('../middleware/auth');
+const { canStaffTransition, STATUS_LABEL_AR, TRANSITIONS, orderZoneClause } = require('./orderController');
+const { staffScopeAllows, staffTypesOf } = require('../middleware/auth');
 const { imageUpload, publicUrl } = require('../lib/upload');
 const { addClient, publish } = require('../lib/eventBus');
 
@@ -33,7 +33,7 @@ function emitPresence(orderId, staffId, staffName) {
 // users.order_scope; manager/admin (and 'both'-scope staff) may filter freely via ?source.
 function resolveSourceFilter(user, querySource) {
   const scope = user.order_scope || 'both';
-  const free = user.role === 'admin' || user.staff_type === 'manager' || scope === 'both';
+  const free = user.role === 'admin' || staffTypesOf(user).includes('manager') || scope === 'both';
   if (free) {
     return querySource === 'retail' || querySource === 'wholesaler' ? querySource : null;
   }
@@ -53,6 +53,9 @@ const QUEUE_STAGES = {
   embroiderer: ['embroidery'],
   presser: ['pressing'],
   preparer: ['preparing', 'ready'],
+  // مفصل (tailor) — read-only viewer of every in-production order (recognises sashes by
+  // name). No transitions exist for tailor, so available_actions stays empty (read-only).
+  tailor: ['design_complete', 'converting', 'embroidery', 'pressing', 'preparing', 'ready'],
 };
 const MANAGER_STAGES = ['design_complete', 'converting', 'embroidery', 'pressing', 'preparing', 'ready'];
 
@@ -61,7 +64,7 @@ const MANAGER_STAGES = ['design_complete', 'converting', 'embroidery', 'pressing
 const PRESENCE_TTL_SECONDS = 90;
 
 function isManager(u) {
-  return u.role === 'admin' || u.staff_type === 'manager';
+  return u.role === 'admin' || staffTypesOf(u).includes('manager');
 }
 
 // Route-aware next stage: design-bearing sashes must use approve (not advance).
@@ -114,17 +117,25 @@ async function getQueue(req, res) {
     const filter = req.query.stage;
     stages = filter && MANAGER_STAGES.includes(filter) ? [filter] : MANAGER_STAGES;
   } else {
-    stages = QUEUE_STAGES[u.staff_type] || [];
+    // Multi-role: union the stage queues of every role the staff member holds.
+    const set = new Set();
+    for (const t of staffTypesOf(u)) (QUEUE_STAGES[t] || []).forEach((st) => set.add(st));
+    stages = [...set];
   }
   if (!stages.length) return res.json({ data: [] });
 
-  // The designer only reviews designs still awaiting a verdict.
-  // For design-less embroidery orders (cap/robe) the designer also handles them (design_id IS NULL).
-  const onlyPending = u.staff_type === 'designer' && !isManager(u);
+  // A designer only reviews designs still awaiting a verdict — but this narrows ONLY the
+  // design_complete stage, so a multi-role designer (e.g. designer+embroiderer) still sees
+  // their other merged stages unfiltered. Design-less embroidery orders (cap/robe) the
+  // designer also handles (design_id IS NULL).
+  const designerPending = staffTypesOf(u).includes('designer') && !isManager(u);
   const srcClause = sourceClause(resolveSourceFilter(u, req.query.source));
+  // Embroidery-zone / pleat filter (sash R/L/back · cap side/top · robe pleats).
+  const zoneClause = req.query.zone ? orderZoneClause(req.query.zone, 'o') : null;
   const { rows } = await query(
     `SELECT o.id, o.status, o.created_at, o.design_id, o.checkout_group_id,
             o.working_staff_id, o.working_since,
+            o.final_design_url, o.has_embroidery,
             u.name AS student_name, s.university_name, s.department,
             p.name_ar AS product_name, p.type AS product_type,
             b.name_ar AS batch_name, b.deadline,
@@ -145,10 +156,11 @@ async function getQueue(req, res) {
      LEFT JOIN users wu ON wu.id = w.user_id
      LEFT JOIN users wk ON wk.id = o.working_staff_id
      WHERE o.status::text = ANY($1)
-       ${onlyPending
-         ? "AND ((o.design_id IS NOT NULL AND d.approval_status = 'pending') OR (o.design_id IS NULL AND o.has_embroidery = TRUE))"
+       ${designerPending
+         ? "AND (o.status::text <> 'design_complete' OR ((o.design_id IS NOT NULL AND d.approval_status = 'pending') OR (o.design_id IS NULL AND o.has_embroidery = TRUE)))"
          : ''}
        ${srcClause}
+       ${zoneClause ? 'AND ' + zoneClause : ''}
      ORDER BY b.deadline ASC NULLS LAST, o.created_at ASC`,
     [stages]
   );
@@ -159,7 +171,14 @@ async function getQueue(req, res) {
 async function getOrder(req, res) {
   const { id } = req.params;
   const u = req.user;
-  const presserOnly = u.staff_type === 'presser' && !isManager(u);
+  // Presser is the only role barred from the canvas/contact details. A multi-role user who
+  // is ALSO a presser still sees them via their other role, so block only when presser is the
+  // sole role.
+  const uTypes = staffTypesOf(u);
+  const presserOnly = !isManager(u) && uTypes.includes('presser') && uTypes.every((t) => t === 'presser');
+  // مفصل (tailor) is a READ-ONLY view: only student name + sash + American-shawl info.
+  // Applies when tailor is the sole role (a tailor who is also a designer sees the full view).
+  const tailorOnly = !isManager(u) && uTypes.includes('tailor') && uTypes.every((t) => t === 'tailor');
 
   const base = await query(
     `SELECT o.id, o.status, o.created_at, o.price, o.design_id, o.package_id, o.checkout_group_id,
@@ -212,7 +231,7 @@ async function getOrder(req, res) {
   }
 
   // PRICE VISIBILITY: only manager/admin/embroiderer sees price (deposit is money too)
-  if (!isManager(u) && u.staff_type !== 'embroiderer' && u.role !== 'admin') {
+  if (!isManager(u) && !uTypes.includes('embroiderer') && u.role !== 'admin') {
     delete order.price;
     if (order.intake) delete order.intake.deposit;
   }
@@ -220,9 +239,18 @@ async function getOrder(req, res) {
   if (presserOnly && order.intake) {
     order.intake = { event_date: order.intake.event_date };
   }
+  // Tailor (مفصل) is the most-restricted role: ONLY student name + sash/shawl spec lines
+  // (the items[] below). Rebuild `order` from an ALLOW-LIST so nothing else can ever leak
+  // via a direct API call — not price, contact, intake, demographics, measurements, the
+  // final-design URL, batch, or wholesaler. (Allow-list, not deny-list, so a future column
+  // added to the SELECT can't silently re-open the hole.)
+  if (tailorOnly) {
+    const ALLOWED = new Set(['id', 'status', 'created_at', 'student_name', 'product_name', 'product_type']);
+    for (const k of Object.keys(order)) if (!ALLOWED.has(k)) delete order[k];
+  }
 
   let design = null;
-  if (order.design_id) {
+  if (order.design_id && !tailorOnly) {
     if (presserOnly) {
       // sash info only — colour + status, NO artwork/canvas/logos.
       const d = await query(
@@ -247,9 +275,15 @@ async function getOrder(req, res) {
      FROM order_items WHERE order_id = $1 ORDER BY created_at`,
     [id]
   );
-  const items = itemsRes.rows.map((it) =>
+  let items = itemsRes.rows.map((it) =>
     presserOnly ? { ...it, customer_image_url: null, customer_text: null } : it
   );
+  // Tailor: only sash/shawl spec lines with real content, and never the per-line price.
+  if (tailorOnly) {
+    items = items
+      .filter((it) => it.group_id !== null || it.customer_text || it.customer_image_url)
+      .map((it) => ({ ...it, price_snapshot: null }));
+  }
 
   // Bundle siblings
   let bundle = null;
@@ -307,12 +341,12 @@ async function getOrder(req, res) {
       !!design &&
       design.approval_status === 'pending' &&
       order.status === 'design_complete' &&
-      (u.staff_type === 'designer' || isManager(u)),
+      (uTypes.includes('designer') || isManager(u)),
     can_reject:
       !!design &&
       design.approval_status === 'pending' &&
       order.status === 'design_complete' &&
-      (u.staff_type === 'designer' || isManager(u)),
+      (uTypes.includes('designer') || isManager(u)),
   };
 
   res.json({
@@ -322,7 +356,7 @@ async function getOrder(req, res) {
       items,
       bundle,
       package_orders: bundle, // backward-compat alias
-      can_see_design: !presserOnly,
+      can_see_design: !presserOnly && !tailorOnly,
       available_actions,
     },
   });

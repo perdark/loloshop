@@ -564,6 +564,49 @@ function SalaryPanel({ userId, userName }: SalaryPanelProps) {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
+/** All production roles a staff row holds (multi-role), falling back to the legacy single role. */
+function rolesOf(u: User): StaffType[] {
+  if (u.staff_types && u.staff_types.length) return u.staff_types;
+  return u.staff_type ? [u.staff_type] : [];
+}
+
+/** Multi-select role picker (toggle chips). Used inline per-row and in the create form. */
+function RoleChips({
+  value,
+  onChange,
+  disabled,
+  ariaLabel,
+}: {
+  value: StaffType[];
+  onChange: (next: StaffType[]) => void;
+  disabled?: boolean;
+  ariaLabel?: string;
+}) {
+  return (
+    <div className="flex flex-wrap gap-1.5" role="group" aria-label={ariaLabel}>
+      {(Object.entries(STAFF_TYPE_LABELS) as [StaffType, string][]).map(([val, label]) => {
+        const on = value.includes(val);
+        return (
+          <button
+            key={val}
+            type="button"
+            disabled={disabled}
+            aria-pressed={on}
+            onClick={() => onChange(on ? value.filter((v) => v !== val) : [...value, val])}
+            className={`min-h-11 rounded-full border px-3 py-1 text-xs font-semibold transition-colors disabled:opacity-60 ${
+              on
+                ? "border-orange-ink bg-orange-ink/10 text-orange-ink"
+                : "border-line bg-beige text-ink-soft hover:border-orange-ink/40"
+            }`}
+          >
+            {label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function AdminStaffPage() {
   const [rows, setRows] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
@@ -578,7 +621,7 @@ export default function AdminStaffPage() {
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [staffTypeField, setStaffTypeField] = useState<StaffType>("designer");
+  const [staffTypesField, setStaffTypesField] = useState<StaffType[]>(["designer"]);
   const [orderScopeField, setOrderScopeField] = useState<StaffOrderScope>("both");
 
   const [newPassword, setNewPassword] = useState("");
@@ -610,14 +653,14 @@ export default function AdminStaffPage() {
     }
     setSubmitting(true);
     try {
-      await createStaff({ name, phone, email, password, staff_type: staffTypeField, order_scope: orderScopeField });
+      await createStaff({ name, phone, email, password, staff_types: staffTypesField, order_scope: orderScopeField });
       toast.success("تم إنشاء الموظف");
       setCreateOpen(false);
       setName("");
       setPhone("");
       setEmail("");
       setPassword("");
-      setStaffTypeField("designer");
+      setStaffTypesField(["designer"]);
       setOrderScopeField("both");
       load();
     } catch (err) {
@@ -627,11 +670,11 @@ export default function AdminStaffPage() {
     }
   }
 
-  async function handleUpdateType(userId: string, newType: StaffType) {
+  async function handleUpdateType(userId: string, newTypes: StaffType[]) {
     setTypeUpdating(userId);
     try {
-      await updateStaffType(userId, newType);
-      toast.success("تم تحديث الدور");
+      await updateStaffType(userId, newTypes);
+      toast.success("تم تحديث الأدوار");
       load();
     } catch (err) {
       toast.error(getApiErrorMessage(err, "تعذر تحديث الدور"));
@@ -726,11 +769,11 @@ export default function AdminStaffPage() {
                     </p>
                     {u.email && <p className="text-xs text-[var(--shop-muted)]">{u.email}</p>}
                     <div className="mt-1 flex flex-wrap gap-1">
-                      {u.staff_type && (
-                        <span className="inline-flex items-center rounded-full border border-orange-ink/25 bg-orange-ink/8 px-2 py-0.5 text-xs font-semibold text-orange-ink">
-                          {STAFF_TYPE_LABELS[u.staff_type]}
+                      {rolesOf(u).map((t) => (
+                        <span key={t} className="inline-flex items-center rounded-full border border-orange-ink/25 bg-orange-ink/8 px-2 py-0.5 text-xs font-semibold text-orange-ink">
+                          {STAFF_TYPE_LABELS[t]}
                         </span>
-                      )}
+                      ))}
                       {u.order_scope && (
                         <span className="inline-flex items-center rounded-full border border-line bg-surface-sink px-2 py-0.5 text-xs font-medium text-ink-soft">
                           {ORDER_SCOPE_LABELS[u.order_scope]}
@@ -740,21 +783,13 @@ export default function AdminStaffPage() {
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  {/* Inline role change */}
-                  <select
-                    value={u.staff_type ?? ""}
+                  {/* Inline multi-role change — toggling a chip saves immediately */}
+                  <RoleChips
+                    value={rolesOf(u)}
                     disabled={typeUpdating === u.id}
-                    onChange={(e) =>
-                      handleUpdateType(u.id, e.target.value as StaffType)
-                    }
-                    className="min-h-11 rounded-xl border border-line bg-beige px-3 py-2 text-sm text-ink shadow-[var(--shadow-soft)] outline-none transition-colors hover:border-orange-ink/40 focus:border-orange-ink disabled:opacity-60"
-                    aria-label={`دور ${u.name}`}
-                  >
-                    <option value="" disabled>اختر الدور</option>
-                    {Object.entries(STAFF_TYPE_LABELS).map(([value, label]) => (
-                      <option key={value} value={value}>{label}</option>
-                    ))}
-                  </select>
+                    ariaLabel={`أدوار ${u.name}`}
+                    onChange={(next) => handleUpdateType(u.id, next)}
+                  />
                   {/* Inline scope change */}
                   <select
                     value={u.order_scope ?? "both"}
@@ -832,15 +867,15 @@ export default function AdminStaffPage() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
-          <Select
-            label="الدور في الإنتاج"
-            value={staffTypeField}
-            onChange={(e) => setStaffTypeField(e.target.value as StaffType)}
-            options={Object.entries(STAFF_TYPE_LABELS).map(([value, label]) => ({
-              value,
-              label,
-            }))}
-          />
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-ink">الأدوار في الإنتاج</label>
+            <RoleChips
+              value={staffTypesField}
+              onChange={setStaffTypesField}
+              ariaLabel="أدوار الموظف الجديد"
+            />
+            <p className="mt-1 text-xs text-[var(--shop-muted)]">يمكن اختيار أكثر من دور للموظف الواحد.</p>
+          </div>
           <Select
             label="نطاق الطلبات"
             value={orderScopeField}

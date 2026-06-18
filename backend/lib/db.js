@@ -1,4 +1,4 @@
-const { Pool } = require('pg');
+const { Pool, types } = require('pg');
 const dns = require('dns');
 require('dotenv').config();
 
@@ -31,6 +31,25 @@ const pool = new Pool({
 pool.on('error', (err) => {
   console.error('Postgres pool error:', err);
 });
+
+// `pg` does NOT auto-parse custom enum array types (e.g. `staff_type[]`); without a
+// parser they arrive as the raw Postgres literal string "{designer,embroiderer}" instead
+// of a JS array, which silently breaks multi-role logic (staffTypesOf) AND any JSON sent
+// to the frontend. The array OID is database-specific, so look it up once at startup and
+// register a parser that turns "{a,b}" into ['a','b']. Self-heals if a query races startup
+// because staffTypesOf() also tolerates the string form defensively.
+(async () => {
+  try {
+    const { rows } = await pool.query(`SELECT oid FROM pg_type WHERE typname = '_staff_type'`);
+    if (rows.length) {
+      types.setTypeParser(Number(rows[0].oid), (val) =>
+        val == null ? val : val.replace(/^{|}$/g, '').split(',').filter(Boolean)
+      );
+    }
+  } catch (e) {
+    console.error('Failed to register _staff_type array parser:', e.message);
+  }
+})();
 
 const TRANSIENT = ['ETIMEDOUT', 'ENETUNREACH', 'ECONNRESET', 'ECONNREFUSED'];
 function isTransient(e) {

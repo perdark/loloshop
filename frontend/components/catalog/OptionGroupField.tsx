@@ -27,6 +27,13 @@ export function OptionGroupField({
 }: OptionGroupFieldProps) {
   const value = selection[group.id];
   const isColorGroup = group.nameAr.includes("لون");
+  // Sash color is a TYPED free-text color (+ optional photo), not a swatch list. The group
+  // carries requires_customer_text and a single auto-selected option; the actual color is
+  // entered via the sibling <CustomerImageUpload>, so we suppress the swatch here.
+  // (Robe/cap color groups keep requires_customer_text=false → real multi-swatch pickers.)
+  const isTypedColor = isColorGroup && group.requiresCustomerText;
+  const soleActiveId =
+    group.options.find((o) => o.active)?.id ?? group.options[0]?.id ?? null;
 
   // Admin locked this group to a single fixed option that the student must keep.
   const lockedOption = lockedOptionId
@@ -40,6 +47,19 @@ export function OptionGroupField({
       onChange(group.id, lockedOption.id);
     }
   }, [lockedOption, value, group.id, onChange]);
+
+  // Auto-select the sole option for a typed-color group so the pipeline always has an
+  // option to attach the typed color + optional photo to (the swatch UI is suppressed).
+  useEffect(() => {
+    if (isTypedColor && soleActiveId && value !== soleActiveId) {
+      onChange(group.id, soleActiveId);
+    }
+  }, [isTypedColor, soleActiveId, value, group.id, onChange]);
+
+  // Typed-color sash group: render nothing here — the sibling <CustomerImageUpload> (shown
+  // by the parent because requires_customer_text is set) is the entire color UI (free-text
+  // color + optional reference photo). The option is auto-selected above.
+  if (isTypedColor) return null;
 
   if (isLocked && lockedOption) {
     return (

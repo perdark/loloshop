@@ -70,32 +70,49 @@ function getNavLinks(
       { href: "/staff/wholesalers", label: "طلاب الممثلين", icon: iconUsers(), prefix: true },
     ];
   }
+  // Every production-role staffer also gets the live production console — the same
+  // /staff/queue screen the admin uses. The backend auto-scopes it to just the stages
+  // this staff member works (their role[s]), so it shows their own queue, richer than
+  // the per-stage card list (search · source tabs · rep drill-down · alerts · paging).
+  const consoleLink: NavLink = {
+    href: "/staff/queue",
+    label: "قائمة الإنتاج",
+    icon: iconBarChart(),
+    prefix: true,
+  };
   switch (staffType) {
     case "designer":
       return [
         { href: "/staff", label: "مراجعة التصاميم", icon: iconClipboard() },
+        consoleLink,
         { href: "/staff/wholesalers", label: "طلاب الممثلين", icon: iconUsers(), prefix: true },
       ];
     case "digitizer":
       return [
         { href: "/staff", label: "قائمة التحويل", icon: iconClipboard() },
+        consoleLink,
       ];
     case "embroiderer":
       return [
         { href: "/staff", label: "قائمة التطريز", icon: iconClipboard() },
+        consoleLink,
       ];
     case "presser":
       return [
         { href: "/staff", label: "قائمة الكوي", icon: iconClipboard() },
+        consoleLink,
       ];
     case "preparer":
       return [
         { href: "/staff", label: "قائمة التجهيز", icon: iconClipboard() },
+        consoleLink,
       ];
     default:
-      // Fallback: legacy view
+      // Fallback: legacy view (also covers مفصل/tailor, whose /staff home has no queue —
+      // the console is their working read-only view of in-production orders).
       return [
         { href: "/staff", label: "لوحة الطلبات", icon: iconClipboard() },
+        consoleLink,
         { href: "/staff/wholesalers", label: "طلاب الممثلين", icon: iconUsers(), prefix: true },
       ];
   }

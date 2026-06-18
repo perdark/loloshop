@@ -129,6 +129,7 @@ export default function StudentMyOrderPage() {
       <FullSetOrderForm
         key={formKey}
         packages={ctx.packages}
+        pricing={ctx.pricing}
         initial={ctx.existing}
         submitting={submitting}
         submitLabel={ctx.existing ? "تحديث الطلب" : "تأكيد الطلب"}

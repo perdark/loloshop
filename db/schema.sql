@@ -53,10 +53,13 @@ ALTER TYPE order_status ADD VALUE IF NOT EXISTS 'converting';
 
 -- Staff job-types (Migration 010). Meaningful only when users.role = 'staff'.
 -- Migration 012 adds 'digitizer' (محوّل التطريز) — owns the 'converting' stage.
+-- Migration 028 adds 'tailor' (مفصل) — a read-only view role (student name + sash +
+-- American-shawl info only), no production stage of its own.
 DO $$ BEGIN
-  CREATE TYPE staff_type AS ENUM ('designer', 'embroiderer', 'presser', 'preparer', 'manager', 'digitizer');
+  CREATE TYPE staff_type AS ENUM ('designer', 'embroiderer', 'presser', 'preparer', 'manager', 'digitizer', 'tailor');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 ALTER TYPE staff_type ADD VALUE IF NOT EXISTS 'digitizer';
+ALTER TYPE staff_type ADD VALUE IF NOT EXISTS 'tailor';
 
 -- Migration 013: student study schedule (صباحي/مسائي), now mandatory at signup.
 DO $$ BEGIN
@@ -135,6 +138,12 @@ CREATE TABLE IF NOT EXISTS wholesalers (
   created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 ALTER TABLE wholesalers ADD COLUMN IF NOT EXISTS commission_rate NUMERIC(5,2) NOT NULL DEFAULT 0;
+-- Migration 032: per-wholesaler «التسعيرة» (pricing) — admin-private base price, rep/student
+-- base price, and editable add-on surcharges. Replaces commission as the rep's earning model.
+ALTER TABLE wholesalers ADD COLUMN IF NOT EXISTS admin_price      BIGINT NOT NULL DEFAULT 0 CHECK (admin_price >= 0);
+ALTER TABLE wholesalers ADD COLUMN IF NOT EXISTS wholesaler_price BIGINT NOT NULL DEFAULT 0 CHECK (wholesaler_price >= 0);
+ALTER TABLE wholesalers ADD COLUMN IF NOT EXISTS pricing_addons   JSONB  NOT NULL DEFAULT
+  '{"royal_sash":10000,"royal_cap_when_normal_sash":3000,"extra_cap_embroidery":3000,"robe_sleeve_each":5000,"american_shawl":25000}'::jsonb;
 CREATE INDEX IF NOT EXISTS idx_wholesalers_code ON wholesalers(referral_code);
 
 -- =====================================================
@@ -465,9 +474,19 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 -- Migration 010 — multi-role staff + production pipeline + retail cart
 -- =====================================================
 
--- Staff job-type (designer | embroiderer | presser | preparer | manager); NULL for non-staff.
+-- Staff job-type (designer | embroiderer | presser | preparer | manager | digitizer | tailor); NULL for non-staff.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS staff_type staff_type;
 CREATE INDEX IF NOT EXISTS idx_users_staff_type ON users(staff_type) WHERE staff_type IS NOT NULL;
+
+-- Migration 029: multi-role staff. staff_types[] is the authoritative set of roles a
+-- staff member holds; staff_type above is kept in sync as the PRIMARY role (staff_types[1])
+-- for backward-compatible single-role reads. Backfill one-element arrays for existing staff.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS staff_types staff_type[];
+UPDATE users
+   SET staff_types = ARRAY[staff_type]::staff_type[]
+ WHERE role = 'staff'
+   AND staff_type IS NOT NULL
+   AND (staff_types IS NULL OR cardinality(staff_types) = 0);
 
 -- Staff order-scope (Migration 011): which order SOURCE a staff member handles —
 -- 'retail' (independent students), 'wholesaler' (rep-linked students), or 'both'.

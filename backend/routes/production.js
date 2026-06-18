@@ -19,7 +19,9 @@ router.post('/orders/:id/advance', c.advance);
 router.post('/orders/:id/revert', c.revert);
 router.post('/orders/:id/claim', c.claim);
 router.post('/orders/:id/release', c.release);
-router.post('/orders/:id/final-design', imageUpload.single('file'), c.uploadFinalDesign);
+// Final artwork is produced by the design/embroidery roles — not the read-only tailor/presser.
+// (requireStaffType also auto-passes manager + admin.)
+router.post('/orders/:id/final-design', requireStaffType('designer', 'digitizer', 'embroiderer'), imageUpload.single('file'), c.uploadFinalDesign);
 
 // Individual design approval gate — designer (+ manager/admin).
 router.post('/designs/:id/approve', requireStaffType('designer'), designs.approveDesign);

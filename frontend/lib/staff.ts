@@ -89,11 +89,13 @@ export { FILTER_STATUSES, STAFF_ACTION_STATUSES };
  */
 export async function getQueue(
   stage?: OrderStatus,
-  source?: "retail" | "wholesaler"
+  source?: "retail" | "wholesaler",
+  zone?: string
 ): Promise<ProductionQueueItem[]> {
   const params: Record<string, string> = {};
   if (stage) params.stage = stage;
   if (source) params.source = source;
+  if (zone) params.zone = zone;
   const { data } = await api.get<{ data: ProductionQueueItem[] }>("/production/queue", {
     params: Object.keys(params).length ? params : undefined,
   });

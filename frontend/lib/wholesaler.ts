@@ -189,11 +189,40 @@ export interface FullSetPackage {
   price: number;
 }
 
-export async function getFullSetPackages(): Promise<FullSetPackage[]> {
-  const { data } = await api.get<{ data: FullSetPackage[] }>(
-    "/wholesaler/full-set-packages"
-  );
-  return data.data || [];
+/** «التسعيرة» the rep/student sees on the order form: base طقم price + add-on surcharges.
+ *  `base` of 0 means the rep hasn't configured a price → fall back to the package price. */
+export interface FullSetPricing {
+  base: number;
+  addons: {
+    royal_sash: number;
+    royal_cap_when_normal_sash: number;
+    extra_cap_embroidery: number;
+    robe_sleeve_each: number;
+    american_shawl: number;
+  };
+}
+
+export const DEFAULT_FULLSET_ADDONS: FullSetPricing["addons"] = {
+  royal_sash: 10000,
+  royal_cap_when_normal_sash: 3000,
+  extra_cap_embroidery: 3000,
+  robe_sleeve_each: 5000,
+  american_shawl: 25000,
+};
+
+export interface FullSetPackagesResult {
+  packages: FullSetPackage[];
+  pricing: FullSetPricing | null;
+}
+
+export async function getFullSetPackages(): Promise<FullSetPackagesResult> {
+  const { data } = await api.get<{
+    data: { packages: FullSetPackage[]; pricing: FullSetPricing | null };
+  }>("/wholesaler/full-set-packages");
+  return {
+    packages: data.data?.packages || [],
+    pricing: data.data?.pricing ?? null,
+  };
 }
 
 export interface WholesalerStudentDetail {
@@ -248,6 +277,8 @@ export interface CreateFullSetPayload {
   };
   sash_type: PieceType;
   cap_type: PieceType;
+  /** لون الوشاح: typed free-text color (required) + optional reference photo. */
+  sash_color: { text: string; image_url?: string };
   /** فصال الروب: كسرة الكتف (yes/no). */
   shoulder_pleat?: boolean;
   /** شال امريكي (yes/no) — image required when enabled. */
@@ -257,6 +288,9 @@ export interface CreateFullSetPayload {
     cap_top?: EmbroideryZone;
     sash_front?: EmbroideryZone;
     sash_back?: EmbroideryZone;
+    /** تطريز ردن الروب — الروب له ردنان فقط (priced add-on per sleeve). */
+    robe_sleeve_right?: EmbroideryZone;
+    robe_sleeve_left?: EmbroideryZone;
   };
   notes?: string;
 }
@@ -288,6 +322,7 @@ export interface FullSetExistingOrder {
   } | null;
   sash_type: PieceType | null;
   cap_type: PieceType | null;
+  sash_color: { text: string; image_url: string };
   shoulder_pleat: boolean;
   american_shawl: { enabled: boolean; image_url: string };
   embroidery: {
@@ -295,6 +330,8 @@ export interface FullSetExistingOrder {
     sash_back: EmbroideryZone;
     cap_side: EmbroideryZone;
     cap_top: EmbroideryZone;
+    robe_sleeve_right: EmbroideryZone;
+    robe_sleeve_left: EmbroideryZone;
   };
   notes: string;
 }
@@ -316,6 +353,7 @@ export interface RepFullSetContext {
   approved: boolean;
   packages: FullSetPackage[];
   existing: FullSetExistingOrder | null;
+  pricing: FullSetPricing | null;
 }
 
 export async function getRepFullSetContext(): Promise<RepFullSetContext> {
@@ -325,6 +363,7 @@ export async function getRepFullSetContext(): Promise<RepFullSetContext> {
       approved: boolean;
       packages: FullSetPackage[];
       existing: FullSetExistingOrder | null;
+      pricing: FullSetPricing | null;
     };
   }>("/orders/rep-full-set");
   return {
@@ -332,6 +371,7 @@ export async function getRepFullSetContext(): Promise<RepFullSetContext> {
     approved: data.data.approved,
     packages: data.data.packages || [],
     existing: data.data.existing,
+    pricing: data.data.pricing ?? null,
   };
 }
 

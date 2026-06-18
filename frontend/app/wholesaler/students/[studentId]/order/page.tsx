@@ -13,6 +13,7 @@ import {
   uploadWholesalerImage,
   type WholesalerStudentDetail,
   type FullSetPackage,
+  type FullSetPricing,
   type FullSetExistingOrder,
   type CreateFullSetPayload,
 } from "@/lib/wholesaler";
@@ -27,6 +28,7 @@ export default function WholesalerStudentOrderPage() {
 
   const [student, setStudent] = useState<WholesalerStudentDetail | null>(null);
   const [packages, setPackages] = useState<FullSetPackage[]>([]);
+  const [pricing, setPricing] = useState<FullSetPricing | null>(null);
   const [existing, setExisting] = useState<FullSetExistingOrder | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -44,7 +46,8 @@ export default function WholesalerStudentOrderPage() {
       .then(([s, pkgs, ex]) => {
         if (!alive) return;
         setStudent(s);
-        setPackages(pkgs);
+        setPackages(pkgs.packages);
+        setPricing(pkgs.pricing);
         setExisting(ex);
       })
       .catch((err) => {
@@ -117,6 +120,7 @@ export default function WholesalerStudentOrderPage() {
 
       <FullSetOrderForm
         packages={packages}
+        pricing={pricing}
         initial={existing}
         submitting={submitting}
         submitLabel={existing ? "تحديث الطلب" : "حفظ الطلب"}

@@ -9,8 +9,9 @@ import {
   getAdminWholesalers,
   getWholesalerSashConfig,
   updateWholesaler,
-  updateWholesalerCommission,
+  updateWholesalerPricing,
   updateWholesalerSashConfig,
+  DEFAULT_PRICING_ADDONS,
   type WholesalerSashConfig,
 } from "@/lib/admin";
 import { SashSideLockEditor } from "@/components/designer/SashSideLockEditor";
@@ -34,7 +35,7 @@ export default function AdminWholesalersPage() {
   const [fetchError, setFetchError] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [extendOpen, setExtendOpen] = useState(false);
-  const [commissionOpen, setCommissionOpen] = useState(false);
+  const [pricingOpen, setPricingOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AdminWholesaler | null>(null);
   const [sashOpen, setSashOpen] = useState(false);
@@ -51,13 +52,25 @@ export default function AdminWholesalersPage() {
   const [password, setPassword] = useState("");
   const [referralCode, setReferralCode] = useState("");
   const [deadline, setDeadline] = useState("");
-  const [commission, setCommission] = useState("0");
   const [university, setUniversity] = useState("");
   const [department, setDepartment] = useState("");
   const [newDeadline, setNewDeadline] = useState("");
-  const [newCommission, setNewCommission] = useState("0");
   const [editUniversity, setEditUniversity] = useState("");
   const [editDepartment, setEditDepartment] = useState("");
+  // «التسعيرة» — create modal base prices (add-ons default server-side, tweak later).
+  const [adminPrice, setAdminPrice] = useState("0");
+  const [wholesalerPrice, setWholesalerPrice] = useState("0");
+  // «التسعيرة» edit modal: two base prices + the 5 editable add-on surcharges.
+  const emptyPricing = {
+    adminPrice: "0",
+    wholesalerPrice: "0",
+    royal_sash: String(DEFAULT_PRICING_ADDONS.royal_sash),
+    royal_cap_when_normal_sash: String(DEFAULT_PRICING_ADDONS.royal_cap_when_normal_sash),
+    extra_cap_embroidery: String(DEFAULT_PRICING_ADDONS.extra_cap_embroidery),
+    robe_sleeve_each: String(DEFAULT_PRICING_ADDONS.robe_sleeve_each),
+    american_shawl: String(DEFAULT_PRICING_ADDONS.american_shawl),
+  };
+  const [pricingForm, setPricingForm] = useState(emptyPricing);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -108,7 +121,8 @@ export default function AdminWholesalersPage() {
         deadline,
         universityName: university.trim(),
         department: department.trim(),
-        commissionRate: Number(commission) || 0,
+        adminPrice: Math.max(0, Math.round(Number(adminPrice) || 0)),
+        wholesalerPrice: Math.max(0, Math.round(Number(wholesalerPrice) || 0)),
       });
       toast.success("تم إنشاء الممثل");
       setCreateOpen(false);
@@ -118,7 +132,8 @@ export default function AdminWholesalersPage() {
       setPassword("");
       setReferralCode("");
       setDeadline("");
-      setCommission("0");
+      setAdminPrice("0");
+      setWholesalerPrice("0");
       setUniversity("");
       setDepartment("");
       load();
@@ -152,22 +167,32 @@ export default function AdminWholesalersPage() {
     }
   }
 
-  async function handleCommission() {
+  async function handlePricing() {
     if (!selected) return;
-    const rate = Number(newCommission);
-    if (!Number.isFinite(rate) || rate < 0 || rate > 100) {
-      toast.error("نسبة بين 0 و 100");
+    const num = (v: string) => Math.max(0, Math.round(Number(v) || 0));
+    if ([pricingForm.adminPrice, pricingForm.wholesalerPrice].some((v) => Number(v) < 0)) {
+      toast.error("السعر يجب أن يكون رقماً موجباً");
       return;
     }
     setSubmitting(true);
     try {
-      await updateWholesalerCommission(selected.id, rate);
-      toast.success("تم تحديث العمولة");
-      setCommissionOpen(false);
+      await updateWholesalerPricing(selected.id, {
+        adminPrice: num(pricingForm.adminPrice),
+        wholesalerPrice: num(pricingForm.wholesalerPrice),
+        pricingAddons: {
+          royal_sash: num(pricingForm.royal_sash),
+          royal_cap_when_normal_sash: num(pricingForm.royal_cap_when_normal_sash),
+          extra_cap_embroidery: num(pricingForm.extra_cap_embroidery),
+          robe_sleeve_each: num(pricingForm.robe_sleeve_each),
+          american_shawl: num(pricingForm.american_shawl),
+        },
+      });
+      toast.success("تم تحديث التسعيرة");
+      setPricingOpen(false);
       setSelected(null);
       load();
     } catch (err) {
-      toast.error(getApiErrorMessage(err, "تعذر تحديث العمولة"));
+      toast.error(getApiErrorMessage(err, "تعذر تحديث التسعيرة"));
     } finally {
       setSubmitting(false);
     }
@@ -274,10 +299,14 @@ export default function AdminWholesalersPage() {
                     {formatDateIQ(w.deadline)}
                   </p>
                   <p className="mt-1 text-sm">
-                    <span className="text-[var(--shop-muted)]">العمولة: </span>
-                    <span className="tabular-nums">{w.commissionRate}%</span>
+                    <span className="text-[var(--shop-muted)]">سعر المدير: </span>
+                    <span className="tabular-nums" dir="ltr">{formatIQD(w.adminPrice)}</span>
                     <span className="mx-2 text-ink/30">|</span>
-                    <span className="text-[var(--shop-muted)]">المستحق: </span>
+                    <span className="text-[var(--shop-muted)]">سعر الممثل والطلاب: </span>
+                    <span className="tabular-nums" dir="ltr">{formatIQD(w.wholesalerPrice)}</span>
+                  </p>
+                  <p className="mt-1 text-sm">
+                    <span className="text-[var(--shop-muted)]">المستحق (الفرق): </span>
                     <span className="font-semibold tabular-nums text-orange-ink" dir="ltr">
                       {formatIQD(w.earnedCommission ?? 0)}
                     </span>
@@ -325,11 +354,19 @@ export default function AdminWholesalersPage() {
                     variant="ghost"
                     onClick={() => {
                       setSelected(w);
-                      setNewCommission(String(w.commissionRate ?? 0));
-                      setCommissionOpen(true);
+                      setPricingForm({
+                        adminPrice: String(w.adminPrice ?? 0),
+                        wholesalerPrice: String(w.wholesalerPrice ?? 0),
+                        royal_sash: String(w.pricingAddons.royal_sash),
+                        royal_cap_when_normal_sash: String(w.pricingAddons.royal_cap_when_normal_sash),
+                        extra_cap_embroidery: String(w.pricingAddons.extra_cap_embroidery),
+                        robe_sleeve_each: String(w.pricingAddons.robe_sleeve_each),
+                        american_shawl: String(w.pricingAddons.american_shawl),
+                      });
+                      setPricingOpen(true);
                     }}
                   >
-                    العمولة
+                    التسعيرة
                   </Button>
                   <Button variant="ghost" onClick={() => openSashConfig(w)}>
                     إعدادات الوشاح
@@ -429,43 +466,117 @@ export default function AdminWholesalersPage() {
               <p className="text-xs text-danger">{errors.deadline}</p>
             )}
           </div>
-          <Input
-            label="نسبة العمولة (%)"
-            type="number"
-            min={0}
-            max={100}
-            step={0.5}
-            autoComplete="off"
-            value={commission}
-            onChange={(e) => setCommission(e.target.value)}
-          />
+          <div className="grid grid-cols-2 gap-3">
+            <Input
+              label="سعر خاص بالمدير (د.ع)"
+              type="number"
+              min={0}
+              step={1000}
+              autoComplete="off"
+              value={adminPrice}
+              onChange={(e) => setAdminPrice(e.target.value)}
+              dir="ltr"
+            />
+            <Input
+              label="سعر الممثل والطلاب (د.ع)"
+              type="number"
+              min={0}
+              step={1000}
+              autoComplete="off"
+              value={wholesalerPrice}
+              onChange={(e) => setWholesalerPrice(e.target.value)}
+              dir="ltr"
+            />
+          </div>
+          <p className="text-xs text-ink-soft">
+            اضافات على السعر تُضبط لكل ممثل بعد الإنشاء من زر «التسعيرة».
+          </p>
         </div>
       </Modal>
 
       <Modal
-        open={commissionOpen}
-        onClose={() => setCommissionOpen(false)}
-        title={`العمولة — ${selected?.name ?? ""}`}
+        open={pricingOpen}
+        onClose={() => setPricingOpen(false)}
+        title={`التسعيرة — ${selected?.name ?? ""}`}
         footer={
           <>
-            <Button variant="ghost" onClick={() => setCommissionOpen(false)}>
+            <Button variant="ghost" onClick={() => setPricingOpen(false)}>
               إلغاء
             </Button>
-            <Button onClick={handleCommission} loading={submitting}>
+            <Button onClick={handlePricing} loading={submitting}>
               حفظ
             </Button>
           </>
         }
       >
-        <Input
-          label="نسبة العمولة (%)"
-          type="number"
-          min={0}
-          max={100}
-          step={0.5}
-          value={newCommission}
-          onChange={(e) => setNewCommission(e.target.value)}
-        />
+        <div className="space-y-4">
+          <div>
+            <h4 className="mb-2 text-sm font-bold text-ink">السعر الأساسي للطقم</h4>
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label="سعر خاص بالمدير (د.ع)"
+                type="number"
+                min={0}
+                step={1000}
+                dir="ltr"
+                value={pricingForm.adminPrice}
+                onChange={(e) =>
+                  setPricingForm((f) => ({ ...f, adminPrice: e.target.value }))
+                }
+              />
+              <Input
+                label="سعر الممثل والطلاب (د.ع)"
+                type="number"
+                min={0}
+                step={1000}
+                dir="ltr"
+                value={pricingForm.wholesalerPrice}
+                onChange={(e) =>
+                  setPricingForm((f) => ({ ...f, wholesalerPrice: e.target.value }))
+                }
+              />
+            </div>
+            <p className="mt-1.5 text-xs text-ink-soft">
+              سعر المدير خاص لا يراه الممثل أو الطالب · سعر الممثل والطلاب هو السعر الظاهر في طلب
+              الطقم. الفرق بينهما = ربح الممثل المستحق.
+            </p>
+          </div>
+
+          <div>
+            <h4 className="mb-2 text-sm font-bold text-ink">اضافات على السعر (للممثل والطلاب)</h4>
+            <div className="space-y-2.5">
+              <PricingAddonRow
+                label="وشاح ملكي"
+                value={pricingForm.royal_sash}
+                onChange={(v) => setPricingForm((f) => ({ ...f, royal_sash: v }))}
+              />
+              <PricingAddonRow
+                label="وشاح عادي + قبعة ملكية"
+                value={pricingForm.royal_cap_when_normal_sash}
+                onChange={(v) =>
+                  setPricingForm((f) => ({ ...f, royal_cap_when_normal_sash: v }))
+                }
+              />
+              <PricingAddonRow
+                label="تطريز القبعة الثاني (الأول مجاني)"
+                value={pricingForm.extra_cap_embroidery}
+                onChange={(v) =>
+                  setPricingForm((f) => ({ ...f, extra_cap_embroidery: v }))
+                }
+              />
+              <PricingAddonRow
+                label="تطريز ردن الروب (لكل ردن · ردنان)"
+                value={pricingForm.robe_sleeve_each}
+                onChange={(v) => setPricingForm((f) => ({ ...f, robe_sleeve_each: v }))}
+              />
+              <PricingAddonRow
+                label="شال امريكي"
+                value={pricingForm.american_shawl}
+                onChange={(v) => setPricingForm((f) => ({ ...f, american_shawl: v }))}
+              />
+            </div>
+          </div>
+        </div>
       </Modal>
 
       <Modal
@@ -581,5 +692,34 @@ export default function AdminWholesalersPage() {
         </p>
       </Modal>
     </div>
+  );
+}
+
+/** One «اضافات على السعر» row: an Arabic label + a compact د.ع amount field. */
+function PricingAddonRow({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <label className="flex items-center justify-between gap-3 rounded-xl border border-line bg-beige px-3 py-2">
+      <span className="text-sm text-ink">{label}</span>
+      <span className="flex items-center gap-1.5">
+        <input
+          type="number"
+          min={0}
+          step={1000}
+          dir="ltr"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-28 rounded-lg border border-line bg-white px-2.5 py-1.5 text-end text-sm tabular-nums text-ink focus:border-orange-ink focus:outline-none focus:ring-2 focus:ring-orange-ink/15"
+        />
+        <span className="text-xs text-ink-soft">د.ع</span>
+      </span>
+    </label>
   );
 }

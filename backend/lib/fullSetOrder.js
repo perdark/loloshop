@@ -25,6 +25,69 @@ const MEAS_RANGE = { shoulder_cm: [25, 80], robe_length_cm: [70, 190], sleeve_le
 const MEAS_LABEL = { shoulder_cm: 'عرض الكتف', robe_length_cm: 'طول الروب', sleeve_length_cm: 'طول الردن' };
 const PIECE_TYPES = ['عادي', 'ملكي'];
 
+// ── «التسعيرة» (per-wholesaler pricing) ──────────────────────────────────────
+// Defaults seeded by migration 032; merged here too so a missing/legacy key is safe.
+// All amounts are IQD surcharges added ONLY to the student-facing price.
+const DEFAULT_ADDONS = {
+  royal_sash: 10000,                 // وشاح ملكي
+  royal_cap_when_normal_sash: 3000,  // وشاح عادي + قبعة ملكية
+  extra_cap_embroidery: 3000,        // تطريز القبعة الثاني (الأول مجاني)
+  robe_sleeve_each: 5000,            // تطريز ردن الروب — لكل ردن (حد أقصى ردنان)
+  american_shawl: 25000,             // شال امريكي
+};
+
+function sanitizeAddons(raw) {
+  const out = {};
+  for (const k of Object.keys(DEFAULT_ADDONS)) {
+    const n = Number(raw?.[k]);
+    out[k] = Number.isFinite(n) && n >= 0 ? Math.round(n) : DEFAULT_ADDONS[k];
+  }
+  return out;
+}
+
+// Load a rep's effective pricing. adminPrice/wholesalerPrice are base طقم prices;
+// 0 means "not configured" → the caller falls back to the package price.
+async function loadWholesalerPricing(wholesalerId) {
+  let row = null;
+  if (wholesalerId) {
+    const r = await query(
+      `SELECT admin_price, wholesaler_price, pricing_addons FROM wholesalers WHERE id = $1`,
+      [wholesalerId]
+    );
+    row = r.rows[0] || null;
+  }
+  return {
+    adminPrice: Math.max(0, Math.round(Number(row?.admin_price || 0))),
+    wholesalerPrice: Math.max(0, Math.round(Number(row?.wholesaler_price || 0))),
+    addons: sanitizeAddons(row?.pricing_addons),
+  };
+}
+
+/**
+ * Compute the applicable «اضافات على السعر» as labelled line items.
+ * @returns {{ label:string, amount:number }[]} only the add-ons that apply (amount > 0 omitted lines skipped)
+ */
+function addonLinesFor(addons, sel) {
+  const lines = [];
+  if (sel.sashType === 'ملكي' && addons.royal_sash > 0) {
+    lines.push({ label: 'إضافة: وشاح ملكي', amount: addons.royal_sash });
+  }
+  if (sel.sashType === 'عادي' && sel.capType === 'ملكي' && addons.royal_cap_when_normal_sash > 0) {
+    lines.push({ label: 'إضافة: قبعة ملكية', amount: addons.royal_cap_when_normal_sash });
+  }
+  if (sel.capEmbCount >= 2 && addons.extra_cap_embroidery > 0) {
+    lines.push({ label: 'إضافة: تطريز قبعة ثانٍ', amount: addons.extra_cap_embroidery });
+  }
+  const sleeves = Math.min(2, Math.max(0, sel.robeSleeveCount));
+  if (sleeves > 0 && addons.robe_sleeve_each > 0) {
+    lines.push({ label: `إضافة: تطريز ردن الروب ×${sleeves}`, amount: addons.robe_sleeve_each * sleeves });
+  }
+  if (sel.shawlEnabled && addons.american_shawl > 0) {
+    lines.push({ label: 'إضافة: شال امريكي', amount: addons.american_shawl });
+  }
+  return lines;
+}
+
 const err = (status, error, code = 'ERR_VALIDATION') => ({ status, json: { error, code } });
 
 /**
@@ -69,6 +132,9 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
     cap_top: zone(e.cap_top),
     sash_front: zone(e.sash_front),
     sash_back: zone(e.sash_back),
+    // تطريز ردن الروب — الروب له ردنان فقط (priced add-on: كل ردن).
+    robe_sleeve_right: zone(e.robe_sleeve_right),
+    robe_sleeve_left: zone(e.robe_sleeve_left),
   };
   const groupNotes = clean(notes, 500);
 
@@ -81,6 +147,13 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
     shawlIn.enabled === true || shawlIn.enabled === 'true' || shawlIn.enabled === 'نعم';
   const shawlImage = clean(shawlIn.image_url, 500);
   if (shawlEnabled && !shawlImage) return err(400, 'صورة الشال الأمريكي مطلوبة');
+
+  // لون الوشاح (sash color) — typed free-text color (REQUIRED) + optional reference photo.
+  // Captured as a sash spec line (same plumbing as embroidery/shawl), not a priced option.
+  const colorIn = body.sash_color || {};
+  const colorText = clean(colorIn.text, 200);
+  const colorImage = clean(colorIn.image_url, 500);
+  if (!colorText) return err(400, 'لون الوشاح مطلوب');
 
   // resolve sash/robe/cap: package-pinned wins, else first active per type
   const byType = {};
@@ -99,21 +172,39 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
     return err(500, 'منتجات الطقم غير مكتملة في النظام', 'ERR_CONFIG');
   }
 
-  const itemPrice = { sash: Number(packageRow.price), robe: 0, cap: 0 };
-
   const sashHasEmb = !!(emb.sash_front.text || emb.sash_front.image_url || emb.sash_back.text || emb.sash_back.image_url);
-  const capHasEmb = !!(emb.cap_side.text || emb.cap_side.image_url || emb.cap_top.text || emb.cap_top.image_url);
+  const sashHasContent = (z) => !!(z.text || z.image_url);
+  const capEmbCount = (sashHasContent(emb.cap_side) ? 1 : 0) + (sashHasContent(emb.cap_top) ? 1 : 0);
+  const capHasEmb = capEmbCount > 0;
+  const robeSleeveCount = (sashHasContent(emb.robe_sleeve_right) ? 1 : 0) + (sashHasContent(emb.robe_sleeve_left) ? 1 : 0);
+  const robeHasEmb = robeSleeveCount > 0;
   // A شال امريكي carries a custom reference photo, so the sash needs design attention
   // even without front/back embroidery → route it to design_complete like an embroidered piece.
   const sashHasDesign = sashHasEmb || shawlEnabled;
+
+  // ── «التسعيرة»: order price = rep/student base + applicable add-ons; cost = admin private base.
+  // The package price is the fallback base for legacy reps who never configured pricing.
+  const pricing = await loadWholesalerPricing(student.wholesaler_id);
+  const baseStudentPrice = pricing.wholesalerPrice > 0 ? pricing.wholesalerPrice : Number(packageRow.price);
+  const addonLines = addonLinesFor(pricing.addons, {
+    sashType, capType, capEmbCount, robeSleeveCount, shawlEnabled,
+  });
+  const addonTotal = addonLines.reduce((s, l) => s + l.amount, 0);
+  const sashPrice = baseStudentPrice + addonTotal;
+
+  // All revenue + cost ride on the sash order (robe/cap = 0), matching configureFullSet.
+  const itemPrice = { sash: sashPrice, robe: 0, cap: 0 };
+  const itemCost = { sash: pricing.adminPrice, robe: 0, cap: 0 };
+
   const itemFlags = {
     sash: { has_embroidery: sashHasEmb, status: sashHasDesign ? 'design_complete' : 'preparing' },
     cap: { has_embroidery: capHasEmb, status: capHasEmb ? 'design_complete' : 'preparing' },
-    robe: { has_embroidery: false, status: 'preparing' },
+    robe: { has_embroidery: robeHasEmb, status: robeHasEmb ? 'design_complete' : 'preparing' },
   };
 
   const specLines = {
     sash: [
+      { label: 'لون الوشاح', customer_text: colorText, customer_image_url: colorImage },
       { label: 'نوع الوشاح', customer_text: sashType },
       ...(shawlEnabled
         ? [{ label: 'شال امريكي', customer_text: 'نعم', customer_image_url: shawlImage }] : []),
@@ -131,6 +222,10 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
     ],
     robe: [
       { label: 'كسرة الكتف', customer_text: shoulderPleat ? 'نعم' : 'لا' },
+      ...(sashHasContent(emb.robe_sleeve_right)
+        ? [{ label: 'تطريز ردن الروب الأيمن', customer_text: emb.robe_sleeve_right.text, customer_image_url: emb.robe_sleeve_right.image_url }] : []),
+      ...(sashHasContent(emb.robe_sleeve_left)
+        ? [{ label: 'تطريز ردن الروب الأيسر', customer_text: emb.robe_sleeve_left.text, customer_image_url: emb.robe_sleeve_left.image_url }] : []),
     ],
   };
 
@@ -181,27 +276,33 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
       if (existing.rows.length) {
         oid = existing.rows[0].id;
         await client.query(
-          `UPDATE orders SET price=$1, batch_id=$2, package_id=$3, checkout_group_id=$4,
-             status=$5, has_embroidery=$6, needs_pressing=FALSE, measurements=$7, notes=$8
-           WHERE id=$9`,
-          [itemPrice[type], resolvedBatchId, package_id, cgId, flags.status, flags.has_embroidery, measurementsJson, groupNotes, oid]
+          `UPDATE orders SET price=$1, cost=$2, batch_id=$3, package_id=$4, checkout_group_id=$5,
+             status=$6, has_embroidery=$7, needs_pressing=FALSE, measurements=$8, notes=$9
+           WHERE id=$10`,
+          [itemPrice[type], itemCost[type], resolvedBatchId, package_id, cgId, flags.status, flags.has_embroidery, measurementsJson, groupNotes, oid]
         );
         await client.query(`DELETE FROM order_items WHERE order_id = $1`, [oid]);
       } else {
         const o = await client.query(
           `INSERT INTO orders (student_id, product_id, batch_id, package_id, checkout_group_id,
-                               price, status, has_embroidery, needs_pressing, measurements, notes)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,FALSE,$9,$10) RETURNING id`,
+                               price, cost, status, has_embroidery, needs_pressing, measurements, notes)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,FALSE,$10,$11) RETURNING id`,
           [student.id, prodId, resolvedBatchId, package_id, cgId,
-           itemPrice[type], flags.status, flags.has_embroidery, measurementsJson, groupNotes]
+           itemPrice[type], itemCost[type], flags.status, flags.has_embroidery, measurementsJson, groupNotes]
         );
         oid = o.rows[0].id;
       }
 
+      // Base طقم line carries the rep/student BASE price; each applied add-on is its own priced
+      // line on the sash so the sash order's items sum to its price (= base + add-ons).
       const baseLine = type === 'sash'
-        ? { label: `طقم: ${packageRow.name_ar}`, price: Number(packageRow.price) }
+        ? { label: `طقم: ${packageRow.name_ar}`, price: baseStudentPrice }
         : { label: `ضمن طقم: ${packageRow.name_ar}`, price: 0 };
-      const lines = [baseLine, ...specLines[type].map((l) => ({ ...l, price: 0 }))];
+      const lines = [
+        baseLine,
+        ...specLines[type].map((l) => ({ ...l, price: 0 })),
+        ...(type === 'sash' ? addonLines.map((l) => ({ label: l.label, price: l.amount })) : []),
+      ];
       for (const it of lines) {
         await client.query(
           `INSERT INTO order_items (order_id, group_id, option_id, label_snapshot, price_snapshot, qty,
@@ -268,11 +369,13 @@ async function readFullSetOrder(studentId) {
     return { text: l?.customer_text || '', image_url: l?.customer_image_url || '' };
   };
   const shawlLine = sashId ? lineFor(sashId, 'شال امريكي') : null;
+  const colorLine = sashId ? lineFor(sashId, 'لون الوشاح') : null;
 
   return {
     package_id: set[0].package_id,
     notes: byType.sash?.notes || byType.robe?.notes || byType.cap?.notes || '',
     measurements: byType.robe?.measurements || null,
+    sash_color: { text: colorLine?.customer_text || '', image_url: colorLine?.customer_image_url || '' },
     sash_type: sashId ? lineFor(sashId, 'نوع الوشاح')?.customer_text || null : null,
     cap_type: capId ? lineFor(capId, 'نوع القبعة')?.customer_text || null : null,
     shoulder_pleat: robeId ? lineFor(robeId, 'كسرة الكتف')?.customer_text === 'نعم' : false,
@@ -282,8 +385,13 @@ async function readFullSetOrder(studentId) {
       sash_back: z(sashId, 'تطريز الوشاح من الخلف'),
       cap_side: z(capId, 'تطريز القبعة من الجانب'),
       cap_top: z(capId, 'تطريز القبعة من الأعلى'),
+      robe_sleeve_right: z(robeId, 'تطريز ردن الروب الأيمن'),
+      robe_sleeve_left: z(robeId, 'تطريز ردن الروب الأيسر'),
     },
   };
 }
 
-module.exports = { persistFullSetOrder, readFullSetOrder };
+module.exports = {
+  persistFullSetOrder, readFullSetOrder,
+  loadWholesalerPricing, DEFAULT_ADDONS, sanitizeAddons,
+};

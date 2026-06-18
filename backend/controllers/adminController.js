@@ -1,10 +1,31 @@
 const bcrypt = require('bcrypt');
 const { query, tx } = require('../lib/db');
+const { DEFAULT_ADDONS, sanitizeAddons } = require('../lib/fullSetOrder');
 
 const SALT_ROUNDS = 10;
 
-const STAFF_TYPES = ['designer', 'embroiderer', 'presser', 'preparer', 'manager'];
+// «التسعيرة» — a base price is a non-negative integer (IQD). null = invalid.
+function parsePrice(v) {
+  if (v == null || v === '') return 0;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.round(n);
+}
+
+const STAFF_TYPES = ['designer', 'embroiderer', 'presser', 'preparer', 'manager', 'digitizer', 'tailor'];
 const STAFF_SCOPES = ['retail', 'wholesaler', 'both'];
+
+// Multi-role (Migration 029): accept either staff_types[] (preferred) or a single
+// staff_type (legacy clients). Returns a de-duped list; the PRIMARY role (index 0) is
+// mirrored into users.staff_type for backward-compatible single-role reads.
+function normalizeStaffTypes(body) {
+  const list = Array.isArray(body.staff_types)
+    ? body.staff_types
+    : body.staff_type != null
+      ? [body.staff_type]
+      : [];
+  return [...new Set(list.filter(Boolean))];
+}
 
 async function analytics(req, res) {
   const totals = await query(
@@ -154,11 +175,12 @@ async function updateCheckoutGroup(req, res) {
 async function listWholesalers(req, res) {
   const { rows } = await query(
     `SELECT w.id, u.name, u.phone, u.email, w.referral_code, w.deadline, w.commission_rate, w.created_at,
-       w.university_name, w.department,
+       w.university_name, w.department, w.admin_price, w.wholesaler_price, w.pricing_addons,
        (SELECT COUNT(*)::int FROM students s WHERE s.wholesaler_id = w.id) AS student_count,
        (SELECT COUNT(*)::int FROM students s WHERE s.wholesaler_id = w.id AND s.status = 'pending_approval') AS pending_count,
+       -- «المستحق» = price-gap profit (سعر الممثل والطلاب − سعر المدير) across the rep's orders.
        COALESCE((
-         SELECT ROUND(SUM(o.price) * w.commission_rate / 100)::bigint
+         SELECT SUM(o.profit)::bigint
          FROM students s JOIN orders o ON o.student_id = s.id
          WHERE s.wholesaler_id = w.id AND o.status <> 'cancelled'
        ), 0) AS earned_commission
@@ -167,23 +189,23 @@ async function listWholesalers(req, res) {
   );
   const data = rows.map((r) => ({
     ...r,
+    admin_price: Number(r.admin_price || 0),
+    wholesaler_price: Number(r.wholesaler_price || 0),
+    pricing_addons: sanitizeAddons(r.pricing_addons),
     referral_url: `${process.env.FRONTEND_URL}/join/${r.referral_code}`,
   }));
   res.json({ data });
 }
 
-function parseCommission(v) {
-  const n = Number(v);
-  if (!Number.isFinite(n) || n < 0 || n > 100) return null;
-  return Math.round(n * 100) / 100;
-}
-
 async function createWholesaler(req, res) {
   const { name, phone, email, password, referral_code, deadline, university_name, department } = req.body;
-  const commissionRate = parseCommission(req.body.commission_rate ?? 0);
-  if (commissionRate === null) {
-    return res.status(400).json({ error: 'نسبة عمولة غير صالحة (0-100)', code: 'ERR_VALIDATION' });
+  // «التسعيرة» — two base prices + editable add-ons (defaults applied; admin tweaks per rep later).
+  const adminPrice = parsePrice(req.body.admin_price);
+  const wholesalerPrice = parsePrice(req.body.wholesaler_price);
+  if (adminPrice === null || wholesalerPrice === null) {
+    return res.status(400).json({ error: 'سعر غير صالح', code: 'ERR_VALIDATION' });
   }
+  const pricingAddons = sanitizeAddons(req.body.pricing_addons);
   if (!name || !phone || !password || !referral_code) {
     return res.status(400).json({ error: 'بيانات ناقصة', code: 'ERR_VALIDATION' });
   }
@@ -215,9 +237,11 @@ async function createWholesaler(req, res) {
       [name, phone, email || null, hash]
     );
     const w = await client.query(
-      `INSERT INTO wholesalers (user_id, referral_code, deadline, commission_rate, approved_by_admin, university_name, department)
-       VALUES ($1, $2, $3, $4, TRUE, $5, $6) RETURNING id, referral_code`,
-      [u.rows[0].id, referral_code, deadline || null, commissionRate, String(university_name).trim(), String(department).trim()]
+      `INSERT INTO wholesalers (user_id, referral_code, deadline, approved_by_admin, university_name, department,
+                               admin_price, wholesaler_price, pricing_addons)
+       VALUES ($1, $2, $3, TRUE, $4, $5, $6, $7, $8::jsonb) RETURNING id, referral_code`,
+      [u.rows[0].id, referral_code, deadline || null, String(university_name).trim(), String(department).trim(),
+       adminPrice, wholesalerPrice, JSON.stringify(pricingAddons)]
     );
     await client.query(
       `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
@@ -285,23 +309,34 @@ async function updateDeadline(req, res) {
   res.json({ data: rows[0] });
 }
 
-async function updateCommission(req, res) {
+// «التسعيرة»: set a rep's two base prices + editable add-on surcharges.
+async function updatePricing(req, res) {
   const { id } = req.params;
-  const rate = parseCommission(req.body.commission_rate);
-  if (rate === null) {
-    return res.status(400).json({ error: 'نسبة عمولة غير صالحة (0-100)', code: 'ERR_VALIDATION' });
+  const adminPrice = parsePrice(req.body.admin_price);
+  const wholesalerPrice = parsePrice(req.body.wholesaler_price);
+  if (adminPrice === null || wholesalerPrice === null) {
+    return res.status(400).json({ error: 'سعر غير صالح', code: 'ERR_VALIDATION' });
   }
+  const pricingAddons = sanitizeAddons(req.body.pricing_addons);
   const { rows } = await query(
-    `UPDATE wholesalers SET commission_rate = $1 WHERE id = $2 RETURNING id, commission_rate`,
-    [rate, id]
+    `UPDATE wholesalers SET admin_price = $1, wholesaler_price = $2, pricing_addons = $3::jsonb
+     WHERE id = $4 RETURNING id, admin_price, wholesaler_price, pricing_addons`,
+    [adminPrice, wholesalerPrice, JSON.stringify(pricingAddons), id]
   );
   if (!rows.length) return res.status(404).json({ error: 'غير موجود', code: 'ERR_NOT_FOUND' });
   await query(
     `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
-     VALUES ($1, 'update_commission', 'wholesaler', $2, $3)`,
-    [req.user.id, id, JSON.stringify({ commission_rate: rate })]
+     VALUES ($1, 'update_pricing', 'wholesaler', $2, $3)`,
+    [req.user.id, id, JSON.stringify({ admin_price: adminPrice, wholesaler_price: wholesalerPrice, pricing_addons: pricingAddons })]
   );
-  res.json({ data: rows[0] });
+  res.json({
+    data: {
+      id: rows[0].id,
+      admin_price: Number(rows[0].admin_price || 0),
+      wholesaler_price: Number(rows[0].wholesaler_price || 0),
+      pricing_addons: sanitizeAddons(rows[0].pricing_addons),
+    },
+  });
 }
 
 async function deleteWholesaler(req, res) {
@@ -398,9 +433,31 @@ async function toggleEditException(req, res) {
   res.json({ data: rows[0] });
 }
 
+// Reps drill-down: every wholesaler with their batches + total order count, for the
+// admin orders «ممثلين» landing grid (click a rep → filter orders to their students).
+async function repsOverview(req, res) {
+  const { rows } = await query(
+    `SELECT w.id, u.name,
+            COALESCE(
+              json_agg(DISTINCT jsonb_build_object('id', b.id, 'name_ar', b.name_ar, 'deadline', b.deadline))
+                FILTER (WHERE b.id IS NOT NULL),
+              '[]'
+            ) AS batches,
+            COUNT(DISTINCT o.id)::int AS order_count
+     FROM wholesalers w
+     JOIN users u ON u.id = w.user_id
+     LEFT JOIN batches b ON b.wholesaler_id = w.id
+     LEFT JOIN students s ON s.wholesaler_id = w.id
+     LEFT JOIN orders o ON o.student_id = s.id
+     GROUP BY w.id, u.name
+     ORDER BY u.name ASC`
+  );
+  res.json({ data: rows });
+}
+
 async function listStaff(req, res) {
   const { rows } = await query(
-    `SELECT id, name, phone, email, staff_type, order_scope, phone_verified
+    `SELECT id, name, phone, email, staff_type, staff_types, order_scope, phone_verified
      FROM users
      WHERE role = 'staff'
      ORDER BY name ASC`
@@ -409,14 +466,15 @@ async function listStaff(req, res) {
 }
 
 async function createStaff(req, res) {
-  const { name, phone, email, password, staff_type, order_scope } = req.body;
+  const { name, phone, email, password, order_scope } = req.body;
   if (!name || !phone || !password) {
     return res.status(400).json({ error: 'بيانات ناقصة', code: 'ERR_VALIDATION' });
   }
   if (String(password).length < 6) {
     return res.status(400).json({ error: 'كلمة المرور قصيرة', code: 'ERR_VALIDATION' });
   }
-  if (staff_type && !STAFF_TYPES.includes(staff_type)) {
+  const staffTypes = normalizeStaffTypes(req.body);
+  if (staffTypes.some((t) => !STAFF_TYPES.includes(t))) {
     return res.status(400).json({ error: 'نوع موظف غير صالح', code: 'ERR_VALIDATION' });
   }
   if (order_scope && !STAFF_SCOPES.includes(order_scope)) {
@@ -426,18 +484,20 @@ async function createStaff(req, res) {
   if (exists.rows.length) {
     return res.status(409).json({ error: 'الرقم مستخدم', code: 'ERR_PHONE_TAKEN' });
   }
+  const primaryType = staffTypes[0] || null;
+  const typesParam = staffTypes.length ? staffTypes : null;
   const hash = await bcrypt.hash(password, SALT_ROUNDS);
   const { rows } = await query(
-    `INSERT INTO users (name, phone, email, password_hash, role, staff_type, order_scope, phone_verified)
-     VALUES ($1, $2, $3, $4, 'staff', $5::staff_type, COALESCE($6::staff_order_scope, 'both'), TRUE)
-     RETURNING id, name, phone, email, staff_type, order_scope, phone_verified`,
-    [name, phone, email || null, hash, staff_type || null, order_scope || null]
+    `INSERT INTO users (name, phone, email, password_hash, role, staff_type, staff_types, order_scope, phone_verified)
+     VALUES ($1, $2, $3, $4, 'staff', $5::staff_type, $6::staff_type[], COALESCE($7::staff_order_scope, 'both'), TRUE)
+     RETURNING id, name, phone, email, staff_type, staff_types, order_scope, phone_verified`,
+    [name, phone, email || null, hash, primaryType, typesParam, order_scope || null]
   );
   const staff = rows[0];
   await query(
     `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
      VALUES ($1, 'create_staff', 'user', $2, $3)`,
-    [req.user.id, staff.id, JSON.stringify({ role: 'staff', staff_type: staff_type || null, order_scope: order_scope || 'both', phone })]
+    [req.user.id, staff.id, JSON.stringify({ role: 'staff', staff_types: staffTypes, order_scope: order_scope || 'both', phone })]
   );
   res.status(201).json({ data: staff });
 }
@@ -464,20 +524,23 @@ async function updateStaffScope(req, res) {
 
 async function updateStaffType(req, res) {
   const { id } = req.params;
-  const { staff_type } = req.body;
-  if (staff_type !== null && !STAFF_TYPES.includes(staff_type)) {
+  const staffTypes = normalizeStaffTypes(req.body);
+  if (staffTypes.some((t) => !STAFF_TYPES.includes(t))) {
     return res.status(400).json({ error: 'نوع موظف غير صالح', code: 'ERR_VALIDATION' });
   }
+  const primaryType = staffTypes[0] || null;
+  const typesParam = staffTypes.length ? staffTypes : null;
   const { rows } = await query(
-    `UPDATE users SET staff_type = $1 WHERE id = $2 AND role = 'staff'
-     RETURNING id, name, staff_type`,
-    [staff_type, id]
+    `UPDATE users SET staff_type = $1::staff_type, staff_types = $2::staff_type[]
+     WHERE id = $3 AND role = 'staff'
+     RETURNING id, name, staff_type, staff_types`,
+    [primaryType, typesParam, id]
   );
   if (!rows.length) return res.status(404).json({ error: 'غير موجود', code: 'ERR_NOT_FOUND' });
   await query(
     `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
      VALUES ($1, 'update_staff_type', 'user', $2, $3)`,
-    [req.user.id, id, JSON.stringify({ staff_type })]
+    [req.user.id, id, JSON.stringify({ staff_types: staffTypes })]
   );
   res.json({ data: rows[0] });
 }
@@ -522,8 +585,9 @@ async function deleteStaff(req, res) {
 
 module.exports = {
   analytics, accounting, updateOrderCost, updateCheckoutGroup,
-  listWholesalers, createWholesaler, updateWholesaler, updateDeadline, updateCommission, deleteWholesaler,
+  listWholesalers, createWholesaler, updateWholesaler, updateDeadline, updatePricing, deleteWholesaler,
   getWholesalerSashConfig, updateWholesalerSashConfig,
   wholesalerStudents, toggleEditException,
   listStaff, createStaff, updateStaffType, updateStaffScope, updateStaffPassword, deleteStaff,
+  repsOverview,
 };

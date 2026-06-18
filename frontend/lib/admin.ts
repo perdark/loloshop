@@ -18,6 +18,7 @@ import type {
   StaffSalary,
   StaffOrderScope,
   User,
+  WholesalerPricingAddons,
 } from "./types";
 
 // ---------- Hero slider (home slides) ----------
@@ -80,6 +81,8 @@ interface ApiOrderRow {
   status: OrderStatus;
   created_at: string;
   source?: "retail" | "wholesaler";
+  working_staff_id?: string | null;
+  working_staff_name?: string | null;
 }
 
 interface ApiWholesalerRow {
@@ -94,9 +97,32 @@ interface ApiWholesalerRow {
   student_count: number;
   pending_count: number;
   deadline: string | null;
-  commission_rate: number;
+  admin_price?: number;
+  wholesaler_price?: number;
+  pricing_addons?: Partial<WholesalerPricingAddons> | null;
   earned_commission: number;
   created_at?: string;
+}
+
+/** Defaults mirror migration 032 — used when the server omits a key. */
+export const DEFAULT_PRICING_ADDONS: WholesalerPricingAddons = {
+  royal_sash: 10000,
+  royal_cap_when_normal_sash: 3000,
+  extra_cap_embroidery: 3000,
+  robe_sleeve_each: 5000,
+  american_shawl: 25000,
+};
+
+function mapAddons(raw?: Partial<WholesalerPricingAddons> | null): WholesalerPricingAddons {
+  return {
+    royal_sash: Number(raw?.royal_sash ?? DEFAULT_PRICING_ADDONS.royal_sash),
+    royal_cap_when_normal_sash: Number(
+      raw?.royal_cap_when_normal_sash ?? DEFAULT_PRICING_ADDONS.royal_cap_when_normal_sash
+    ),
+    extra_cap_embroidery: Number(raw?.extra_cap_embroidery ?? DEFAULT_PRICING_ADDONS.extra_cap_embroidery),
+    robe_sleeve_each: Number(raw?.robe_sleeve_each ?? DEFAULT_PRICING_ADDONS.robe_sleeve_each),
+    american_shawl: Number(raw?.american_shawl ?? DEFAULT_PRICING_ADDONS.american_shawl),
+  };
 }
 
 function mapOrder(row: ApiOrderRow): AdminOrder {
@@ -114,6 +140,7 @@ function mapOrder(row: ApiOrderRow): AdminOrder {
     status: row.status,
     createdAt: row.created_at,
     source: row.source,
+    workingStaffName: row.working_staff_name ?? null,
   };
 }
 
@@ -128,7 +155,9 @@ function mapWholesaler(row: ApiWholesalerRow): AdminWholesaler {
     studentCount: row.student_count,
     pendingCount: row.pending_count,
     deadline: row.deadline,
-    commissionRate: Number(row.commission_rate ?? 0),
+    adminPrice: Number(row.admin_price ?? 0),
+    wholesalerPrice: Number(row.wholesaler_price ?? 0),
+    pricingAddons: mapAddons(row.pricing_addons),
     earnedCommission: Number(row.earned_commission ?? 0),
     referralCode: row.referral_code,
     referralUrl: row.referral_url,
@@ -158,12 +187,16 @@ function mapAnalytics(raw: ApiAnalytics): AdminAnalytics {
 
 export interface OrdersFilters {
   wholesalerId?: string;
+  /** Filter to a single batch (دفعة) of a rep. */
+  batchId?: string;
   status?: OrderStatus | "";
   dateFrom?: string;
   dateTo?: string;
   source?: "retail" | "wholesaler" | "";
   /** Product type filter — only honoured in item mode. e.g. "sash" | "robe" | "cap" */
   type?: string;
+  /** Embroidery-zone / pleat filter key (see EMBROIDERY_ZONE_LABELS). */
+  zone?: string;
 }
 
 export async function getAdminAnalytics(): Promise<AdminAnalytics> {
@@ -184,11 +217,13 @@ export async function getAdminOrders(
   const { data } = await api.get<{ data: ApiOrderRow[] }>("/admin/orders", {
     params: {
       wholesaler_id: filters.wholesalerId || undefined,
+      batch_id: filters.batchId || undefined,
       status: filters.status || undefined,
       from: filters.dateFrom || undefined,
       to: filters.dateTo || undefined,
       source: filters.source || undefined,
       type: filters.type || undefined,
+      zone: filters.zone || undefined,
     },
   });
   return (data.data || []).map(mapOrder);
@@ -327,6 +362,25 @@ export async function getAdminWholesalers(): Promise<AdminWholesaler[]> {
   return (data.data || []).map(mapWholesaler);
 }
 
+/** A batch (دفعة) belonging to a rep. */
+export interface RepBatch {
+  id: string;
+  name_ar: string;
+  deadline: string | null;
+}
+/** A rep with their batches + total order count — the «ممثلين» drill-down landing grid. */
+export interface RepOverview {
+  id: string;
+  name: string;
+  batches: RepBatch[];
+  order_count: number;
+}
+
+export async function getRepsOverview(): Promise<RepOverview[]> {
+  const { data } = await api.get<{ data: RepOverview[] }>("/admin/reps-overview");
+  return data.data || [];
+}
+
 export async function createWholesaler(
   payload: CreateWholesalerPayload
 ): Promise<CreateWholesalerResult> {
@@ -341,7 +395,9 @@ export async function createWholesaler(
     deadline: payload.deadline,
     university_name: payload.universityName,
     department: payload.department,
-    commission_rate: payload.commissionRate ?? 0,
+    admin_price: payload.adminPrice,
+    wholesaler_price: payload.wholesalerPrice,
+    pricing_addons: payload.pricingAddons,
   });
   const row = data.data;
   return { id: row.id, referralUrl: row.referral_url };
@@ -365,12 +421,21 @@ export async function extendWholesalerDeadline(
   await api.patch(`/admin/wholesalers/${id}/deadline`, { deadline });
 }
 
-export async function updateWholesalerCommission(
+export interface WholesalerPricingPayload {
+  adminPrice: number;
+  wholesalerPrice: number;
+  pricingAddons: WholesalerPricingAddons;
+}
+
+/** «التسعيرة»: set a rep's admin-private base price, rep/student base price + add-ons. */
+export async function updateWholesalerPricing(
   id: string,
-  commissionRate: number
+  payload: WholesalerPricingPayload
 ): Promise<void> {
-  await api.patch(`/admin/wholesalers/${id}/commission`, {
-    commission_rate: commissionRate,
+  await api.patch(`/admin/wholesalers/${id}/pricing`, {
+    admin_price: payload.adminPrice,
+    wholesaler_price: payload.wholesalerPrice,
+    pricing_addons: payload.pricingAddons,
   });
 }
 
@@ -409,6 +474,7 @@ interface ApiStaffRow {
   email?: string | null;
   phone_verified?: boolean;
   staff_type?: string | null;
+  staff_types?: string[] | null;
   order_scope?: StaffOrderScope | null;
 }
 
@@ -417,7 +483,8 @@ export interface CreateStaffPayload {
   phone: string;
   email?: string;
   password: string;
-  staff_type?: string;
+  /** Multi-role (Migration 029): all production roles this staff member holds. */
+  staff_types?: string[];
   order_scope?: StaffOrderScope;
 }
 
@@ -430,6 +497,7 @@ export async function getAdminStaff(): Promise<User[]> {
     email: r.email || undefined,
     role: "staff" as const,
     staff_type: (r.staff_type as User["staff_type"]) ?? null,
+    staff_types: (r.staff_types as User["staff_types"]) ?? (r.staff_type ? [r.staff_type as NonNullable<User["staff_type"]>] : []),
     order_scope: (r.order_scope as StaffOrderScope) ?? undefined,
   }));
 }
@@ -443,9 +511,9 @@ export async function updateStaffScope(
 
 export async function updateStaffType(
   id: string,
-  staff_type: string
+  staff_types: string[]
 ): Promise<void> {
-  await api.patch(`/admin/staff/${id}/type`, { staff_type });
+  await api.patch(`/admin/staff/${id}/type`, { staff_types });
 }
 
 export async function createStaff(payload: CreateStaffPayload): Promise<void> {
@@ -454,7 +522,7 @@ export async function createStaff(payload: CreateStaffPayload): Promise<void> {
     phone: payload.phone,
     email: payload.email,
     password: payload.password,
-    staff_type: payload.staff_type,
+    staff_types: payload.staff_types,
     order_scope: payload.order_scope,
   });
 }

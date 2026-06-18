@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
 import { getFabric } from "@/lib/fabric-loader";
 import { boldSupported, fontFamilyFor, loadFont } from "@/lib/fonts-loader";
+import { ORNAMENT_CATEGORIES, ornamentDataUrl } from "@/lib/ornaments";
 import type { FontDef } from "@/lib/types";
 import { DesignerToolsAside } from "./DesignerToolsAside";
 
@@ -67,6 +68,7 @@ export function Whiteboard({ side, fonts, onApply, onClose }: Props) {
   const [fontSize, setFontSize] = useState(36);
   const [hasSelection, setHasSelection] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(true);
+  const [ornCat, setOrnCat] = useState(ORNAMENT_CATEGORIES[0].id);
 
   useEffect(() => {
     if (!canvasElRef.current) return;
@@ -233,6 +235,39 @@ export function Whiteboard({ side, fonts, onApply, onClose }: Props) {
     canvas.renderAll();
   }
 
+  /**
+   * Add a vector ornament (زخرفة) as a self-contained SVG image in the chosen
+   * thread color. It serializes as a normal Fabric image, so it round-trips
+   * through the editor, customer preview, staff viewer and print export with no
+   * special handling. Left freely movable/rotatable/scalable like an image.
+   */
+  async function addOrnament(svg: string) {
+    const canvas = fabricRef.current;
+    const fabric = fabricLibRef.current;
+    if (!canvas || !fabric) return;
+    const ImageClass = fabric.FabricImage ?? fabric.Image;
+    if (!ImageClass?.fromURL) {
+      toast.error("تعذر إضافة الزخرفة");
+      return;
+    }
+    const n = placeCountRef.current++;
+    try {
+      const image = await ImageClass.fromURL(ornamentDataUrl(svg, textColor));
+      image.scaleToWidth(110);
+      image.set({
+        left: BOARD.w / 2 + ((n % 5) - 2) * 16,
+        top: BOARD.h / 2 + ((n % 3) - 1) * 16,
+        originX: "center",
+        originY: "center",
+      });
+      canvas.add(image);
+      canvas.setActiveObject(image);
+      canvas.requestRenderAll?.() ?? canvas.renderAll();
+    } catch {
+      toast.error("تعذر إضافة الزخرفة");
+    }
+  }
+
   function activeText() {
     const o = fabricRef.current?.getActiveObject();
     return o && isTextType(o?.type) ? o : null;
@@ -315,6 +350,8 @@ export function Whiteboard({ side, fonts, onApply, onClose }: Props) {
   }
 
   const sideLabel = side === "left" ? "اليسار" : "اليمين";
+  const activeOrnaments =
+    ORNAMENT_CATEGORIES.find((c) => c.id === ornCat)?.items ?? ORNAMENT_CATEGORIES[0].items;
 
   return (
     <div
@@ -423,7 +460,7 @@ export function Whiteboard({ side, fonts, onApply, onClose }: Props) {
                 </button>
               ))}
             </div>
-            <p className="mb-1 mt-3 text-xs font-semibold text-muted">زخرفة — اضغط ثم اسحبها لأي مكان</p>
+            <p className="mb-1 mt-3 text-xs font-semibold text-muted">رموز — اضغط ثم اسحبها لأي مكان</p>
             <div className="flex flex-wrap gap-1.5">
               {ORNAMENTS.map((o) => (
                 <button
@@ -433,6 +470,56 @@ export function Whiteboard({ side, fonts, onApply, onClose }: Props) {
                   className="flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-line bg-cream text-lg text-ink-soft transition-colors hover:border-neutral-dark hover:bg-surface-sink"
                 >
                   {o}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-line bg-cream p-3">
+            <p className="mb-1 text-sm font-semibold text-ink">زخارف</p>
+            <p className="mb-2 text-xs text-ink-soft">
+              اختر زخرفة لإضافتها بلون النص الحالي — ثم اسحبها وكبّرها وأدِرها على الوشاح
+            </p>
+            <div
+              className="mb-2.5 flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1"
+              role="tablist"
+              aria-label="أقسام الزخارف"
+            >
+              {ORNAMENT_CATEGORIES.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={ornCat === c.id}
+                  onClick={() => setOrnCat(c.id)}
+                  className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                    ornCat === c.id
+                      ? "border-orange-ink bg-orange-ink/8 text-ink ring-1 ring-orange-ink"
+                      : "border-line bg-cream text-ink-soft hover:border-neutral-dark"
+                  }`}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
+            <div className="grid grid-cols-4 gap-1.5">
+              {activeOrnaments.map((o) => (
+                <button
+                  key={o.id}
+                  type="button"
+                  title={o.label}
+                  aria-label={o.label}
+                  onClick={() => addOrnament(o.svg)}
+                  className="flex aspect-square items-center justify-center rounded-lg border border-line bg-cream p-1.5 text-ink transition-colors hover:border-orange-ink hover:bg-surface-sink active:scale-95"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={ornamentDataUrl(o.svg, "#1a1a1a")}
+                    alt=""
+                    aria-hidden
+                    draggable={false}
+                    className="h-full w-full object-contain"
+                  />
                 </button>
               ))}
             </div>
