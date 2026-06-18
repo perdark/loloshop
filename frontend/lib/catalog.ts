@@ -423,6 +423,8 @@ export interface FullSetPackage {
   price: number;
   imageUrl: string | null;
   storyImageUrl: string | null;
+  /** Admin-set photo gallery — when 2+ photos, the storefront tile auto-rotates. */
+  gallery: string[];
   sort: number;
   description: string | null;
   badgeLabel: string | null;
@@ -442,6 +444,11 @@ function mapFullSetPackage(raw: Record<string, unknown>): FullSetPackage {
     storyImageUrl: resolveCatalogMediaUrl(
       raw.story_image_url as string | null
     ),
+    gallery: Array.isArray(raw.gallery)
+      ? (raw.gallery as unknown[])
+          .map((u) => resolveCatalogMediaUrl(String(u)) || String(u))
+          .filter(Boolean)
+      : [],
     sort: Number(raw.sort ?? 0),
     description: (raw.description as string | null) ?? null,
     badgeLabel: (raw.badge_label as string | null) ?? null,

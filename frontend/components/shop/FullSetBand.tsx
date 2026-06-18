@@ -6,6 +6,14 @@ import { useEffect, useState } from "react";
 import { listFullSetPackages } from "@/lib/catalog";
 import { formatIQD } from "@/lib/format";
 import type { FullSetPackage } from "@/lib/catalog";
+import { AutoRotatingImage } from "@/components/ui/AutoRotatingImage";
+
+/** Cover photo first, then the rest of the admin gallery — de-duplicated. */
+function packagePhotos(pkg: FullSetPackage): string[] {
+  return [...new Set([pkg.imageUrl, ...(pkg.gallery ?? [])].filter(
+    (u): u is string => !!u
+  ))];
+}
 
 export function FullSetBand() {
   const [packages, setPackages] = useState<FullSetPackage[]>([]);
@@ -31,17 +39,27 @@ export function FullSetBand() {
 
       {/* Editorial tiles — caption below (not scrim over photo) */}
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-        {packages.map((pkg) => (
+        {packages.map((pkg) => {
+          const photos = packagePhotos(pkg);
+          return (
           <Link
             key={pkg.id}
             href={`/full-set/${pkg.id}`}
             className="group block space-y-3"
           >
-            {/* Image — tall editorial crop */}
+            {/* Image — tall editorial crop; auto-rotates through the admin gallery */}
             <div className="relative aspect-[4/5] w-full overflow-hidden rounded-[var(--radius-card)] bg-[var(--shop-sink)]">
-              {pkg.imageUrl ? (
+              {photos.length > 1 ? (
+                <AutoRotatingImage
+                  images={photos}
+                  alt={pkg.nameAr}
+                  sizes="(max-width: 639px) 100vw, 50vw"
+                  controls
+                  className="transition-transform duration-500 group-hover:scale-[1.03]"
+                />
+              ) : photos.length === 1 ? (
                 <Image
-                  src={pkg.imageUrl}
+                  src={photos[0]}
                   alt={pkg.nameAr}
                   fill
                   className="object-cover transition-transform duration-500 group-hover:scale-[1.03]"
@@ -82,7 +100,8 @@ export function FullSetBand() {
               </div>
             </div>
           </Link>
-        ))}
+          );
+        })}
       </div>
     </section>
   );
