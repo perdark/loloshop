@@ -812,7 +812,7 @@ export default function FullSetWizardPage() {
     return <SuccessScreen result={result} />;
   }
 
-  const disabledReason = (() => {
+  const _disabledReason = (() => {
     const errs = validateStep(step);
     if (Object.keys(errs).length === 0) return undefined;
     return Object.values(errs)[0];

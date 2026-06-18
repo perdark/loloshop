@@ -63,7 +63,7 @@ export default function AdminWholesalerStudentsPage() {
 
   useEffect(() => {
     if (!wholesalerId) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial fetch
+     
     setLoading(true);
     setFetchError(false);
     api

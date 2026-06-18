@@ -750,7 +750,7 @@ export default function AdminOrdersPage() {
   }, [viewMode, wholesalerId, batchId, status, dateFrom, dateTo, typeFilter, zoneFilter]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch on mount / filters
+     
     load();
   }, [load]);
 

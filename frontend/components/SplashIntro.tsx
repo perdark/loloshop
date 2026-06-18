@@ -19,7 +19,7 @@ export function SplashIntro() {
       return;
     }
     sessionStorage.setItem(SPLASH_KEY, "1");
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional mount-only splash trigger
+     
     setPhase("in");
 
     const fadeTimer = setTimeout(() => setPhase("out"), DISPLAY_MS);

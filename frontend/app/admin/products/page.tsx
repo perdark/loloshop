@@ -193,12 +193,12 @@ export default function AdminProductsPage() {
   );
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial fetch
+     
     loadList();
   }, [loadList]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch on selection/role change
+     
     setEditingName(false);
     if (selectedId) loadProduct(selectedId, previewRole);
     else setProduct(null);
@@ -217,7 +217,7 @@ export default function AdminProductsPage() {
   const selectedSummary = summaries.find((s) => s.id === selectedId);
   const activeParents = summaries.filter((s) => !s.parentId && s.active);
   const parents = activeParents;
-  const childrenOf = (pid: string) =>
+  const _childrenOf = (pid: string) =>
     summaries.filter((s) => s.parentId === pid);
   const activeChildrenOf = (pid: string) =>
     summaries.filter((s) => s.parentId === pid && s.active);
@@ -1210,7 +1210,6 @@ function ProductRailItem({
 /* ── Archived products disclosure ── */
 function ArchivedSection({
   products,
-  selectedId,
   onSelect,
   onRestore,
 }: {

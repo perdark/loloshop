@@ -756,36 +756,27 @@ function ConsoleContent() {
   }
 
   // ── Client-side filtering ──────────────────────────────────────────────────
-  const filtered = useMemo(() => {
-    let list = items;
-
-    // Stage filter
-    if (stage) list = list.filter((i) => i.status === stage);
-
-    // Source tab
-    if (source === "retail") list = list.filter((i) => i.source === "retail");
-    else if (source === "wholesaler") list = list.filter((i) => i.source === "wholesaler");
-
-    // Rep drill-down
+  // Plain derived value — the React Compiler memoizes it automatically (a manual
+  // useMemo here could not be preserved because it aliased/reassigned `items`).
+  const q = search.trim().toLowerCase();
+  const filtered = items.filter((i) => {
+    if (stage && i.status !== stage) return false;
+    if (source === "retail" && i.source !== "retail") return false;
+    if (source === "wholesaler" && i.source !== "wholesaler") return false;
     if (repParam !== null && source === "wholesaler") {
-      list = list.filter((i) => (i.wholesaler_name ?? "—") === repParam);
-      if (selectedBatch) list = list.filter((i) => i.batch_name === selectedBatch);
+      if ((i.wholesaler_name ?? "—") !== repParam) return false;
+      if (selectedBatch && i.batch_name !== selectedBatch) return false;
     }
-
-    // Search
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      list = list.filter(
-        (i) =>
-          i.student_name.toLowerCase().includes(q) ||
-          (i.university_name ?? "").toLowerCase().includes(q) ||
-          (i.department ?? "").toLowerCase().includes(q) ||
-          (i.wholesaler_name ?? "").toLowerCase().includes(q)
-      );
+    if (q) {
+      const hit =
+        i.student_name.toLowerCase().includes(q) ||
+        (i.university_name ?? "").toLowerCase().includes(q) ||
+        (i.department ?? "").toLowerCase().includes(q) ||
+        (i.wholesaler_name ?? "").toLowerCase().includes(q);
+      if (!hit) return false;
     }
-
-    return list;
-  }, [items, stage, source, repParam, selectedBatch, search]);
+    return true;
+  });
 
   // ── Source counts (for tab badges) ────────────────────────────────────────
   const stageItems   = stage ? items.filter((i) => i.status === stage) : items;
@@ -800,24 +791,20 @@ function ConsoleContent() {
   );
   const repsOverview = useMemo(() => buildRepsOverview(wholesalerItems), [wholesalerItems]);
 
-  // Batches for selected rep
-  const repBatches = useMemo(() => {
-    if (!repParam) return [];
-    return [
-      ...new Set(
-        items
-          .filter((i) => i.source === "wholesaler" && (i.wholesaler_name ?? "—") === repParam)
-          .map((i) => i.batch_name)
-          .filter(Boolean) as string[]
-      ),
-    ];
-  }, [items, repParam]);
+  // Batches for selected rep (compiler-memoized plain value).
+  const repBatches: string[] = !repParam
+    ? []
+    : [
+        ...new Set(
+          items
+            .filter((i) => i.source === "wholesaler" && (i.wholesaler_name ?? "—") === repParam)
+            .map((i) => i.batch_name)
+            .filter((b): b is string => Boolean(b))
+        ),
+      ];
 
   // ── Pagination ────────────────────────────────────────────────────────────
-  const pageItems = useMemo(() => {
-    const start = (page - 1) * PER_PAGE;
-    return filtered.slice(start, start + PER_PAGE);
-  }, [filtered, page]);
+  const pageItems = filtered.slice((page - 1) * PER_PAGE, (page - 1) * PER_PAGE + PER_PAGE);
 
   // Whether to show rep grid vs table
   const showRepGrid     = source === "wholesaler" && repParam === null;

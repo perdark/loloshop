@@ -68,7 +68,7 @@ export default function WholesalerStudentsPage() {
   }
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- refetch on filter change
+     
     fetchStudents(status);
   }, [status]);
 
