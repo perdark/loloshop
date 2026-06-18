@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import type { CSSProperties } from "react";
+import { AutoRotatingImage } from "@/components/ui/AutoRotatingImage";
 import { IconCrest } from "./VipIcons";
 import { vipAccent } from "./vipAccent";
 
@@ -16,30 +17,49 @@ export function VipHero({
   sub,
   badgeLabel,
   imageUrl,
+  images,
 }: {
   kicker?: string;
   headline: string;
   sub?: string | null;
   badgeLabel?: string | null;
   imageUrl?: string | null;
+  /** Admin-set gallery — when more than one, the hero photo auto-rotates. */
+  images?: string[];
 }) {
   const a = vipAccent(null);
+  // Cover first, then the gallery; fall back to the default lookbook shot.
+  const photos = (images && images.length ? images : [imageUrl]).filter(
+    (u): u is string => !!u
+  );
+  const heroPhotos = photos.length ? photos : ["/lookbook/look-boutique.jpg"];
 
   return (
     <section
       className="full-bleed relative overflow-hidden h-[68vh] min-h-[420px] sm:h-[78vh]"
       dir="rtl"
     >
-      {/* Layer 1 — living photo */}
-      <Image
-        src={imageUrl || "/lookbook/look-boutique.jpg"}
-        alt={headline}
-        fill
-        priority
-        unoptimized
-        sizes="100vw"
-        className="object-cover object-[50%_18%]"
-      />
+      {/* Layer 1 — living photo (auto-rotates through the admin's gallery) */}
+      {heroPhotos.length > 1 ? (
+        <AutoRotatingImage
+          images={heroPhotos}
+          alt={headline}
+          sizes="100vw"
+          priority
+          showDots={false}
+          imgClassName="object-cover object-[50%_18%]"
+        />
+      ) : (
+        <Image
+          src={heroPhotos[0]}
+          alt={headline}
+          fill
+          priority
+          unoptimized
+          sizes="100vw"
+          className="object-cover object-[50%_18%]"
+        />
+      )}
 
       {/* Layer 2 — editorial cream fade: blends photo into page at the bottom */}
       <div

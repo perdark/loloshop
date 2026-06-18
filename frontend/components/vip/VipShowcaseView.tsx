@@ -71,6 +71,7 @@ export function VipShowcaseView({
         sub={hero.description}
         badgeLabel={hero.badgeLabel}
         imageUrl={hero.imageUrl}
+        images={[...new Set([hero.imageUrl, ...(hero.gallery ?? [])].filter((u): u is string => !!u))]}
       />
 
       <div ref={sentinelRef} aria-hidden className="h-0" />

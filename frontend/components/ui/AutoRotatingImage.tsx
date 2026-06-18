@@ -16,6 +16,8 @@ export function AutoRotatingImage({
   intervalMs = 4000,
   imgClassName = "object-cover",
   className = "",
+  priority = false,
+  showDots = true,
 }: {
   images: string[];
   alt: string;
@@ -23,6 +25,8 @@ export function AutoRotatingImage({
   intervalMs?: number;
   imgClassName?: string;
   className?: string;
+  priority?: boolean;
+  showDots?: boolean;
 }) {
   const [active, setActive] = useState(0);
   const n = images.length;
@@ -51,6 +55,7 @@ export function AutoRotatingImage({
           alt={i === 0 ? alt : ""}
           fill
           unoptimized
+          priority={priority && i === 0}
           sizes={sizes}
           aria-hidden={i !== active}
           className={`${imgClassName} transition-opacity duration-700 ease-out ${
@@ -58,7 +63,7 @@ export function AutoRotatingImage({
           }`}
         />
       ))}
-      {n > 1 && (
+      {showDots && n > 1 && (
         <div className="pointer-events-none absolute bottom-2 left-1/2 flex -translate-x-1/2 gap-1.5">
           {images.map((_, i) => (
             <span
