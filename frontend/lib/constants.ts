@@ -93,6 +93,27 @@ export const EMBROIDERY_ZONE_ORDER: EmbroideryZone[] = [
   "sash_right", "sash_left", "sash_back", "cap_side", "cap_top", "robe_pleat", "robe_no_pleat",
 ];
 
+/** Wholesaler full-set (طقم) embroidery zones — match the label set persisted by
+ *  backend/lib/fullSetOrder.js. Used by the rep-scoped orders console so an embroiderer
+ *  can batch by zone ("10 وشاح أمام، ثم 10 قبعات…"). Distinct from the retail zones above. */
+export type FullSetZone =
+  | "sash_front" | "sash_back"
+  | "cap_side" | "cap_top"
+  | "robe_sleeve_right" | "robe_sleeve_left"
+  | "american_shawl";
+export const FULLSET_ZONE_LABELS: Record<FullSetZone, string> = {
+  sash_front: "وشاح — أمام",
+  sash_back: "وشاح — خلف",
+  cap_side: "قبعة — جانب",
+  cap_top: "قبعة — أعلى",
+  robe_sleeve_right: "روب — ردن أيمن",
+  robe_sleeve_left: "روب — ردن أيسر",
+  american_shawl: "شال أمريكي",
+};
+export const FULLSET_ZONE_ORDER: FullSetZone[] = [
+  "sash_front", "sash_back", "cap_side", "cap_top", "robe_sleeve_right", "robe_sleeve_left", "american_shawl",
+];
+
 export const ORDER_STATUS_OPTIONS: OrderStatus[] = [
   "pending_approval",
   "designing",

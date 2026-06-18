@@ -3,6 +3,7 @@ const { authRequired, requireRole } = require('../middleware/auth');
 const c = require('../controllers/adminController');
 const orders = require('../controllers/orderController');
 const salary = require('../controllers/salaryController');
+const staff = require('../controllers/staffController');
 
 router.use(authRequired, requireRole('admin'));
 
@@ -20,6 +21,7 @@ router.patch('/wholesalers/:id/pricing', c.updatePricing);
 router.get('/wholesalers/:id/sash-config', c.getWholesalerSashConfig);
 router.put('/wholesalers/:id/sash-config', c.updateWholesalerSashConfig);
 router.get('/wholesalers/:id/students', c.wholesalerStudents);
+router.get('/wholesalers/:id/orders', staff.wholesalerOrders);
 router.delete('/wholesalers/:id', c.deleteWholesaler);
 router.post('/students/:id/edit-exception', c.toggleEditException);
 

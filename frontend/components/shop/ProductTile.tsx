@@ -1,6 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
-import { formatIQD } from "@/lib/format";
+import { formatIQD, formatDiscountPercent } from "@/lib/format";
 import { productImageVT } from "@/lib/view-transition";
 import type { ShopPackageCard, ShopProductCard } from "@/lib/types";
 
@@ -10,6 +10,12 @@ import type { ShopPackageCard, ShopProductCard } from "@/lib/types";
  * over the image). Quiet, scannable, lets the garment photography stay clean.
  */
 export function ProductTile({ product }: { product: ShopProductCard }) {
+  // Only a genuine markdown (old price strictly above the shown price) shows the strike.
+  const hasDiscount =
+    product.compareAtPrice != null && product.compareAtPrice > product.basePrice;
+  const discountLabel = hasDiscount
+    ? formatDiscountPercent(product.basePrice, product.compareAtPrice)
+    : null;
   return (
     <Link href={`/product/${product.id}`} className="group block">
       <figure
@@ -37,14 +43,27 @@ export function ProductTile({ product }: { product: ShopProductCard }) {
         <h3 className="truncate font-display text-[1.1rem] font-semibold leading-[1.6] pb-[3px] text-ink">
           {product.nameAr}
         </h3>
-        <p className="mt-1 flex items-baseline gap-1.5" dir="ltr">
+        <p className="mt-1 flex flex-wrap items-baseline gap-x-1.5 gap-y-1" dir="ltr">
           <span className="text-[10px] font-medium tracking-wide text-[var(--shop-muted)]">
             يبدأ من
           </span>
           <span className="text-sm font-semibold tabular-nums text-ink/85">
             {formatIQD(product.basePrice)}
           </span>
+          {hasDiscount && (
+            <span className="text-xs font-medium tabular-nums text-[var(--shop-muted)] line-through">
+              {formatIQD(product.compareAtPrice!)}
+            </span>
+          )}
         </p>
+        {discountLabel && (
+          <span
+            dir="rtl"
+            className="mt-1 inline-block rounded-full bg-orange-ink/10 px-2 py-0.5 text-[10px] font-bold text-orange-ink"
+          >
+            {discountLabel}
+          </span>
+        )}
       </figcaption>
     </Link>
   );

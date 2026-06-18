@@ -86,6 +86,7 @@ const VALID_PRODUCT_TYPES = ['sash', 'robe', 'cap', 'shawl'];
 // "only sashes with right-side embroidery" or "robes with shoulder pleats". The clause uses
 // only constant text (zone is a validated key, never raw input) → injection-safe.
 const ORDER_ZONE_MATCH = {
+  // Retail single-sash zones (right side = university, left = name).
   sash_right:    `(oi.label_snapshot ILIKE '%يمين%' OR oi.label_snapshot ILIKE '%اليمن%')`,
   sash_left:     `(oi.label_snapshot ILIKE '%يسار%' OR oi.label_snapshot ILIKE '%اليسر%')`,
   sash_back:     `(oi.label_snapshot ILIKE '%خلف%')`,
@@ -93,10 +94,19 @@ const ORDER_ZONE_MATCH = {
   cap_top:       `(oi.label_snapshot ILIKE '%أعلى%' OR oi.label_snapshot ILIKE '%اعلى%')`,
   robe_pleat:    `(oi.label_snapshot ILIKE '%كسرة%' AND oi.customer_text = 'نعم')`,
   robe_no_pleat: `(oi.label_snapshot ILIKE '%كسرة%' AND oi.customer_text = 'لا')`,
+  // Wholesaler full-set (طقم) zones — the label set persisted by lib/fullSetOrder.js:
+  // «تطريز الوشاح من الأمام/الخلف» · «… القبعة من الجانب/الأعلى» · «… ردن الروب الأيمن/الأيسر» · «شال امريكي».
+  sash_front:        `(oi.label_snapshot ILIKE '%وشاح%أمام%')`,
+  robe_sleeve_right: `(oi.label_snapshot ILIKE '%ردن%' AND oi.label_snapshot ILIKE '%أيمن%')`,
+  robe_sleeve_left:  `(oi.label_snapshot ILIKE '%ردن%' AND oi.label_snapshot ILIKE '%أيسر%')`,
+  american_shawl:    `(oi.label_snapshot ILIKE '%شال%امريكي%' OR oi.label_snapshot ILIKE '%شال%أمريكي%')`,
 };
 // Embroidery zones additionally require the zone to carry real content (text/image), so
 // "بيها تطريز" excludes a plain (سادة) zone. Pleats encode their yes/no in customer_text.
-const ZONE_NEEDS_CONTENT = new Set(['sash_right', 'sash_left', 'sash_back', 'cap_side', 'cap_top']);
+const ZONE_NEEDS_CONTENT = new Set([
+  'sash_right', 'sash_left', 'sash_back', 'cap_side', 'cap_top',
+  'sash_front', 'robe_sleeve_right', 'robe_sleeve_left', 'american_shawl',
+]);
 
 function orderZoneClause(zone, alias = 'o') {
   const match = ORDER_ZONE_MATCH[zone];

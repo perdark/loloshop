@@ -52,12 +52,17 @@ const QUEUE_STAGES = {
   digitizer: ['converting'],
   embroiderer: ['embroidery'],
   presser: ['pressing'],
-  preparer: ['preparing', 'ready'],
+  // Preparer also sees تم التسليم (delivered) — they're the ones who hand orders over,
+  // so the "done" column lives in their queue (recency-capped in getQueue).
+  preparer: ['preparing', 'ready', 'delivered'],
   // مفصل (tailor) — read-only viewer of every in-production order (recognises sashes by
   // name). No transitions exist for tailor, so available_actions stays empty (read-only).
   tailor: ['design_complete', 'converting', 'embroidery', 'pressing', 'preparing', 'ready'],
 };
 const MANAGER_STAGES = ['design_complete', 'converting', 'embroidery', 'pressing', 'preparing', 'ready'];
+// What a manager/admin SEES in the production console — same as MANAGER_STAGES plus the
+// تم التسليم "done" column. Kept separate so monitor()'s WIP math stays on the 6 live stages.
+const MANAGER_VIEW_STAGES = [...MANAGER_STAGES, 'delivered'];
 
 // Presence is heartbeat-based: a viewer re-claims every ~30s while the order tab
 // is open. An order is "actively worked" only while its last heartbeat is fresh.
@@ -115,7 +120,7 @@ async function getQueue(req, res) {
   let stages;
   if (isManager(u)) {
     const filter = req.query.stage;
-    stages = filter && MANAGER_STAGES.includes(filter) ? [filter] : MANAGER_STAGES;
+    stages = filter && MANAGER_VIEW_STAGES.includes(filter) ? [filter] : MANAGER_VIEW_STAGES;
   } else {
     // Multi-role: union the stage queues of every role the staff member holds.
     const set = new Set();
@@ -156,6 +161,9 @@ async function getQueue(req, res) {
      LEFT JOIN users wu ON wu.id = w.user_id
      LEFT JOIN users wk ON wk.id = o.working_staff_id
      WHERE o.status::text = ANY($1)
+       -- تم التسليم column is bounded to the last 90 days so the console can't grow unbounded.
+       -- NULL delivered_at (legacy/migrated rows) is kept so a delivered order never just vanishes.
+       AND (o.status::text <> 'delivered' OR o.delivered_at IS NULL OR o.delivered_at > NOW() - INTERVAL '90 days')
        ${designerPending
          ? "AND (o.status::text <> 'design_complete' OR ((o.design_id IS NOT NULL AND d.approval_status = 'pending') OR (o.design_id IS NULL AND o.has_embroidery = TRUE)))"
          : ''}
@@ -374,8 +382,8 @@ async function getOrder(req, res) {
 }
 
 // ---------- Advance an order to its next production stage ----------
-async function advance(req, res) {
-  const { id } = req.params;
+// Load the row needed to compute + apply an advance (shared by single + bulk).
+async function loadAdvanceRow(id) {
   const cur = await query(
     `SELECT o.id, o.status, o.design_id, o.has_embroidery, o.needs_pressing,
             s.user_id, s.wholesaler_id, d.approval_status AS design_approval_status
@@ -384,36 +392,32 @@ async function advance(req, res) {
      WHERE o.id = $1`,
     [id]
   );
-  if (!cur.rows.length) return res.status(404).json({ error: 'الطلب غير موجود', code: 'ERR_NOT_FOUND' });
-  const order = cur.rows[0];
-  if (!staffScopeAllows(req.user, order.wholesaler_id == null)) {
-    return res.status(403).json({ error: 'هذا الطلب خارج نطاقك', code: 'ERR_FORBIDDEN' });
-  }
+  return cur.rows[0] || null;
+}
+
+// Apply ONE forward advance (guards must be checked by the caller). Writes the
+// status + audit/activity/notification in a tx, then emits live events. Returns
+// the updated {id, status} row.
+async function performAdvance(order, user) {
   const from = order.status;
   const to = nextStageFor(order);
-  if (!to) {
-    return res.status(409).json({ error: 'لا يمكن تقديم هذه الحالة', code: 'ERR_INVALID_TRANSITION' });
-  }
-  if (!canStaffTransition(req.user, from, to)) {
-    return res.status(403).json({ error: 'ممنوع', code: 'ERR_FORBIDDEN' });
-  }
   const deliveredSet = to === 'delivered' ? ', delivered_at = NOW()' : '';
   const updated = await tx(async (client) => {
     const { rows } = await client.query(
       `UPDATE orders SET status = $1${deliveredSet},
        working_staff_id = NULL, working_since = NULL
        WHERE id = $2 RETURNING id, status`,
-      [to, id]
+      [to, order.id]
     );
     await client.query(
       `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
        VALUES ($1, 'status_change', 'order', $2, $3)`,
-      [req.user.id, id, JSON.stringify({ from, to, by: req.user.staff_type || req.user.role })]
+      [user.id, order.id, JSON.stringify({ from, to, by: user.staff_type || user.role })]
     );
     await client.query(
       `INSERT INTO staff_activity_log (user_id, action, order_id, from_stage, to_stage)
        VALUES ($1, 'advance', $2, $3, $4)`,
-      [req.user.id, id, from, to]
+      [user.id, order.id, from, to]
     );
     await client.query(
       `INSERT INTO notifications (user_id, type, title_ar, body_ar, link)
@@ -422,9 +426,61 @@ async function advance(req, res) {
     );
     return rows[0];
   });
-  emitOrderChanged(id, updated.status);
-  emitPresence(id, null, null); // advancing clears the working_staff
+  emitOrderChanged(order.id, updated.status);
+  emitPresence(order.id, null, null); // advancing clears the working_staff
+  return updated;
+}
+
+async function advance(req, res) {
+  const { id } = req.params;
+  const order = await loadAdvanceRow(id);
+  if (!order) return res.status(404).json({ error: 'الطلب غير موجود', code: 'ERR_NOT_FOUND' });
+  if (!staffScopeAllows(req.user, order.wholesaler_id == null)) {
+    return res.status(403).json({ error: 'هذا الطلب خارج نطاقك', code: 'ERR_FORBIDDEN' });
+  }
+  const to = nextStageFor(order);
+  if (!to) {
+    return res.status(409).json({ error: 'لا يمكن تقديم هذه الحالة', code: 'ERR_INVALID_TRANSITION' });
+  }
+  if (!canStaffTransition(req.user, order.status, to)) {
+    return res.status(403).json({ error: 'ممنوع', code: 'ERR_FORBIDDEN' });
+  }
+  const updated = await performAdvance(order, req.user);
   res.json({ data: updated });
+}
+
+// ---------- Bulk advance: "إكمال" multiple orders one stage at a time ----------
+// Each order is guarded INDEPENDENTLY (scope + state-machine + role) and advanced in
+// its own tx, so one bad/locked order never blocks the rest. Orders the caller can't
+// move are skipped (never error the whole call) and reported back.
+async function advanceBulk(req, res) {
+  const ids = Array.isArray(req.body.ids)
+    ? [...new Set(req.body.ids.filter((x) => typeof x === 'string' && x))].slice(0, 200)
+    : [];
+  if (!ids.length) {
+    return res.status(400).json({ error: 'لم تُحدد أي طلبات', code: 'ERR_VALIDATION' });
+  }
+  const results = [];
+  let advanced = 0;
+  for (const id of ids) {
+    const order = await loadAdvanceRow(id);
+    if (!order) { results.push({ id, ok: false, reason: 'not_found' }); continue; }
+    if (!staffScopeAllows(req.user, order.wholesaler_id == null)) {
+      results.push({ id, ok: false, reason: 'forbidden' }); continue;
+    }
+    const to = nextStageFor(order);
+    if (!to || !canStaffTransition(req.user, order.status, to)) {
+      results.push({ id, ok: false, reason: 'not_advanceable' }); continue;
+    }
+    try {
+      const updated = await performAdvance(order, req.user);
+      advanced++;
+      results.push({ id, ok: true, status: updated.status });
+    } catch {
+      results.push({ id, ok: false, reason: 'error' });
+    }
+  }
+  res.json({ data: { advanced, skipped: ids.length - advanced, results } });
 }
 
 // ---------- Confirm delivery (ready → delivered) with hand-off details ----------
@@ -701,6 +757,171 @@ async function uploadFinalDesign(req, res) {
   res.json({ data: { url } });
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// «الفصال» (tailor) — a PARALLEL, fully-independent track over RETAIL orders.
+// ابو عبدو works a retail order's tailoring at the SAME TIME the designer pipeline
+// runs. Marking tailoring done writes ONLY orders.tailor_status (+ done_at/by) — it
+// never touches orders.status, and advancing the pipeline never touches the tailor
+// track. Retail-only everywhere (students.wholesaler_id IS NULL).
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Who may work the tailor track: the مفصل (tailor) staff_type, or a manager/admin.
+function canTailor(u) {
+  return isManager(u) || staffTypesOf(u).includes('tailor');
+}
+
+// ---------- GET /tailor-queue?done=0|1 — ابو عبدو's parallel to-do ----------
+async function tailorQueue(req, res) {
+  if (!canTailor(req.user)) {
+    return res.status(403).json({ error: 'ممنوع', code: 'ERR_FORBIDDEN' });
+  }
+  // Default (absent / '0') = pending; '1' = done.
+  const wantDone = String(req.query.done || '') === '1';
+  const tailorStatus = wantDone ? 'done' : 'pending';
+  const { rows } = await query(
+    `SELECT o.id, o.status, o.created_at,
+            o.tailor_status, o.tailor_done_at,
+            u.name AS student_name,
+            p.name_ar AS product_name, p.type AS product_type,
+            b.name_ar AS batch_name, b.deadline
+     FROM orders o
+     JOIN students s ON s.id = o.student_id
+     JOIN users u ON u.id = s.user_id
+     JOIN products p ON p.id = o.product_id
+     LEFT JOIN batches b ON b.id = o.batch_id
+     WHERE s.wholesaler_id IS NULL
+       AND o.status::text <> 'cancelled'
+       AND o.tailor_status::text = $1
+     ORDER BY b.deadline ASC NULLS LAST, o.created_at ASC`,
+    [tailorStatus]
+  );
+  // status_label: pipeline status is DISPLAY-ONLY context here (never an action).
+  const data = rows.map((r) => ({ ...r, status_label: STATUS_LABEL_AR[r.status] ?? r.status }));
+  res.json({ data });
+}
+
+// Load the row needed to guard + apply a tailor mutation (shared by single + bulk).
+async function loadTailorRow(id) {
+  const cur = await query(
+    `SELECT o.id, o.tailor_status, s.wholesaler_id
+     FROM orders o JOIN students s ON s.id = o.student_id
+     WHERE o.id = $1`,
+    [id]
+  );
+  return cur.rows[0] || null;
+}
+
+// Apply ONE tailor mark (guards checked by caller). done=true → mark done; false → reopen.
+// Writes tailor_status + audit row in a tx. Idempotent. Returns the updated row.
+async function performTailorMark(orderId, user, done) {
+  return tx(async (client) => {
+    const { rows } = await client.query(
+      done
+        ? `UPDATE orders SET tailor_status = 'done', tailor_done_at = NOW(), tailor_done_by = $1
+           WHERE id = $2 RETURNING id, tailor_status, tailor_done_at`
+        : `UPDATE orders SET tailor_status = 'pending', tailor_done_at = NULL, tailor_done_by = NULL
+           WHERE id = $1 RETURNING id, tailor_status, tailor_done_at`,
+      done ? [user.id, orderId] : [orderId]
+    );
+    await client.query(
+      `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
+       VALUES ($1, $2, 'order', $3, $4)`,
+      [user.id, done ? 'tailor_complete' : 'tailor_reopen', orderId,
+       JSON.stringify({ tailor_status: done ? 'done' : 'pending' })]
+    );
+    return rows[0];
+  });
+}
+
+// ---------- POST /orders/:id/tailor-complete — mark tailoring done (idempotent) ----------
+async function tailorComplete(req, res) {
+  if (!canTailor(req.user)) {
+    return res.status(403).json({ error: 'ممنوع', code: 'ERR_FORBIDDEN' });
+  }
+  const { id } = req.params;
+  const order = await loadTailorRow(id);
+  if (!order) return res.status(404).json({ error: 'الطلب غير موجود', code: 'ERR_NOT_FOUND' });
+  // Tailor track is retail-only — a wholesaler order is out of scope.
+  if (order.wholesaler_id != null) {
+    return res.status(403).json({ error: 'هذا الطلب خارج نطاق الفصال', code: 'ERR_FORBIDDEN' });
+  }
+  if (order.tailor_status === 'done') {
+    return res.json({ data: { id: order.id, tailor_status: 'done' } }); // idempotent
+  }
+  const updated = await performTailorMark(id, req.user, true);
+  res.json({ data: updated });
+}
+
+// ---------- POST /orders/:id/tailor-reopen — undo a mistaken completion ----------
+async function tailorReopen(req, res) {
+  if (!canTailor(req.user)) {
+    return res.status(403).json({ error: 'ممنوع', code: 'ERR_FORBIDDEN' });
+  }
+  const { id } = req.params;
+  const order = await loadTailorRow(id);
+  if (!order) return res.status(404).json({ error: 'الطلب غير موجود', code: 'ERR_NOT_FOUND' });
+  if (order.wholesaler_id != null) {
+    return res.status(403).json({ error: 'هذا الطلب خارج نطاق الفصال', code: 'ERR_FORBIDDEN' });
+  }
+  if (order.tailor_status === 'pending') {
+    return res.json({ data: { id: order.id, tailor_status: 'pending' } }); // idempotent
+  }
+  const updated = await performTailorMark(id, req.user, false);
+  res.json({ data: updated });
+}
+
+// ---------- POST /tailor-complete-bulk { ids:[] } — mirror advanceBulk ----------
+// Each order guarded INDEPENDENTLY (retail + permission); the rest are skipped + reported.
+async function tailorCompleteBulk(req, res) {
+  if (!canTailor(req.user)) {
+    return res.status(403).json({ error: 'ممنوع', code: 'ERR_FORBIDDEN' });
+  }
+  const ids = Array.isArray(req.body.ids)
+    ? [...new Set(req.body.ids.filter((x) => typeof x === 'string' && x))].slice(0, 200)
+    : [];
+  if (!ids.length) {
+    return res.status(400).json({ error: 'لم تُحدد أي طلبات', code: 'ERR_VALIDATION' });
+  }
+  const results = [];
+  let done = 0;
+  for (const id of ids) {
+    const order = await loadTailorRow(id);
+    if (!order) { results.push({ id, ok: false, reason: 'not_found' }); continue; }
+    if (order.wholesaler_id != null) {
+      results.push({ id, ok: false, reason: 'not_retail' }); continue;
+    }
+    if (order.tailor_status === 'done') {
+      // Already done → count as success (idempotent), no extra write/audit.
+      done++; results.push({ id, ok: true }); continue;
+    }
+    try {
+      await performTailorMark(id, req.user, true);
+      done++;
+      results.push({ id, ok: true });
+    } catch {
+      results.push({ id, ok: false, reason: 'error' });
+    }
+  }
+  res.json({ data: { done, skipped: ids.length - done, results } });
+}
+
+// ---------- GET /tailor-summary — parallel-progress counts over RETAIL orders ----------
+async function tailorSummary(req, res) {
+  if (!canTailor(req.user)) {
+    return res.status(403).json({ error: 'ممنوع', code: 'ERR_FORBIDDEN' });
+  }
+  const { rows } = await query(
+    `SELECT
+       COUNT(*) FILTER (WHERE o.tailor_status::text = 'pending')::int AS pending,
+       COUNT(*) FILTER (WHERE o.tailor_status::text = 'done')::int    AS done,
+       COUNT(*)::int AS total
+     FROM orders o JOIN students s ON s.id = o.student_id
+     WHERE s.wholesaler_id IS NULL AND o.status::text <> 'cancelled'`
+  );
+  const r = rows[0] || { pending: 0, done: 0, total: 0 };
+  res.json({ data: { pending: r.pending, done: r.done, total: r.total } });
+}
+
 // ---------- Manager / admin: staff performance + pipeline health ----------
 async function monitor(req, res) {
   const sc = sourceClause(resolveSourceFilter(req.user, req.query.source));
@@ -773,6 +994,7 @@ async function monitor(req, res) {
 }
 
 module.exports = {
-  getQueue, getOrder, advance, deliver, revert, claim, release, completed, uploadFinalDesign, monitor,
-  streamEvents,
+  getQueue, getOrder, advance, advanceBulk, deliver, revert, claim, release, completed, uploadFinalDesign, monitor,
+  streamEvents, nextStageFor,
+  tailorQueue, tailorComplete, tailorReopen, tailorCompleteBulk, tailorSummary,
 };

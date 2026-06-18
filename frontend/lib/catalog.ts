@@ -87,6 +87,13 @@ function mapImageFit(raw: unknown): import("./types").ImageFit {
   return raw === "contain" ? "contain" : "cover";
 }
 
+/** Optional «السعر قبل الخصم» — NULL/absent → null, else a finite number. */
+function mapCompareAtPrice(raw: unknown): number | null {
+  if (raw == null) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
 function mapProductImage(raw: Record<string, unknown>): ProductImage {
   return {
     id: String(raw.id),
@@ -102,6 +109,7 @@ function mapShopProduct(raw: Record<string, unknown>): ShopProductCard {
     nameAr: String(raw.name_ar ?? raw.nameAr),
     description: (raw.description as string | null) ?? null,
     basePrice: Number(raw.base_price ?? raw.basePrice ?? 0),
+    compareAtPrice: mapCompareAtPrice(raw.compare_at_price ?? raw.compareAtPrice),
     imageUrl: resolveCatalogMediaUrl(raw.image_url as string | null),
     imageFit: mapImageFit(raw.image_fit ?? raw.imageFit),
     featured: Boolean(raw.featured),
@@ -135,6 +143,7 @@ function mapProductFull(raw: Record<string, unknown>): CatalogProduct {
     nameAr: String(raw.name_ar ?? raw.nameAr),
     description: (raw.description as string | null) ?? null,
     basePrice: Number(raw.base_price ?? raw.basePrice ?? 0),
+    compareAtPrice: mapCompareAtPrice(raw.compare_at_price ?? raw.compareAtPrice),
     genderRestriction:
       (raw.gender_restriction as CatalogProduct["genderRestriction"]) ?? null,
     customizable: Boolean(raw.customizable),
@@ -160,6 +169,7 @@ function mapProductSummary(raw: Record<string, unknown>): CatalogProductSummary 
     nameAr: String(raw.name_ar ?? raw.nameAr),
     description: (raw.description as string | null) ?? null,
     basePrice: Number(raw.base_price ?? raw.basePrice ?? 0),
+    compareAtPrice: mapCompareAtPrice(raw.compare_at_price ?? raw.compareAtPrice),
     customizable: Boolean(raw.customizable),
     genderRestriction:
       (raw.gender_restriction as CatalogProductSummary["genderRestriction"]) ??
@@ -248,6 +258,8 @@ export async function createCatalogProduct(body: {
   name_ar: string;
   description?: string | null;
   base_price: number;
+  /** Optional «السعر قبل الخصم» (IQD). null/omitted = no discount. */
+  compare_at_price?: number | null;
   customizable?: boolean;
   gender_restriction?: string | null;
   parent_id?: string | null;

@@ -38,6 +38,7 @@ async function getProductFull(req, res) {
   const prod = await query(
     `SELECT p.id, p.type, p.name_ar, p.description, p.customizable, p.gender_restriction,
             p.image_url, p.image_fit, p.featured, p.parent_id, p.wholesaler_only, p.retail_only,
+            p.compare_at_price,
             par.name_ar AS parent_name_ar, par.image_url AS parent_image_url,
             COALESCE(ppr.base_price, p.base_price) AS base_price
      FROM products p
@@ -152,7 +153,7 @@ async function getShop(req, res) {
       : 'AND p.wholesaler_only = FALSE';
   const products = await query(
     `SELECT p.id, p.type, p.name_ar, p.description, p.customizable, p.gender_restriction,
-            p.image_url, p.image_fit, p.featured, p.sort,
+            p.image_url, p.image_fit, p.featured, p.sort, p.compare_at_price,
             COALESCE(ppr.base_price, p.base_price) AS base_price
      FROM products p
      LEFT JOIN product_price_roles ppr ON ppr.product_id = p.id AND ppr.role = $1
@@ -195,7 +196,7 @@ async function getShop(req, res) {
 // ---------- ADMIN: list all products (incl. inactive) for catalog editor ----------
 async function listProductsAdmin(req, res) {
   const { rows } = await query(
-    `SELECT p.id, p.type, p.name_ar, p.description, p.base_price, p.customizable,
+    `SELECT p.id, p.type, p.name_ar, p.description, p.base_price, p.compare_at_price, p.customizable,
             p.gender_restriction, p.image_url, p.image_fit, p.featured, p.sort, p.active,
             p.wholesaler_only, p.retail_only, p.parent_id,
             par.name_ar AS parent_name,
@@ -227,15 +228,28 @@ async function deleteProductImage(req, res) {
 }
 
 // ---------- ADMIN: products ----------
+// Coerce an optional compare-at (old) price: empty/null → null (clears it),
+// otherwise a non-negative integer. Returns { ok, value } so callers can 400 on bad input.
+function normalizeCompareAtPrice(raw) {
+  if (raw === undefined || raw === null || raw === '') return { ok: true, value: null };
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return { ok: false, value: null };
+  return { ok: true, value: Math.round(n) };
+}
+
 async function createProduct(req, res) {
   const { type, name_ar, description, base_price, customizable, gender_restriction, parent_id } = req.body;
   if (!type || !name_ar || base_price == null) {
     return res.status(400).json({ error: 'بيانات ناقصة', code: 'ERR_VALIDATION' });
   }
+  const cap = normalizeCompareAtPrice(req.body.compare_at_price);
+  if (!cap.ok) {
+    return res.status(400).json({ error: 'السعر قبل الخصم غير صالح', code: 'ERR_VALIDATION' });
+  }
   const { rows } = await query(
-    `INSERT INTO products (type, name_ar, description, base_price, customizable, gender_restriction, parent_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-    [type, name_ar, description || null, base_price, !!customizable, gender_restriction || null, parent_id || null]
+    `INSERT INTO products (type, name_ar, description, base_price, compare_at_price, customizable, gender_restriction, parent_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+    [type, name_ar, description || null, base_price, cap.value, !!customizable, gender_restriction || null, parent_id || null]
   );
   res.status(201).json({ data: { id: rows[0].id } });
 }
@@ -268,9 +282,19 @@ async function updateProduct(req, res) {
     return res.status(400).json({ error: 'قيمة عرض الصورة غير صالحة', code: 'ERR_VALIDATION' });
   }
 
+  // compare_at_price (السعر قبل الخصم): empty/null clears it; reject negatives before
+  // the DB CHECK so the client gets a clean Arabic 400.
+  if (req.body.compare_at_price !== undefined) {
+    const cap = normalizeCompareAtPrice(req.body.compare_at_price);
+    if (!cap.ok) {
+      return res.status(400).json({ error: 'السعر قبل الخصم غير صالح', code: 'ERR_VALIDATION' });
+    }
+    req.body.compare_at_price = cap.value;
+  }
+
   const upd = buildUpdate(
     'products',
-    ['name_ar', 'description', 'base_price', 'customizable', 'gender_restriction', 'image_url', 'image_fit', 'featured', 'sort', 'active', 'wholesaler_only', 'retail_only', 'parent_id'],
+    ['name_ar', 'description', 'base_price', 'compare_at_price', 'customizable', 'gender_restriction', 'image_url', 'image_fit', 'featured', 'sort', 'active', 'wholesaler_only', 'retail_only', 'parent_id'],
     req.body, req.params.id
   );
   if (!upd) return res.status(400).json({ error: 'لا تغييرات', code: 'ERR_VALIDATION' });

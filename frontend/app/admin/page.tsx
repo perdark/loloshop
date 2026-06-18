@@ -4,7 +4,9 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { toast } from "sonner";
 import { getAdminAnalytics, getAdminAccounting } from "@/lib/admin";
+import { getTailorSummary, type TailorSummary } from "@/lib/staff";
 import { ORDER_STATUS_LABELS } from "@/lib/constants";
+import Link from "next/link";
 import { formatIQD } from "@/lib/format";
 import type { AdminAccounting, AdminAnalytics } from "@/lib/types";
 import { usePolling } from "@/lib/hooks/usePolling";
@@ -117,6 +119,7 @@ function DashboardSkeleton() {
 export default function AdminDashboardPage() {
   const [data, setData] = useState<AdminAnalytics | null>(null);
   const [accounting, setAccounting] = useState<AdminAccounting | null>(null);
+  const [tailor, setTailor] = useState<TailorSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -135,6 +138,13 @@ export default function AdminDashboardPage() {
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+    // الفصال (tailor) is a non-critical parallel widget — fetch separately so a
+    // failure here never blocks the core dashboard.
+    try {
+      setTailor(await getTailorSummary());
+    } catch {
+      /* leave previous value */
     }
   }, []);
 
@@ -255,6 +265,45 @@ export default function AdminDashboardPage() {
           ))}
         </dl>
       </section>
+
+      {/* الفصال — parallel tailoring progress (independent of the pipeline) */}
+      {tailor && tailor.total > 0 && (
+        <section className="mt-16">
+          <SectionHead title="الفصال" meta="بالتوازي مع الإنتاج" />
+          <Link
+            href="/staff/tailor"
+            className="block rounded-2xl border border-ink/10 bg-beige p-6 transition-colors hover:border-orange/40 sm:p-7"
+          >
+            <div className="grid grid-cols-3 divide-x divide-ink/10 [&>*]:border-ink/10">
+              <div className="px-4 text-center sm:px-6">
+                <dt className="text-sm font-medium text-[var(--shop-muted)]">قيد الفصال</dt>
+                <dd className="mt-3 text-[1.7rem] font-bold leading-none text-orange-ink lg:text-[2.1rem]">
+                  {toArabicDigits(tailor.pending)}
+                </dd>
+              </div>
+              <div className="px-4 text-center sm:px-6">
+                <dt className="text-sm font-medium text-[var(--shop-muted)]">تم الفصال</dt>
+                <dd className="mt-3 text-[1.7rem] font-bold leading-none text-ink lg:text-[2.1rem]">
+                  {toArabicDigits(tailor.done)}
+                </dd>
+              </div>
+              <div className="px-4 text-center sm:px-6">
+                <dt className="text-sm font-medium text-[var(--shop-muted)]">الإجمالي</dt>
+                <dd className="mt-3 text-[1.7rem] font-bold leading-none text-ink lg:text-[2.1rem]">
+                  {toArabicDigits(tailor.total)}
+                </dd>
+              </div>
+            </div>
+            {/* Progress bar — share of retail orders whose tailoring is finished */}
+            <div className="mt-6 h-2 overflow-hidden rounded-full bg-ink/8">
+              <div
+                className="h-full rounded-full bg-orange-ink transition-[width]"
+                style={{ width: `${tailor.total > 0 ? Math.round((tailor.done / tailor.total) * 100) : 0}%` }}
+              />
+            </div>
+          </Link>
+        </section>
+      )}
 
       {/* Accounting — system receipt */}
       <section className="mt-16">

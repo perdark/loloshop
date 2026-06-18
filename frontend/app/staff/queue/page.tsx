@@ -30,6 +30,7 @@ const STAGES: OrderStatus[] = [
   "pressing",
   "preparing",
   "ready",
+  "delivered",
 ];
 
 const PER_PAGE = 30;
@@ -58,6 +59,7 @@ const RAIL_BAR: Partial<Record<OrderStatus, string>> = {
   pressing:        "bg-amber-500",
   preparing:       "bg-ink-soft",
   ready:           "bg-emerald-500",
+  delivered:       "bg-ink/40",
 };
 
 // Product type chip colours — warm / neutral.
@@ -72,6 +74,7 @@ const PRODUCT_CHIP: Record<string, string> = {
 
 function isOverdue(item: ProductionQueueItem): boolean {
   if (!item.deadline) return false;
+  if (item.status === "delivered") return false; // already handed over — not late
   return new Date(item.deadline).getTime() < Date.now();
 }
 
@@ -147,7 +150,8 @@ interface StageRailProps {
 }
 
 function StageRail({ items, activeStage, onSelect }: StageRailProps) {
-  const total = items.length;
+  // "الكل" counts in-production only; delivered has its own chip (matches the list filter).
+  const total = items.filter((i) => i.status !== "delivered").length;
 
   const statByStage = useMemo(() => {
     const m: Record<string, { count: number; overdue: number; missing: number }> = {};
@@ -339,10 +343,11 @@ function StageRail({ items, activeStage, onSelect }: StageRailProps) {
 // ─── KPI strip ────────────────────────────────────────────────────────────────
 
 function KpiStrip({ items }: { items: ProductionQueueItem[] }) {
-  const inProd   = items.filter((i) => i.status !== "ready").length;
-  const ready    = items.filter((i) => i.status === "ready").length;
-  const overdue  = items.filter(isOverdue).length;
-  const missing  = items.filter(isMissingDesign).length;
+  const inProd    = items.filter((i) => i.status !== "ready" && i.status !== "delivered").length;
+  const ready     = items.filter((i) => i.status === "ready").length;
+  const delivered = items.filter((i) => i.status === "delivered").length;
+  const overdue   = items.filter(isOverdue).length;
+  const missing   = items.filter(isMissingDesign).length;
 
   const kpi = (val: number, label: string, valCls: string) => (
     <div className="flex items-center gap-2 rounded-lg border border-line bg-surface-sink px-3 py-1.5">
@@ -358,6 +363,8 @@ function KpiStrip({ items }: { items: ProductionQueueItem[] }) {
       {kpi(inProd,  "في الإنتاج", "text-ink")}
       <div className="hidden sm:block h-7 w-px bg-line" />
       {kpi(ready,   "جاهز اليوم", "text-emerald-600")}
+      <div className="hidden sm:block h-7 w-px bg-line" />
+      {kpi(delivered, "تم التسليم", "text-ink-soft")}
       <div className="hidden sm:block h-7 w-px bg-line" />
       {kpi(overdue, "متأخر",      "text-danger")}
       <div className="hidden sm:block h-7 w-px bg-line" />
@@ -761,6 +768,8 @@ function ConsoleContent() {
   const q = search.trim().toLowerCase();
   const filtered = items.filter((i) => {
     if (stage && i.status !== stage) return false;
+    // "الكل" means everything still in production — delivered shows only under its own chip.
+    if (!stage && i.status === "delivered") return false;
     if (source === "retail" && i.source !== "retail") return false;
     if (source === "wholesaler" && i.source !== "wholesaler") return false;
     if (repParam !== null && source === "wholesaler") {

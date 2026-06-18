@@ -21,6 +21,18 @@ export function formatIQD(amount: number): string {
   return `${IQD_FORMAT.format(amount)} د.ع`;
 }
 
+/** Discount percent off the compare-at (old) price, in the same Arabic-Indic
+ *  digits as prices — e.g. «خصم ٢٥٪». Returns null when there is no real discount. */
+export function formatDiscountPercent(
+  price: number,
+  compareAtPrice: number | null | undefined
+): string | null {
+  if (compareAtPrice == null || compareAtPrice <= price) return null;
+  const pct = Math.round((1 - price / compareAtPrice) * 100);
+  if (pct <= 0) return null;
+  return `خصم ${IQD_FORMAT.format(pct)}٪`;
+}
+
 export function formatDateIQ(date: string | Date | null): string {
   if (!date) return "—";
   const d = typeof date === "string" ? new Date(date) : date;

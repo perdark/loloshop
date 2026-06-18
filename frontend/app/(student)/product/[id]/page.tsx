@@ -27,6 +27,7 @@ import {
   type OptionSelection,
 } from "@/lib/pricing";
 import { addToCart } from "@/lib/cart";
+import { formatIQD, formatDiscountPercent } from "@/lib/format";
 import type { CatalogProduct, ConfigureOrderResult, RobeMeasurements } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -254,6 +255,13 @@ export default function StudentProductPage() {
     .filter((g) => groupVisibleForGender(g, gender))
     .sort((a, b) => a.sort - b.sort);
 
+  // Old-price markdown: strike compareAtPrice over the base price only when it's strictly higher.
+  const hasDiscount =
+    product.compareAtPrice != null && product.compareAtPrice > product.basePrice;
+  const discountLabel = hasDiscount
+    ? formatDiscountPercent(product.basePrice, product.compareAtPrice)
+    : null;
+
   return (
     <div className="pb-28">
       {/* Editorial product layout: sticky gallery beside the options on desktop,
@@ -276,6 +284,29 @@ export default function StudentProductPage() {
               <p className="mt-2 text-sm leading-relaxed text-ink-soft">
                 {product.description}
               </p>
+            )}
+
+            {/* Old-price markdown — base price + struck compare-at + خصم badge */}
+            {hasDiscount && (
+              <div className="mt-3 flex flex-wrap items-center gap-2.5">
+                <span
+                  dir="ltr"
+                  className="text-lg font-bold tabular-nums text-orange-ink"
+                >
+                  {formatIQD(product.basePrice)}
+                </span>
+                <span
+                  dir="ltr"
+                  className="text-sm font-medium tabular-nums text-ink-soft line-through"
+                >
+                  {formatIQD(product.compareAtPrice!)}
+                </span>
+                {discountLabel && (
+                  <span className="inline-block rounded-full bg-orange-ink/10 px-2.5 py-0.5 text-xs font-bold text-orange-ink">
+                    {discountLabel}
+                  </span>
+                )}
+              </div>
             )}
           </div>
 

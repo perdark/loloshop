@@ -126,6 +126,192 @@ export async function advanceOrder(id: string): Promise<{ id: string; status: Or
   return data.data;
 }
 
+// ─── Wholesaler order-working console (one rep's students' orders) ─────────────
+
+/** One order in the rep-scoped orders console (GET /{staff,admin}/wholesalers/:id/orders). */
+export interface WholesalerOrderRow {
+  id: string;
+  studentId: string;
+  studentName: string;
+  productName: string;
+  productType: "sash" | "robe" | "cap" | "shawl" | string;
+  status: OrderStatus;
+  statusLabel: string;
+  isDone: boolean;
+  batchName: string | null;
+  deadline: string | null;
+  /** Backend-computed: may THIS staff advance it? Single source of truth — drives the checkbox. */
+  canAdvance: boolean;
+  nextStatus: OrderStatus | null;
+  nextLabel: string | null;
+}
+
+interface WholesalerOrderApiRow {
+  id: string;
+  student_id: string;
+  student_name: string;
+  product_name: string;
+  product_type: string;
+  status: OrderStatus;
+  status_label: string;
+  is_done: boolean;
+  batch_name: string | null;
+  deadline: string | null;
+  can_advance: boolean;
+  next_status: OrderStatus | null;
+  next_label: string | null;
+}
+
+/**
+ * GET /{staff,admin}/wholesalers/:id/orders — every order for the rep's students.
+ * `isAdmin` picks the admin route (the staff route is requireRole('staff')).
+ * Optional `zone` filters by embroidery zone (e.g. "sash_front", "cap_side").
+ */
+export async function getWholesalerOrders(
+  wholesalerId: string,
+  opts: { zone?: string; isAdmin?: boolean } = {}
+): Promise<WholesalerOrderRow[]> {
+  const base = opts.isAdmin ? "/admin" : "/staff";
+  const { data } = await api.get<{ data: WholesalerOrderApiRow[] }>(
+    `${base}/wholesalers/${wholesalerId}/orders`,
+    { params: opts.zone ? { zone: opts.zone } : undefined }
+  );
+  return (data.data || []).map((r) => ({
+    id: r.id,
+    studentId: r.student_id,
+    studentName: r.student_name,
+    productName: r.product_name,
+    productType: r.product_type,
+    status: r.status,
+    statusLabel: r.status_label,
+    isDone: Boolean(r.is_done),
+    batchName: r.batch_name,
+    deadline: r.deadline,
+    canAdvance: Boolean(r.can_advance),
+    nextStatus: r.next_status,
+    nextLabel: r.next_label,
+  }));
+}
+
+export interface BulkAdvanceResult {
+  advanced: number;
+  skipped: number;
+  results: { id: string; ok: boolean; status?: OrderStatus; reason?: string }[];
+}
+
+/** POST /production/advance-bulk — advance many orders one stage. Skips any the caller can't move. */
+export async function advanceBulk(ids: string[]): Promise<BulkAdvanceResult> {
+  const { data } = await api.post<{ data: BulkAdvanceResult }>(
+    "/production/advance-bulk",
+    { ids }
+  );
+  return data.data;
+}
+
+// ─── «الفصال» (tailor) parallel track — RETAIL-only, independent of the pipeline ──
+
+/**
+ * One order in ابو عبدو's parallel tailoring console (GET /production/tailor-queue).
+ * Local to this module by design — lib/types.ts is owned by another agent.
+ * `status`/`statusLabel` are the PIPELINE status for context only; the tailor track
+ * lives entirely in `tailorStatus` and never moves `status`.
+ */
+export interface TailorOrderRow {
+  id: string;
+  studentName: string;
+  productName: string;
+  productType: "sash" | "robe" | "cap" | "shawl" | string;
+  /** Pipeline status — DISPLAY ONLY (shows where the order is in production). */
+  status: OrderStatus;
+  statusLabel: string;
+  tailorStatus: "pending" | "done";
+  tailorDoneAt: string | null;
+  createdAt: string;
+  batchName: string | null;
+  deadline: string | null;
+}
+
+interface TailorOrderApiRow {
+  id: string;
+  student_name: string;
+  product_name: string;
+  product_type: string;
+  status: OrderStatus;
+  status_label: string;
+  tailor_status: "pending" | "done";
+  tailor_done_at: string | null;
+  created_at: string;
+  batch_name: string | null;
+  deadline: string | null;
+}
+
+function mapTailorRow(r: TailorOrderApiRow): TailorOrderRow {
+  return {
+    id: r.id,
+    studentName: r.student_name,
+    productName: r.product_name,
+    productType: r.product_type,
+    status: r.status,
+    statusLabel: r.status_label,
+    tailorStatus: r.tailor_status,
+    tailorDoneAt: r.tailor_done_at,
+    createdAt: r.created_at,
+    batchName: r.batch_name,
+    deadline: r.deadline,
+  };
+}
+
+/** GET /production/tailor-queue?done=0|1 — retail orders for the مفصل. `done` → finished. */
+export async function getTailorQueue(done = false): Promise<TailorOrderRow[]> {
+  const { data } = await api.get<{ data: TailorOrderApiRow[] }>("/production/tailor-queue", {
+    params: done ? { done: 1 } : undefined,
+  });
+  return (data.data || []).map(mapTailorRow);
+}
+
+/** POST /production/orders/:id/tailor-complete — mark this order's tailoring done (idempotent). */
+export async function tailorComplete(id: string): Promise<{ id: string; tailor_status: string }> {
+  const { data } = await api.post<{ data: { id: string; tailor_status: string } }>(
+    `/production/orders/${id}/tailor-complete`
+  );
+  return data.data;
+}
+
+/** POST /production/orders/:id/tailor-reopen — undo a mistaken completion (back to pending). */
+export async function tailorReopen(id: string): Promise<{ id: string; tailor_status: string }> {
+  const { data } = await api.post<{ data: { id: string; tailor_status: string } }>(
+    `/production/orders/${id}/tailor-reopen`
+  );
+  return data.data;
+}
+
+export interface TailorBulkResult {
+  done: number;
+  skipped: number;
+  results: { id: string; ok: boolean; reason?: string }[];
+}
+
+/** POST /production/tailor-complete-bulk — mark many done. Skips any non-retail/forbidden. */
+export async function tailorCompleteBulk(ids: string[]): Promise<TailorBulkResult> {
+  const { data } = await api.post<{ data: TailorBulkResult }>(
+    "/production/tailor-complete-bulk",
+    { ids }
+  );
+  return data.data;
+}
+
+export interface TailorSummary {
+  pending: number;
+  done: number;
+  total: number;
+}
+
+/** GET /production/tailor-summary — parallel-progress counts over retail orders. */
+export async function getTailorSummary(): Promise<TailorSummary> {
+  const { data } = await api.get<{ data: TailorSummary }>("/production/tailor-summary");
+  return data.data;
+}
+
 export interface DeliveryConfirmPayload {
   delivery_method: "delivery" | "pickup";
   recipient_name: string;

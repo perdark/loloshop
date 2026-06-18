@@ -183,6 +183,9 @@ CREATE TABLE IF NOT EXISTS products (
   parent_id          UUID REFERENCES products(id) ON DELETE SET NULL,
   created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+-- Migration 035: optional «السعر قبل الخصم» (compare-at / old price) for storefront discounts.
+ALTER TABLE products ADD COLUMN IF NOT EXISTS compare_at_price BIGINT
+  CHECK (compare_at_price IS NULL OR compare_at_price >= 0);
 
 CREATE TABLE IF NOT EXISTS product_images (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -557,6 +560,15 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS measurements JSONB;
 --   needs_pressing: order also passes through the pressing stage (sash only).
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS has_embroidery BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS needs_pressing BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- Migration 036: parallel «الفصال» (tailor) track for retail orders — independent of status.
+DO $$ BEGIN
+  CREATE TYPE tailor_track_status AS ENUM ('pending', 'done');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS tailor_status tailor_track_status NOT NULL DEFAULT 'pending';
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS tailor_done_at TIMESTAMPTZ;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS tailor_done_by UUID REFERENCES users(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_orders_tailor_pending ON orders(tailor_status) WHERE tailor_status = 'pending';
 
 -- Staff presence: who is actively working on an order (admin monitor + soft lock).
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS working_staff_id UUID REFERENCES users(id) ON DELETE SET NULL;

@@ -313,6 +313,8 @@ export interface CatalogProduct {
   nameAr: string;
   description: string | null;
   basePrice: number;
+  /** Optional «السعر قبل الخصم» — when set and > basePrice, shown struck-through. */
+  compareAtPrice: number | null;
   genderRestriction: GenderRestriction;
   customizable: boolean;
   active?: boolean;
@@ -335,6 +337,8 @@ export interface CatalogProductSummary {
   nameAr: string;
   description: string | null;
   basePrice: number;
+  /** Optional «السعر قبل الخصم» — admin-set old/compare-at price. */
+  compareAtPrice: number | null;
   customizable: boolean;
   genderRestriction: GenderRestriction;
   active: boolean;
@@ -367,6 +371,8 @@ export interface ShopProductCard {
   nameAr: string;
   description: string | null;
   basePrice: number;
+  /** Optional «السعر قبل الخصم» — when set and > basePrice, shown struck-through. */
+  compareAtPrice: number | null;
   imageUrl: string | null;
   imageFit: ImageFit;
   featured: boolean;

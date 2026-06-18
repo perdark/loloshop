@@ -49,6 +49,18 @@ function iconUsers() {
   );
 }
 
+function iconScissors() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <circle cx="6" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <line x1="20" y1="4" x2="8.12" y2="15.88" />
+      <line x1="14.47" y1="14.48" x2="20" y2="20" />
+      <line x1="8.12" y1="8.12" x2="12" y2="12" />
+    </svg>
+  );
+}
+
 function iconWallet() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -67,6 +79,7 @@ function getNavLinks(
     return [
       { href: "/staff", label: "المتابعة", icon: iconBarChart() },
       { href: "/staff/queue", label: "جميع الطلبات", icon: iconClipboard(), prefix: true },
+      { href: "/staff/tailor", label: "الفصال", icon: iconScissors(), prefix: true },
     ];
   }
   // Every production-role staffer also gets the live production console — the same
@@ -103,6 +116,13 @@ function getNavLinks(
     case "preparer":
       return [
         { href: "/staff", label: "قائمة التجهيز", icon: iconClipboard() },
+        consoleLink,
+      ];
+    case "tailor":
+      // مفصل (ابو عبدو): his parallel «الفصال» console is the primary screen — a
+      // retail-only tailoring to-do that runs alongside (and never moves) the pipeline.
+      return [
+        { href: "/staff/tailor", label: "الفصال", icon: iconScissors(), prefix: true },
         consoleLink,
       ];
     default:

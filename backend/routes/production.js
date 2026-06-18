@@ -16,10 +16,20 @@ router.get('/monitor', requireStaffType(), c.monitor); // no types → manager s
 router.get('/completed', c.completed);
 router.get('/orders/:id', c.getOrder);
 router.post('/orders/:id/advance', c.advance);
+// Bulk "إكمال" — advance many orders one stage (per-order guards inside the controller).
+router.post('/advance-bulk', c.advanceBulk);
 router.post('/orders/:id/deliver', c.deliver);
 router.post('/orders/:id/revert', c.revert);
 router.post('/orders/:id/claim', c.claim);
 router.post('/orders/:id/release', c.release);
+
+// «الفصال» (tailor) — parallel, independent track over RETAIL orders. Permission
+// (tailor staff_type OR manager/admin) is enforced inside each controller.
+router.get('/tailor-queue', c.tailorQueue);
+router.get('/tailor-summary', c.tailorSummary);
+router.post('/tailor-complete-bulk', c.tailorCompleteBulk);
+router.post('/orders/:id/tailor-complete', c.tailorComplete);
+router.post('/orders/:id/tailor-reopen', c.tailorReopen);
 // Final artwork is produced by the design/embroidery roles — not the read-only tailor/presser.
 // (requireStaffType also auto-passes manager + admin.)
 router.post('/orders/:id/final-design', requireStaffType('designer', 'digitizer', 'embroiderer'), imageUpload.single('file'), c.uploadFinalDesign);

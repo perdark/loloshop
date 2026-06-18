@@ -6,6 +6,84 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
+## 2026-06-19 — Storefront package slideshow · «تم التسليم» console column · rep order-working console (zone filter + bulk «إكمال») · product discount · parallel «الفصال» tailor track
+
+Large batch on **main** (uncommitted working tree — NOT committed/pushed/deployed). Migrations
+**035 + 036 applied to Neon + verified.** Frontend `next dev` :3000 + backend nodemon :4000 up.
+Everything below verified **live in-browser** (injected JWTs for manager/tailor/admin) with **zero
+console errors**, plus backend e2e + `tsc` 0 + `eslint` 0. `next build` SKIPPED (disk 93%/4.5G and
+dev server shares `.next` → conflict risk); rely on tsc/eslint/live. Run a prod build before deploy.
+
+### A) Storefront package photos auto-rotate + manual slide (committed earlier: `2f2e785`)
+`FullSetBand` + VIP already shipped. `AutoRotatingImage` gained `controls` (‹ › arrows + swipe +
+dots) — see that commit. (Only this part is committed/pushed.)
+
+### B) Production console «تم التسليم» (delivered) column — `/staff/queue`
+- Backend `getQueue`: new `MANAGER_VIEW_STAGES = [...MANAGER_STAGES,'delivered']` (manager view only —
+  `monitor()` still uses the 6-stage `MANAGER_STAGES`, WIP math unchanged); `preparer` QUEUE_STAGES
+  gained `delivered`. WHERE caps delivered to 90d BUT keeps `delivered_at IS NULL` (legacy rows never
+  vanish — critic fix).
+- Frontend: `delivered` added to STAGES rail + RAIL_BAR + a «تم التسليم» KPI; "الكل" rail count + list
+  EXCLUDE delivered (own chip only); `isOverdue` excludes delivered. Live: chip=3, KPI=3, الكل=189.
+
+### C) Rep → students' **orders** console — `/staff/wholesalers/[id]/students` (rewritten, tabbed)
+- «الطلبات» tab (default) + «الطلاب» roster tab. Orders tab = checkbox rows (student→`/staff/orders/[id]`,
+  product, status pill) + **7 full-set zone chips** + completion filter (الكل/يخصّني الآن/منجز) + search +
+  sticky `lg:ms-64` «إكمال (N)» bulk bar. Mobile-first.
+- **Checkbox enabled ONLY when backend says `can_advance`** (no ghost-409s — state-machine memory).
+- Backend: NEW `GET /{staff,admin}/wholesalers/:id/orders` (`staffController.wholesalerOrders`) →
+  per-order `can_advance`/`next_status` via `nextStageFor`+`canStaffTransition`; zone via `orderZoneClause`;
+  unknown zone → 400 (critic fix); `final_design_url` NOT selected (tailor-confinement, critic fix).
+  NEW `POST /production/advance-bulk` (`advanceBulk`) — per-order re-guard, skips+reports, cap 200.
+  Refactored single `advance` to share `loadAdvanceRow`+`performAdvance`.
+- **NEW full-set zone keys** in `orderController.ORDER_ZONE_MATCH`: `sash_front`, `robe_sleeve_right/left`,
+  `american_shawl` (the wholesaler طقم label set is front/back + ردن أيمن/أيسر + شال — NOT the retail
+  يمين/يسار). Frontend `FULLSET_ZONE_LABELS`/`_ORDER` in `lib/constants.ts`. Live: sash_front=56, cap_side=21.
+
+### D) Product discount / «السعر قبل الخصم» — `/admin/products` + storefront (parallel agent)
+- DB col `products.compare_at_price BIGINT NULL` (migration 035). `catalogController` exposes it in the 3
+  product SELECTs + accepts/validates it in create/update (rejects negatives). `lib/catalog.ts` maps
+  `compareAtPrice` (BIGINT→`Number`); `lib/types.ts` product interfaces; `lib/format.ts`
+  `formatDiscountPercent`. `ProductTile` + product detail strike the old price + «خصم N٪» ONLY when
+  `compareAtPrice > shownPrice`. Live demo set on «روب فصال بشت» (now 35000 / was 50000 / خصم ٣٠٪).
+
+### E) Parallel «الفصال» (tailor) track for RETAIL orders — ابو عبدو (parallel agent)
+- DB (migration 036): `orders.tailor_status tailor_track_status ('pending'|'done') DEFAULT 'pending'` +
+  `tailor_done_at`/`tailor_done_by`. **Fully INDEPENDENT of `orders.status`** — tailor endpoints write
+  ONLY the tailor cols, pipeline advance never touches them (critic-confirmed).
+- Backend (`productionController`): `GET /production/tailor-queue?done=0|1`, `POST .../:id/tailor-complete`,
+  `.../tailor-reopen`, `POST /production/tailor-complete-bulk`, `GET /production/tailor-summary`. All
+  guarded `canTailor` (tailor staff_type OR manager/admin) + **retail-only** (`wholesaler_id IS NULL`;
+  wholesaler order → 403/skip). Bulk mirrors advanceBulk.
+- Frontend: NEW `app/staff/tailor/page.tsx` (قيد الفصال/تم الفصال tabs, checkbox rows, sticky «تم الفصال (N)»),
+  nav entry in `StaffSidebar` (tailor primary + admin/manager), admin dashboard «الفصال» card
+  (pending/done/total) in `app/admin/page.tsx`, wrappers in `lib/staff.ts`. Live: 15 pending / 5 done.
+
+### Demo data I left for live testing (revert if unwanted)
+- 7 of ممثل تجريبي's sashes moved to `embroidery` (so the embroiderer's «إكمال» has work). 3 were
+  advanced to `preparing` during e2e. ابو عبدو tailor track = 15 pending / 5 done (e2e reverted).
+- «روب فصال بشت» has a demo `compare_at_price=50000` — clear it in /admin/products to remove the discount.
+
+### Open follow-ups
+- **Uncommitted on main** — decide commit/branch + prod build + VPS deploy. Run `next build` (needs disk;
+  currently 93%/4.5G) before shipping.
+- Seed not updated for 035/036 (only schema.sql mirrored; fresh installs get the cols, not the demo data).
+- Nits deferred (critic): KPI «تم التسليم» label reflects the 90-day window (cosmetic); admin can also open
+  the rep orders console (uses `/admin/...` route — works). Tailor queue currently lists ALL retail orders
+  regardless of pipeline stage (by design — parallel track).
+- `PROGRESS.md` not updated this session (HANDOFF only).
+
+### Files touched (this session, besides the committed slider)
+- backend: `controllers/{productionController,staffController,orderController,catalogController}.js`,
+  `routes/{production,staff,admin}.js`; NEW `db/migrations/035_*.sql`, `036_*.sql`; `db/schema.sql`
+- frontend: `app/staff/queue/page.tsx`, `app/staff/wholesalers/[wholesalerId]/students/page.tsx`,
+  NEW `app/staff/tailor/page.tsx`, `app/admin/{page,products/page}.tsx`, `app/(student)/product/[id]/page.tsx`,
+  `components/shop/ProductTile.tsx`, `components/staff/StaffSidebar.tsx`,
+  `lib/{staff,catalog,types,constants,format}.ts`
+- docs: `HANDOFF.md`
+
+---
+
 ## 2026-06-18 — Phase-9 of the staff batch (migrations applied + security fixes) · sash color = typed free-text + optional photo · /staff/queue rebuilt as a stage-rail console
 
 Continuation of the `feat/staff-batch-2026-06-17` branch. **Still NOT merged to main, NOT

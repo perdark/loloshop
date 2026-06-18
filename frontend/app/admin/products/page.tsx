@@ -144,6 +144,7 @@ export default function AdminProductsPage() {
   const [npType, setNpType] = useState<ProductType>("sash");
   const [npName, setNpName] = useState("");
   const [npPrice, setNpPrice] = useState("");
+  const [npComparePrice, setNpComparePrice] = useState("");
   const [npParent, setNpParent] = useState("");
 
   // Inline create-group form
@@ -248,12 +249,14 @@ export default function AdminProductsPage() {
         type: npType,
         name_ar: npName.trim(),
         base_price: Number(npPrice) || 0,
+        compare_at_price: npComparePrice.trim() ? Number(npComparePrice) || 0 : null,
         parent_id: npParent || null,
       });
       toast.success("تم إنشاء المنتج");
       setNewOpen(false);
       setNpName("");
       setNpPrice("");
+      setNpComparePrice("");
       setNpParent("");
       setNpType("sash");
       await loadList(id);
@@ -380,6 +383,17 @@ export default function AdminProductsPage() {
     );
   }
 
+  /** «السعر قبل الخصم» — single product-level column (not role-scoped). Empty → clears it. */
+  function commitComparePrice(raw: string) {
+    if (!product) return;
+    const trimmed = raw.trim();
+    const next: number | null = trimmed ? Number(trimmed) || 0 : null;
+    if (next === (product.compareAtPrice ?? null)) return;
+    return run("compare-price", () =>
+      updateCatalogProduct(product.id, { compare_at_price: next })
+    );
+  }
+
   async function handleGroupImage(groupId: string, file: File) {
     setSavingId(groupId);
     try {
@@ -495,6 +509,14 @@ export default function AdminProductsPage() {
                 dir="ltr"
                 className={`${fieldCls} w-full text-right`}
               />
+              <input
+                type="number"
+                value={npComparePrice}
+                onChange={(e) => setNpComparePrice(e.target.value)}
+                placeholder="السعر قبل الخصم (اختياري)"
+                dir="ltr"
+                className={`${fieldCls} w-full text-right`}
+              />
               <select
                 value={npParent}
                 onChange={(e) => {
@@ -526,7 +548,7 @@ export default function AdminProductsPage() {
                 <Button
                   size="sm"
                   variant="ghost"
-                  onClick={() => { setNewOpen(false); setNpParent(""); setNpType("sash"); }}
+                  onClick={() => { setNewOpen(false); setNpParent(""); setNpType("sash"); setNpComparePrice(""); }}
                 >
                   إلغاء
                 </Button>
@@ -549,6 +571,7 @@ export default function AdminProductsPage() {
                       setNpType(p.type);
                       setNpName("");
                       setNpPrice("");
+                      setNpComparePrice("");
                       setNewOpen(true);
                     }}
                   />
@@ -670,24 +693,46 @@ export default function AdminProductsPage() {
 
               {/* Price band: role tabs + inline base price for that role */}
               <div className="flex flex-wrap items-center justify-between gap-4">
-                <div>
-                  <p className="text-sm font-medium text-[var(--shop-muted)]">
-                    السعر الأساسي · {ROLE_LABELS[previewRole]}
-                  </p>
-                  <div className="mt-2 flex items-baseline gap-2">
-                    <input
-                      key={`base-${product.id}-${previewRole}`}
-                      type="number"
-                      defaultValue={product.basePrice}
-                      dir="ltr"
-                      disabled={savingId === "base-price"}
-                      onBlur={(e) => {
-                        const n = Number(e.target.value) || 0;
-                        if (n !== product.basePrice) commitBasePrice(n);
-                      }}
-                      className={`${fieldCls} w-40 text-2xl font-bold tabular-nums`}
-                    />
-                    <span className="text-sm text-[var(--shop-muted)]">د.ع</span>
+                <div className="flex flex-wrap items-start gap-6">
+                  <div>
+                    <p className="text-sm font-medium text-[var(--shop-muted)]">
+                      السعر الأساسي · {ROLE_LABELS[previewRole]}
+                    </p>
+                    <div className="mt-2 flex items-baseline gap-2">
+                      <input
+                        key={`base-${product.id}-${previewRole}`}
+                        type="number"
+                        defaultValue={product.basePrice}
+                        dir="ltr"
+                        disabled={savingId === "base-price"}
+                        onBlur={(e) => {
+                          const n = Number(e.target.value) || 0;
+                          if (n !== product.basePrice) commitBasePrice(n);
+                        }}
+                        className={`${fieldCls} w-40 text-2xl font-bold tabular-nums`}
+                      />
+                      <span className="text-sm text-[var(--shop-muted)]">د.ع</span>
+                    </div>
+                  </div>
+                  {/* السعر قبل الخصم — product-level, shared across roles. Empty clears it. */}
+                  <div>
+                    <p className="text-sm font-medium text-[var(--shop-muted)]">
+                      السعر قبل الخصم <span className="text-[var(--shop-muted)]/70">(اختياري)</span>
+                    </p>
+                    <div className="mt-2 flex items-baseline gap-2">
+                      <input
+                        key={`compare-${product.id}-${product.compareAtPrice ?? ""}`}
+                        type="number"
+                        defaultValue={product.compareAtPrice ?? ""}
+                        dir="ltr"
+                        placeholder="—"
+                        disabled={savingId === "compare-price"}
+                        onBlur={(e) => commitComparePrice(e.target.value)}
+                        className={`${fieldCls} w-40 text-2xl font-bold tabular-nums`}
+                        aria-label="السعر قبل الخصم (اختياري)"
+                      />
+                      <span className="text-sm text-[var(--shop-muted)]">د.ع</span>
+                    </div>
                   </div>
                 </div>
                 <div
