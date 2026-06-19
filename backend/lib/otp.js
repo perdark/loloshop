@@ -1,6 +1,34 @@
 const crypto = require('crypto');
 const { query } = require('./db');
 
+// Normalise a typed phone to the canonical local Iraqi form `07XXXXXXXXX`.
+// Users sometimes omit the leading 0 (e.g. type `7713644460` instead of
+// `07713644460`) — without this, lookups/OTP target the wrong number and nothing
+// is sent. Also tolerates Arabic-Indic digits, separators, and a `+964`/`00964`/
+// `964` country prefix, all of which collapse back to the local `0…` form so a
+// user matches their stored account regardless of how they typed it.
+function normalizeIqPhone(input) {
+  if (input == null) return input;
+  let d = String(input)
+    .replace(/[٠-٩]/g, (c) => '٠١٢٣٤٥٦٧٨٩'.indexOf(c))
+    .replace(/[۰-۹]/g, (c) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(c))
+    .replace(/\D/g, '');
+  if (!d) return String(input).trim();
+  if (d.startsWith('00')) d = d.slice(2);
+  if (d.startsWith('964')) d = d.slice(3); // strip Iraq country code → local
+  if (!d.startsWith('0')) d = '0' + d;      // default the leading 0 if omitted
+  return d;
+}
+
+// Express middleware: normalise `req.body.phone` on the way in so every downstream
+// handler (register/login/OTP/reset) sees the canonical form.
+function normalizePhoneBody(req, _res, next) {
+  if (req.body && req.body.phone != null) {
+    req.body.phone = normalizeIqPhone(req.body.phone);
+  }
+  next();
+}
+
 const TTL = parseInt(process.env.OTP_TTL_SECONDS || '300', 10);
 // Per-phone request cap (IP-independent). Stops an attacker from resetting the
 // 5-guess brute-force budget by spamming new codes, and defeats IP-rotation that
@@ -151,4 +179,4 @@ async function sendViaZentramsg(phone, code) {
   }
 }
 
-module.exports = { createOtp, verifyOtp, toIntlDigits };
+module.exports = { createOtp, verifyOtp, toIntlDigits, normalizeIqPhone, normalizePhoneBody };

@@ -1,7 +1,12 @@
 const router = require('express').Router();
 const c = require('../controllers/authController');
 const { authRequired } = require('../middleware/auth');
+const { normalizePhoneBody } = require('../lib/otp');
 const rateLimit = require('express-rate-limit');
+
+// Default a leading 0 onto phone numbers (e.g. 7713644460 → 07713644460) so a user
+// who omits it still matches their account and receives the OTP.
+router.use(normalizePhoneBody);
 
 const loginLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 20 });
 const otpLimit = rateLimit({ windowMs: 60 * 60 * 1000, max: 5 });
