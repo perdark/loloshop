@@ -79,25 +79,27 @@ export function Modal({ open, onClose, title, children, footer, descriptionId }:
     >
       <div
         ref={dialogRef}
-        className="animate-auth-card-in w-full max-w-md overflow-hidden rounded-3xl bg-cream shadow-[var(--shadow-pop)] ring-1 ring-line"
+        className="animate-auth-card-in flex max-h-[calc(100dvh-2rem)] w-full max-w-md flex-col overflow-hidden rounded-3xl bg-cream shadow-[var(--shadow-pop)] ring-1 ring-line"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         {...(descriptionId ? { "aria-describedby": descriptionId } : {})}
       >
-        <div className="border-b border-line bg-surface-sink px-5 py-4">
+        <div className="shrink-0 border-b border-line bg-surface-sink px-5 py-4">
           <h2 id={titleId} className="font-display text-xl font-bold text-ink">
             {title}
           </h2>
         </div>
-        <div className="px-5 py-4">{children}</div>
+        {/* Scrollable body — caps the modal to the viewport so tall forms (e.g. add
+            wholesaler) scroll instead of overflowing off-screen. */}
+        <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
         {footer !== undefined ? (
-          <div className="flex gap-2 border-t border-line px-5 py-4">
+          <div className="flex shrink-0 gap-2 border-t border-line px-5 py-4">
             {footer}
           </div>
         ) : (
-          <div className="border-t border-line px-5 py-4">
+          <div className="shrink-0 border-t border-line px-5 py-4">
             <Button variant="ghost" fullWidth onClick={onClose}>
               إغلاق
             </Button>
