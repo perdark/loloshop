@@ -6,6 +6,79 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
+## 2026-06-19 (b) — 7-part batch: guest cart gate · «لون التطريز» · OTP (kill 111111 + WhatsApp + unified signup design) · admin-controlled discount popup · cinematic splash · context-aware back
+
+Committed to **main** this session. Built mostly via a parallel agent workflow (6 disjoint streams)
++ a 2-agent follow-up for the admin promo control. Migrations **037 + 038 applied to Neon + verified.**
+Gates green: `tsc` 0 · `eslint` 0 · backend `node --check` 0. Live spot-checks done (splash/home light,
+popup active/inactive, embroidery field, back-scroll); user did their own browser pass. `next build` SKIPPED
+(disk/`.next` contention per prior entries) — run before deploy.
+
+1. **Guest cart gate** — `app/(student)/cart/page.tsx`: a logged-out user hitting `/cart` now sees a login
+   prompt (`EmptyState` + CTA → `loginHref('/cart')`) instead of the 401→logout→"تعذر تحميل السلة" break.
+   Browsing was already open. Fetches are guarded behind `isAuthenticated()`.
+2. **«لون التطريز» (embroidery/thread color)** — REQUIRED **typed text, NO photo**. Mirrors the «اللون»
+   (sash color, migration 031) plumbing.
+   - **Migration 037** (`db/migrations/037_embroidery_color.sql`, +`schema.sql`): new option group «لون التطريز»
+     on the «وشاح» product `5bcab8b6…` (the only sash with an «اللون» group), `requires_customer_text=TRUE`,
+     `requires_customer_image=FALSE`, one auto-select option. Also `designs.embroidery_color TEXT`.
+   - Retail product page: flows through the existing `customerTexts` plumbing (no page edit).
+     `CustomerImageUpload.tsx` gained `allowImage = needsImage || nameAr==='اللون'` so «لون التطريز» is
+     text-only (photo suppressed); «اللون» keeps its optional photo.
+   - **Designer** (`useDesignDraft.ts`): fixed a name-collision — sash color now matches
+     `includes('لون') && !includes('تطريز')`, embroidery matches `includes('تطريز')`; derives/persists/restores
+     `embroidery_color` parallel to `sash_color` (designs column + `designController.js`).
+   - **Wholesaler full-set**: `FullSetOrderForm.tsx` gained a **rep-only** `showEmbroideryColor` «لون التطريز»
+     text section (required when shown); passed `true` on `/wholesaler/students/[id]/order`, omitted on the
+     student `/my-order` (the rep types it, not the student). `fullSetOrder.js` persists/reads it as the sash
+     spec line `لون التطريز` (optional server-side so student self-fill still saves). Types in `lib/wholesaler.ts`.
+3. **OTP (items 3+4)** — `lib/otp.js`: **removed the baked-in `111111`** (dev master now `DEV_MASTER_OTP || null`
+   — no code accepted unless explicitly set; dev reads the live code from the backend console until Zentramsg is
+   wired). **User must add `ZENTRAMSG_API_KEY` + `ZENTRAMSG_DEVICE_UUID` to `backend/.env`** for real WhatsApp
+   delivery (both login + signup already call `sendViaZentramsg`). **Signup-OTP design unified**: extracted login's
+   polished 6-box step into NEW `components/auth/OtpVerifyForm.tsx`, now used by BOTH `login/page.tsx` and
+   `register/page.tsx` (register's old plain single-input step is gone). (NB: a separate pre-existing
+   `components/auth/VerifyOtpForm.tsx` still backs `/verify-otp` — left as-is; consider consolidating later.)
+4. **Admin-controlled discount popup** — NEW generic `site_settings(key, value jsonb, updated_at)` (migration 038)
+   with a `discount_popup` row `{active,title_ar,message_ar,deadline}`. `GET /api/catalog/promo` (public) +
+   `PATCH /api/admin/promo` (admin). NEW admin card `components/admin/PromoControl.tsx` (active toggle · title ·
+   message · `datetime-local` deadline) mounted on `app/admin/page.tsx`. `DiscountPopup.tsx` now FETCHES the config:
+   shows only when `active && now<deadline && !sessionSeen`, renders the admin's title/message + live d/h/m/s
+   countdown, scrolls to `#catalog` on CTA. **Ships INACTIVE** (admin flips it on). Verified live: inactive→hidden,
+   active→shows with countdown.
+5. **Splash redesign** — `SplashIntro.tsx` reworked into a cinematic reveal (logo bloom rings, script wordmark,
+   staggered tagline, curtain-wipe exit) on the **warm-cream** brand stage (NOT dark — first agent build was dark,
+   corrected). Contract intact (sessionStorage `loloshop_splash_seen`, ~2.2s+fade, click/Esc skip, reduced-motion
+   skip). New `animate-splash2-*` keyframes in `globals.css`.
+   - **Reverted an out-of-scope font hijack**: the splash agent had swapped the whole site to Tajawal in
+     `app/layout.tsx` + `globals.css` (+ a ShopCover weight tweak) — restored the brand fonts (Amiri/Cairo/Playfair/
+     Great Vibes) per CLAUDE.md. Only the splash keyframes were kept.
+6. **Context-aware back** — NEW `lib/back.ts` `backHrefFromParam(from, fallback)` (`vip`→/vip, `packages`→/full-set,
+   `catalog`→/#catalog). `ProductTile` takes a `from` prop; home grid passes `catalog`. `product/[id]` back reads
+   `?from` via `useSearchParams`; `full-set/[id]` back → `/full-set`. Home `page.tsx` got `id="catalog"` **plus a
+   post-feed-load scroll effect** — the grid renders after the async feed, so the native `#catalog` hash-scroll
+   found nothing; we now `scrollIntoView` once the section exists (verified: lands with catalog pinned to top).
+
+### Open follow-ups
+- **`ZENTRAMSG_API_KEY` / `ZENTRAMSG_DEVICE_UUID` not set** — login/signup OTP won't deliver over WhatsApp until the
+  user pastes them into `backend/.env`. Verify a real send after.
+- `next build` not run (disk/`.next`); run before VPS deploy. Seeds not updated for 037/038 (schema mirrored).
+- Pre-existing uncommitted FE work (admin/staff/wholesaler `layout.tsx`, `VipHomeBand.tsx`) + screenshots/junk were
+  **left out of this commit** (likely Cursor's in-progress work — avoid FE collisions).
+- `/verify-otp` still uses the old `VerifyOtpForm`; could share `OtpVerifyForm` too.
+
+### Files (this session)
+- backend: `lib/otp.js`, `lib/fullSetOrder.js`, `controllers/{designController,catalogController,adminController}.js`,
+  `routes/{catalog,admin}.js`; NEW `db/migrations/037_embroidery_color.sql`, `038_site_settings.sql`; `db/schema.sql`
+- frontend NEW: `components/auth/OtpVerifyForm.tsx`, `components/admin/PromoControl.tsx`, `components/DiscountPopup.tsx`,
+  `lib/back.ts`
+- frontend EDIT: `app/(student)/{cart,layout,page,product/[id],full-set/[id]}`, `app/{login,register}/page.tsx`,
+  `app/admin/page.tsx`, `app/wholesaler/students/[studentId]/order/page.tsx`, `app/globals.css`,
+  `components/{SplashIntro,catalog/CustomerImageUpload,shop/ProductTile,wholesaler/FullSetOrderForm}.tsx`,
+  `hooks/useDesignDraft.ts`, `lib/{types,wholesaler,catalog,admin}.ts`
+
+---
+
 ## 2026-06-19 — Storefront package slideshow · «تم التسليم» console column · rep order-working console (zone filter + bulk «إكمال») · product discount · parallel «الفصال» tailor track
 
 Large batch on **main** (uncommitted working tree — NOT committed/pushed/deployed). Migrations

@@ -44,6 +44,8 @@ export interface FullSetOrderFormProps {
   /** uploads a photo and resolves to its URL (endpoint differs per role) */
   onUploadImage: (file: File) => Promise<string>;
   onSubmit: (payload: CreateFullSetPayload) => void;
+  /** Show the «لون التطريز» section — rep-only; student self-fill must NOT see it. */
+  showEmbroideryColor?: boolean;
 }
 
 /**
@@ -59,6 +61,7 @@ export function FullSetOrderForm({
   submitLabel = "حفظ الطلب",
   onUploadImage,
   onSubmit,
+  showEmbroideryColor = false,
 }: FullSetOrderFormProps) {
   const [packageId, setPackageId] = useState(
     initial?.package_id || (packages.length === 1 ? packages[0].id : "")
@@ -92,6 +95,7 @@ export function FullSetOrderForm({
   const [colorText, setColorText] = useState(initial?.sash_color?.text || "");
   const [colorImage, setColorImage] = useState(initial?.sash_color?.image_url || "");
   const [colorUploading, setColorUploading] = useState(false);
+  const [embroideryColorText, setEmbroideryColorText] = useState(initial?.embroidery_color || "");
 
   function setZone(key: ZoneKey, patch: Partial<ZoneState>) {
     setZones((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
@@ -140,6 +144,8 @@ export function FullSetOrderForm({
     if (!sashType) return toast.error("يرجى اختيار نوع الوشاح");
     if (!capType) return toast.error("يرجى اختيار نوع القبعة");
     if (!colorText.trim()) return toast.error("يرجى كتابة لون الوشاح");
+    if (showEmbroideryColor && !embroideryColorText.trim())
+      return toast.error("يرجى كتابة لون التطريز");
     if (shawlUploading || colorUploading || Object.values(zones).some((z) => z.uploading))
       return toast.error("يرجى الانتظار حتى انتهاء رفع الصور");
     if (shawlEnabled && !shawlImage)
@@ -162,6 +168,9 @@ export function FullSetOrderForm({
         text: colorText.trim(),
         image_url: colorImage || undefined,
       },
+      embroidery_color: showEmbroideryColor
+        ? embroideryColorText.trim() || undefined
+        : undefined,
       shoulder_pleat: shoulderPleat,
       american_shawl: {
         enabled: shawlEnabled,
@@ -340,6 +349,19 @@ export function FullSetOrderForm({
           </div>
         </div>
       </Section>
+
+      {/* ── لون التطريز (rep-only) ── */}
+      {showEmbroideryColor && (
+        <Section title="لون التطريز" hint="مطلوب — اكتب لون الخيط">
+          <Input
+            label="اللون"
+            value={embroideryColorText}
+            onChange={(e) => setEmbroideryColorText(e.target.value)}
+            placeholder="مثال: ذهبي"
+            maxLength={200}
+          />
+        </Section>
+      )}
 
       {/* ── شال امريكي ── */}
       <Section title="شال امريكي" hint="صورة الشال إجبارية عند الاختيار">

@@ -38,6 +38,10 @@ export function CustomerImageUpload({
   const previewUrl = value ? resolveCatalogMediaUrl(value) : null;
   const needsText = customerTextRequired(group, optionId);
   const needsImage = group.requiresCustomerImage || Boolean(opt?.requiresCustomerImage);
+  // Show image UI only when truly required, OR for «اللون» (sash color) which has an
+  // optional reference photo. All other text-only groups (e.g. «لون التطريز») must
+  // suppress the image section entirely.
+  const allowImage = needsImage || group.nameAr === "اللون";
   // Derive the admin-set text prompt + placeholder: option-level overrides group-level.
   const textPrompt =
     opt?.customerTextPromptAr ?? group.customerTextPromptAr ?? null;
@@ -125,85 +129,89 @@ export function CustomerImageUpload({
         </div>
       )}
 
-      {/* Image upload */}
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) handleFile(f);
-          e.target.value = "";
-        }}
-      />
-
-      {/* Image upload section — mandatory when needsImage, optional when only text is required */}
-      <p className={`mt-3 text-xs font-semibold text-ink ${needsText ? "" : "sr-only"}`}>
-        {needsText
-          ? needsImage
-            ? <>صورة مرجعية<span className="text-orange-ink"> *</span></>
-            : "صورة مرجعية (اختياري)"
-          : ""}
-      </p>
-
-      {previewUrl ? (
-        <div className={needsText ? "mt-1.5" : "mt-3"}>
-          <div className="relative h-36 w-full overflow-hidden rounded-xl border border-orange/30 bg-white shadow-[var(--shadow-soft)]">
-            <Image
-              src={previewUrl}
-              alt="صورتك"
-              fill
-              sizes="(max-width: 768px) calc(100vw - 4rem), 480px"
-              className="object-contain"
-            />
-          </div>
-          <button
-            type="button"
-            className="mt-2 min-h-11 text-xs font-semibold text-orange-ink underline underline-offset-2"
-            disabled={uploading}
-            onClick={() => inputRef.current?.click()}
-          >
-            تغيير الصورة
-          </button>
-        </div>
-      ) : (
+      {/* Image upload — only shown when allowImage (required or «اللون» optional photo) */}
+      {allowImage && (
         <>
-          <button
-            type="button"
-            disabled={uploading}
-            onClick={() => inputRef.current?.click()}
-            className={`mt-3 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed bg-white text-sm font-semibold transition-colors disabled:opacity-50 ${
-              showErrors && imageMissing
-                ? "border-red-400 text-red-500 hover:border-red-500 hover:bg-red-50"
-                : "border-orange/60 text-orange-ink hover:border-orange hover:bg-orange/5"
-            }`}
-          >
-            {uploading ? (
-              "جاري الرفع…"
-            ) : (
-              <>
-                <svg
-                  aria-hidden
-                  viewBox="0 0 24 24"
-                  className="h-4 w-4"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M12 16V4m0 0L8 8m4-4l4 4" />
-                  <path d="M20 16v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2" />
-                </svg>
-                اختر صورة من جهازك
-              </>
-            )}
-          </button>
-          {showErrors && imageMissing && (
-            <p role="alert" className="mt-1 text-xs font-medium text-red-500">
-              يرجى رفع صورة مرجعية
-            </p>
+          <input
+            ref={inputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) handleFile(f);
+              e.target.value = "";
+            }}
+          />
+
+          {/* Image upload section — mandatory when needsImage, optional when only text is required */}
+          <p className={`mt-3 text-xs font-semibold text-ink ${needsText ? "" : "sr-only"}`}>
+            {needsText
+              ? needsImage
+                ? <>صورة مرجعية<span className="text-orange-ink"> *</span></>
+                : "صورة مرجعية (اختياري)"
+              : ""}
+          </p>
+
+          {previewUrl ? (
+            <div className={needsText ? "mt-1.5" : "mt-3"}>
+              <div className="relative h-36 w-full overflow-hidden rounded-xl border border-orange/30 bg-white shadow-[var(--shadow-soft)]">
+                <Image
+                  src={previewUrl}
+                  alt="صورتك"
+                  fill
+                  sizes="(max-width: 768px) calc(100vw - 4rem), 480px"
+                  className="object-contain"
+                />
+              </div>
+              <button
+                type="button"
+                className="mt-2 min-h-11 text-xs font-semibold text-orange-ink underline underline-offset-2"
+                disabled={uploading}
+                onClick={() => inputRef.current?.click()}
+              >
+                تغيير الصورة
+              </button>
+            </div>
+          ) : (
+            <>
+              <button
+                type="button"
+                disabled={uploading}
+                onClick={() => inputRef.current?.click()}
+                className={`mt-3 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed bg-white text-sm font-semibold transition-colors disabled:opacity-50 ${
+                  showErrors && imageMissing
+                    ? "border-red-400 text-red-500 hover:border-red-500 hover:bg-red-50"
+                    : "border-orange/60 text-orange-ink hover:border-orange hover:bg-orange/5"
+                }`}
+              >
+                {uploading ? (
+                  "جاري الرفع…"
+                ) : (
+                  <>
+                    <svg
+                      aria-hidden
+                      viewBox="0 0 24 24"
+                      className="h-4 w-4"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M12 16V4m0 0L8 8m4-4l4 4" />
+                      <path d="M20 16v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2" />
+                    </svg>
+                    اختر صورة من جهازك
+                  </>
+                )}
+              </button>
+              {showErrors && imageMissing && (
+                <p role="alert" className="mt-1 text-xs font-medium text-red-500">
+                  يرجى رفع صورة مرجعية
+                </p>
+              )}
+            </>
           )}
         </>
       )}

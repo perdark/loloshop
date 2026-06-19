@@ -217,6 +217,7 @@ CREATE TABLE IF NOT EXISTS designs (
   student_id            UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
   variant_id            UUID REFERENCES product_variants(id) ON DELETE SET NULL,
   sash_color            TEXT,
+  embroidery_color      TEXT,
   left_canvas           JSONB,
   right_canvas          JSONB,
   canvas_schema_version SMALLINT NOT NULL DEFAULT 1,
@@ -502,6 +503,9 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS order_scope staff_order_scope NOT NULL DEFAULT 'both';
 
 -- Individual design approval gate (set by the designer / manager / admin).
+-- Migration 037: embroidery/thread color typed text (parallels sash_color).
+ALTER TABLE designs ADD COLUMN IF NOT EXISTS embroidery_color TEXT;
+
 ALTER TABLE designs ADD COLUMN IF NOT EXISTS approval_status design_approval_status NOT NULL DEFAULT 'pending';
 ALTER TABLE designs ADD COLUMN IF NOT EXISTS approved_by UUID REFERENCES users(id) ON DELETE SET NULL;
 ALTER TABLE designs ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
@@ -702,5 +706,13 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_phone   TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_notes   TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivered_by     UUID REFERENCES users(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_orders_delivered ON orders(delivered_at DESC) WHERE status = 'delivered';
+
+-- Migration 038: generic key/value settings store for admin-controlled site config.
+-- One well-known key: 'discount_popup' — see migration 038_site_settings.sql for shape.
+CREATE TABLE IF NOT EXISTS site_settings (
+  key        TEXT         PRIMARY KEY,
+  value      JSONB        NOT NULL DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
 
 COMMIT;

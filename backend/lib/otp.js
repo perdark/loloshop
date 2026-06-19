@@ -51,10 +51,12 @@ async function createOtp(phone, purpose = 'verify') {
 const MAX_OTP_ATTEMPTS = 5; // wrong guesses before the code is burned
 // In prod the master code is a full-account-takeover backdoor, so it stays OFF
 // unless BOTH an explicit opt-in flag and a NON-default code are set in env.
-// Dev keeps the convenient 111111 default.
+// There is NO baked-in default any more (the old 111111 is gone): a master code is
+// honored ONLY when DEV_MASTER_OTP is explicitly set in env. With it unset, dev reads
+// the real code from the backend console (or WhatsApp once Zentramsg creds are set).
 const DEV_MASTER_OTP = (() => {
   if (process.env.NODE_ENV !== 'production') {
-    return process.env.DEV_MASTER_OTP ?? '111111';
+    return process.env.DEV_MASTER_OTP || null;
   }
   if (process.env.ALLOW_PROD_MASTER_OTP === 'true' && process.env.DEV_MASTER_OTP) {
     console.warn('[OTP] PROD master OTP ENABLED via ALLOW_PROD_MASTER_OTP — backdoor active.');

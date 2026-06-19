@@ -166,6 +166,26 @@ export default function StudentHomePage() {
     loadShop();
   }, [loadShop, router]);
 
+  // A detail-page back button lands here as «/#catalog», but the grid only renders
+  // AFTER the async feed loads — so the browser's native hash-scroll finds no target
+  // at navigation time and stays at the top. Once the feed (and the section) exist,
+  // honour the hash ourselves. Respects prefers-reduced-motion.
+  useEffect(() => {
+    if (!feed || typeof window === "undefined") return;
+    if (window.location.hash !== "#catalog") return;
+    const el = catalogSectionRef.current;
+    if (!el) return;
+    const prefersReduced = window.matchMedia(
+      "(prefers-reduced-motion: reduce)"
+    ).matches;
+    requestAnimationFrame(() => {
+      el.scrollIntoView({
+        behavior: prefersReduced ? "auto" : "smooth",
+        block: "start",
+      });
+    });
+  }, [feed]);
+
   // Which categories actually have products — only those become chips.
   const availableTypes = useMemo<ProductType[]>(
     () => SHOP_TYPE_ORDER.filter((t) => (feed?.byType[t]?.length ?? 0) > 0),
@@ -276,7 +296,7 @@ export default function StudentHomePage() {
       <div className="full-bleed h-px bg-line" aria-hidden />
 
       {/* ── Catalog area — padded section so it breathes like a page turn ── */}
-      <section ref={catalogSectionRef} className="space-y-12 py-12 sm:py-16">
+      <section id="catalog" ref={catalogSectionRef} className="space-y-12 py-12 sm:py-16">
 
       {/* Whole catalog still empty — the cover and designer carry the page. */}
       {!hasAnyProduct ? (
@@ -326,7 +346,7 @@ export default function StudentHomePage() {
                 className="animate-fade-page-in grid grid-cols-2 gap-x-4 gap-y-7 md:grid-cols-3 md:gap-x-6 md:gap-y-10 lg:grid-cols-4"
               >
                 {visibleProducts.map((p) => (
-                  <ProductTile key={p.id} product={p} />
+                  <ProductTile key={p.id} product={p} from="catalog" />
                 ))}
               </div>
             ) : (

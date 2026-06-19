@@ -693,6 +693,24 @@ async function deleteHeroSlide(req, res) {
   res.json({ data: rows[0] });
 }
 
+// ---------- PUBLIC: discount popup promo config ----------
+const PROMO_DEFAULTS = { active: false, title_ar: 'استغل الخصومات', message_ar: '', deadline: null };
+
+async function getPromo(req, res) {
+  const { rows } = await query(
+    `SELECT value FROM site_settings WHERE key = 'discount_popup'`
+  );
+  const cfg = rows[0] ? rows[0].value : PROMO_DEFAULTS;
+  res.json({
+    data: {
+      active:     typeof cfg.active === 'boolean' ? cfg.active : false,
+      title_ar:   cfg.title_ar   || '',
+      message_ar: cfg.message_ar || '',
+      deadline:   cfg.deadline   || null,
+    },
+  });
+}
+
 module.exports = {
   getHeroSlides, listHeroSlidesAdmin, createHeroSlide, updateHeroSlide, deleteHeroSlide,
   priceRoleForUser, getProductFull, getShop, listProductsAdmin,
@@ -703,4 +721,5 @@ module.exports = {
   setOptionPriceRole, setProductPriceRole, uploadImage,
   lockGroupOption, unlockGroupOption,
   listPackages, createPackage, updatePackage, deletePackage, setPackageRule, setPackageProducts,
+  getPromo,
 };

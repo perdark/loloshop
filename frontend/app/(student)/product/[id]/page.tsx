@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { CustomerImageUpload } from "@/components/catalog/CustomerImageUpload";
@@ -29,6 +29,7 @@ import {
 import { addToCart } from "@/lib/cart";
 import { isAuthenticated, loginHref } from "@/lib/auth";
 import { formatIQD, formatDiscountPercent } from "@/lib/format";
+import { backHrefFromParam } from "@/lib/back";
 import type { CatalogProduct, ConfigureOrderResult, RobeMeasurements } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -79,6 +80,8 @@ function ProductPageSkeleton() {
 export default function StudentProductPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const backHref = backHrefFromParam(searchParams.get("from"), "/#catalog");
   const [product, setProduct] = useState<CatalogProduct | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -255,7 +258,7 @@ export default function StudentProductPage() {
               <Button onClick={() => { setLoading(true); setLoadError(null); getProductFull(id!).then(setProduct).catch((e) => setLoadError(getApiErrorMessage(e, "تعذر التحميل"))).finally(() => setLoading(false)); }}>
                 إعادة المحاولة
               </Button>
-              <Link href="/" className="text-sm font-medium text-orange-ink underline underline-offset-2">
+              <Link href={backHref} className="text-sm font-medium text-orange-ink underline underline-offset-2">
                 العودة للمتجر
               </Link>
             </div>
@@ -285,7 +288,7 @@ export default function StudentProductPage() {
         <div className="space-y-5 lg:sticky lg:top-24">
           <div>
             <Link
-              href="/"
+              href={backHref}
               className="inline-flex min-h-11 items-center gap-1 text-sm font-semibold text-orange-ink transition-colors hover:text-ink"
             >
               <span aria-hidden>→</span>

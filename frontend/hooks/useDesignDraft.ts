@@ -95,7 +95,15 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
   const [singleSideOnly, setSingleSideOnly] = useState(false);
 
   const colorGroup = useMemo(
-    () => product?.optionGroups.find((g) => g.nameAr.includes("لون")) ?? null,
+    () =>
+      product?.optionGroups.find(
+        (g) => g.nameAr.includes("لون") && !g.nameAr.includes("تطريز")
+      ) ?? null,
+    [product]
+  );
+
+  const embroideryColorGroup = useMemo(
+    () => product?.optionGroups.find((g) => g.nameAr.includes("تطريز")) ?? null,
     [product]
   );
 
@@ -113,6 +121,15 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
     return opt?.labelAr ?? "أبيض";
   }, [colorGroup, selection, customerTexts]);
 
+  const embroideryColor = useMemo(() => {
+    if (!embroideryColorGroup) return "";
+    const optId = getSelectedOptionId(embroideryColorGroup, selection);
+    const txt = optId
+      ? customerTexts[selectionKey(embroideryColorGroup.id, optId)]
+      : undefined;
+    return txt?.trim() || "";
+  }, [embroideryColorGroup, selection, customerTexts]);
+
   const role = product?.priceRole ?? "retail";
   const preview = useMemo(() => {
     if (!product) return { lines: [], total: 0 };
@@ -121,9 +138,10 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
 
   const sortedGroups = useMemo(() => {
     const priority = (g: { nameAr: string; sort: number }) => {
-      if (g.nameAr.includes("لون")) return 0;
-      if (g.nameAr.includes("نوع")) return 1;
-      return 2 + g.sort;
+      if (g.nameAr.includes("لون") && !g.nameAr.includes("تطريز")) return 0;
+      if (g.nameAr.includes("تطريز")) return 1;
+      if (g.nameAr.includes("نوع")) return 2;
+      return 3 + g.sort;
     };
     return (product?.optionGroups ?? [])
       .filter((g) => groupVisibleForGender(g, gender))
@@ -254,7 +272,9 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
             const loadedFonts = my.data.fonts_used || [];
             loadedFonts.forEach((f) => usedFontsRef.current.add(f));
             setFontsUsed(loadedFonts);
-            const cg = full.optionGroups.find((g) => g.nameAr.includes("لون"));
+            const cg = full.optionGroups.find(
+              (g) => g.nameAr.includes("لون") && !g.nameAr.includes("تطريز")
+            );
             const savedColor = my.data?.sash_color;
             if (cg && savedColor) {
               if (cg.requiresCustomerText) {
@@ -275,6 +295,21 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
                 if (match) {
                   setSelection((prev) => ({ ...prev, [cg.id]: match.id }));
                 }
+              }
+            }
+            // Restore saved embroidery color (parallel track — text-only group).
+            const ecg = full.optionGroups.find((g) => g.nameAr.includes("تطريز"));
+            const savedEmbColor = my.data?.embroidery_color;
+            if (ecg && savedEmbColor && ecg.requiresCustomerText) {
+              const eopt = ecg.options.find((o) => o.active) ?? ecg.options[0];
+              if (eopt) {
+                setSelection((prev) =>
+                  prev[ecg.id] != null ? prev : { ...prev, [ecg.id]: eopt.id }
+                );
+                const eckey = selectionKey(ecg.id, eopt.id);
+                setCustomerTexts((prev) =>
+                  prev[eckey] ? prev : { ...prev, [eckey]: savedEmbColor }
+                );
               }
             }
             if (my.data.completed && !my.edit_exception) {
@@ -362,6 +397,7 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
       try {
         await saveDesign({
           sash_color: sashColor,
+          embroidery_color: embroideryColor || null,
           left_canvas:
             lockedLeft !== undefined
               ? lockedLeft
@@ -401,6 +437,7 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
       editException,
       product,
       sashColor,
+      embroideryColor,
       leftJson,
       rightJson,
       logoUrl,
@@ -436,6 +473,7 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
     extraImageUrl,
     notes,
     sashColor,
+    embroideryColor,
   ]);
 
   // Explicitly load a sash the student picked from the chooser, then enter the
@@ -544,6 +582,7 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
     try {
       const { id: designId } = await saveDesign({
         sash_color: sashColor,
+        embroidery_color: embroideryColor || null,
         left_canvas: lockedLeft !== undefined ? lockedLeft : leftJson,
         right_canvas: lockedRight !== undefined ? lockedRight : rightJson,
         logo_url: logoUrl,
@@ -651,6 +690,7 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
     setSingleSideOnly,
     editableSide,
     sashColor,
+    embroideryColor,
     role,
     preview,
     sortedGroups,

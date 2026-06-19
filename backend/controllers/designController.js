@@ -53,7 +53,7 @@ async function saveDesign(req, res) {
       code: 'ERR_PENDING_APPROVAL',
     });
   }
-  const { variant_id, sash_color, left_canvas, right_canvas, logo_url, extra_image_url, fonts_used, notes } = req.body;
+  const { variant_id, sash_color, embroidery_color, left_canvas, right_canvas, logo_url, extra_image_url, fonts_used, notes } = req.body;
 
   const latest = await query(
     `SELECT id, completed FROM designs WHERE student_id = $1 ORDER BY updated_at DESC LIMIT 1`,
@@ -71,10 +71,12 @@ async function saveDesign(req, res) {
   if (existing) {
     designId = await tx(async (client) => {
       const { rows } = await client.query(
-        `UPDATE designs SET variant_id = $1, sash_color = $2, left_canvas = $3, right_canvas = $4,
-           logo_url = $5, extra_image_url = $6, fonts_used = $7, notes = $8
-         WHERE id = $9 RETURNING id`,
-        [variant_id || null, sash_color || null, left_canvas || null, right_canvas || null,
+        `UPDATE designs SET variant_id = $1, sash_color = $2, embroidery_color = $3,
+           left_canvas = $4, right_canvas = $5,
+           logo_url = $6, extra_image_url = $7, fonts_used = $8, notes = $9
+         WHERE id = $10 RETURNING id`,
+        [variant_id || null, sash_color || null, embroidery_color || null,
+         left_canvas || null, right_canvas || null,
          logo_url || null, extra_image_url || null, fonts_used || null, notes || null, existing.id]
       );
       await client.query(
@@ -85,9 +87,10 @@ async function saveDesign(req, res) {
     });
   } else {
     const { rows } = await query(
-      `INSERT INTO designs (student_id, variant_id, sash_color, left_canvas, right_canvas, logo_url, extra_image_url, fonts_used, notes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
-      [student.id, variant_id || null, sash_color || null, left_canvas || null, right_canvas || null,
+      `INSERT INTO designs (student_id, variant_id, sash_color, embroidery_color, left_canvas, right_canvas, logo_url, extra_image_url, fonts_used, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+      [student.id, variant_id || null, sash_color || null, embroidery_color || null,
+       left_canvas || null, right_canvas || null,
        logo_url || null, extra_image_url || null, fonts_used || null, notes || null]
     );
     designId = rows[0].id;

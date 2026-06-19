@@ -1731,10 +1731,10 @@ function SuccessScreen({ result }: { result: ConfigureFullSetResult }) {
       </div>
       <div className="flex flex-col gap-3">
         <Link
-          href="/"
+          href="/full-set"
           className="btn-shine inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-pill bg-orange-ink px-7 text-sm font-bold text-white shadow-[var(--shadow-card)]"
         >
-          العودة للمتجر
+          العودة للباقات
         </Link>
         <a
           href="https://instagram.com/loloshop96"
@@ -1855,11 +1855,11 @@ function ReviewRow({ label, value }: { label: string; value: string }) {
 function BackLink() {
   return (
     <Link
-      href="/"
+      href="/full-set"
       className="mb-2 inline-flex min-h-11 items-center gap-1 text-sm font-semibold text-orange-ink transition-colors hover:text-ink"
     >
       <span aria-hidden>→</span>
-      المتجر
+      الباقات
     </Link>
   );
 }

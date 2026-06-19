@@ -9,15 +9,22 @@ import type { ShopPackageCard, ShopProductCard } from "@/lib/types";
  * soft warm frame, and the name + price live *below* it in ink (no dark scrim
  * over the image). Quiet, scannable, lets the garment photography stay clean.
  */
-export function ProductTile({ product }: { product: ShopProductCard }) {
+export function ProductTile({
+  product,
+  from,
+}: {
+  product: ShopProductCard;
+  from?: string;
+}) {
   // Only a genuine markdown (old price strictly above the shown price) shows the strike.
   const hasDiscount =
     product.compareAtPrice != null && product.compareAtPrice > product.basePrice;
   const discountLabel = hasDiscount
     ? formatDiscountPercent(product.basePrice, product.compareAtPrice)
     : null;
+  const href = `/product/${product.id}${from ? `?from=${from}` : ""}`;
   return (
-    <Link href={`/product/${product.id}`} className="group block">
+    <Link href={href} className="group block">
       <figure
         className="relative aspect-[3/4] overflow-hidden rounded-[10px] bg-beige ring-1 ring-ink/10 transition-shadow duration-300 group-hover:shadow-[var(--shadow-float)]"
         style={{ viewTransitionName: productImageVT(product.id) }}

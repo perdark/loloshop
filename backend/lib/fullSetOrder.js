@@ -155,6 +155,10 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
   const colorImage = clean(colorIn.image_url, 500);
   if (!colorText) return err(400, 'لون الوشاح مطلوب');
 
+  // لون التطريز (embroidery/thread color) — typed free-text, OPTIONAL (student self-fill may omit).
+  // Captured as a sash spec line immediately after لون الوشاح.
+  const embroideryColor = clean(body.embroidery_color, 200);
+
   // resolve sash/robe/cap: package-pinned wins, else first active per type
   const byType = {};
   const pinned = await query(
@@ -205,6 +209,8 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
   const specLines = {
     sash: [
       { label: 'لون الوشاح', customer_text: colorText, customer_image_url: colorImage },
+      ...(embroideryColor
+        ? [{ label: 'لون التطريز', customer_text: embroideryColor }] : []),
       { label: 'نوع الوشاح', customer_text: sashType },
       ...(shawlEnabled
         ? [{ label: 'شال امريكي', customer_text: 'نعم', customer_image_url: shawlImage }] : []),
@@ -370,12 +376,14 @@ async function readFullSetOrder(studentId) {
   };
   const shawlLine = sashId ? lineFor(sashId, 'شال امريكي') : null;
   const colorLine = sashId ? lineFor(sashId, 'لون الوشاح') : null;
+  const embColorLine = sashId ? lineFor(sashId, 'لون التطريز') : null;
 
   return {
     package_id: set[0].package_id,
     notes: byType.sash?.notes || byType.robe?.notes || byType.cap?.notes || '',
     measurements: byType.robe?.measurements || null,
     sash_color: { text: colorLine?.customer_text || '', image_url: colorLine?.customer_image_url || '' },
+    embroidery_color: embColorLine?.customer_text || '',
     sash_type: sashId ? lineFor(sashId, 'نوع الوشاح')?.customer_text || null : null,
     cap_type: capId ? lineFor(capId, 'نوع القبعة')?.customer_text || null : null,
     shoulder_pleat: robeId ? lineFor(robeId, 'كسرة الكتف')?.customer_text === 'نعم' : false,

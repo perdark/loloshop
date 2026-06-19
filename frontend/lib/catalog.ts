@@ -410,6 +410,21 @@ export async function setProductMainImage(
   await updateCatalogProduct(productId, { image_url: imageUrl });
 }
 
+// ─── Promo / Discount Popup Config ───────────────────────────────────────────
+
+export interface PromoConfig {
+  active: boolean;
+  title_ar: string;
+  message_ar: string;
+  deadline: string | null;
+}
+
+/** Public endpoint — no auth required. Returns the storefront promo config. */
+export async function getPromo(): Promise<PromoConfig> {
+  const { data } = await api.get<{ data: PromoConfig }>("/catalog/promo");
+  return data.data;
+}
+
 /** @deprecated Use getShopFeed */
 export async function listCatalogProducts(): Promise<CatalogProductSummary[]> {
   return listCatalogProductsAdmin();

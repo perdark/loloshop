@@ -283,6 +283,8 @@ export interface CreateFullSetPayload {
   shoulder_pleat?: boolean;
   /** شال امريكي (yes/no) — image required when enabled. */
   american_shawl?: { enabled: boolean; image_url?: string };
+  /** لون التطريز: typed thread color (rep-only; optional server-side). */
+  embroidery_color?: string;
   embroidery: {
     cap_side?: EmbroideryZone;
     cap_top?: EmbroideryZone;
@@ -323,6 +325,8 @@ export interface FullSetExistingOrder {
   sash_type: PieceType | null;
   cap_type: PieceType | null;
   sash_color: { text: string; image_url: string };
+  /** Thread color typed by the rep (stored as «لون التطريز» sash spec line). */
+  embroidery_color?: string;
   shoulder_pleat: boolean;
   american_shawl: { enabled: boolean; image_url: string };
   embroidery: {

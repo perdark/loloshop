@@ -555,6 +555,8 @@ export interface DesignState {
   id?: string;
   variant_id: string | null;
   sash_color: string | null;
+  /** Thread/embroidery color typed by the student — stored in designs.embroidery_color. */
+  embroidery_color?: string | null;
   left_canvas: unknown | null;
   right_canvas: unknown | null;
   logo_url: string | null;

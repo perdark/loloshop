@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { AuthCard } from "@/components/auth/AuthCard";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
+import { OtpVerifyForm } from "@/components/auth/OtpVerifyForm";
 import {
   register as apiRegister,
   verifyRegistrationOtp,
@@ -28,7 +29,6 @@ const ROLE_REDIRECT: Record<UserRole, string> = {
 export default function RegisterPage() {
   const router = useRouter();
   const [step, setStep] = useState<"form" | "otp">("form");
-  const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [form, setForm] = useState({
@@ -82,34 +82,15 @@ export default function RegisterPage() {
     }
   }
 
-  async function handleVerify(e: React.FormEvent) {
-    e.preventDefault();
-    if (code.trim().length < 4) {
-      toast.error("أدخل رمز التحقق");
-      return;
-    }
-    setLoading(true);
-    try {
-      const { token } = await verifyRegistrationOtp(form.phone.trim(), code.trim());
-      setToken(token);
-      const user = await fetchMe();
-      setUser(user);
-      toast.success(`مرحباً ${user.name} 🎉`);
-      router.replace(ROLE_REDIRECT[user.role]);
-    } catch (err) {
-      toast.error(getApiErrorMessage(err, "رمز غير صحيح"));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleResend() {
-    try {
-      await resendVerifyOtp(form.phone.trim());
-      toast.success("تم إرسال رمز جديد");
-    } catch (err) {
-      toast.error(getApiErrorMessage(err, "تعذّر إرسال الرمز"));
-    }
+  async function verifyOtp(code: string) {
+    // verifyRegistrationOtp already throws Error with Arabic message on failure;
+    // OtpVerifyForm catches it, shows it, clears digits, refocuses.
+    const { token } = await verifyRegistrationOtp(form.phone.trim(), code);
+    setToken(token);
+    const user = await fetchMe();
+    setUser(user);
+    toast.success(`مرحباً ${user.name} 🎉`);
+    router.replace(ROLE_REDIRECT[user.role]);
   }
 
   return (
@@ -288,41 +269,14 @@ export default function RegisterPage() {
           </p>
         </form>
       ) : (
-        <form onSubmit={handleVerify} className="space-y-5">
-          <div className="rounded-[12px] border border-ink/10 bg-cream px-4 py-3.5 text-center text-sm text-ink-soft">
-            <p>أُرسل رمز التحقق عبر واتساب إلى</p>
-            <p className="mt-1 font-bold tracking-widest text-ink" dir="ltr">
-              +964 {form.phone}
-            </p>
-          </div>
-          <Input
-            label="رمز التحقق"
-            type="text"
-            inputMode="numeric"
-            value={code}
-            onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
-            autoComplete="one-time-code"
-          />
-          <Button type="submit" fullWidth loading={loading}>
-            تأكيد ودخول
-          </Button>
-          <div className="flex items-center justify-between text-sm">
-            <button
-              type="button"
-              onClick={() => setStep("form")}
-              className="text-ink-soft transition-colors hover:text-ink"
-            >
-              ← رجوع
-            </button>
-            <button
-              type="button"
-              onClick={handleResend}
-              className="font-medium text-orange-ink transition-colors hover:text-ink"
-            >
-              إعادة إرسال الرمز
-            </button>
-          </div>
-        </form>
+        <OtpVerifyForm
+          phone={form.phone}
+          onVerify={verifyOtp}
+          onResend={() => resendVerifyOtp(form.phone.trim())}
+          onBack={() => setStep("form")}
+          submitLabel="تأكيد ودخول"
+          backLabel="← رجوع"
+        />
       )}
     </AuthCard>
   );

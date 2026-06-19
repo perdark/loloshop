@@ -1,5 +1,6 @@
 import { api } from "./api";
 import { mapHeroSlide } from "./catalog";
+import type { PromoConfig } from "./catalog";
 import type {
   AdminAccounting,
   AdminAnalytics,
@@ -20,6 +21,16 @@ import type {
   User,
   WholesalerPricingAddons,
 } from "./types";
+
+// ─── Promo / Discount Popup Config ───────────────────────────────────────────
+
+export type { PromoConfig };
+
+/** Admin-only: save the storefront promo config. */
+export async function updatePromo(payload: PromoConfig): Promise<PromoConfig> {
+  const { data } = await api.patch<{ data: PromoConfig }>("/admin/promo", payload);
+  return data.data;
+}
 
 // ---------- Hero slider (home slides) ----------
 export interface HeroSlidePayload {

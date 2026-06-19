@@ -4,6 +4,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { toast } from "sonner";
 import { getAdminAnalytics, getAdminAccounting } from "@/lib/admin";
+import { PromoControl } from "@/components/admin/PromoControl";
 import { getTailorSummary, type TailorSummary } from "@/lib/staff";
 import { ORDER_STATUS_LABELS } from "@/lib/constants";
 import Link from "next/link";
@@ -264,6 +265,12 @@ export default function AdminDashboardPage() {
             />
           ))}
         </dl>
+      </section>
+
+      {/* Promo / Discount Popup control */}
+      <section className="mt-16">
+        <SectionHead title="الإعلانات والعروض" />
+        <PromoControl />
       </section>
 
       {/* الفصال — parallel tailoring progress (independent of the pipeline) */}

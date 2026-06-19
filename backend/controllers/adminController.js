@@ -583,11 +583,58 @@ async function deleteStaff(req, res) {
   res.json({ data: { id } });
 }
 
+// ---------- Admin: discount popup promo config ----------
+async function updatePromo(req, res) {
+  const { active, title_ar, message_ar, deadline } = req.body;
+
+  // active: coerce to boolean
+  const activeVal = !!active;
+
+  // title_ar: required, trimmed, max 120 chars
+  const titleTrimmed = typeof title_ar === 'string' ? title_ar.trim() : '';
+  if (!titleTrimmed) {
+    return res.status(400).json({ error: 'العنوان مطلوب', code: 'ERR_VALIDATION' });
+  }
+  if (titleTrimmed.length > 120) {
+    return res.status(400).json({ error: 'العنوان طويل جداً (الحد 120 حرف)', code: 'ERR_VALIDATION' });
+  }
+
+  // message_ar: required, trimmed, max 600 chars
+  const msgTrimmed = typeof message_ar === 'string' ? message_ar.trim() : '';
+  if (!msgTrimmed) {
+    return res.status(400).json({ error: 'الرسالة مطلوبة', code: 'ERR_VALIDATION' });
+  }
+  if (msgTrimmed.length > 600) {
+    return res.status(400).json({ error: 'الرسالة طويلة جداً (الحد 600 حرف)', code: 'ERR_VALIDATION' });
+  }
+
+  // deadline: null/'' → null; otherwise must be a valid ISO date
+  let deadlineVal = null;
+  if (deadline != null && deadline !== '') {
+    const d = new Date(deadline);
+    if (isNaN(d.getTime())) {
+      return res.status(400).json({ error: 'تاريخ غير صالح', code: 'ERR_VALIDATION' });
+    }
+    deadlineVal = d.toISOString();
+  }
+
+  const cfg = { active: activeVal, title_ar: titleTrimmed, message_ar: msgTrimmed, deadline: deadlineVal };
+
+  await query(
+    `INSERT INTO site_settings (key, value, updated_at)
+     VALUES ('discount_popup', $1::jsonb, now())
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+    [JSON.stringify(cfg)]
+  );
+
+  res.json({ data: cfg });
+}
+
 module.exports = {
   analytics, accounting, updateOrderCost, updateCheckoutGroup,
   listWholesalers, createWholesaler, updateWholesaler, updateDeadline, updatePricing, deleteWholesaler,
   getWholesalerSashConfig, updateWholesalerSashConfig,
   wholesalerStudents, toggleEditException,
   listStaff, createStaff, updateStaffType, updateStaffScope, updateStaffPassword, deleteStaff,
-  repsOverview,
+  repsOverview, updatePromo,
 };

@@ -41,7 +41,6 @@
   --color-amber: #f47b42;
   --color-offwhite: #f5f5dc;
 
-  /* --- Fonts --- */
   --font-sans: var(--font-cairo), ui-sans-serif, system-ui, sans-serif;
   /* Latin headings → Playfair Display; Arabic display → Amiri (silent swap via font-stack).
      Use --font-display-ar when you need to explicitly target Arabic display text. */
@@ -436,6 +435,8 @@ html {
 }
 
 /* ─── Splash intro ─── */
+
+/* Legacy keyframes — kept so any external reference doesn't break */
 @keyframes splash-logo-pop {
   0%   { opacity: 0; transform: scale(0.55); }
   65%  { opacity: 1; transform: scale(1.08); }
@@ -468,6 +469,111 @@ html {
 }
 .animate-splash-ring {
   animation: splash-ring 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* ─── Cinematic splash v2 keyframes ─── */
+
+/* Logo: drifts up from a slight sink — slow, confident luxury entrance */
+@keyframes splash2-logo-rise {
+  0%   { opacity: 0; transform: translateY(22px) scale(0.88); }
+  60%  { opacity: 1; }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Halo: blooms outward from the logo centre */
+@keyframes splash2-halo-bloom {
+  0%   { opacity: 0; transform: scale(0.4); }
+  50%  { opacity: 0.55; }
+  100% { opacity: 0;   transform: scale(1.7); }
+}
+
+/* Shimmer ring: a crisp accent ring that expands once then fades */
+@keyframes splash2-ring-expand {
+  0%   { opacity: 0.8; transform: scale(0.72); }
+  100% { opacity: 0;   transform: scale(1.22); }
+}
+
+/* Wordmark script draw: clip-path reveal from start (RTL: from the right) */
+@keyframes splash2-word-draw {
+  from { clip-path: inset(0 100% 0 0); }
+  to   { clip-path: inset(0 0% 0 0); }
+}
+
+/* Tagline words stagger-rise */
+@keyframes splash2-tag-rise {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Accent rule grows inward from the centre */
+@keyframes splash2-rule-grow {
+  from { transform: scaleX(0); opacity: 0; }
+  to   { transform: scaleX(1); opacity: 1; }
+}
+
+/* GradCap: bob in from above */
+@keyframes splash2-cap-drop {
+  0%   { opacity: 0; transform: translateY(-18px) scale(0.85); }
+  60%  { opacity: 1; transform: translateY(2px) scale(1.04); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Curtain exit: top panel slides up, bottom panel slides down */
+@keyframes splash2-curtain-top-out {
+  from { transform: translateY(0); }
+  to   { transform: translateY(-100%); }
+}
+@keyframes splash2-curtain-bot-out {
+  from { transform: translateY(0); }
+  to   { transform: translateY(100%); }
+}
+
+/* Content fade-in behind the curtains */
+@keyframes splash2-behind-reveal {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* Ambient glow pulse on the backdrop */
+@keyframes splash2-glow-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(1); }
+  50%       { opacity: 0.55; transform: scale(1.08); }
+}
+
+/* Utility classes */
+.animate-splash2-logo-rise {
+  animation: splash2-logo-rise 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.15s both;
+}
+.animate-splash2-halo-bloom {
+  animation: splash2-halo-bloom 1.4s cubic-bezier(0.16, 1, 0.3, 1) 0.15s both;
+}
+.animate-splash2-ring-expand {
+  animation: splash2-ring-expand 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.35s both;
+}
+.animate-splash2-word-draw {
+  animation: splash2-word-draw 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.65s both;
+}
+.animate-splash2-tag-rise-1 {
+  animation: splash2-tag-rise 0.5s cubic-bezier(0.16, 1, 0.3, 1) 1.05s both;
+}
+.animate-splash2-tag-rise-2 {
+  animation: splash2-tag-rise 0.5s cubic-bezier(0.16, 1, 0.3, 1) 1.22s both;
+}
+.animate-splash2-rule-grow {
+  animation: splash2-rule-grow 0.55s cubic-bezier(0.22, 1, 0.36, 1) 1.45s both;
+  transform-origin: center;
+}
+.animate-splash2-cap-drop {
+  animation: splash2-cap-drop 0.6s cubic-bezier(0.34, 1.4, 0.64, 1) 0s both;
+}
+.animate-splash2-glow-pulse {
+  animation: splash2-glow-pulse 3s ease-in-out infinite;
+}
+.animate-splash2-curtain-top-out {
+  animation: splash2-curtain-top-out 0.55s cubic-bezier(0.76, 0, 0.24, 1) forwards;
+}
+.animate-splash2-curtain-bot-out {
+  animation: splash2-curtain-bot-out 0.55s cubic-bezier(0.76, 0, 0.24, 1) forwards;
 }
 
 /* ─── Graduation cap loader ─── */

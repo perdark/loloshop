@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { MyOrdersList } from "@/components/student/MyOrdersList";
 import { VipUpsellCard } from "@/components/vip/VipUpsellCard";
+import { isAuthenticated, loginHref } from "@/lib/auth";
 
 function CartSkeleton() {
   return (
@@ -215,13 +216,20 @@ export default function CartPage() {
   // checkout doesn't dead-end on a blank cart.
   const [myOrders, setMyOrders] = useState<StudentOrder[]>([]);
 
+  const authed = isAuthenticated();
+
   const loadMyOrders = useCallback(() => {
+    if (!isAuthenticated()) return;
     getMyOrders()
       .then(setMyOrders)
       .catch(() => setMyOrders([]));
   }, []);
 
   const loadCart = useCallback(async () => {
+    if (!isAuthenticated()) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setLoadError(false);
     try {
@@ -303,6 +311,34 @@ export default function CartPage() {
     } finally {
       setCheckingOut(false);
     }
+  }
+
+  if (!authed) {
+    return (
+      <div className="space-y-4 py-8">
+        <BackLink />
+        <EmptyState
+          title="سجّل دخولك لإكمال طلبك"
+          message="سلة التسوق متاحة بعد تسجيل الدخول — تصفّحك محفوظ."
+          action={
+            <div className="flex flex-col items-center gap-3">
+              <Link
+                href={loginHref("/cart")}
+                className="btn-shine inline-flex min-h-[44px] w-full max-w-[240px] items-center justify-center gap-2 rounded-pill bg-brand-gradient px-7 text-sm font-bold text-white shadow-[var(--shadow-card)]"
+              >
+                تسجيل الدخول
+              </Link>
+              <Link
+                href="/"
+                className="inline-flex min-h-[44px] items-center justify-center gap-1 text-sm font-semibold text-orange-ink transition-colors hover:text-ink"
+              >
+                تابع التصفّح
+              </Link>
+            </div>
+          }
+        />
+      </div>
+    );
   }
 
   if (loading) return <CartSkeleton />;

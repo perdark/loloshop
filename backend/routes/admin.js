@@ -42,4 +42,7 @@ router.get('/staff/:id/activity', salary.getStaffActivity);
 router.get('/staff/:id/goal', salary.getStaffGoal);
 router.post('/staff/:id/goal', salary.setStaffGoal);
 
+// Site settings — discount popup promo config
+router.patch('/promo', c.updatePromo);
+
 module.exports = router;

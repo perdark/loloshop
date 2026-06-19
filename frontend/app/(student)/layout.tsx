@@ -1,5 +1,6 @@
 import { StudentNav } from "@/components/StudentNav";
 import { SplashIntro } from "@/components/SplashIntro";
+import { DiscountPopup } from "@/components/DiscountPopup";
 
 export default function StudentLayout({
   children,
@@ -8,9 +9,10 @@ export default function StudentLayout({
 }) {
   return (
     <div dir="rtl" lang="ar" className="shop-paper min-h-screen bg-cream pb-8">
-      {/* Rendered outside <main> so its fixed overlay anchors to the viewport,
+      {/* Rendered outside <main> so fixed overlays anchor to the viewport,
           not to <main>'s transformed (animate-page-in) box. */}
       <SplashIntro />
+      <DiscountPopup />
       <StudentNav />
       {/* Phone-first but no longer caged at 512px — editorial grids engage on
           tablet/desktop while mobile stays a single calm column. */}
