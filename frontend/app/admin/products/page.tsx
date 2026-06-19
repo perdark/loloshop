@@ -21,7 +21,6 @@ import {
   updateCatalogGroup,
   updateCatalogOption,
   updateCatalogProduct,
-  uploadCatalogImage,
 } from "@/lib/catalog";
 import { getApiErrorMessage } from "@/lib/api";
 import { computePriceBreakdown, type OptionSelection } from "@/lib/pricing";
@@ -394,19 +393,6 @@ export default function AdminProductsPage() {
     );
   }
 
-  async function handleGroupImage(groupId: string, file: File) {
-    setSavingId(groupId);
-    try {
-      const url = await uploadCatalogImage(file);
-      await updateCatalogGroup(groupId, { image_url: url, has_image: true });
-      await reloadProduct();
-      toast.success("تم رفع الصورة");
-    } catch (e) {
-      toast.error(getApiErrorMessage(e, "تعذر رفع الصورة"));
-    } finally {
-      setSavingId(null);
-    }
-  }
 
   if (loadingList) return (
     <div dir="rtl" lang="ar" className="space-y-6 animate-fade-page-in">
@@ -903,7 +889,6 @@ export default function AdminProductsPage() {
                       onDeleteGroup={() => {
                         setDeleteGroupTarget({ id: group.id, name: group.nameAr });
                       }}
-                      onGroupImage={handleGroupImage}
                       onCommitOptionPrice={commitOptionPrice}
                       onToggleOptionImage={(optId, v) =>
                         run(
@@ -1317,7 +1302,6 @@ function GroupBlock({
   onCreateOption,
   onPersistGroup,
   onDeleteGroup,
-  onGroupImage,
   onCommitOptionPrice,
   onToggleOptionImage,
   onToggleOptionText,
@@ -1339,7 +1323,6 @@ function GroupBlock({
   onCreateOption: (groupId: string) => void;
   onPersistGroup: (patch: Record<string, unknown>) => void;
   onDeleteGroup: () => void;
-  onGroupImage: (groupId: string, file: File) => void;
   onToggleOptionText: (optId: string, v: boolean) => void;
   onCommitOptionPrice: (optId: string, value: number) => void;
   onToggleOptionImage: (optId: string, v: boolean) => void;
@@ -1462,35 +1445,7 @@ function GroupBlock({
           >
             كتابة مطلوبة من الزبون
           </CheckRow>
-          <CheckRow
-            checked={group.hasImage}
-            disabled={busy}
-            onChange={(v) => onPersistGroup({ has_image: v })}
-          >
-            إظهار صورة توضيحية
-          </CheckRow>
-          <label className="text-xs">
-            <input
-              type="file"
-              accept="image/*"
-              className="hidden"
-              id={`gimg-${group.id}`}
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) onGroupImage(group.id, f);
-              }}
-            />
-            <span
-              role="button"
-              tabIndex={0}
-              className="cursor-pointer font-medium text-orange-ink underline-offset-2 hover:underline"
-              onClick={() =>
-                document.getElementById(`gimg-${group.id}`)?.click()
-              }
-            >
-              رفع صورة توضيحية
-            </span>
-          </label>
+          {/* «صورة توضيحية» (group hint image) controls removed per request. */}
 
           {/* What the customer must type — admin controls the title + the in-box example. */}
           {(group.requiresCustomerText ||

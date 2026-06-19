@@ -104,7 +104,7 @@ function defaultState(): WizardState {
       customerTexts: {},
       customerImageUrls: {},
     },
-    measurements: { shoulder_cm: 0, robe_length_cm: 0, sleeve_length_cm: 0 },
+    measurements: { shoulder_cm: 0, chest_cm: 0, robe_length_cm: 0, sleeve_length_cm: 0, tailor_notes: "" },
     sashZones: { right_text: "", left_mode: "logo_year" },
     delivery: {
       customer_name: "",
@@ -596,9 +596,11 @@ export default function FullSetWizardPage() {
           }
         }
       }
-      const { shoulder_cm, robe_length_cm, sleeve_length_cm } = state.measurements;
+      const { shoulder_cm, chest_cm, robe_length_cm, sleeve_length_cm } = state.measurements;
       if (!shoulder_cm || shoulder_cm < 25 || shoulder_cm > 80)
         errs.shoulder_cm = "عرض الكتف يجب أن يكون بين ٢٥–٨٠ سم";
+      if (!chest_cm || chest_cm < 60 || chest_cm > 180)
+        errs.chest_cm = "محيط الصدر يجب أن يكون بين ٦٠–١٨٠ سم";
       if (!robe_length_cm || robe_length_cm < 70 || robe_length_cm > 190)
         errs.robe_length_cm = "طول الروب يجب أن يكون بين ٧٠–١٩٠ سم";
       if (!sleeve_length_cm || sleeve_length_cm < 30 || sleeve_length_cm > 100)
@@ -852,6 +854,12 @@ export default function FullSetWizardPage() {
                 measurements: { ...prev.measurements, [field]: val },
               }))
             }
+            onNotesChange={(val) =>
+              setState((prev) => ({
+                ...prev,
+                measurements: { ...prev.measurements, tailor_notes: val },
+              }))
+            }
             onErrorClear={(key) =>
               setErrors((prev) => {
                 const n = { ...prev };
@@ -964,6 +972,7 @@ function StepRobe({
   onSelect,
   onTextChange,
   onMeasureChange,
+  onNotesChange,
   onErrorClear,
 }: {
   product: CatalogProduct | null;
@@ -974,6 +983,7 @@ function StepRobe({
   onSelect: (groupId: string, optionId: string) => void;
   onTextChange: (groupId: string, optionId: string, text: string) => void;
   onMeasureChange: (field: keyof FullSetMeasurements, value: number) => void;
+  onNotesChange: (value: string) => void;
   onErrorClear: (key: string) => void;
 }) {
   return (
@@ -1010,7 +1020,7 @@ function StepRobe({
 
       <div className="rounded-2xl bg-surface p-5 shadow-[var(--shadow-soft)] ring-1 ring-line">
         <p className="mb-4 font-display-ar text-base font-bold text-ink">
-          مقاسات الروب (سم)
+          قياسات الروب (سم)
         </p>
         <div className="space-y-4">
           <MeasurementInput
@@ -1024,6 +1034,19 @@ function StepRobe({
             onChange={(v) => {
               onMeasureChange("shoulder_cm", v);
               onErrorClear("shoulder_cm");
+            }}
+          />
+          <MeasurementInput
+            id="field_chest_cm"
+            label="محيط الصدر"
+            hint="قس حول أعرض جزء من الصدر"
+            value={measurements.chest_cm}
+            min={60}
+            max={180}
+            error={errors.chest_cm}
+            onChange={(v) => {
+              onMeasureChange("chest_cm", v);
+              onErrorClear("chest_cm");
             }}
           />
           <MeasurementInput
@@ -1052,6 +1075,26 @@ function StepRobe({
               onErrorClear("sleeve_length_cm");
             }}
           />
+          {/* ملاحظات لفصال الروب — optional tailoring note (rides measurements.tailor_notes) */}
+          <div>
+            <label
+              htmlFor="field_tailor_notes"
+              className="block text-sm font-semibold text-ink"
+            >
+              ملاحظات لفصال الروب
+              <span className="ms-1 text-xs font-normal text-muted">(اختياري)</span>
+            </label>
+            <textarea
+              id="field_tailor_notes"
+              dir="rtl"
+              rows={3}
+              maxLength={500}
+              placeholder="أي تفاصيل إضافية عن الفصال…"
+              value={measurements.tailor_notes ?? ""}
+              onChange={(e) => onNotesChange(e.target.value)}
+              className="mt-1.5 w-full resize-none rounded-xl border border-line bg-white px-3.5 py-2.5 text-sm leading-relaxed text-ink placeholder:text-ink/30 outline-none transition-colors focus:border-orange focus:ring-2 focus:ring-orange/30"
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -1577,8 +1620,12 @@ function StepReview({
           );
         })}
         <ReviewRow label="عرض الكتف" value={`${state.measurements.shoulder_cm} سم`} />
+        <ReviewRow label="محيط الصدر" value={`${state.measurements.chest_cm} سم`} />
         <ReviewRow label="طول الروب" value={`${state.measurements.robe_length_cm} سم`} />
         <ReviewRow label="طول الكُم" value={`${state.measurements.sleeve_length_cm} سم`} />
+        {state.measurements.tailor_notes?.trim() && (
+          <ReviewRow label="ملاحظات لفصال الروب" value={state.measurements.tailor_notes} />
+        )}
       </ReviewSection>
 
       <ReviewSection title="القبعة">

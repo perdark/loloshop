@@ -130,8 +130,12 @@ export interface FullSetSashZones {
 
 export interface FullSetMeasurements {
   shoulder_cm: number;
+  /** محيط الصدر */
+  chest_cm: number;
   robe_length_cm: number;
   sleeve_length_cm: number;
+  /** ملاحظات لفصال الروب — optional free-text tailoring note. */
+  tailor_notes?: string;
 }
 
 export interface FullSetDelivery {

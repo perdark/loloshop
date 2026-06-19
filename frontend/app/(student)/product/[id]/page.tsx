@@ -93,8 +93,10 @@ export default function StudentProductPage() {
   const [customerTexts, setCustomerTexts] = useState<Record<string, string>>({});
   const [measurements, setMeasurements] = useState<RobeMeasurements>({
     shoulder_cm: 0,
+    chest_cm: 0,
     robe_length_cm: 0,
     sleeve_length_cm: 0,
+    tailor_notes: "",
   });
   const [showErrors, setShowErrors] = useState(false);
   const [confirmed, setConfirmed] = useState<ConfigureOrderResult | null>(null);
@@ -168,6 +170,7 @@ export default function StudentProductPage() {
     if (!product || product.type !== "robe") return null;
     if (
       measurements.shoulder_cm <= 0 ||
+      measurements.chest_cm <= 0 ||
       measurements.robe_length_cm <= 0 ||
       measurements.sleeve_length_cm <= 0
     ) {
@@ -386,11 +389,11 @@ export default function StudentProductPage() {
           );
         })}
 
-        {/* فصال الروب — mandatory measurements for robe products */}
+        {/* قياسات الروب — mandatory measurements for robe products */}
         {product.type === "robe" && (
           <fieldset className="surface-card rounded-2xl p-4">
             <legend className="px-1 font-display text-sm font-bold text-ink">
-              فصال الروب
+              قياسات الروب
               <span className="ms-1 text-orange-ink">*</span>
             </legend>
             <p className="mt-1 text-xs leading-relaxed text-ink-soft">
@@ -400,9 +403,10 @@ export default function StudentProductPage() {
               {(
                 [
                   { key: "shoulder_cm", label: "كتف" },
+                  { key: "chest_cm", label: "محيط الصدر" },
                   { key: "robe_length_cm", label: "طول الروب" },
                   { key: "sleeve_length_cm", label: "طول الردن" },
-                ] as { key: keyof RobeMeasurements; label: string }[]
+                ] as { key: "shoulder_cm" | "chest_cm" | "robe_length_cm" | "sleeve_length_cm"; label: string }[]
               ).map(({ key: mKey, label }) => {
                 const val = measurements[mKey];
                 const hasError = showErrors && val <= 0;
@@ -448,6 +452,28 @@ export default function StudentProductPage() {
                   {measurementsError}
                 </p>
               )}
+            </div>
+            {/* ملاحظات لفصال الروب — optional tailoring note (rides measurements.tailor_notes) */}
+            <div className="mt-4">
+              <label
+                htmlFor="m-tailor-notes"
+                className="block text-sm font-semibold text-ink"
+              >
+                ملاحظات لفصال الروب
+                <span className="ms-1 text-xs font-normal text-ink-soft">(اختياري)</span>
+              </label>
+              <textarea
+                id="m-tailor-notes"
+                dir="rtl"
+                rows={3}
+                maxLength={500}
+                placeholder="أي تفاصيل إضافية عن الفصال (مثال: تكبير الصدر قليلاً)…"
+                value={measurements.tailor_notes ?? ""}
+                onChange={(e) =>
+                  setMeasurements((prev) => ({ ...prev, tailor_notes: e.target.value }))
+                }
+                className="mt-1.5 w-full resize-none rounded-xl border border-neutral bg-white px-3.5 py-2.5 text-sm leading-relaxed text-ink placeholder:text-ink/30 outline-none transition-colors focus:border-orange focus:ring-2 focus:ring-orange/30"
+              />
             </div>
           </fieldset>
         )}

@@ -336,7 +336,7 @@ function findOpt(items: ProductionOrderItem[], groupPartial: string): string {
 function buildInstaText(
   intake: NonNullable<ProductionOrderDetail["order"]["intake"]>,
   ordersByType: {
-    robe?: { items: ProductionOrderItem[]; measurements?: { shoulder_cm: number; robe_length_cm: number; sleeve_length_cm: number } | null };
+    robe?: { items: ProductionOrderItem[]; measurements?: { shoulder_cm: number; chest_cm?: number; robe_length_cm: number; sleeve_length_cm: number; tailor_notes?: string } | null };
     cap?: { items: ProductionOrderItem[] };
     sash?: { items: ProductionOrderItem[] };
   },
@@ -363,6 +363,8 @@ function buildInstaText(
       r.measurements ? `طول الروب / ${r.measurements.robe_length_cm}` : null,
       r.measurements ? `طول الردن / ${r.measurements.sleeve_length_cm}` : null,
       r.measurements ? `عرض الكتف / ${r.measurements.shoulder_cm}` : null,
+      r.measurements?.chest_cm ? `محيط الصدر / ${r.measurements.chest_cm}` : null,
+      line("ملاحظات الفصال", r.measurements?.tailor_notes),
       line("ردن الروب", findOpt(r.items, "ردن")),
       "___",
     );
@@ -447,7 +449,7 @@ function InstaCopyButton({
       const setType = (
         type: string,
         its: ProductionOrderItem[],
-        meas?: { shoulder_cm: number; robe_length_cm: number; sleeve_length_cm: number } | null
+        meas?: { shoulder_cm: number; chest_cm?: number; robe_length_cm: number; sleeve_length_cm: number; tailor_notes?: string } | null
       ) => {
         if (type === "robe") ordersByType.robe = { items: its, measurements: meas };
         else if (type === "cap") ordersByType.cap = { items: its };
@@ -1197,12 +1199,18 @@ export default function ProductionOrderDetailPage() {
           {/* Measurements */}
           {order.measurements && (
             <article className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
-              <h3 className="mb-3 text-sm font-semibold text-ink">مقاسات الروب</h3>
+              <h3 className="mb-3 text-sm font-semibold text-ink">قياسات الروب</h3>
               <dl className="space-y-2 text-sm">
                 <div className="flex justify-between gap-4 border-b border-line pb-2">
                   <dt className="text-muted">الكتف</dt>
                   <dd className="font-medium text-ink" dir="ltr">{order.measurements.shoulder_cm} cm</dd>
                 </div>
+                {order.measurements.chest_cm != null && (
+                  <div className="flex justify-between gap-4 border-b border-line pb-2">
+                    <dt className="text-muted">محيط الصدر</dt>
+                    <dd className="font-medium text-ink" dir="ltr">{order.measurements.chest_cm} cm</dd>
+                  </div>
+                )}
                 <div className="flex justify-between gap-4 border-b border-line pb-2">
                   <dt className="text-muted">طول الروب</dt>
                   <dd className="font-medium text-ink" dir="ltr">{order.measurements.robe_length_cm} cm</dd>
@@ -1212,6 +1220,12 @@ export default function ProductionOrderDetailPage() {
                   <dd className="font-medium text-ink" dir="ltr">{order.measurements.sleeve_length_cm} cm</dd>
                 </div>
               </dl>
+              {order.measurements.tailor_notes?.trim() && (
+                <div className="mt-3 rounded-xl border border-line bg-beige/60 p-3">
+                  <p className="mb-1 text-xs font-semibold text-muted">ملاحظات لفصال الروب</p>
+                  <p className="whitespace-pre-wrap text-sm text-ink">{order.measurements.tailor_notes}</p>
+                </div>
+              )}
             </article>
           )}
 

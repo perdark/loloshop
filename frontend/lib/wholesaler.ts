@@ -276,6 +276,10 @@ export interface CreateFullSetPayload {
     robe_length_cm: number | string;
     sleeve_length_cm: number | string;
     shoulder_cm: number | string;
+    /** محيط الصدر */
+    chest_cm: number | string;
+    /** ملاحظات لفصال الروب */
+    tailor_notes?: string;
   };
   sash_type: PieceType;
   cap_type: PieceType;
@@ -321,6 +325,8 @@ export interface FullSetExistingOrder {
     robe_length_cm: number;
     sleeve_length_cm: number;
     shoulder_cm: number;
+    chest_cm?: number;
+    tailor_notes?: string;
   } | null;
   sash_type: PieceType | null;
   cap_type: PieceType | null;

@@ -93,26 +93,9 @@ export function OptionGroupField({
         )}
       </legend>
 
-      {group.hasImage && (group.hintAr || group.imageUrl) && (
-        <div className="mb-3 rounded-xl border border-ink/8 bg-cream/60 p-2.5">
-          <p className="text-[11px] font-medium text-[var(--shop-muted)]">
-            صورة توضيحية
-          </p>
-          {group.hintAr && (
-            <p className="mt-1 text-xs text-ink-soft">{group.hintAr}</p>
-          )}
-          {group.imageUrl && (
-            <div className="relative mt-2 h-32 w-full overflow-hidden rounded-lg bg-peach/40">
-              <Image
-                src={group.imageUrl}
-                alt={group.nameAr}
-                fill
-                sizes="(max-width: 768px) calc(100vw - 4rem), 480px"
-                className="object-contain"
-              />
-            </div>
-          )}
-        </div>
+      {/* «صورة توضيحية» (admin hint image/text) intentionally removed per request. */}
+      {group.hintAr && (
+        <p className="mb-3 text-xs leading-relaxed text-ink-soft">{group.hintAr}</p>
       )}
 
       {group.inputType === "single_select" && (

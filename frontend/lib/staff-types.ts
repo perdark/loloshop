@@ -172,8 +172,14 @@ export interface ProductionOrderDetail {
     /** Routing flags (batch update). */
     has_embroidery?: boolean;
     needs_pressing?: boolean;
-    /** Robe tailoring measurements {shoulder_cm, robe_length_cm, sleeve_length_cm}. */
-    measurements?: { shoulder_cm: number; robe_length_cm: number; sleeve_length_cm: number } | null;
+    /** Robe tailoring measurements (قياسات الروب). chest_cm + tailor_notes are newer (optional on legacy orders). */
+    measurements?: {
+      shoulder_cm: number;
+      chest_cm?: number;
+      robe_length_cm: number;
+      sleeve_length_cm: number;
+      tailor_notes?: string;
+    } | null;
     /** Final design image uploaded by admin/designer (replaces PDF). */
     final_design_url?: string | null;
     /** Staff presence — who is actively working on this order. */

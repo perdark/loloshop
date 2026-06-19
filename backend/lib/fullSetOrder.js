@@ -21,8 +21,8 @@ function clean(v, max) {
   return t ? t.slice(0, max) : null;
 }
 
-const MEAS_RANGE = { shoulder_cm: [25, 80], robe_length_cm: [70, 190], sleeve_length_cm: [30, 100] };
-const MEAS_LABEL = { shoulder_cm: 'عرض الكتف', robe_length_cm: 'طول الروب', sleeve_length_cm: 'طول الردن' };
+const MEAS_RANGE = { shoulder_cm: [25, 80], chest_cm: [60, 180], robe_length_cm: [70, 190], sleeve_length_cm: [30, 100] };
+const MEAS_LABEL = { shoulder_cm: 'عرض الكتف', chest_cm: 'محيط الصدر', robe_length_cm: 'طول الروب', sleeve_length_cm: 'طول الردن' };
 const PIECE_TYPES = ['عادي', 'ملكي'];
 
 // ── «التسعيرة» (per-wholesaler pricing) ──────────────────────────────────────
@@ -107,12 +107,16 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
   if (!pkg.rows.length) return err(404, 'الطقم غير موجود', 'ERR_NOT_FOUND');
   const packageRow = pkg.rows[0];
 
-  // robe measurements (فصال) — typo-guarded
+  // robe measurements (قياسات الروب) — typo-guarded. محيط الصدر (chest_cm) is a required
+  // measurement; ملاحظات لفصال الروب (tailor_notes) is an optional free-text note that rides
+  // the measurements JSON (no range check — skipped because it isn't in MEAS_RANGE).
   const m = measurements || {};
   const meas = {
     shoulder_cm: Number(normalizeDigits(m.shoulder_cm)),
+    chest_cm: Number(normalizeDigits(m.chest_cm)),
     robe_length_cm: Number(normalizeDigits(m.robe_length_cm)),
     sleeve_length_cm: Number(normalizeDigits(m.sleeve_length_cm)),
+    tailor_notes: clean(m.tailor_notes, 500),
   };
   for (const [k, [lo, hi]] of Object.entries(MEAS_RANGE)) {
     if (!isFinite(meas[k]) || meas[k] < lo || meas[k] > hi) {

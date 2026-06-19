@@ -72,6 +72,12 @@ export function FullSetOrderForm({
   const [shoulder, setShoulder] = useState(
     initial?.measurements ? String(initial.measurements.shoulder_cm) : ""
   );
+  const [chest, setChest] = useState(
+    initial?.measurements?.chest_cm ? String(initial.measurements.chest_cm) : ""
+  );
+  const [tailorNotes, setTailorNotes] = useState(
+    initial?.measurements?.tailor_notes || ""
+  );
   const [sashType, setSashType] = useState<PieceType | "">(initial?.sash_type || "");
   const [capType, setCapType] = useState<PieceType | "">(initial?.cap_type || "");
   const [zones, setZones] = useState<Record<ZoneKey, ZoneState>>({
@@ -135,7 +141,7 @@ export function FullSetOrderForm({
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!packageId) return toast.error("يرجى اختيار الطقم");
-    if (!robeLen || !sleeveLen || !shoulder)
+    if (!robeLen || !sleeveLen || !shoulder || !chest)
       return toast.error("يرجى إدخال قياسات الروب كاملة");
     if (!sashType) return toast.error("يرجى اختيار نوع الوشاح");
     if (!capType) return toast.error("يرجى اختيار نوع القبعة");
@@ -155,6 +161,8 @@ export function FullSetOrderForm({
         robe_length_cm: robeLen,
         sleeve_length_cm: sleeveLen,
         shoulder_cm: shoulder,
+        chest_cm: chest,
+        tailor_notes: tailorNotes.trim() || undefined,
       },
       sash_type: sashType,
       cap_type: capType,
@@ -243,9 +251,29 @@ export function FullSetOrderForm({
         )}
       </Section>
 
-      {/* ── فصال الروب ── */}
-      <Section title="فصال الروب" hint="بالسنتيمتر">
-        <div className="grid grid-cols-3 gap-2.5">
+      {/* ── قياسات الروب ── */}
+      <Section title="قياسات الروب" hint="بالسنتيمتر">
+        <div className="grid grid-cols-2 gap-2.5">
+          <Input
+            label="عرض الكتف"
+            type="number"
+            inputMode="numeric"
+            min={25}
+            max={80}
+            value={shoulder}
+            onChange={(e) => setShoulder(e.target.value)}
+            placeholder="49"
+          />
+          <Input
+            label="محيط الصدر"
+            type="number"
+            inputMode="numeric"
+            min={60}
+            max={180}
+            value={chest}
+            onChange={(e) => setChest(e.target.value)}
+            placeholder="100"
+          />
           <Input
             label="طول الروب"
             type="number"
@@ -266,22 +294,30 @@ export function FullSetOrderForm({
             onChange={(e) => setSleeveLen(e.target.value)}
             placeholder="65"
           />
-          <Input
-            label="عرض الكتف"
-            type="number"
-            inputMode="numeric"
-            min={25}
-            max={80}
-            value={shoulder}
-            onChange={(e) => setShoulder(e.target.value)}
-            placeholder="49"
-          />
         </div>
         <div className="mt-3">
           <YesNoToggle
             label="كسرة الكتف"
             value={shoulderPleat}
             onChange={setShoulderPleat}
+          />
+        </div>
+        <div className="mt-3">
+          <label
+            htmlFor="fs-tailor-notes"
+            className="mb-1.5 block text-sm font-medium text-ink"
+          >
+            ملاحظات لفصال الروب
+            <span className="ms-1 text-xs font-normal text-ink-soft">(اختياري)</span>
+          </label>
+          <textarea
+            id="fs-tailor-notes"
+            value={tailorNotes}
+            onChange={(e) => setTailorNotes(e.target.value)}
+            rows={2}
+            maxLength={500}
+            placeholder="أي تفاصيل إضافية عن الفصال…"
+            className="min-h-11 w-full rounded-xl border border-line bg-beige px-3.5 py-2.5 text-ink shadow-[var(--shadow-soft)] outline-none transition-colors duration-200 placeholder:text-ink/55 hover:border-ink/30 focus:border-orange-ink focus:ring-2 focus:ring-orange-ink/20"
           />
         </div>
       </Section>

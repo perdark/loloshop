@@ -34,7 +34,6 @@ export function CustomerImageUpload({
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const opt = group.options.find((o) => o.id === optionId);
-  const hintUrl = (group.hasImage ? group.imageUrl : null) || opt?.imageUrl || null;
   const previewUrl = value ? resolveCatalogMediaUrl(value) : null;
   const needsText = customerTextRequired(group, optionId);
   const needsImage = group.requiresCustomerImage || Boolean(opt?.requiresCustomerImage);
@@ -76,29 +75,12 @@ export function CustomerImageUpload({
           ? needsImage
             ? "اكتب التفاصيل المطلوبة وارفع صورة مرجعية — كلاهما مطلوب."
             : "اكتب التفاصيل المطلوبة."
-          : "ارفع صورة مرجعية للطباعة — يختلف عن صورة التوضيح من الأدمن أدناه."}
+          : "ارفع صورة مرجعية للطباعة."}
       </p>
 
-      {((group.hasImage && group.hintAr) || hintUrl) && (
-        <div className="mt-3 rounded-xl border border-ink/10 bg-beige/80 p-2.5">
-          <p className="text-[11px] font-medium text-[var(--shop-muted)]">
-            صورة توضيحية
-          </p>
-          {group.hasImage && group.hintAr && (
-            <p className="mt-1 text-xs text-ink-soft">{group.hintAr}</p>
-          )}
-          {hintUrl && (
-            <div className="relative mt-2 h-28 w-full overflow-hidden rounded-lg bg-peach/30">
-              <Image
-                src={hintUrl}
-                alt=""
-                fill
-                sizes="(max-width: 768px) calc(100vw - 4rem), 480px"
-                className="object-contain"
-              />
-            </div>
-          )}
-        </div>
+      {/* «صورة توضيحية» (admin hint image) intentionally removed per request. */}
+      {group.hasImage && group.hintAr && (
+        <p className="mt-2 text-xs leading-relaxed text-ink-soft">{group.hintAr}</p>
       )}
 
       {/* Embroidery text input — only shown when the option requires customer text */}
