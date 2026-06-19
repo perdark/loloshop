@@ -35,6 +35,7 @@ export function VipPackageCard({
             images={photos}
             alt={pkg.nameAr}
             sizes="(max-width: 639px) 88vw, 360px"
+            controls
             imgClassName="object-cover transition-transform duration-[900ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:scale-[1.05]"
           />
         ) : (

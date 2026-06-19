@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { AutoRotatingImage } from "@/components/ui/AutoRotatingImage";
 import { listFullSetPackages } from "@/lib/catalog";
 import { formatIQD } from "@/lib/format";
 import type { FullSetPackage } from "@/lib/catalog";
@@ -46,9 +47,20 @@ export function FullSetBand() {
             href={`/full-set/${pkg.id}`}
             className="group block space-y-3"
           >
-            {/* Image — tall editorial crop; auto-rotates through the admin gallery */}
+            {/* Image — tall editorial crop; slide through the admin gallery
+                (arrows on desktop, swipe on touch, dots). Auto-rotate stays off
+                on this scroll-heavy page to avoid full-res cycling stalls. */}
             <div className="relative aspect-[4/5] w-full overflow-hidden rounded-[var(--radius-card)] bg-[var(--shop-sink)]">
-              {photos[0] ? (
+              {photos.length > 1 ? (
+                <AutoRotatingImage
+                  images={photos}
+                  alt={pkg.nameAr}
+                  sizes="(max-width: 639px) 100vw, 50vw"
+                  autoRotate={false}
+                  controls
+                  imgClassName="object-cover transition-transform duration-500 group-hover:scale-[1.03]"
+                />
+              ) : photos[0] ? (
                 <Image
                   src={photos[0]}
                   alt={pkg.nameAr}

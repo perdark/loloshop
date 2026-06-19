@@ -162,6 +162,7 @@ function PackageRow({
                 sizes="(max-width: 1023px) 100vw, 48vw"
                 priority={priority}
                 autoRotate={false}
+                controls
                 className="transition-transform duration-700 ease-out group-hover/photo:scale-[1.03]"
               />
             ) : photos.length === 1 ? (
