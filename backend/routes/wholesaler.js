@@ -14,6 +14,9 @@ router.post('/students/bulk', c.bulkSetStatus);
 router.get('/sash-config', c.getSashConfig);
 router.put('/sash-config', c.updateSashConfig);
 
+// Rep self-edits their own «لون التطريز» (embroidery/thread color for their students' full-set orders).
+router.patch('/embroidery-color', c.updateEmbroideryColor);
+
 // Rep-entered full-set order (WhatsApp intake form → الطقم الكامل)
 router.get('/full-set-packages', c.fullSetPackages);
 router.get('/students/:studentId', c.getStudent);

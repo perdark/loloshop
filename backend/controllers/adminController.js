@@ -221,6 +221,10 @@ async function createWholesaler(req, res) {
   if (!slugOk) {
     return res.status(400).json({ error: 'الرابط يجب أن يحتوي على حروف صغيرة وأرقام وشرطات', code: 'ERR_VALIDATION' });
   }
+  // «لون التطريز» — optional per-wholesaler embroidery/thread color (max 120 chars; '' → null).
+  const rawEmbColor = req.body.embroidery_color;
+  const embroideryColor = rawEmbColor != null ? String(rawEmbColor).trim().slice(0, 120) || null : null;
+
   const exists = await query(`SELECT id FROM users WHERE phone = $1`, [phone]);
   if (exists.rows.length) {
     return res.status(409).json({ error: 'الرقم مستخدم', code: 'ERR_PHONE_TAKEN' });
@@ -238,10 +242,10 @@ async function createWholesaler(req, res) {
     );
     const w = await client.query(
       `INSERT INTO wholesalers (user_id, referral_code, deadline, approved_by_admin, university_name, department,
-                               admin_price, wholesaler_price, pricing_addons)
-       VALUES ($1, $2, $3, TRUE, $4, $5, $6, $7, $8::jsonb) RETURNING id, referral_code`,
+                               admin_price, wholesaler_price, pricing_addons, embroidery_color)
+       VALUES ($1, $2, $3, TRUE, $4, $5, $6, $7, $8::jsonb, $9) RETURNING id, referral_code`,
       [u.rows[0].id, referral_code, deadline || null, String(university_name).trim(), String(department).trim(),
-       adminPrice, wholesalerPrice, JSON.stringify(pricingAddons)]
+       adminPrice, wholesalerPrice, JSON.stringify(pricingAddons), embroideryColor]
     );
     await client.query(
       `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
@@ -258,8 +262,9 @@ async function createWholesaler(req, res) {
   });
 }
 
-// Edit a wholesaler's جامعة/قسم (so existing reps can be filled in / corrected — these
-// flow to every student who joins via the rep's link).
+// Edit a wholesaler's جامعة/قسم + «لون التطريز» (so existing reps can be filled in / corrected).
+// جامعة/قسم flow to every student who joins via the rep's link; embroidery_color stamps
+// all that rep's future full-set orders.
 async function updateWholesaler(req, res) {
   const { id } = req.params;
   const { university_name, department } = req.body;
@@ -269,18 +274,33 @@ async function updateWholesaler(req, res) {
   if (!department || !String(department).trim()) {
     return res.status(400).json({ error: 'القسم/التخصص مطلوب', code: 'ERR_VALIDATION' });
   }
-  const { rows } = await query(
-    `UPDATE wholesalers SET university_name = $1, department = $2
-     WHERE id = $3 RETURNING id, university_name, department`,
-    [String(university_name).trim(), String(department).trim(), id]
-  );
+  // «لون التطريز» — optional; '' → null.
+  const rawEmbColor = req.body.embroidery_color;
+  const embroideryColor = rawEmbColor != null ? String(rawEmbColor).trim().slice(0, 120) || null : undefined;
+
+  // Build the update dynamically so passing no embroidery_color field is a no-op.
+  let sql, params;
+  if (embroideryColor !== undefined) {
+    sql = `UPDATE wholesalers SET university_name = $1, department = $2, embroidery_color = $3
+           WHERE id = $4 RETURNING id, university_name, department, embroidery_color`;
+    params = [String(university_name).trim(), String(department).trim(), embroideryColor, id];
+  } else {
+    sql = `UPDATE wholesalers SET university_name = $1, department = $2
+           WHERE id = $3 RETURNING id, university_name, department, embroidery_color`;
+    params = [String(university_name).trim(), String(department).trim(), id];
+  }
+  const { rows } = await query(sql, params);
   if (!rows.length) {
     return res.status(404).json({ error: 'الممثل غير موجود', code: 'ERR_NOT_FOUND' });
   }
   await query(
     `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
      VALUES ($1, 'update_wholesaler', 'wholesaler', $2, $3)`,
-    [req.user.id, id, JSON.stringify({ university_name: rows[0].university_name, department: rows[0].department })]
+    [req.user.id, id, JSON.stringify({
+      university_name: rows[0].university_name,
+      department: rows[0].department,
+      embroidery_color: rows[0].embroidery_color,
+    })]
   );
   res.json({ data: rows[0] });
 }

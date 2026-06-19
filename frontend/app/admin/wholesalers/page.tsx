@@ -57,6 +57,8 @@ export default function AdminWholesalersPage() {
   const [newDeadline, setNewDeadline] = useState("");
   const [editUniversity, setEditUniversity] = useState("");
   const [editDepartment, setEditDepartment] = useState("");
+  const [editEmbroideryColor, setEditEmbroideryColor] = useState("");
+  const [createEmbroideryColor, setCreateEmbroideryColor] = useState("");
   // «التسعيرة» — create modal base prices (add-ons default server-side, tweak later).
   const [adminPrice, setAdminPrice] = useState("0");
   const [wholesalerPrice, setWholesalerPrice] = useState("0");
@@ -122,6 +124,7 @@ export default function AdminWholesalersPage() {
         department: department.trim(),
         adminPrice: Math.max(0, Math.round(Number(adminPrice) || 0)),
         wholesalerPrice: Math.max(0, Math.round(Number(wholesalerPrice) || 0)),
+        embroideryColor: createEmbroideryColor.trim() || undefined,
       });
       toast.success("تم إنشاء الممثل");
       setCreateOpen(false);
@@ -135,6 +138,7 @@ export default function AdminWholesalersPage() {
       setWholesalerPrice("0");
       setUniversity("");
       setDepartment("");
+      setCreateEmbroideryColor("");
       load();
     } catch (err) {
       toast.error(getApiErrorMessage(err, "تعذر إنشاء الممثل"));
@@ -154,6 +158,7 @@ export default function AdminWholesalersPage() {
       await updateWholesaler(selected.id, {
         universityName: editUniversity.trim(),
         department: editDepartment.trim(),
+        embroideryColor: editEmbroideryColor.trim() || undefined,
       });
       toast.success("تم تحديث بيانات الممثل");
       setEditOpen(false);
@@ -330,6 +335,7 @@ export default function AdminWholesalersPage() {
                       setSelected(w);
                       setEditUniversity(w.universityName ?? "");
                       setEditDepartment(w.department ?? "");
+                      setEditEmbroideryColor(w.embroideryColor ?? "");
                       setEditOpen(true);
                     }}
                   >
@@ -451,6 +457,14 @@ export default function AdminWholesalersPage() {
             value={department}
             onChange={(e) => setDepartment(e.target.value)}
             error={errors.department}
+          />
+          <Input
+            label="لون التطريز (اختياري)"
+            autoComplete="off"
+            value={createEmbroideryColor}
+            onChange={(e) => setCreateEmbroideryColor(e.target.value)}
+            placeholder="مثال: ذهبي"
+            maxLength={200}
           />
           <div dir="rtl" className="flex flex-col gap-1">
             <label className="text-xs font-semibold text-muted">الموعد النهائي</label>
@@ -608,6 +622,14 @@ export default function AdminWholesalersPage() {
             autoComplete="off"
             value={editDepartment}
             onChange={(e) => setEditDepartment(e.target.value)}
+          />
+          <Input
+            label="لون التطريز (اختياري)"
+            autoComplete="off"
+            value={editEmbroideryColor}
+            onChange={(e) => setEditEmbroideryColor(e.target.value)}
+            placeholder="مثال: ذهبي"
+            maxLength={200}
           />
         </div>
       </Modal>

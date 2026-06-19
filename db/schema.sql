@@ -696,6 +696,10 @@ ALTER TABLE options       ADD COLUMN IF NOT EXISTS customer_text_placeholder_ar 
 ALTER TABLE wholesalers ADD COLUMN IF NOT EXISTS university_name TEXT;
 ALTER TABLE wholesalers ADD COLUMN IF NOT EXISTS department      TEXT;
 
+-- Migration 039: per-wholesaler «لون التطريز» (embroidery/thread color).
+-- Null/empty = not set → full-set orders carry NO لون التطريز spec line.
+ALTER TABLE wholesalers ADD COLUMN IF NOT EXISTS embroidery_color TEXT;
+
 -- Migration 033: delivery confirmation details captured at «تأكيد التسليم».
 -- 'delivery' = توصيل بعنوان ورقم · 'pickup' = استلام من المحل.
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_method TEXT

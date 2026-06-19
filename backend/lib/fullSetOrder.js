@@ -155,9 +155,17 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
   const colorImage = clean(colorIn.image_url, 500);
   if (!colorText) return err(400, 'لون الوشاح مطلوب');
 
-  // لون التطريز (embroidery/thread color) — typed free-text, OPTIONAL (student self-fill may omit).
-  // Captured as a sash spec line immediately after لون الوشاح.
-  const embroideryColor = clean(body.embroidery_color, 200);
+  // لون التطريز (embroidery/thread color) — comes from the WHOLESALER record, NOT the request body.
+  // A per-wholesaler setting (admin or rep sets it once); all that rep's orders inherit it automatically.
+  // If the wholesaler has no embroidery_color set (null/empty), the spec line is omitted entirely.
+  let embroideryColor = null;
+  if (student.wholesaler_id) {
+    const ec = await query(
+      `SELECT embroidery_color FROM wholesalers WHERE id = $1`,
+      [student.wholesaler_id]
+    );
+    embroideryColor = clean(ec.rows[0]?.embroidery_color, 200);
+  }
 
   // resolve sash/robe/cap: package-pinned wins, else first active per type
   const byType = {};

@@ -113,6 +113,7 @@ interface ApiWholesalerRow {
   pricing_addons?: Partial<WholesalerPricingAddons> | null;
   earned_commission: number;
   created_at?: string;
+  embroidery_color?: string | null;
 }
 
 /** Defaults mirror migration 032 — used when the server omits a key. */
@@ -173,6 +174,7 @@ function mapWholesaler(row: ApiWholesalerRow): AdminWholesaler {
     referralCode: row.referral_code,
     referralUrl: row.referral_url,
     createdAt: row.created_at,
+    embroideryColor: row.embroidery_color ?? null,
   };
 }
 
@@ -409,19 +411,21 @@ export async function createWholesaler(
     admin_price: payload.adminPrice,
     wholesaler_price: payload.wholesalerPrice,
     pricing_addons: payload.pricingAddons,
+    embroidery_color: payload.embroideryColor || undefined,
   });
   const row = data.data;
   return { id: row.id, referralUrl: row.referral_url };
 }
 
-/** Edit a wholesaler's جامعة/قسم (inherited by students who join via their link). */
+/** Edit a wholesaler's جامعة/قسم + optional لون التطريز (inherited/per-wholesaler). */
 export async function updateWholesaler(
   id: string,
-  payload: { universityName: string; department: string }
+  payload: { universityName: string; department: string; embroideryColor?: string }
 ): Promise<void> {
   await api.patch(`/admin/wholesalers/${id}`, {
     university_name: payload.universityName,
     department: payload.department,
+    embroidery_color: payload.embroideryColor ?? undefined,
   });
 }
 

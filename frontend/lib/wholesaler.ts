@@ -16,6 +16,7 @@ interface ApiDashboard {
   earned_commission: number;
   referral_url: string;
   referral_code: string;
+  embroidery_color?: string | null;
 }
 
 interface ApiPendingStudent {
@@ -39,6 +40,7 @@ export async function getWholesalerDashboard(): Promise<WholesalerDashboard> {
     earnedCommission: data.earned_commission ?? 0,
     referralUrl: data.referral_url,
     referralCode: data.referral_code,
+    embroideryColor: data.embroidery_color ?? null,
   };
 }
 
@@ -283,8 +285,6 @@ export interface CreateFullSetPayload {
   shoulder_pleat?: boolean;
   /** شال امريكي (yes/no) — image required when enabled. */
   american_shawl?: { enabled: boolean; image_url?: string };
-  /** لون التطريز: typed thread color (rep-only; optional server-side). */
-  embroidery_color?: string;
   embroidery: {
     cap_side?: EmbroideryZone;
     cap_top?: EmbroideryZone;
@@ -325,8 +325,6 @@ export interface FullSetExistingOrder {
   sash_type: PieceType | null;
   cap_type: PieceType | null;
   sash_color: { text: string; image_url: string };
-  /** Thread color typed by the rep (stored as «لون التطريز» sash spec line). */
-  embroidery_color?: string;
   shoulder_pleat: boolean;
   american_shawl: { enabled: boolean; image_url: string };
   embroidery: {
@@ -386,4 +384,15 @@ export async function submitRepFullSetOrder(
     data: { total: number; package_name: string };
   }>("/orders/rep-full-set", payload);
   return { total: data.data.total, packageName: data.data.package_name };
+}
+
+/** Rep self-edit: PATCH /api/wholesaler/embroidery-color */
+export async function updateEmbroideryColor(
+  color: string
+): Promise<{ embroidery_color: string }> {
+  const { data } = await api.patch<{ data: { embroidery_color: string } }>(
+    "/wholesaler/embroidery-color",
+    { embroidery_color: color }
+  );
+  return data.data;
 }

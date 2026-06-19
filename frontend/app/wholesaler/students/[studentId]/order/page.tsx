@@ -126,7 +126,6 @@ export default function WholesalerStudentOrderPage() {
         submitLabel={existing ? "تحديث الطلب" : "حفظ الطلب"}
         onUploadImage={uploadWholesalerImage}
         onSubmit={handleSubmit}
-        showEmbroideryColor
       />
     </div>
   );

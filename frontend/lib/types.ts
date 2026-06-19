@@ -143,6 +143,8 @@ export interface AdminWholesaler {
   pricingAddons: WholesalerPricingAddons;
   /** «المستحق» — now the price-gap profit (rep/student price − admin price) across orders. */
   earnedCommission?: number;
+  /** لون التطريز — per-wholesaler thread color (optional). */
+  embroideryColor?: string | null;
 }
 
 export interface CreateWholesalerPayload {
@@ -157,6 +159,8 @@ export interface CreateWholesalerPayload {
   adminPrice: number;
   wholesalerPrice: number;
   pricingAddons?: WholesalerPricingAddons;
+  /** لون التطريز — per-wholesaler thread color (optional). */
+  embroideryColor?: string;
 }
 
 export interface CreateWholesalerResult {
@@ -173,6 +177,7 @@ export interface WholesalerDashboard {
   referralCode: string;
   commissionRate?: number;
   earnedCommission?: number;
+  embroideryColor?: string | null;
 }
 
 export interface PendingStudent {

@@ -8,6 +8,7 @@ import {
   getPendingStudents,
   getWholesalerDashboard,
   rejectStudent,
+  updateEmbroideryColor,
 } from "@/lib/wholesaler";
 import { QRCodeSVG } from "qrcode.react";
 import { getApiErrorMessage } from "@/lib/api";
@@ -30,6 +31,9 @@ export default function WholesalerDashboardPage() {
   const [reject, setReject] = useState<
     { ids: string[]; label: string } | null
   >(null);
+  const [embroideryColor, setEmbroideryColor] = useState<string>("");
+  const [embroideryColorInput, setEmbroideryColorInput] = useState<string>("");
+  const [savingColor, setSavingColor] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -41,6 +45,9 @@ export default function WholesalerDashboardPage() {
       setDashboard(dash);
       setPending(students);
       setSelected(new Set());
+      const c = dash.embroideryColor ?? "";
+      setEmbroideryColor(c);
+      setEmbroideryColorInput(c);
     } catch {
       toast.error("تعذر تحميل البيانات");
     } finally {
@@ -115,6 +122,19 @@ export default function WholesalerDashboardPage() {
     }
   }
 
+  async function handleSaveEmbroideryColor() {
+    setSavingColor(true);
+    try {
+      await updateEmbroideryColor(embroideryColorInput.trim());
+      setEmbroideryColor(embroideryColorInput.trim());
+      toast.success("تم حفظ لون التطريز");
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "تعذر حفظ لون التطريز"));
+    } finally {
+      setSavingColor(false);
+    }
+  }
+
   if (loading || !dashboard) {
     return <PageLoader />;
   }
@@ -151,6 +171,34 @@ export default function WholesalerDashboardPage() {
           </p>
         </section>
       )}
+
+      {/* لون التطريز — rep edits their own embroidery thread color */}
+      <section className="surface-card rounded-2xl p-5">
+        <p className="mb-3 text-sm font-semibold text-ink">لون التطريز</p>
+        {embroideryColor && (
+          <p className="mb-2 text-xs text-ink-soft">
+            اللون الحالي:{" "}
+            <span className="font-medium text-ink">{embroideryColor}</span>
+          </p>
+        )}
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={embroideryColorInput}
+            onChange={(e) => setEmbroideryColorInput(e.target.value)}
+            placeholder="مثال: ذهبي"
+            maxLength={200}
+            className="min-h-11 flex-1 rounded-xl border border-line bg-beige px-3.5 text-sm text-ink shadow-[var(--shadow-soft)] outline-none transition-colors placeholder:text-ink/55 hover:border-ink/30 focus:border-orange-ink focus:ring-2 focus:ring-orange-ink/20"
+          />
+          <Button
+            onClick={handleSaveEmbroideryColor}
+            loading={savingColor}
+            disabled={embroideryColorInput.trim() === embroideryColor}
+          >
+            حفظ
+          </Button>
+        </div>
+      </section>
 
       {/* Referral URL — legible, no gradients */}
       <section className="surface-card rounded-2xl p-5">

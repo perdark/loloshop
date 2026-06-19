@@ -19,7 +19,7 @@ async function dashboard(req, res) {
   if (!wId) return res.status(404).json({ error: 'حساب الممثل غير موجود', code: 'ERR_NOT_FOUND' });
   const { rows } = await query(
     `SELECT
-       w.deadline, w.referral_code, w.commission_rate,
+       w.deadline, w.referral_code, w.commission_rate, w.embroidery_color,
        (SELECT COUNT(*) FROM students s WHERE s.wholesaler_id = w.id) AS student_count,
        (SELECT COUNT(*) FROM students s WHERE s.wholesaler_id = w.id AND s.status = 'pending_approval') AS pending_count,
        (SELECT COUNT(*) FROM students s JOIN designs d ON d.student_id = s.id
@@ -42,7 +42,25 @@ async function dashboard(req, res) {
     earned_commission: Number(r.earned_commission),
     referral_url: `${process.env.FRONTEND_URL}/join/${r.referral_code}`,
     referral_code: r.referral_code,
+    embroidery_color: r.embroidery_color || null,
   });
+}
+
+// Rep self-edits their own «لون التطريز» without going through admin.
+async function updateEmbroideryColor(req, res) {
+  const wId = await getWholesalerId(req.user.id);
+  if (!wId) return res.status(404).json({ error: 'حساب الممثل غير موجود', code: 'ERR_NOT_FOUND' });
+  const raw = req.body.embroidery_color;
+  if (raw === undefined) {
+    return res.status(400).json({ error: 'embroidery_color مطلوب', code: 'ERR_VALIDATION' });
+  }
+  // Allow empty string → null (clears the color).
+  const color = String(raw).trim().slice(0, 120) || null;
+  const { rows } = await query(
+    `UPDATE wholesalers SET embroidery_color = $1 WHERE id = $2 RETURNING embroidery_color`,
+    [color, wId]
+  );
+  res.json({ data: { embroidery_color: rows[0].embroidery_color } });
 }
 
 async function pendingStudents(req, res) {
@@ -264,4 +282,5 @@ module.exports = {
   dashboard, pendingStudents, listStudents, approve, reject, bulkSetStatus,
   getSashConfig, updateSashConfig,
   fullSetPackages, getStudent, getStudentOrder, createFullSetOrder, uploadImage,
+  updateEmbroideryColor,
 };
