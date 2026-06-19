@@ -18,7 +18,7 @@ function StaffShell({ children }: { children: React.ReactNode }) {
   const isAdmin = user.role === "admin";
 
   return (
-    <div className="min-h-screen bg-cream" dir="rtl" lang="ar">
+    <div className="min-h-screen bg-cream bg-warm-veil" dir="rtl" lang="ar">
       <Suspense fallback={null}>
         <StaffSidebar
           user={user}
