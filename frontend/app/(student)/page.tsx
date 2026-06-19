@@ -255,8 +255,8 @@ export default function StudentHomePage() {
       {/* ── VIP highlight — one editorial band → the VIP showcase (renders nothing if no VIP) ── */}
       <VipHomeBand />
 
-      {/* ── Brand story band 2: Milestone gallery — recessed surface-sink ── */}
-      <section className="full-bleed bg-[var(--shop-sink)] py-14 sm:py-20">
+      {/* ── Brand story band 2: Milestone gallery — same cream canvas (one flat bg) ── */}
+      <section className="py-14 sm:py-20">
         <div className="mx-auto max-w-2xl px-4 sm:px-6 scroll-reveal-soft">
           <MilestoneStory />
         </div>
@@ -280,7 +280,7 @@ export default function StudentHomePage() {
 
       {/* Whole catalog still empty — the cover and designer carry the page. */}
       {!hasAnyProduct ? (
-        <div className="flex flex-col items-center gap-3 rounded-card border border-dashed border-orange/25 bg-[var(--shop-sink)] px-6 py-14 text-center">
+        <div className="flex flex-col items-center gap-3 rounded-card border border-dashed border-orange/25 px-6 py-14 text-center">
           <p className="font-script text-3xl leading-none text-orange-ink">lolo</p>
           <p className="max-w-[32ch] text-sm font-medium text-ink-soft">
             المتجر يجهّز لموسم التخرّج، تابعونا على إنستغرام @loloshop96
@@ -330,7 +330,7 @@ export default function StudentHomePage() {
                 ))}
               </div>
             ) : (
-              <div className="flex flex-col items-center gap-4 rounded-card border border-dashed border-ink/15 bg-[var(--shop-sink)] px-6 py-12 text-center">
+              <div className="flex flex-col items-center gap-4 rounded-card border border-dashed border-ink/15 px-6 py-12 text-center">
                 <p className="max-w-[30ch] text-sm font-medium text-ink-soft">
                   لا يوجد منتجات في هذا القسم بعد.
                 </p>
@@ -349,8 +349,8 @@ export default function StudentHomePage() {
 
       </section>
 
-      {/* Quiet, human close — full-bleed on sink so it breathes as a colophon */}
-      <footer className="full-bleed bg-[var(--shop-sink)] mt-0 border-t border-line px-4 py-10 sm:px-6">
+      {/* Quiet, human close — same cream canvas, a hairline rule sets it apart */}
+      <footer className="full-bleed mt-0 border-t border-line px-4 py-10 sm:px-6">
         <div className="mx-auto max-w-2xl text-center">
           <p className="font-script text-3xl leading-none text-orange-ink">lolo shop</p>
           <p className="mt-4 max-w-[40ch] text-sm leading-relaxed text-ink-soft mx-auto">

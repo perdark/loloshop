@@ -117,7 +117,9 @@ function draftToPayload(d: Draft): PackagePayload {
     image_url: d.imageUrl,
     story_image_url: isVip ? d.storyImageUrl : null,
     gallery: d.gallery,
-    badge_label: d.badgeLabel.trim() || null,
+    // Badge is a VIP-only field (the input is hidden for other kinds). Sending it
+    // for a full-set/wholesale package would leak the default "VIP" onto a طقم card.
+    badge_label: isVip ? (d.badgeLabel.trim() || null) : null,
     accent: isVip ? (d.accent || null) : null,
     description: d.description.trim() || null,
     features: d.features.map((f) => f.trim()).filter(Boolean),
