@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { AuthCard } from "@/components/auth/AuthCard";
 import { Input } from "@/components/ui/Input";
 import { login, loginVerifyOtp, resendLoginOtp, getApiErrorMessage } from "@/lib/auth-api";
-import { setToken, setUser } from "@/lib/auth";
+import { setToken, setUser, safeRedirectTarget } from "@/lib/auth";
 import type { UserRole } from "@/lib/types";
 
 const ROLE_REDIRECT: Record<UserRole, string> = {
@@ -124,7 +124,16 @@ export default function LoginPage() {
       setToken(token);
       setUser(user);
       toast.success(`مرحباً ${user.name} 🎉`);
-      router.replace(ROLE_REDIRECT[user.role]);
+      // Storefront shoppers gated at add-to-cart/order arrive with ?redirect=…
+      // — return them to exactly where they left off. Only retail (storefront)
+      // users follow it; dashboard roles always land on their own panel.
+      const redirect =
+        typeof window !== "undefined"
+          ? safeRedirectTarget(new URLSearchParams(window.location.search).get("redirect"))
+          : null;
+      router.replace(
+        redirect && user.role === "retail" ? redirect : ROLE_REDIRECT[user.role]
+      );
     } catch (err) {
       const msg = getApiErrorMessage(err, "رمز غير صحيح");
       setOtpError(msg);

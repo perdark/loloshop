@@ -6,7 +6,6 @@ import { useEffect, useState } from "react";
 import { listFullSetPackages } from "@/lib/catalog";
 import { formatIQD } from "@/lib/format";
 import type { FullSetPackage } from "@/lib/catalog";
-import { AutoRotatingImage } from "@/components/ui/AutoRotatingImage";
 
 /** Cover photo first, then the rest of the admin gallery — de-duplicated. */
 function packagePhotos(pkg: FullSetPackage): string[] {
@@ -27,12 +26,12 @@ export function FullSetBand() {
   if (packages.length === 0) return null;
 
   return (
-    <section className="scroll-reveal py-12 sm:py-16">
-      <div className="mb-6 flex items-baseline justify-between gap-3">
-        <h2 className="font-display-ar text-xl font-bold leading-tight text-ink">
+    <section className="py-12 sm:py-16">
+      <div className="mb-7 flex items-baseline justify-between gap-4">
+        <h2 className="text-balance font-display-ar text-[clamp(1.6rem,4.5vw,2.4rem)] font-bold leading-tight text-ink">
           طقم التخرج الكامل
         </h2>
-        <span className="shrink-0 text-xs font-medium text-[var(--shop-muted)]">
+        <span className="shrink-0 text-sm font-medium text-[var(--shop-muted)]">
           روب + قبعة + وشاح
         </span>
       </div>
@@ -49,22 +48,14 @@ export function FullSetBand() {
           >
             {/* Image — tall editorial crop; auto-rotates through the admin gallery */}
             <div className="relative aspect-[4/5] w-full overflow-hidden rounded-[var(--radius-card)] bg-[var(--shop-sink)]">
-              {photos.length > 1 ? (
-                <AutoRotatingImage
-                  images={photos}
-                  alt={pkg.nameAr}
-                  sizes="(max-width: 639px) 100vw, 50vw"
-                  controls
-                  className="transition-transform duration-500 group-hover:scale-[1.03]"
-                />
-              ) : photos.length === 1 ? (
+              {photos[0] ? (
                 <Image
                   src={photos[0]}
                   alt={pkg.nameAr}
                   fill
+                  loading="lazy"
                   className="object-cover transition-transform duration-500 group-hover:scale-[1.03]"
                   sizes="(max-width: 639px) 100vw, 50vw"
-                  unoptimized
                 />
               ) : (
                 <div className="flex h-full items-center justify-center">
@@ -102,6 +93,29 @@ export function FullSetBand() {
           </Link>
           );
         })}
+      </div>
+
+      {/* See-more → the dedicated packages page */}
+      <div className="mt-9 flex justify-center sm:mt-12">
+        <Link
+          href="/full-set"
+          className="group inline-flex min-h-12 items-center gap-2 rounded-pill border border-orange-ink/30 bg-surface px-7 text-sm font-semibold text-orange-ink shadow-[var(--shadow-soft)] transition-colors hover:bg-orange-ink hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-ink"
+        >
+          عرض كل الأطقم
+          <svg
+            aria-hidden
+            viewBox="0 0 24 24"
+            className="h-4 w-4 transition-transform duration-200 ease-out group-hover:-translate-x-0.5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M19 12H5" />
+            <path d="M12 19l-7-7 7-7" />
+          </svg>
+        </Link>
       </div>
     </section>
   );

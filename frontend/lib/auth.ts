@@ -60,3 +60,22 @@ export function shouldSkipDashboardRedirect(): boolean {
 export function isAuthenticated(): boolean {
   return !!getToken();
 }
+
+/**
+ * Login URL that returns the visitor to `returnTo` after they sign in. Used to
+ * gate add-to-cart / order actions for anonymous shoppers: they browse freely,
+ * and only land on login when they act — then come straight back. `returnTo`
+ * must be a same-origin path (starts with a single "/") or it's ignored.
+ */
+export function loginHref(returnTo?: string | null): string {
+  if (!returnTo || !returnTo.startsWith("/") || returnTo.startsWith("//")) {
+    return "/login";
+  }
+  return `/login?redirect=${encodeURIComponent(returnTo)}`;
+}
+
+/** Validate a `?redirect=` value into a safe same-origin path, or null. */
+export function safeRedirectTarget(raw: string | null | undefined): string | null {
+  if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return null;
+  return raw;
+}

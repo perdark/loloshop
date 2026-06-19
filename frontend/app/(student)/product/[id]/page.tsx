@@ -27,6 +27,7 @@ import {
   type OptionSelection,
 } from "@/lib/pricing";
 import { addToCart } from "@/lib/cart";
+import { isAuthenticated, loginHref } from "@/lib/auth";
 import { formatIQD, formatDiscountPercent } from "@/lib/format";
 import type { CatalogProduct, ConfigureOrderResult, RobeMeasurements } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
@@ -174,6 +175,13 @@ export default function StudentProductPage() {
 
   async function handleAddToCart() {
     if (!product || !id) return;
+    // Browsing is open to everyone; the cart needs an account. Send anonymous
+    // shoppers to login and bring them straight back to this product.
+    if (!isAuthenticated()) {
+      toast("سجّل دخولك كطالب لإضافة المنتج إلى السلة");
+      router.push(loginHref(window.location.pathname));
+      return;
+    }
     const err = validateSelection(product, selection, gender);
     if (err) { toast.error(err); return; }
     const imgErr = validateCustomerImages(product, selection, customerImages);
@@ -199,6 +207,12 @@ export default function StudentProductPage() {
 
   async function handleConfirm() {
     if (!product || !id) return;
+    // Same gate as add-to-cart: placing the order requires a student account.
+    if (!isAuthenticated()) {
+      toast("سجّل دخولك كطالب لإتمام الطلب");
+      router.push(loginHref(window.location.pathname));
+      return;
+    }
     const err = validateSelection(product, selection, gender);
     if (err) { toast.error(err); return; }
     const imgErr = validateCustomerImages(product, selection, customerImages);

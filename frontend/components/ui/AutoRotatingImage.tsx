@@ -23,6 +23,7 @@ export function AutoRotatingImage({
   priority = false,
   showDots = true,
   controls = false,
+  autoRotate = true,
 }: {
   images: string[];
   alt: string;
@@ -33,6 +34,9 @@ export function AutoRotatingImage({
   priority?: boolean;
   showDots?: boolean;
   controls?: boolean;
+  /** Auto-cycle on a timer. Off = manual only (swipe/arrows) — used on the
+   *  storefront where cycling full-res photos caused periodic scroll stalls. */
+  autoRotate?: boolean;
 }) {
   const [active, setActive] = useState(0);
   const n = images.length;
@@ -48,7 +52,7 @@ export function AutoRotatingImage({
   // photo won't jump straight after a tap/swipe). Pauses on reduced-motion and
   // while the tab is hidden.
   useEffect(() => {
-    if (n <= 1) return;
+    if (!autoRotate || n <= 1) return;
     const reduce =
       typeof window !== "undefined" &&
       window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -57,7 +61,7 @@ export function AutoRotatingImage({
       if (!document.hidden) setActive((i) => (i + 1) % n);
     }, intervalMs);
     return () => clearInterval(t);
-  }, [n, intervalMs, active]);
+  }, [autoRotate, n, intervalMs, active]);
 
   if (n === 0) return null;
 
@@ -87,21 +91,30 @@ export function AutoRotatingImage({
             : undefined
         }
       >
-        {images.map((src, i) => (
-          <Image
-            key={`${src}-${i}`}
-            src={src}
-            alt={i === 0 ? alt : ""}
-            fill
-            unoptimized
-            priority={priority && i === 0}
-            sizes={sizes}
-            aria-hidden={i !== active}
-            className={`${imgClassName} transition-opacity duration-700 ease-out ${
-              i === active ? "opacity-100" : "opacity-0"
-            }`}
-          />
-        ))}
+        {images.map((src, i) => {
+          // Windowed rendering: keep only the current frame and its two immediate
+          // neighbours mounted. Caps decoded bitmaps at three regardless of gallery
+          // size — a large full-res gallery decoded 9+ at once and could OOM the
+          // renderer. The pre-mounted neighbours mean a swipe/crossfade always has
+          // its outgoing + incoming frame ready without fetching on the fly.
+          const next = (active + 1) % n;
+          const prev = (active - 1 + n) % n;
+          if (i !== active && i !== next && i !== prev) return null;
+          return (
+            <Image
+              key={`${src}-${i}`}
+              src={src}
+              alt={i === 0 ? alt : ""}
+              fill
+              priority={priority && i === 0}
+              sizes={sizes}
+              aria-hidden={i !== active}
+              className={`${imgClassName} transition-opacity duration-700 ease-out ${
+                i === active ? "opacity-100" : "opacity-0"
+              }`}
+            />
+          );
+        })}
       </div>
 
       {/* Manual arrows — RTL: previous on the start (right) edge, next on the
@@ -116,7 +129,7 @@ export function AutoRotatingImage({
               e.stopPropagation();
               step(-1);
             }}
-            className="absolute start-2 top-1/2 z-10 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/35 text-white backdrop-blur-sm transition-colors hover:bg-black/55"
+            className="absolute start-2 top-1/2 z-10 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/45 text-white transition-colors hover:bg-black/60"
           >
             <span aria-hidden className="text-2xl leading-none">
               ›
@@ -130,7 +143,7 @@ export function AutoRotatingImage({
               e.stopPropagation();
               step(1);
             }}
-            className="absolute end-2 top-1/2 z-10 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/35 text-white backdrop-blur-sm transition-colors hover:bg-black/55"
+            className="absolute end-2 top-1/2 z-10 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/45 text-white transition-colors hover:bg-black/60"
           >
             <span aria-hidden className="text-2xl leading-none">
               ‹

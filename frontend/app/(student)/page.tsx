@@ -326,9 +326,7 @@ export default function StudentHomePage() {
                 className="animate-fade-page-in grid grid-cols-2 gap-x-4 gap-y-7 md:grid-cols-3 md:gap-x-6 md:gap-y-10 lg:grid-cols-4"
               >
                 {visibleProducts.map((p) => (
-                  <div key={p.id} className="scroll-reveal">
-                    <ProductTile product={p} />
-                  </div>
+                  <ProductTile key={p.id} product={p} />
                 ))}
               </div>
             ) : (
@@ -418,18 +416,20 @@ function RevealHeading({
   );
 }
 
-/** Section heading — Amiri title with a quiet supporting note, no eyebrow. */
+/** Section heading — confident Amiri display title with a quiet supporting note,
+ *  no eyebrow. Scale matches the brand-story headlines so the page reads as one
+ *  couture system rather than dropping to a small UI label at the catalog. */
 function SectionHeading({ title, note }: { title: string; note?: string }) {
   return (
-    <div className="flex items-baseline justify-between gap-3">
+    <div className="flex items-baseline justify-between gap-4">
       <RevealHeading
         as="h2"
-        className="font-display-ar text-xl font-bold leading-tight text-ink"
+        className="text-balance font-display-ar text-[clamp(1.6rem,4.5vw,2.4rem)] font-bold leading-tight text-ink"
       >
         {title}
       </RevealHeading>
       {note && (
-        <span className="shrink-0 text-xs font-medium text-[var(--shop-muted)]">{note}</span>
+        <span className="shrink-0 text-sm font-medium text-[var(--shop-muted)]">{note}</span>
       )}
     </div>
   );

@@ -43,15 +43,15 @@ export function ProductTile({ product }: { product: ShopProductCard }) {
         <h3 className="truncate font-display text-[1.1rem] font-semibold leading-[1.6] pb-[3px] text-ink">
           {product.nameAr}
         </h3>
-        <p className="mt-1 flex flex-wrap items-baseline gap-x-1.5 gap-y-1" dir="ltr">
-          <span className="text-[10px] font-medium tracking-wide text-[var(--shop-muted)]">
+        <p className="mt-1.5 flex flex-wrap items-baseline gap-x-1.5 gap-y-1" dir="ltr">
+          <span className="text-xs font-medium tracking-wide text-[var(--shop-muted)]">
             يبدأ من
           </span>
-          <span className="text-sm font-semibold tabular-nums text-ink/85">
+          <span className="text-base font-bold tabular-nums text-ink">
             {formatIQD(product.basePrice)}
           </span>
           {hasDiscount && (
-            <span className="text-xs font-medium tabular-nums text-[var(--shop-muted)] line-through">
+            <span className="text-[13px] font-medium tabular-nums text-[var(--shop-muted)] line-through">
               {formatIQD(product.compareAtPrice!)}
             </span>
           )}
@@ -102,7 +102,7 @@ export function PackageTile({ pkg }: { pkg: ShopPackageCard }) {
           {pkg.nameAr}
         </h3>
         <p className="mt-0.5 text-xs text-[var(--shop-muted)]">روب + وشاح + قبعة</p>
-        <p className="mt-1 text-sm font-semibold tabular-nums text-ink/85" dir="ltr">
+        <p className="mt-1.5 text-base font-bold tabular-nums text-ink" dir="ltr">
           {formatIQD(pkg.price)}
         </p>
       </figcaption>

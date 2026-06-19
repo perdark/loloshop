@@ -62,7 +62,7 @@ function TypeCover() {
         aria-hidden
         className="absolute inset-x-0 bottom-6 mx-auto flex w-full justify-center text-orange-ink/45 motion-reduce:hidden"
       >
-        <svg className="animate-bounce h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <svg className="animate-scroll-cue h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M12 5v14M5 12l7 7 7-7" />
         </svg>
       </span>

@@ -11,6 +11,7 @@ import {
 import { getProductFull, getShopFeed } from "@/lib/catalog";
 import { buildConfigureSelections, configureOrder } from "@/lib/orders";
 import { addToCart } from "@/lib/cart";
+import { isAuthenticated, loginHref } from "@/lib/auth";
 import {
   computePriceBreakdown,
   groupVisibleForGender,
@@ -510,6 +511,13 @@ export function useDesignDraft(enabled: boolean, pauseAutosave = false) {
 
   async function confirmDesign(): Promise<boolean> {
     if (!product) return false;
+    // Anyone can design; confirming (save + add-to-cart/order) needs an account.
+    // Send anonymous designers to login and return them to the designer.
+    if (!isAuthenticated()) {
+      toast("سجّل دخولك كطالب لإتمام طلبك");
+      router.push(loginHref("/design"));
+      return false;
+    }
     const err = validateSelection(product, selection, gender);
     if (err) {
       toast.error(err);
