@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { getApiErrorMessage } from "@/lib/api";
-import { getToken, getUser } from "@/lib/auth";
+import { isAuthenticated, loginHref } from "@/lib/auth";
 import {
   getProductFull,
   listFullSetPackages,
@@ -19,6 +19,7 @@ import type { CatalogProduct, CatalogOptionGroup, CatalogOption } from "@/lib/ty
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
+import { ReceiptUpload } from "@/components/catalog/ReceiptUpload";
 import type { FullSetPackage } from "@/lib/catalog";
 import type {
   ConfigureFullSetPayload,
@@ -104,7 +105,7 @@ function defaultState(): WizardState {
       customerTexts: {},
       customerImageUrls: {},
     },
-    measurements: { shoulder_cm: 0, chest_cm: 0, robe_length_cm: 0, sleeve_length_cm: 0, tailor_notes: "" },
+    measurements: { shoulder_cm: 0, chest_cm: 0, robe_length_cm: 0, sleeve_length_cm: 0, tailor_notes: "", receipt_image_url: "" },
     sashZones: { right_text: "", left_mode: "logo_year" },
     delivery: {
       customer_name: "",
@@ -400,8 +401,6 @@ export default function FullSetWizardPage() {
   const { id: packageId } = useParams<{ id: string }>();
   const router = useRouter();
 
-  const [authChecked, setAuthChecked] = useState(false);
-
   const [pkg, setPkg] = useState<FullSetPackage | null>(null);
   const [robeProduct, setRobeProduct] = useState<CatalogProduct | null>(null);
   const [capProduct, setCapProduct] = useState<CatalogProduct | null>(null);
@@ -419,18 +418,10 @@ export default function FullSetWizardPage() {
   const [logoUploading, setLogoUploading] = useState(false);
   const topRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    const token = getToken();
-    const user = getUser();
-    if (!token || !user || user.role !== "retail") {
-      router.replace(`/login?redirect=/full-set/${packageId}`);
-      return;
-    }
-    setAuthChecked(true);
-  }, [packageId, router]);
-
+  // Browsing the configurator is open to everyone — guests can explore the whole
+  // طقم wizard. The account gate fires only when they confirm the order (see
+  // handleSubmit), mirroring the product page's add-to-cart flow.
   const loadData = useCallback(async () => {
-    if (!authChecked) return;
     setDataLoading(true);
     setLoadError(null);
     try {
@@ -463,34 +454,38 @@ export default function FullSetWizardPage() {
       setCapProduct(cap);
       setSashProduct(sash);
 
-      try {
-        const me = await fetchMe();
-        const meAny = me as unknown as Record<string, unknown>;
-        const student = meAny.student as Record<string, unknown> | undefined;
-        setState((prev) => {
-          const updated: WizardState = {
-            ...prev,
-            delivery: {
-              ...prev.delivery,
-              customer_name: prev.delivery.customer_name || String(me.name || ""),
-              instagram_username:
-                prev.delivery.instagram_username ||
-                String(student?.instagram_username || ""),
-              phone_primary: prev.delivery.phone_primary || String(me.phone || ""),
-            },
-          };
-          saveToSession(updated);
-          return updated;
-        });
-      } catch {
-        // /auth/me failure is non-fatal
+      // Prefill delivery from the account — logged-in shoppers only (a guest has
+      // no /auth/me, and calling it would trip the 401 auto-logout interceptor).
+      if (isAuthenticated()) {
+        try {
+          const me = await fetchMe();
+          const meAny = me as unknown as Record<string, unknown>;
+          const student = meAny.student as Record<string, unknown> | undefined;
+          setState((prev) => {
+            const updated: WizardState = {
+              ...prev,
+              delivery: {
+                ...prev.delivery,
+                customer_name: prev.delivery.customer_name || String(me.name || ""),
+                instagram_username:
+                  prev.delivery.instagram_username ||
+                  String(student?.instagram_username || ""),
+                phone_primary: prev.delivery.phone_primary || String(me.phone || ""),
+              },
+            };
+            saveToSession(updated);
+            return updated;
+          });
+        } catch {
+          // /auth/me failure is non-fatal
+        }
       }
     } catch (e) {
       setLoadError(getApiErrorMessage(e, "تعذر تحميل بيانات الطقم"));
     } finally {
       setDataLoading(false);
     }
-  }, [authChecked, packageId]);
+  }, [packageId]);
 
   useEffect(() => {
     loadData();
@@ -753,6 +748,13 @@ export default function FullSetWizardPage() {
   }
 
   async function handleSubmit() {
+    // Account gate at the finish line — guests configure freely, then sign in to
+    // confirm and come straight back to this طقم.
+    if (!isAuthenticated()) {
+      toast("سجّل دخولك كطالب لتأكيد الطلب");
+      router.push(loginHref(`/full-set/${packageId}`));
+      return;
+    }
     setSubmitting(true);
     try {
       const payload: ConfigureFullSetPayload = {
@@ -796,7 +798,7 @@ export default function FullSetWizardPage() {
 
   // ─── Render guards ────────────────────────────────────────────────────────────
 
-  if (!authChecked || dataLoading) return <WizardSkeleton />;
+  if (dataLoading) return <WizardSkeleton />;
 
   if (loadError) {
     return (
@@ -858,6 +860,12 @@ export default function FullSetWizardPage() {
               setState((prev) => ({
                 ...prev,
                 measurements: { ...prev.measurements, tailor_notes: val },
+              }))
+            }
+            onReceiptChange={(url) =>
+              setState((prev) => ({
+                ...prev,
+                measurements: { ...prev.measurements, receipt_image_url: url },
               }))
             }
             onErrorClear={(key) =>
@@ -973,6 +981,7 @@ function StepRobe({
   onTextChange,
   onMeasureChange,
   onNotesChange,
+  onReceiptChange,
   onErrorClear,
 }: {
   product: CatalogProduct | null;
@@ -984,6 +993,7 @@ function StepRobe({
   onTextChange: (groupId: string, optionId: string, text: string) => void;
   onMeasureChange: (field: keyof FullSetMeasurements, value: number) => void;
   onNotesChange: (value: string) => void;
+  onReceiptChange: (url: string) => void;
   onErrorClear: (key: string) => void;
 }) {
   return (
@@ -1096,6 +1106,8 @@ function StepRobe({
             />
           </div>
         </div>
+        {/* صورة الوصل — optional receipt photo (rides measurements.receipt_image_url) */}
+        <ReceiptUpload value={measurements.receipt_image_url} onChange={onReceiptChange} />
       </div>
     </div>
   );
@@ -1626,6 +1638,9 @@ function StepReview({
         {state.measurements.tailor_notes?.trim() && (
           <ReviewRow label="ملاحظات لفصال الروب" value={state.measurements.tailor_notes} />
         )}
+        {state.measurements.receipt_image_url?.trim() && (
+          <ReviewRow label="صورة الوصل" value="مرفقة ✓" />
+        )}
       </ReviewSection>
 
       <ReviewSection title="القبعة">
@@ -1784,7 +1799,7 @@ function SuccessScreen({ result }: { result: ConfigureFullSetResult }) {
           العودة للباقات
         </Link>
         <a
-          href="https://instagram.com/loloshop96"
+          href="https://instagram.com/lolo_shop96"
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-pill border border-line bg-beige px-5 text-sm font-semibold text-ink-soft"

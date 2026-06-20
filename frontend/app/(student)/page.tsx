@@ -169,7 +169,13 @@ export default function StudentHomePage() {
   // A detail-page back button lands here as «/#catalog», but the grid only renders
   // AFTER the async feed loads — so the browser's native hash-scroll finds no target
   // at navigation time and stays at the top. Once the feed (and the section) exist,
-  // honour the hash ourselves. Respects prefers-reduced-motion.
+  // honour the hash ourselves.
+  //
+  // The catch: the bands above the catalog (hero + brand-story photos) load their
+  // images lazily, so a one-shot scroll lands SHORT — the images then load and push
+  // the catalog further down, leaving the visitor above it ("need more scrolling").
+  // So we re-assert the position as the layout settles, and bail the instant the
+  // user takes over so we never yank them back. Respects prefers-reduced-motion.
   useEffect(() => {
     if (!feed || typeof window === "undefined") return;
     if (window.location.hash !== "#catalog") return;
@@ -178,12 +184,35 @@ export default function StudentHomePage() {
     const prefersReduced = window.matchMedia(
       "(prefers-reduced-motion: reduce)"
     ).matches;
-    requestAnimationFrame(() => {
-      el.scrollIntoView({
-        behavior: prefersReduced ? "auto" : "smooth",
-        block: "start",
-      });
-    });
+
+    let cancelled = false;
+    const timers: number[] = [];
+
+    const align = (behavior: ScrollBehavior) => {
+      if (cancelled) return;
+      el.scrollIntoView({ behavior, block: "start" });
+    };
+
+    // User scrolled/typed on their own → stop correcting and clean up.
+    const stop = () => {
+      cancelled = true;
+      timers.forEach(clearTimeout);
+      window.removeEventListener("wheel", stop);
+      window.removeEventListener("touchmove", stop);
+      window.removeEventListener("keydown", stop);
+    };
+    window.addEventListener("wheel", stop, { passive: true });
+    window.addEventListener("touchmove", stop, { passive: true });
+    window.addEventListener("keydown", stop);
+
+    // First honour the hash (smooth), then re-assert instantly as images above
+    // finish loading and grow the page over the next ~1.5s.
+    requestAnimationFrame(() => align(prefersReduced ? "auto" : "smooth"));
+    [150, 350, 650, 1000, 1500].forEach((delay) =>
+      timers.push(window.setTimeout(() => align("auto"), delay))
+    );
+
+    return stop;
   }, [feed]);
 
   // Which categories actually have products — only those become chips.
@@ -303,7 +332,7 @@ export default function StudentHomePage() {
         <div className="flex flex-col items-center gap-3 rounded-card border border-dashed border-orange/25 px-6 py-14 text-center">
           <p className="font-script text-3xl leading-none text-orange-ink">lolo</p>
           <p className="max-w-[32ch] text-sm font-medium text-ink-soft">
-            المتجر يجهّز لموسم التخرّج، تابعونا على إنستغرام @loloshop96
+            المتجر يجهّز لموسم التخرّج، تابعونا على إنستغرام @lolo_shop96
           </p>
         </div>
       ) : (
@@ -374,18 +403,26 @@ export default function StudentHomePage() {
         <div className="mx-auto max-w-2xl text-center">
           <p className="font-script text-3xl leading-none text-orange-ink">lolo shop</p>
           <p className="mt-4 max-w-[40ch] text-sm leading-relaxed text-ink-soft mx-auto">
-            تدفع نقداً وقت ما يوصلك — مثل ما تعوّدنا. أي سؤال؟ راسلنا على إنستغرام{" "}
+            افضل اللحظات تطرز من اصحاب الخبرة{" "}
+            <br></br>
             <a
-              href="https://instagram.com/loloshop96"
+              href="https://instagram.com/lolo_shop96"
               target="_blank"
               rel="noopener noreferrer"
               className="font-semibold text-orange-ink underline underline-offset-2"
             >
-              @loloshop96
+              @lolo_shop96
             </a>
             .
           </p>
-          <p className="mt-4 text-xs text-[var(--shop-muted)]">الدفع نقداً عند الاستلام</p>
+          <a
+              href="https://revo-azure.vercel.app/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold text-orange-ink underline underline-offset-2"
+            >
+              © RevoArt 
+            </a>
         </div>
       </footer>
     </div>

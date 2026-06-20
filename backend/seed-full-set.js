@@ -1,7 +1,7 @@
 // LoloShop full-set seed — the real Instagram order-form fields as admin-managed
 // option groups on robe / cap / sash, plus a sample full-set package (طقم التخرج الكامل).
 //
-// Source of truth: the actual order form used on @loloshop96 DMs —
+// Source of truth: the actual order form used on @lolo_shop96 DMs —
 //   الروب: اللون، القماش (كوبرا اندنوسي)، الفصال (ملكي)، الردن سادة/بكتابة + القياسات
 //   القبعة: اللون، الشكل (عادية/مثلثة)، الجانب سادة/بكتابة، الأعلى سادة/بكتابة
 //   الوشاح: اللون، النوع، العرض (يفضل ١٤-١٥ سم)، لون التطريز

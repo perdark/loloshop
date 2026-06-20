@@ -39,7 +39,7 @@ export function AuthCard({ title, subtitle, children }: AuthCardProps) {
         </main>
 
         <p className="mt-6 text-center text-xs text-ink-soft">
-          أوشحة وروبات التخرّج · @loloshop96
+          أوشحة وروبات التخرّج · @lolo_shop96
         </p>
       </div>
     </div>

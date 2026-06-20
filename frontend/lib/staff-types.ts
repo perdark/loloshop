@@ -179,6 +179,8 @@ export interface ProductionOrderDetail {
       robe_length_cm: number;
       sleeve_length_cm: number;
       tailor_notes?: string;
+      /** صورة الوصل — optional receipt/bill photo URL (retail only). */
+      receipt_image_url?: string;
     } | null;
     /** Final design image uploaded by admin/designer (replaces PDF). */
     final_design_url?: string | null;

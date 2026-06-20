@@ -336,7 +336,7 @@ function findOpt(items: ProductionOrderItem[], groupPartial: string): string {
 function buildInstaText(
   intake: NonNullable<ProductionOrderDetail["order"]["intake"]>,
   ordersByType: {
-    robe?: { items: ProductionOrderItem[]; measurements?: { shoulder_cm: number; chest_cm?: number; robe_length_cm: number; sleeve_length_cm: number; tailor_notes?: string } | null };
+    robe?: { items: ProductionOrderItem[]; measurements?: { shoulder_cm: number; chest_cm?: number; robe_length_cm: number; sleeve_length_cm: number; tailor_notes?: string; receipt_image_url?: string } | null };
     cap?: { items: ProductionOrderItem[] };
     sash?: { items: ProductionOrderItem[] };
   },
@@ -365,6 +365,7 @@ function buildInstaText(
       r.measurements ? `عرض الكتف / ${r.measurements.shoulder_cm}` : null,
       r.measurements?.chest_cm ? `محيط الصدر / ${r.measurements.chest_cm}` : null,
       line("ملاحظات الفصال", r.measurements?.tailor_notes),
+      line("صورة الوصل", r.measurements?.receipt_image_url),
       line("ردن الروب", findOpt(r.items, "ردن")),
       "___",
     );
@@ -449,7 +450,7 @@ function InstaCopyButton({
       const setType = (
         type: string,
         its: ProductionOrderItem[],
-        meas?: { shoulder_cm: number; chest_cm?: number; robe_length_cm: number; sleeve_length_cm: number; tailor_notes?: string } | null
+        meas?: { shoulder_cm: number; chest_cm?: number; robe_length_cm: number; sleeve_length_cm: number; tailor_notes?: string; receipt_image_url?: string } | null
       ) => {
         if (type === "robe") ordersByType.robe = { items: its, measurements: meas };
         else if (type === "cap") ordersByType.cap = { items: its };
@@ -1224,6 +1225,28 @@ export default function ProductionOrderDetailPage() {
                 <div className="mt-3 rounded-xl border border-line bg-beige/60 p-3">
                   <p className="mb-1 text-xs font-semibold text-muted">ملاحظات لفصال الروب</p>
                   <p className="whitespace-pre-wrap text-sm text-ink">{order.measurements.tailor_notes}</p>
+                </div>
+              )}
+              {order.measurements.receipt_image_url?.trim() && (
+                <div className="mt-3 rounded-xl border border-line bg-beige/60 p-3">
+                  <p className="mb-2 text-xs font-semibold text-muted">صورة الوصل</p>
+                  <a
+                    href={resolveImageUrl(order.measurements.receipt_image_url) ?? "#"}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block w-fit"
+                    aria-label="عرض صورة الوصل بالحجم الكامل"
+                  >
+                    <Image
+                      src={resolveImageUrl(order.measurements.receipt_image_url) ?? ""}
+                      alt="صورة الوصل"
+                      width={240}
+                      height={240}
+                      className="max-h-56 w-auto rounded-lg border border-line object-contain"
+                      loading="lazy"
+                      unoptimized
+                    />
+                  </a>
                 </div>
               )}
             </article>

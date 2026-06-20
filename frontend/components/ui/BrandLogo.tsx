@@ -9,7 +9,7 @@ interface BrandMarkProps {
 }
 
 /**
- * Official @loloshop96 logo mark — the real PNG asset (public/logo.png),
+ * Official @lolo_shop96 logo mark — the real PNG asset (public/logo.png),
  * a coral disc with the "lolo shop 96" script. Rendered with object-contain
  * so its built-in padding is preserved at any size.
  */

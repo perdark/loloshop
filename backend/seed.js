@@ -3,7 +3,7 @@ const bcrypt = require('bcrypt');
 const { query, pool } = require('./lib/db');
 
 async function ensureAdmin() {
-  const phone = '07700000000';
+  const phone = '07783571996';
   const exists = await query(`SELECT id FROM users WHERE phone = $1`, [phone]);
   if (exists.rows.length) {
     console.log('Admin exists.');
@@ -15,7 +15,7 @@ async function ensureAdmin() {
      VALUES ($1, $2, $3, $4, 'admin', TRUE)`,
     ['Admin', phone, 'admin@loloshop.com', hash]
   );
-  console.log('Admin created: 07700000000 / admin123');
+  console.log('Admin created: 07783571996 / admin123');
 }
 
 async function ensureProducts() {

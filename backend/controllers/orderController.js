@@ -839,6 +839,8 @@ async function configureFullSet(req, res) {
     sleeve_length_cm: Number(normalizeDigits(m.sleeve_length_cm)),
     // ملاحظات لفصال الروب — optional free-text tailoring note, rides the measurements JSON.
     tailor_notes: cleanText(m.tailor_notes, 500),
+    // صورة الوصل — optional receipt/bill photo URL (retail only), rides the measurements JSON.
+    receipt_image_url: cleanText(m.receipt_image_url, 500),
   };
   const MEAS_RANGE = { shoulder_cm: [25, 80], chest_cm: [60, 180], robe_length_cm: [70, 190], sleeve_length_cm: [30, 100] };
   const MEAS_LABEL = { shoulder_cm: 'عرض الكتف', chest_cm: 'محيط الصدر', robe_length_cm: 'طول الروب', sleeve_length_cm: 'طول الردن' };

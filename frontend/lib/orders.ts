@@ -136,6 +136,8 @@ export interface FullSetMeasurements {
   sleeve_length_cm: number;
   /** ملاحظات لفصال الروب — optional free-text tailoring note. */
   tailor_notes?: string;
+  /** صورة الوصل — optional receipt/bill photo URL (retail only). */
+  receipt_image_url?: string;
 }
 
 export interface FullSetDelivery {

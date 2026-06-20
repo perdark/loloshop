@@ -41,3 +41,7 @@ Thumbs.db
 .claude/
 .impeccable/
 frontend/.impeccable/
+
+# local DB dumps / backups (contain real customer PII — NEVER commit/push)
+*_db_backup_*.json
+prod_db_backup*.json

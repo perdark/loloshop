@@ -54,7 +54,7 @@ Two separate apps, no shared package. Frontend talks to backend over HTTP.
 ## What is LoloShop?
 An e-commerce + design platform for graduation sashes (أوشحة تخرج) and graduation robes (روبات تخرج).
 Students design their own sash online, wholesalers manage groups of students, admins track orders and profits.
-Brand: @loloshop96 on Instagram.
+Brand: @lolo_shop96 on Instagram.
 
 ## Stack
 - **Frontend:** Next.js 16 (App Router) + React 19 + Tailwind v4 (see version facts above)
@@ -94,7 +94,7 @@ Brand: @loloshop96 on Instagram.
   - Backgrounds: creamy off-white `#FAEBD7`, card `#FFF8F0`; soft accents peach `#FFDAB9`, blush `#FFE4E1`
   - Neutrals: `#E0E0E0` / `#BDBDBD`
   - NOT navy/green/gold (older spec was wrong — superseded by real identity)
-- Logo: "lolo shop" script + "96" serif, in an orange circle (@loloshop96)
+- Logo: "lolo shop" script + "96" serif, in an orange circle (@lolo_shop96)
 - Fonts: logo/flourish → script (Great Vibes); Latin headings → Playfair Display; Arabic → Amiri (display) + Cairo (UI)
 - NEVER use generic purple gradients or Inter font
 

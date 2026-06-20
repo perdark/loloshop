@@ -5,6 +5,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { CustomerImageUpload } from "@/components/catalog/CustomerImageUpload";
+import { ReceiptUpload } from "@/components/catalog/ReceiptUpload";
 import { OptionGroupField } from "@/components/catalog/OptionGroupField";
 import { OrderBreakdownCard } from "@/components/catalog/OrderBreakdownCard";
 import { ProductMediaGallery } from "@/components/catalog/ProductMediaGallery";
@@ -97,6 +98,7 @@ export default function StudentProductPage() {
     robe_length_cm: 0,
     sleeve_length_cm: 0,
     tailor_notes: "",
+    receipt_image_url: "",
   });
   const [showErrors, setShowErrors] = useState(false);
   const [confirmed, setConfirmed] = useState<ConfigureOrderResult | null>(null);
@@ -475,6 +477,13 @@ export default function StudentProductPage() {
                 className="mt-1.5 w-full resize-none rounded-xl border border-neutral bg-white px-3.5 py-2.5 text-sm leading-relaxed text-ink placeholder:text-ink/30 outline-none transition-colors focus:border-orange focus:ring-2 focus:ring-orange/30"
               />
             </div>
+            {/* صورة الوصل — optional receipt photo (rides measurements.receipt_image_url) */}
+            <ReceiptUpload
+              value={measurements.receipt_image_url}
+              onChange={(url) =>
+                setMeasurements((prev) => ({ ...prev, receipt_image_url: url }))
+              }
+            />
           </fieldset>
         )}
 

@@ -228,7 +228,7 @@ Configurator (dynamic options + price breakdown + designer link) replaces the ol
 ---
 
 ## PHASE 7 — Polish + Deployment — files DONE (not yet deployed)
-> `nginx.conf` + `ecosystem.config.js` + prod env examples written for loloshop96.com. Deploy after local complete.
+> `nginx.conf` + `ecosystem.config.js` + prod env examples written for lolo_shop96.com. Deploy after local complete.
 
 ### Task 7.1 — Nginx Config
 **Files:** `nginx.conf`

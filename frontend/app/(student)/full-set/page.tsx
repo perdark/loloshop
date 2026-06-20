@@ -94,12 +94,12 @@ export default function FullSetIndexPage() {
           <p className="max-w-[34ch] text-sm font-medium text-ink-soft">
             نجهّز أطقم هذا الموسم — تابعونا على إنستغرام{" "}
             <a
-              href="https://instagram.com/loloshop96"
+              href="https://instagram.com/lolo_shop96"
               target="_blank"
               rel="noopener noreferrer"
               className="font-semibold text-orange-ink underline underline-offset-2"
             >
-              @loloshop96
+              @lolo_shop96
             </a>
             .
           </p>
