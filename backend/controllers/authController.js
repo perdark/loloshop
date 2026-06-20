@@ -167,12 +167,14 @@ async function forgotPassword(req, res) {
 
 // Phone-based reset (WhatsApp OTP) — students log in by phone and may not recall
 // their email. Mirrors forgotPassword but uses an OTP with purpose 'reset'.
+// Privileged accounts (admin/staff) cannot reset via phone OTP — they must use
+// the email token path. We still return { sent: true } to avoid enumeration leaks.
 async function forgotPasswordPhone(req, res) {
   const { phone } = req.body;
   if (!phone) return res.status(400).json({ error: 'بيانات ناقصة', code: 'ERR_VALIDATION' });
-  const { rows } = await query(`SELECT id FROM users WHERE phone = $1`, [phone]);
-  // Don't leak whether the phone is registered — always 200, only send if it exists.
-  if (rows.length) {
+  const { rows } = await query(`SELECT id, role FROM users WHERE phone = $1`, [phone]);
+  // Don't leak whether the phone is registered — always 200.
+  if (rows.length && !['admin', 'staff'].includes(rows[0].role)) {
     await createOtp(phone, 'reset');
   }
   res.json({ sent: true });
@@ -186,11 +188,12 @@ async function resetPasswordPhone(req, res) {
   const ok = await verifyOtp(phone, code, 'reset');
   if (!ok) return res.status(400).json({ error: 'الرمز خاطئ أو منتهي', code: 'ERR_INVALID_OTP' });
   const hash = await bcrypt.hash(password, SALT_ROUNDS);
+  // Defence-in-depth: even if the OTP somehow reached a privileged account, refuse the reset here.
   const { rows } = await query(
-    `UPDATE users SET password_hash = $1 WHERE phone = $2 RETURNING id`,
+    `UPDATE users SET password_hash = $1 WHERE phone = $2 AND role NOT IN ('admin','staff') RETURNING id`,
     [hash, phone]
   );
-  if (!rows.length) return res.status(404).json({ error: 'المستخدم غير موجود', code: 'ERR_NOT_FOUND' });
+  if (!rows.length) return res.status(403).json({ error: 'غير مصرح', code: 'ERR_FORBIDDEN' });
   res.json({ reset: true });
 }
 

@@ -271,7 +271,8 @@ export interface EmbroideryZone {
 }
 
 export interface CreateFullSetPayload {
-  package_id: string;
+  /** Legacy field — no longer sent by the form; backend ignores it. */
+  package_id?: string;
   measurements: {
     robe_length_cm: number | string;
     sleeve_length_cm: number | string;
@@ -283,8 +284,6 @@ export interface CreateFullSetPayload {
   };
   sash_type: PieceType;
   cap_type: PieceType;
-  /** لون الوشاح: typed free-text color (required) + optional reference photo. */
-  sash_color: { text: string; image_url?: string };
   /** فصال الروب: كسرة الكتف (yes/no). */
   shoulder_pleat?: boolean;
   /** شال امريكي (yes/no) — image required when enabled. */
@@ -330,7 +329,8 @@ export interface FullSetExistingOrder {
   } | null;
   sash_type: PieceType | null;
   cap_type: PieceType | null;
-  sash_color: { text: string; image_url: string };
+  /** Legacy — may be absent from orders created after the color field was removed. */
+  sash_color?: { text: string; image_url: string };
   shoulder_pleat: boolean;
   american_shawl: { enabled: boolean; image_url: string };
   embroidery: {

@@ -133,7 +133,25 @@ async function verifyOtp(phone, code, purpose = 'verify') {
   return consumed.rows.length > 0;
 }
 
-const ZENTRAMSG_URL = process.env.ZENTRAMSG_API_URL || 'https://api.zentramsg.com/v1/messages';
+// Defensive URL resolver: guards against the common misconfiguration where the
+// whole `KEY=value` assignment is pasted as the value again (e.g.
+// `ZENTRAMSG_API_URL=ZENTRAMSG_API_URL=https://…`), which produces a non-URL
+// string that causes fetch() to throw and silently drops every OTP.
+const ZENTRAMSG_DEFAULT_URL = 'https://api.zentramsg.com/v1/messages';
+function resolveZentramsgUrl() {
+  const raw = process.env.ZENTRAMSG_API_URL;
+  if (!raw) return ZENTRAMSG_DEFAULT_URL;
+  try {
+    const u = new URL(String(raw).trim());
+    if (u.protocol === 'http:' || u.protocol === 'https:') return u.toString();
+  } catch { /* fall through */ }
+  console.error(
+    `[OTP] ZENTRAMSG_API_URL is not a valid http(s) URL — falling back to ${ZENTRAMSG_DEFAULT_URL}. ` +
+    'Check backend/.env (a duplicated "ZENTRAMSG_API_URL=" prefix is the usual cause).'
+  );
+  return ZENTRAMSG_DEFAULT_URL;
+}
+const ZENTRAMSG_URL = resolveZentramsgUrl();
 
 // Zentramsg's `ids` field wants international digits with no leading '+' or '00'
 // (e.g. an Iraqi local number 0771234567 → 964771234567). Numbers are stored
@@ -147,6 +165,10 @@ function toIntlDigits(phone) {
 }
 
 async function sendViaZentramsg(phone, code) {
+  // Always surface the code on dev so local testing works even when Zentramsg
+  // creds are present (no more blind OTP loops in development).
+  if (process.env.NODE_ENV !== 'production') console.log(`[OTP DEV] ${phone} -> ${code}`);
+
   const token = process.env.ZENTRAMSG_API_KEY;       // x-api-token
   const device = process.env.ZENTRAMSG_DEVICE_UUID;  // device_uuid (the WhatsApp sender device)
   if (!token || !device) {
@@ -155,8 +177,6 @@ async function sendViaZentramsg(phone, code) {
     // leaking codes to the logs.
     if (process.env.NODE_ENV === 'production') {
       console.error('ZENTRAMSG_API_KEY / ZENTRAMSG_DEVICE_UUID missing — OTP cannot be sent in production.');
-    } else {
-      console.log(`[OTP DEV] ${phone} -> ${code}`);
     }
     return;
   }

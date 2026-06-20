@@ -5,7 +5,6 @@ import { toast } from "sonner";
 import type {
   CreateFullSetPayload,
   FullSetExistingOrder,
-  FullSetPackage,
   FullSetPricing,
   PieceType,
 } from "@/lib/wholesaler";
@@ -34,7 +33,6 @@ function seedZone(z?: { text?: string; image_url?: string }): ZoneState {
 }
 
 export interface FullSetOrderFormProps {
-  packages: FullSetPackage[];
   /** existing order to pre-fill (edit), or null for a fresh order */
   initial?: FullSetExistingOrder | null;
   /** «التسعيرة»: rep/student base price + add-on surcharges (drives the live total). */
@@ -52,7 +50,6 @@ export interface FullSetOrderFormProps {
  * supplies packages, any existing order, and the submit/upload handlers.
  */
 export function FullSetOrderForm({
-  packages,
   initial,
   pricing,
   submitting,
@@ -60,9 +57,6 @@ export function FullSetOrderForm({
   onUploadImage,
   onSubmit,
 }: FullSetOrderFormProps) {
-  const [packageId, setPackageId] = useState(
-    initial?.package_id || (packages.length === 1 ? packages[0].id : "")
-  );
   const [robeLen, setRobeLen] = useState(
     initial?.measurements ? String(initial.measurements.robe_length_cm) : ""
   );
@@ -95,9 +89,6 @@ export function FullSetOrderForm({
   );
   const [shawlImage, setShawlImage] = useState(initial?.american_shawl?.image_url || "");
   const [shawlUploading, setShawlUploading] = useState(false);
-  const [colorText, setColorText] = useState(initial?.sash_color?.text || "");
-  const [colorImage, setColorImage] = useState(initial?.sash_color?.image_url || "");
-  const [colorUploading, setColorUploading] = useState(false);
 
   function setZone(key: ZoneKey, patch: Partial<ZoneState>) {
     setZones((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
@@ -126,27 +117,13 @@ export function FullSetOrderForm({
     }
   }
 
-  async function handleColorUpload(file: File) {
-    setColorUploading(true);
-    try {
-      const url = await onUploadImage(file);
-      setColorImage(url);
-    } catch {
-      toast.error("تعذر رفع الصورة");
-    } finally {
-      setColorUploading(false);
-    }
-  }
-
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!packageId) return toast.error("يرجى اختيار الطقم");
     if (!robeLen || !sleeveLen || !shoulder || !chest)
       return toast.error("يرجى إدخال قياسات الروب كاملة");
     if (!sashType) return toast.error("يرجى اختيار نوع الوشاح");
     if (!capType) return toast.error("يرجى اختيار نوع القبعة");
-    if (!colorText.trim()) return toast.error("يرجى كتابة لون الوشاح");
-    if (shawlUploading || colorUploading || Object.values(zones).some((z) => z.uploading))
+    if (shawlUploading || Object.values(zones).some((z) => z.uploading))
       return toast.error("يرجى الانتظار حتى انتهاء رفع الصور");
     if (shawlEnabled && !shawlImage)
       return toast.error("صورة الشال الأمريكي مطلوبة");
@@ -156,7 +133,6 @@ export function FullSetOrderForm({
       image_url: z.imageUrl || undefined,
     });
     onSubmit({
-      package_id: packageId,
       measurements: {
         robe_length_cm: robeLen,
         sleeve_length_cm: sleeveLen,
@@ -166,10 +142,6 @@ export function FullSetOrderForm({
       },
       sash_type: sashType,
       cap_type: capType,
-      sash_color: {
-        text: colorText.trim(),
-        image_url: colorImage || undefined,
-      },
       shoulder_pleat: shoulderPleat,
       american_shawl: {
         enabled: shawlEnabled,
@@ -187,12 +159,9 @@ export function FullSetOrderForm({
     });
   }
 
-  const selectedPkg = packages.find((p) => p.id === packageId);
-
   // ── «التسعيرة»: live total = base + applicable add-ons (mirrors backend fullSetOrder.js) ──
   const addons = pricing?.addons ?? DEFAULT_FULLSET_ADDONS;
-  const basePrice =
-    pricing && pricing.base > 0 ? pricing.base : selectedPkg?.price ?? 0;
+  const basePrice = pricing?.base ?? 0;
   const zoneHasContent = (z: ZoneState) => !!(z.text.trim() || z.imageUrl);
   const capEmbCount =
     (zoneHasContent(zones.capSide) ? 1 : 0) + (zoneHasContent(zones.capTop) ? 1 : 0);
@@ -218,39 +187,6 @@ export function FullSetOrderForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
-      {/* ── الطقم ── */}
-      <Section title="الطقم">
-        {packages.length === 0 ? (
-          <p className="text-sm text-danger">
-            لا يوجد طقم كامل مُفعّل حالياً.
-          </p>
-        ) : (
-          <div className="grid gap-2">
-            {packages.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => setPackageId(p.id)}
-                aria-pressed={packageId === p.id}
-                className={`flex items-center justify-between rounded-xl border px-3.5 py-3 text-start transition-colors ${
-                  packageId === p.id
-                    ? "border-orange-ink bg-orange-ink/10"
-                    : "border-line bg-beige hover:border-orange/40"
-                }`}
-              >
-                <span className="font-semibold text-ink">{p.name_ar}</span>
-                <span className="text-sm tabular-nums text-ink-soft">
-                  {PRICE_FMT.format(
-                    pricing && pricing.base > 0 ? pricing.base : p.price
-                  )}{" "}
-                  د.ع
-                </span>
-              </button>
-            ))}
-          </div>
-        )}
-      </Section>
-
       {/* ── قياسات الروب ── */}
       <Section title="قياسات الروب" hint="بالسنتيمتر">
         <div className="grid grid-cols-2 gap-2.5">
@@ -327,53 +263,6 @@ export function FullSetOrderForm({
         <div className="space-y-3">
           <TypeToggle label="نوع الوشاح" value={sashType} onChange={setSashType} />
           <TypeToggle label="نوع القبعة" value={capType} onChange={setCapType} />
-        </div>
-      </Section>
-
-      {/* ── لون الوشاح ── */}
-      <Section title="لون الوشاح" hint="مطلوب — اكتب اللون بالضبط · صورة اختيارية">
-        <div className="space-y-2.5">
-          <Input
-            label="اللون"
-            value={colorText}
-            onChange={(e) => setColorText(e.target.value)}
-            placeholder="مثال: أخضر زيتي غامق"
-            maxLength={200}
-          />
-          <div className="flex items-center gap-2.5">
-            {colorImage ? (
-              <>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={resolveDesignMediaUrl(colorImage)}
-                  alt="صورة اللون"
-                  className="h-16 w-16 rounded-lg border border-line object-cover"
-                />
-                <button
-                  type="button"
-                  onClick={() => setColorImage("")}
-                  className="min-h-11 text-sm font-medium text-danger hover:underline"
-                >
-                  إزالة الصورة
-                </button>
-              </>
-            ) : (
-              <label className="inline-flex min-h-11 cursor-pointer items-center rounded-xl border border-line bg-beige px-3.5 text-sm font-medium text-ink-soft transition-colors hover:border-orange/40 hover:text-orange-ink">
-                {colorUploading ? "جارٍ الرفع…" : "إرفاق صورة لون (اختياري)"}
-                <input
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp"
-                  className="sr-only"
-                  disabled={colorUploading}
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) handleColorUpload(f);
-                    e.target.value = "";
-                  }}
-                />
-              </label>
-            )}
-          </div>
         </div>
       </Section>
 
@@ -497,41 +386,44 @@ export function FullSetOrderForm({
       </Section>
 
       {/* ── التسعيرة (الإجمالي المباشر) ── */}
-      {packageId && (
-        <Section title="التسعيرة">
-          <dl className="space-y-2 text-sm">
-            <div className="flex items-center justify-between">
-              <dt className="text-ink-soft">السعر الأساسي</dt>
+      <Section title="التسعيرة">
+        <dl className="space-y-2 text-sm">
+          <div className="flex items-center justify-between">
+            <dt className="text-ink-soft">السعر الأساسي</dt>
+            <dd className="tabular-nums text-ink" dir="ltr">
+              {basePrice > 0 ? (
+                <>{PRICE_FMT.format(basePrice)} د.ع</>
+              ) : (
+                <span className="text-xs text-[var(--shop-muted)]">
+                  لم يُحدَّد سعر لهذا الممثل — راجع الإدارة
+                </span>
+              )}
+            </dd>
+          </div>
+          {addonRows.map((r) => (
+            <div key={r.label} className="flex items-center justify-between">
+              <dt className="text-ink-soft">{r.label}</dt>
               <dd className="tabular-nums text-ink" dir="ltr">
-                {PRICE_FMT.format(basePrice)} د.ع
+                + {PRICE_FMT.format(r.amount)} د.ع
               </dd>
             </div>
-            {addonRows.map((r) => (
-              <div key={r.label} className="flex items-center justify-between">
-                <dt className="text-ink-soft">{r.label}</dt>
-                <dd className="tabular-nums text-ink" dir="ltr">
-                  + {PRICE_FMT.format(r.amount)} د.ع
-                </dd>
-              </div>
-            ))}
-            <div className="flex items-center justify-between border-t border-line pt-2">
-              <dt className="font-bold text-ink">الإجمالي</dt>
-              <dd className="font-display text-lg font-bold text-orange-ink tabular-nums" dir="ltr">
-                {PRICE_FMT.format(totalPrice)} د.ع
-              </dd>
-            </div>
-          </dl>
-        </Section>
-      )}
+          ))}
+          <div className="flex items-center justify-between border-t border-line pt-2">
+            <dt className="font-bold text-ink">الإجمالي</dt>
+            <dd className="font-display text-lg font-bold text-orange-ink tabular-nums" dir="ltr">
+              {PRICE_FMT.format(totalPrice)} د.ع
+            </dd>
+          </div>
+        </dl>
+      </Section>
 
       <Button
         type="submit"
         fullWidth
         size="lg"
         loading={submitting}
-        disabled={packages.length === 0}
       >
-        {packageId
+        {totalPrice > 0
           ? `${submitLabel} — ${PRICE_FMT.format(totalPrice)} د.ع`
           : submitLabel}
       </Button>

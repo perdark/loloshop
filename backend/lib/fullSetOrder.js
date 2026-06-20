@@ -29,7 +29,7 @@ const PIECE_TYPES = ['عادي', 'ملكي'];
 // Defaults seeded by migration 032; merged here too so a missing/legacy key is safe.
 // All amounts are IQD surcharges added ONLY to the student-facing price.
 const DEFAULT_ADDONS = {
-  royal_sash: 10000,                 // وشاح ملكي
+  royal_sash: 15000,                 // وشاح ملكي
   royal_cap_when_normal_sash: 3000,  // وشاح عادي + قبعة ملكية
   extra_cap_embroidery: 3000,        // تطريز القبعة الثاني (الأول مجاني)
   robe_sleeve_each: 5000,            // تطريز ردن الروب — لكل ردن (حد أقصى ردنان)
@@ -99,13 +99,17 @@ const err = (status, error, code = 'ERR_VALIDATION') => ({ status, json: { error
 async function persistFullSetOrder({ student, body, actorUserId }) {
   const { package_id, measurements, sash_type, cap_type, embroidery, notes } = body || {};
 
-  if (!package_id) return err(400, 'الطقم مطلوب');
-  const pkg = await query(
-    `SELECT id, name_ar, price FROM packages WHERE id = $1 AND active = TRUE AND is_full_set = TRUE`,
-    [package_id]
-  );
-  if (!pkg.rows.length) return err(404, 'الطقم غير موجود', 'ERR_NOT_FOUND');
-  const packageRow = pkg.rows[0];
+  // package_id is now OPTIONAL — if provided we pin sub-products to it; if absent we
+  // fall back to the first-active-per-type resolution below (byType fill from prods query).
+  let packageRow = null;
+  if (package_id) {
+    const pkg = await query(
+      `SELECT id, name_ar, price FROM packages WHERE id = $1 AND active = TRUE AND is_full_set = TRUE`,
+      [package_id]
+    );
+    if (!pkg.rows.length) return err(404, 'الطقم غير موجود', 'ERR_NOT_FOUND');
+    packageRow = pkg.rows[0];
+  }
 
   // robe measurements (قياسات الروب) — typo-guarded. محيط الصدر (chest_cm) is a required
   // measurement; ملاحظات لفصال الروب (tailor_notes) is an optional free-text note that rides
@@ -152,12 +156,12 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
   const shawlImage = clean(shawlIn.image_url, 500);
   if (shawlEnabled && !shawlImage) return err(400, 'صورة الشال الأمريكي مطلوبة');
 
-  // لون الوشاح (sash color) — typed free-text color (REQUIRED) + optional reference photo.
-  // Captured as a sash spec line (same plumbing as embroidery/shawl), not a priced option.
+  // لون الوشاح (sash color) — optional typed free-text color + optional reference photo.
+  // Captured as a sash spec line only when non-empty (frontend no longer sends it; kept
+  // for backward compatibility with any existing submissions that include it).
   const colorIn = body.sash_color || {};
   const colorText = clean(colorIn.text, 200);
   const colorImage = clean(colorIn.image_url, 500);
-  if (!colorText) return err(400, 'لون الوشاح مطلوب');
 
   // لون التطريز (embroidery/thread color) — comes from the WHOLESALER record, NOT the request body.
   // A per-wholesaler setting (admin or rep sets it once); all that rep's orders inherit it automatically.
@@ -171,14 +175,16 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
     embroideryColor = clean(ec.rows[0]?.embroidery_color, 200);
   }
 
-  // resolve sash/robe/cap: package-pinned wins, else first active per type
+  // resolve sash/robe/cap: package-pinned wins (when package_id given), else first active per type
   const byType = {};
-  const pinned = await query(
-    `SELECT p.id, p.type FROM package_products pl JOIN products p ON p.id = pl.product_id
-     WHERE pl.package_id = $1 AND p.active = TRUE AND p.type IN ('sash','robe','cap')`,
-    [package_id]
-  );
-  for (const p of pinned.rows) byType[p.type] = p.id;
+  if (package_id) {
+    const pinned = await query(
+      `SELECT p.id, p.type FROM package_products pl JOIN products p ON p.id = pl.product_id
+       WHERE pl.package_id = $1 AND p.active = TRUE AND p.type IN ('sash','robe','cap')`,
+      [package_id]
+    );
+    for (const p of pinned.rows) byType[p.type] = p.id;
+  }
   const prods = await query(
     `SELECT id, type FROM products WHERE type IN ('sash','robe','cap') AND active = TRUE
      ORDER BY type, featured DESC, sort, created_at`
@@ -199,9 +205,15 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
   const sashHasDesign = sashHasEmb || shawlEnabled;
 
   // ── «التسعيرة»: order price = rep/student base + applicable add-ons; cost = admin private base.
-  // The package price is the fallback base for legacy reps who never configured pricing.
+  // Primary source is the rep's wholesaler_price (admin-configured). When no package_id is given
+  // there's no package fallback, so wholesaler_price > 0 is required.
   const pricing = await loadWholesalerPricing(student.wholesaler_id);
-  const baseStudentPrice = pricing.wholesalerPrice > 0 ? pricing.wholesalerPrice : Number(packageRow.price);
+  const baseStudentPrice = pricing.wholesalerPrice > 0
+    ? pricing.wholesalerPrice
+    : (packageRow ? Number(packageRow.price) : 0);
+  if (baseStudentPrice <= 0) {
+    return err(400, 'لم يُحدَّد سعر الطقم لهذا الممثل — يرجى مراجعة الإدارة');
+  }
   const addonLines = addonLinesFor(pricing.addons, {
     sashType, capType, capEmbCount, robeSleeveCount, shawlEnabled,
   });
@@ -220,7 +232,9 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
 
   const specLines = {
     sash: [
-      { label: 'لون الوشاح', customer_text: colorText, customer_image_url: colorImage },
+      // لون الوشاح is optional — only emitted when the frontend actually sends it.
+      ...(colorText
+        ? [{ label: 'لون الوشاح', customer_text: colorText, customer_image_url: colorImage }] : []),
       ...(embroideryColor
         ? [{ label: 'لون التطريز', customer_text: embroideryColor }] : []),
       { label: 'نوع الوشاح', customer_text: sashType },
@@ -313,9 +327,10 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
 
       // Base طقم line carries the rep/student BASE price; each applied add-on is its own priced
       // line on the sash so the sash order's items sum to its price (= base + add-ons).
+      const pkgLabel = packageRow?.name_ar || 'طقم التخرج';
       const baseLine = type === 'sash'
-        ? { label: `طقم: ${packageRow.name_ar}`, price: baseStudentPrice }
-        : { label: `ضمن طقم: ${packageRow.name_ar}`, price: 0 };
+        ? { label: `طقم: ${pkgLabel}`, price: baseStudentPrice }
+        : { label: `ضمن طقم: ${pkgLabel}`, price: 0 };
       const lines = [
         baseLine,
         ...specLines[type].map((l) => ({ ...l, price: 0 })),
@@ -345,8 +360,8 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
     json: {
       data: {
         checkout_group_id: result.cgId,
-        package_id,
-        package_name: packageRow.name_ar,
+        package_id: package_id || null,
+        package_name: packageRow?.name_ar || 'طقم التخرج',
         total: itemPrice.sash,
         orders: result.ids,
       },
@@ -360,7 +375,7 @@ async function readFullSetOrder(studentId) {
   const orders = await query(
     `SELECT o.id, o.package_id, o.measurements, o.notes, o.checkout_group_id, p.type
      FROM orders o JOIN products p ON p.id = o.product_id
-     WHERE o.student_id = $1 AND o.status <> 'cancelled' AND o.package_id IS NOT NULL
+     WHERE o.student_id = $1 AND o.status <> 'cancelled' AND o.design_id IS NULL
        AND p.type IN ('sash','robe','cap')
      ORDER BY o.created_at DESC`,
     [studentId]

@@ -1,6 +1,7 @@
 const bcrypt = require('bcrypt');
 const { query, tx } = require('../lib/db');
 const { DEFAULT_ADDONS, sanitizeAddons } = require('../lib/fullSetOrder');
+const { normalizeIqPhone } = require('../lib/otp');
 
 const SALT_ROUNDS = 10;
 
@@ -198,6 +199,8 @@ async function listWholesalers(req, res) {
 }
 
 async function createWholesaler(req, res) {
+  // Normalize phone before duplicate-check + insert so stored numbers are always canonical.
+  req.body.phone = normalizeIqPhone(req.body.phone);
   const { name, phone, email, password, referral_code, deadline, university_name, department } = req.body;
   // «التسعيرة» — two base prices + editable add-ons (defaults applied; admin tweaks per rep later).
   const adminPrice = parsePrice(req.body.admin_price);
@@ -486,6 +489,8 @@ async function listStaff(req, res) {
 }
 
 async function createStaff(req, res) {
+  // Normalize phone before duplicate-check + insert.
+  req.body.phone = normalizeIqPhone(req.body.phone);
   const { name, phone, email, password, order_scope } = req.body;
   if (!name || !phone || !password) {
     return res.status(400).json({ error: 'بيانات ناقصة', code: 'ERR_VALIDATION' });

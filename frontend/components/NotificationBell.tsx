@@ -36,7 +36,32 @@ export function NotificationBell({ className = "" }: { className?: string }) {
   const [items, setItems] = useState<AppNotification[]>([]);
   const [open, setOpen] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  // The panel is positioned `fixed` and clamped to the viewport so it can never
+  // run off-screen — on RTL phones the bell sits left-of-center, so a bell-
+  // anchored panel (`end-0`) overflowed the right edge and got clipped. We
+  // measure the bell each time it opens: drop just beneath it, align under it
+  // on wide screens, but clamp into the viewport (with a 1rem margin) on phones.
+  const [panelPos, setPanelPos] = useState<{ top: number; left: number }>({
+    top: 64,
+    left: 16,
+  });
   const rootRef = useRef<HTMLDivElement>(null);
+
+  const toggle = useCallback(() => {
+    setOpen((v) => {
+      const next = !v;
+      if (next && rootRef.current) {
+        const r = rootRef.current.getBoundingClientRect();
+        const margin = 16;
+        const width = Math.min(320, window.innerWidth - 2 * margin);
+        const maxLeft = window.innerWidth - width - margin;
+        // Align the panel's left edge under the bell, clamped on-screen.
+        const left = Math.round(Math.min(Math.max(r.left, margin), Math.max(margin, maxLeft)));
+        setPanelPos({ top: Math.round(r.bottom) + 8, left });
+      }
+      return next;
+    });
+  }, []);
 
   const load = useCallback(() => {
     getNotifications()
@@ -98,7 +123,7 @@ export function NotificationBell({ className = "" }: { className?: string }) {
     <div ref={rootRef} className={`relative ${className}`}>
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggle}
         aria-label={`الإشعارات${unread > 0 ? ` — ${unread} غير مقروء` : ""}`}
         aria-expanded={open}
         className="relative flex h-11 w-11 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-beige hover:text-orange-ink active:scale-95"
@@ -130,7 +155,8 @@ export function NotificationBell({ className = "" }: { className?: string }) {
         <div
           role="dialog"
           aria-label="الإشعارات"
-          className="absolute end-0 top-full z-50 mt-2 w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-line bg-surface shadow-[var(--shadow-pop)]"
+          style={{ top: panelPos.top, left: panelPos.left }}
+          className="fixed z-50 w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-line bg-surface shadow-[var(--shadow-pop)]"
         >
           <div className="flex items-center justify-between border-b border-line px-4 py-3">
             <p className="text-sm font-bold text-ink">الإشعارات</p>

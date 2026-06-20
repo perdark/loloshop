@@ -6,6 +6,81 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
+## 2026-06-21 (b) — home «نحيكها» gift-bag section · wholesaler-student order = base+surcharge (no package/no لون الوشاح) · OTP delivery fixes
+
+Uncommitted on **main**. Gates green: FE `tsc` 0 · `eslint` 0 · BE `node --check` 0. Migration **041 applied to Neon + verified**.
+Verified **live in the running dev browser** (home section mobile+desktop; wholesaler order form as rep «دابي»). `next build` NOT run.
+
+**1. Home «نحيكها بأيدينا، غرزة غرزة» section (`components/shop/BrandStory.tsx`, `AtelierStory`).** Swapped the photo for the
+black lolo-shop gift bag (`/home/mint/Downloads/32.png` → trimmed transparent margins via PIL → `public/lookbook/gift-bag.png`,
+1138×1200, alpha). Per user: **no background panel** — the bag sits transparent on the page, centred, with heading on the RIGHT and
+body on the LEFT (`lg:grid-cols-[1fr_auto_1fr]`, stacks on mobile). Drop-shadow only. Caption «يصلك في تغليف…» was added then **removed** per user.
+
+**2. Wholesaler-student full-set order reworked (user pricing model).** The form IS the package — **package picker removed**, and
+**«لون الوشاح» (sash color) removed**. Price = the rep's admin-set base (`wholesalers.wholesaler_price`) + type surcharge:
+وشاح ملكي (any cap) **+15,000**, وشاح عادي + قبعة ملكية **+3,000**, else +0. The infra already existed (`fullSetOrder.js` base+addons,
+admin sets `admin_price`/`wholesaler_price` + `pricing_addons` in `/admin/wholesalers`); only change was **`royal_sash` 10000→15000**.
+   - BE `lib/fullSetOrder.js`: `royal_sash`→15000; `package_id` now OPTIONAL (sub-products fall back to first-active-per-type; base from
+     `wholesaler_price`, else err «لم يُحدَّد سعر الطقم…»); «لون الوشاح» no longer required (spec line omitted when empty); package-name
+     fallback `'طقم التخرج'`; `readFullSetOrder` filter widened (`design_id IS NULL` instead of `package_id IS NOT NULL`).
+   - **Migration 041** (`041_royal_sash_15000.sql`, applied+verified): bumps every rep's `pricing_addons.royal_sash` to 15000.
+   - FE `components/wholesaler/FullSetOrderForm.tsx`: removed «الطقم» picker + «لون الوشاح» section + their state/validation/payload;
+     `basePrice = pricing.base ?? 0`; التسعيرة always shown (warns «لم يُحدَّد سعر…» when base 0); no `package_id`/`sash_color` sent.
+     Callers updated: `app/wholesaler/students/[studentId]/order/page.tsx`, `app/(student)/my-order/page.tsx`, `lib/wholesaler.ts`
+     (`package_id` optional, `sash_color` dropped). Shared form → applies to BOTH rep-fill and student `/my-order`.
+   - Verified live (rep دابي, base 50): ملكي → الإجمالي ١٥٬٠٥٠ ✓; backend e2e gave 15050 / 3050 / 50 for the three type combos.
+
+**3. OTP delivery (`backend/lib/otp.js`, `.env`, auth/admin controllers).**
+   - **Root cause of "no OTP":** `backend/.env` had `ZENTRAMSG_API_URL=ZENTRAMSG_API_URL=https://…` (key pasted as value) → `fetch` threw →
+     every send silently dropped. Fixed the line; hardened `otp.js` with `resolveZentramsgUrl()` (validates http(s), falls back to default,
+     logs loudly). Also `sendViaZentramsg` now **always logs the code in dev** (even with creds) so local testing isn't blind.
+   - **Wholesaler-student / forgot-password "no OTP" deeper cause:** legacy un-normalized phone accounts (`771…`) whose normalized form
+     collides with another account — incl. **admin/staff** (privilege hazard). User chose **"only add the code guard" (no deletions)**:
+     `forgotPasswordPhone` now SKIPS sending for admin/staff (generic 200, no enumeration leak); `resetPasswordPhone` UPDATE scoped
+     `AND role NOT IN ('admin','staff')` → 403 otherwise; `adminController.createWholesaler/createStaff` now `normalizeIqPhone` the phone.
+
+### Open follow-ups
+- **⚠️ PROD `.env` on the VPS almost certainly has the same `ZENTRAMSG_API_URL=ZENTRAMSG_API_URL=` typo** — fix it there + `pm2 restart`,
+  then send a real OTP to confirm (watch `pm2 logs` for `Zentramsg send failed: <status>` = different problem, e.g. bad device/key).
+- **Discount popup is committed AND pushed** (commit `8cdfb97`), it just **ships INACTIVE** — `site_settings.discount_popup.active=false`.
+  To show it: admin flips it on in `/admin` (PromoControl), or set `active:true`. Nothing is "unpushed" (`git ... ahead=0`).
+- **Duplicate/colliding phone accounts NOT cleaned** (user deferred): مصطفى `7723078729` (1 order, ↔ staff), مصطفى `7783571996`
+  (0 orders, ↔ admin), فرقان `0` (5 orders), فرقان `00`, Yuosif Revo `077015601996` (12-digit typo → OTP unreachable). A reviewed,
+  **un-executed** cleanup SQL exists from this session if you want it later.
+- All of the above is **uncommitted on main**; `next build` not run; `PROGRESS.md` not updated.
+
+---
+
+## 2026-06-21 — Fix: notification dropdown clipped off-screen on RTL phones (home/header)
+
+Single-file FE fix, **uncommitted on main**. `tsc` 0 · `eslint` 0 · verified **live in the running dev
+browser** at 360px phone + ~1280/1600px wide, zero console errors.
+
+**Bug.** In `components/NotificationBell.tsx` the dropdown was `absolute end-0` anchored to the 44px bell
+wrapper. On RTL phones the header controls (bell/cart/logout) sit on the **left** of the screen, so the bell
+is left-of-center; a 320px panel growing from `end-0` ran **~112px off the right edge** at 360px and got
+clipped (the «تعليم الكل كمقروء» button + item text were cut off). No bell-anchored offset can fit a panel
+that's nearly the full screen width — it must be pinned to the **viewport**.
+
+**Fix.** Panel is now `position: fixed` with a measured, viewport-clamped position. On open, `toggle()`
+measures the bell rect and sets `{ top: bell.bottom + 8, left: clamp(bell.left, 16, vw - width - 16) }`
+(width = `min(320, vw-32)`). Result: drops just under the header at any header height; **aligns under the
+bell on wide screens**, **clamps fully on-screen on phones**. Outside-click + Esc still close (panel is still
+a DOM child of `rootRef`, so `contains()` holds). Reused by StudentNav + wholesaler layout — both covered.
+
+**Verified live.** 360px: panel left=24/right=344, fits, no h-scroll. Wide: left aligns to bell, fits.
+Empty + 2-item states both render in-bounds; badge «2» + mark-all-read button correct; outside-click & Esc
+close; console clean. (Earlier 401s while testing were just my hand-signed token using `sub` instead of
+`signToken`'s `user.id` — real endpoint returns 200; not a product bug.)
+
+### Open follow-ups
+- **Uncommitted on main** — commit when ready. `next build` not run (dev server up). `PROGRESS.md` not updated.
+- Latent (not fixed, out of scope): if `getNotifications()` errors, `loaded` stays false → panel spins
+  «جارٍ التحميل…» forever (caught silently). Fine for a valid session; consider showing an error/empty state
+  on failure if it ever surfaces.
+
+---
+
 ## 2026-06-20 — Retail sash designer REMOVED → typed-spec intake (like wholesaler sashes)
 
 Committed + pushed to **main** (`d0c7009`). Migration **040 applied to Neon + verified.** Gates green:
