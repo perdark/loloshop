@@ -428,8 +428,16 @@ async function priceSelections({ productId, role, selections, studentGender }) {
     if (needsText && (!s.customer_text || !String(s.customer_text).trim())) {
       return { ok: false, status: 400, error: `يرجى كتابة التفاصيل المطلوبة لـ ${g.name_ar}`, code: 'ERR_CUSTOMER_TEXT_REQUIRED' };
     }
-    // Track embroidery: any option requiring image OR text means embroidery work
-    if (needsImage || needsText) hasEmbroidery = true;
+    // Persist ANY text the customer typed — including OPTIONAL typed fields (e.g. sash
+    // «تطريز يمين» / «تطريز من الخلف») whose group isn't flagged required. Without this, a
+    // non-required field would silently drop the value the customer entered.
+    const providedText =
+      s.customer_text != null && String(s.customer_text).trim() !== ''
+        ? String(s.customer_text).trim()
+        : null;
+    // Track embroidery: a required image/text — or any embroidery text the customer typed —
+    // means there's embroidery work, so the piece routes to the staff design stage.
+    if (needsImage || needsText || providedText) hasEmbroidery = true;
 
     const line = opt.price_delta * qty;
     total += line;
@@ -437,7 +445,7 @@ async function priceSelections({ productId, role, selections, studentGender }) {
       label: `${g.name_ar}: ${opt.label_ar}${qty > 1 ? ' ×' + qty : ''}`,
       price: line, group_id: s.group_id, option_id: opt.id, qty,
       customer_image_url: s.customer_image_url || null,
-      customer_text: needsText ? String(s.customer_text).trim() : null,
+      customer_text: providedText,
     });
   }
   return { ok: true, total, items, hasEmbroidery };

@@ -27,11 +27,18 @@ export function OptionGroupField({
 }: OptionGroupFieldProps) {
   const value = selection[group.id];
   const isColorGroup = group.nameAr.includes("لون");
-  // Sash color is a TYPED free-text color (+ optional photo), not a swatch list. The group
-  // carries requires_customer_text and a single auto-selected option; the actual color is
-  // entered via the sibling <CustomerImageUpload>, so we suppress the swatch here.
-  // (Robe/cap color groups keep requires_customer_text=false → real multi-swatch pickers.)
-  const isTypedColor = isColorGroup && group.requiresCustomerText;
+  // A "typed field" group is a single-option group that exists ONLY to carry typed customer
+  // text (+ optional photo) — not a real choice. We auto-select its sole option and suppress
+  // the selector, leaving the sibling <CustomerImageUpload> as the entire UI. Two cases:
+  //   • Sash color «اللون» / thread color «لون التطريز» — a typed value, not a swatch list
+  //     (requires_customer_text=true). Robe/cap color groups keep their real multi-swatch
+  //     pickers (requires_customer_text=false → not a typed field).
+  //   • Sash embroidery zones «تطريز يسار/يمين/من الخلف» — typed text per side, optional photo.
+  //     (These don't include «لون», so the color clause misses them; match by «تطريز» prefix.)
+  const isTypedField =
+    (isColorGroup && group.requiresCustomerText) || // sash «اللون» (typed); robe/cap «اللون» = swatches
+    group.nameAr === "لون التطريز" || // thread color — typed even when optional (sash-only by name)
+    group.nameAr.startsWith("تطريز"); // embroidery zones يسار/يمين/من الخلف (sash-only by name)
   const soleActiveId =
     group.options.find((o) => o.active)?.id ?? group.options[0]?.id ?? null;
 
@@ -48,18 +55,18 @@ export function OptionGroupField({
     }
   }, [lockedOption, value, group.id, onChange]);
 
-  // Auto-select the sole option for a typed-color group so the pipeline always has an
-  // option to attach the typed color + optional photo to (the swatch UI is suppressed).
+  // Auto-select the sole option for a typed-field group so the pipeline always has an option
+  // to attach the typed text + optional photo to (the selector UI is suppressed). This fires
+  // even for OPTIONAL groups (تطريز يمين / من الخلف) so a left-blank field still has a target.
   useEffect(() => {
-    if (isTypedColor && soleActiveId && value !== soleActiveId) {
+    if (isTypedField && soleActiveId && value !== soleActiveId) {
       onChange(group.id, soleActiveId);
     }
-  }, [isTypedColor, soleActiveId, value, group.id, onChange]);
+  }, [isTypedField, soleActiveId, value, group.id, onChange]);
 
-  // Typed-color sash group: render nothing here — the sibling <CustomerImageUpload> (shown
-  // by the parent because requires_customer_text is set) is the entire color UI (free-text
-  // color + optional reference photo). The option is auto-selected above.
-  if (isTypedColor) return null;
+  // Typed-field sash group: render nothing here — the sibling <CustomerImageUpload> is the
+  // entire UI (free-text value + optional reference photo). The option is auto-selected above.
+  if (isTypedField) return null;
 
   if (isLocked && lockedOption) {
     return (

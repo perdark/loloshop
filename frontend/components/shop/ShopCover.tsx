@@ -7,7 +7,7 @@ import Link from "next/link";
  * calls to action. Tuned for iPhone: solid brand colors, large readable type, one font.
  */
 
-const DESIGN_HREF = "/design";
+const CATALOG_HREF = "/#catalog";
 const FULLSET_HREF = "/full-set";
 
 export function ShopCover() {
@@ -52,15 +52,15 @@ export function ShopCover() {
           className="mt-5 max-w-[44ch] text-base leading-relaxed text-ink-soft sm:text-lg"
           style={{ animation: "hero-line 0.8s cubic-bezier(0.16,1,0.3,1) 0.36s both" }}
         >
-          أوشحة وروبات وقبعات تخرّج فاخرة، وتصمّم وشاحك بنفسك بتفاصيل تليق بيومٍ لا
-          يتكرّر.
+          أوشحة وروبات وقبعات تخرّج فاخرة، بلونك وتطريزك واسمك، بتفاصيل تليق بيومٍ
+          لا يتكرّر.
         </p>
 
         <div
           className="mt-7 flex flex-wrap items-center gap-3"
           style={{ animation: "hero-line 0.8s cubic-bezier(0.16,1,0.3,1) 0.5s both" }}
         >
-          <PrimaryCta label="صمّم وشاحك" href={DESIGN_HREF} />
+          <PrimaryCta label="تسوّق الأوشحة" href={CATALOG_HREF} />
           <SecondaryCta label="الطقم الكامل" href={FULLSET_HREF} />
         </div>
       </div>

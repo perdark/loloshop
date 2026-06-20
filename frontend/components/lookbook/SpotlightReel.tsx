@@ -50,9 +50,9 @@ const DEFAULT_SLIDES: Slide[] = [
     src: "/lookbook/detail-pedestal.jpg",
     kicker: "يبقى ذكرى",
     title: "وشاح تعلّقه بعد التخرّج",
-    caption: "صمّمه بنفسك خطوة خطوة، ويوصلك جاهز.",
+    caption: "اختر لونه وتطريزه واسمك، ويوصلك جاهز.",
     accent: "#7fb4cc",
-    cta: { label: "صمّم وشاحك", href: "/design" },
+    cta: { label: "تصفّح المتجر", href: "/#catalog" },
   },
 ];
 

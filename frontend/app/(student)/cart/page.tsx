@@ -3,7 +3,6 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { getApiErrorMessage } from "@/lib/api";
 import {
@@ -205,7 +204,6 @@ function MissingPiecesCard({ cartItems }: { cartItems: CartItem[] }) {
 }
 
 export default function CartPage() {
-  const router = useRouter();
   const [cart, setCart] = useState<Cart | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -296,16 +294,13 @@ export default function CartPage() {
   async function handleCheckout() {
     if (!cart || cart.items.length === 0) return;
     setCheckingOut(true);
-    const hasCustomizable = cart.items.some((it) => it.customizable);
     try {
       await checkout();
       toast.success("تم تأكيد طلبك");
       loadMyOrders();
-      if (hasCustomizable) {
-        router.push("/design");
-      } else {
-        setDone(true);
-      }
+      // Sash specs (color + embroidery per side) are captured on the product page before
+      // add-to-cart, so checkout is the final step — staff produce the design from the order.
+      setDone(true);
     } catch (e) {
       toast.error(getApiErrorMessage(e, "تعذر إتمام الطلب — سجّل دخولك كطالب"));
     } finally {

@@ -135,10 +135,10 @@ export function MilestoneStory() {
   );
 }
 
-/* 4 — Made to order: the three steps into the designer. */
+/* 4 — Made to order: the three steps to a personalised sash. */
 const STEPS = [
-  { n: "١", text: "اختر القماش واللون" },
-  { n: "٢", text: "اكتب اسمك وجامعتك بخط عربي" },
+  { n: "١", text: "اختر الوشاح ولونه" },
+  { n: "٢", text: "اكتب اسمك وجامعتك للتطريز" },
   { n: "٣", text: "نخيطه يدوياً ونوصله، تدفع نقداً" },
 ];
 
@@ -152,7 +152,7 @@ export function DesignProcess() {
         id="process-title"
         className="text-balance font-display text-[clamp(1.6rem,4.5vw,2.4rem)] font-bold leading-tight text-ink"
       >
-        صمّمه بنفسك، في دقائق
+        خصّصه بتفاصيلك، في دقائق
       </h2>
 
       <ol className="mt-8 grid gap-7 p-0 sm:grid-cols-3 sm:gap-6">
@@ -170,10 +170,10 @@ export function DesignProcess() {
       </ol>
 
       <Link
-        href="/design"
+        href="/#catalog"
         className="mt-9 inline-flex min-h-11 items-center justify-center rounded-pill bg-orange-ink px-8 text-sm font-semibold text-white transition-colors hover:bg-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-ink"
       >
-        صمّم وشاحك
+        تسوّق الأوشحة
       </Link>
     </section>
   );

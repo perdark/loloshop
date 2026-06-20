@@ -5,7 +5,7 @@ const SITE = "https://lolo-shop96.com";
 // Public, crawlable storefront routes. Role areas are intentionally excluded
 // (also disallowed in robots.ts).
 export default function sitemap(): MetadataRoute.Sitemap {
-  const routes = ["", "/design", "/showcase"];
+  const routes = ["", "/showcase"];
   return routes.map((path) => ({
     url: `${SITE}${path}`,
     changeFrequency: "weekly",

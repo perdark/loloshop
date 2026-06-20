@@ -89,7 +89,7 @@ export function VipShowcaseView({
           items={items}
           badgeLabel={hero.badgeLabel}
           accent={hero.accent}
-          ctaLabel="اعتمد الباقة وصمّم وشاحك"
+          ctaLabel="اعتمد الباقة"
           onPick={() => onPick(hero)}
           busy={busy}
         />

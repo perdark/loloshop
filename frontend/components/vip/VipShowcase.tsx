@@ -64,8 +64,8 @@ export function VipShowcase() {
     setBusyId(pkg.id);
     try {
       await confirmPackage({ packageId: pkg.id, capOptionId: "" });
-      toast.success("تم اعتماد الباقة — صمّم وشاحك");
-      router.push("/design");
+      toast.success("تم اعتماد الباقة");
+      router.push("/cart");
     } catch (e) {
       toast.error(getApiErrorMessage(e, "تعذّر اعتماد الباقة"));
       setBusyId(null);
@@ -129,7 +129,7 @@ export function VipShowcase() {
       packages={packages}
       standardPrice={standardPrice}
       onPick={pick}
-      onStandard={() => router.push("/design")}
+      onStandard={() => router.push("/")}
       onUpgrade={upgrade}
       upgradeable={!!ctx?.upgradeable}
       busyId={busyId}

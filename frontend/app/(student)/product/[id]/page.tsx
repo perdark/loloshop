@@ -357,7 +357,15 @@ export default function StudentProductPage() {
           const needsText =
             optionId != null &&
             customerTextRequired(group, optionId);
-          const showUploadBlock = needsImage || needsText;
+          // Sash typed spec fields. Embroidery zones (تطريز يسار/يمين/من الخلف) get an OPTIONAL
+          // reference photo; «لون التطريز» (thread color) is text-only. Both render even when
+          // optional so the student can fill them — required vs optional is driven by needsText.
+          const isSashEmbroideryZone =
+            product.type === "sash" && group.nameAr.startsWith("تطريز");
+          const isSashThreadColor =
+            product.type === "sash" && group.nameAr === "لون التطريز";
+          const isSashTypedField = isSashEmbroideryZone || isSashThreadColor;
+          const showUploadBlock = needsImage || needsText || isSashTypedField;
           const key =
             optionId != null ? selectionKey(group.id, optionId) : null;
 
@@ -384,6 +392,8 @@ export default function StudentProductPage() {
                     setCustomerTexts((prev) => ({ ...prev, [key]: text }));
                     setConfirmed(null);
                   }}
+                  allowOptionalText={isSashTypedField && !needsText}
+                  allowOptionalImage={isSashEmbroideryZone}
                   showErrors={showErrors}
                 />
               )}
@@ -495,37 +505,10 @@ export default function StudentProductPage() {
           />
         )}
 
-        {product.type === "sash" && (
-          <div className="space-y-2">
-            <button
-              type="button"
-              className="btn-shine flex min-h-12 w-full items-center justify-center gap-2 rounded-pill bg-orange-ink font-display text-base font-bold text-white shadow-[var(--shadow-float)] transition-transform duration-200 hover:-translate-y-0.5 active:translate-y-0"
-              onClick={() => {
-                // Forward the color + any photo/text entered here so the designer
-                // can carry it and open the canvas directly (no re-entry).
-                sessionStorage.setItem(
-                  "loloshop_sash_preset",
-                  JSON.stringify({
-                    productId: id,
-                    selections: selection,
-                    customerImages,
-                    customerTexts,
-                  })
-                );
-                router.push("/design");
-              }}
-            >
-              صمّم وشاحك واطلبه
-            </button>
-            <p className="text-center text-xs text-[var(--shop-muted)]">
-              اختيار اللون والنوع والسعر يتم داخل المصمّم
-            </p>
-          </div>
-        )}
         </div>
       </div>
 
-      {product.type !== "sash" && !product.customizable && (
+      {!product.customizable && (
         <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-cream px-4 py-3.5 shadow-[var(--shadow-float)]">
           <div className="mx-auto max-w-5xl">
             {addedToCart ? (
@@ -559,7 +542,7 @@ export default function StudentProductPage() {
         </div>
       )}
 
-      {product.type !== "sash" && product.customizable && (
+      {product.customizable && (
         <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-cream px-4 py-3.5 shadow-[var(--shadow-float)]">
           <div className="mx-auto max-w-5xl">
           {confirmed ? (

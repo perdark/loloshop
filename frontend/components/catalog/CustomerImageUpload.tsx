@@ -18,6 +18,10 @@ interface CustomerImageUploadProps {
   /** Current embroidery text for this selection (only used when requiresCustomerText). */
   textValue?: string;
   onTextChange?: (text: string) => void;
+  /** Render the text box even when the group does NOT require text (optional typed field). */
+  allowOptionalText?: boolean;
+  /** Allow an optional reference photo even when the group does NOT require an image. */
+  allowOptionalImage?: boolean;
   /** Show inline error state (called by parent after failed submit attempt). */
   showErrors?: boolean;
 }
@@ -29,6 +33,8 @@ export function CustomerImageUpload({
   onChange,
   textValue,
   onTextChange,
+  allowOptionalText = false,
+  allowOptionalImage = false,
   showErrors = false,
 }: CustomerImageUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -37,10 +43,12 @@ export function CustomerImageUpload({
   const previewUrl = value ? resolveCatalogMediaUrl(value) : null;
   const needsText = customerTextRequired(group, optionId);
   const needsImage = group.requiresCustomerImage || Boolean(opt?.requiresCustomerImage);
-  // Show image UI only when truly required, OR for «اللون» (sash color) which has an
-  // optional reference photo. All other text-only groups (e.g. «لون التطريز») must
-  // suppress the image section entirely.
-  const allowImage = needsImage || group.nameAr === "اللون";
+  // A field can be REQUIRED (needsText/needsImage) or merely ALLOWED (optional). Optional
+  // typed fields — e.g. sash «تطريز يمين» / «تطريز من الخلف» — render the same text box +
+  // photo picker, just without the required asterisk/validation. «اللون» keeps its optional
+  // photo by name. Pure text-only groups (e.g. «لون التطريز») still suppress the photo.
+  const showText = needsText || allowOptionalText;
+  const allowImage = needsImage || allowOptionalImage || group.nameAr === "اللون";
   // Derive the admin-set text prompt + placeholder: option-level overrides group-level.
   const textPrompt =
     opt?.customerTextPromptAr ?? group.customerTextPromptAr ?? null;
@@ -67,14 +75,20 @@ export function CustomerImageUpload({
     <div className="mt-3 rounded-2xl border border-orange/40 bg-orange/5 p-4 ring-1 ring-orange/10">
       <p className="inline-flex items-center gap-1.5 text-sm font-semibold text-ink">
         <span aria-hidden className="h-2 w-2 rounded-full bg-brand-gradient" />
-        {needsText ? (textPrompt ? textPrompt : "كتابة مطلوبة منك") : "صورة مطلوبة منك"}
-        <span className="text-orange-ink">*</span>
+        {showText ? (textPrompt ? textPrompt : "كتابة مطلوبة منك") : "صورة مطلوبة منك"}
+        {needsText || needsImage ? (
+          <span className="text-orange-ink">*</span>
+        ) : (
+          <span className="text-xs font-normal text-ink-soft">(اختياري)</span>
+        )}
       </p>
       <p className="mt-1 text-xs leading-relaxed text-ink-soft">
-        {needsText
+        {showText
           ? needsImage
             ? "اكتب التفاصيل المطلوبة وارفع صورة مرجعية — كلاهما مطلوب."
-            : "اكتب التفاصيل المطلوبة."
+            : needsText
+              ? "اكتب التفاصيل المطلوبة."
+              : "اكتب التفاصيل إن رغبت — يمكنك إضافة صورة مرجعية أيضاً."
           : "ارفع صورة مرجعية للطباعة."}
       </p>
 
@@ -83,12 +97,16 @@ export function CustomerImageUpload({
         <p className="mt-2 text-xs leading-relaxed text-ink-soft">{group.hintAr}</p>
       )}
 
-      {/* Embroidery text input — only shown when the option requires customer text */}
-      {needsText && (
+      {/* Embroidery text input — shown when text is required OR allowed (optional typed field) */}
+      {showText && (
         <div className="mt-3">
           <label className="block text-xs font-semibold text-ink" htmlFor={`cust-text-${group.id}`}>
             {textPrompt ? textPrompt : "اكتب التفاصيل المطلوبة"}
-            <span className="text-orange-ink"> *</span>
+            {needsText ? (
+              <span className="text-orange-ink"> *</span>
+            ) : (
+              <span className="font-normal text-ink-soft"> (اختياري)</span>
+            )}
           </label>
           <textarea
             id={`cust-text-${group.id}`}
@@ -126,9 +144,9 @@ export function CustomerImageUpload({
             }}
           />
 
-          {/* Image upload section — mandatory when needsImage, optional when only text is required */}
-          <p className={`mt-3 text-xs font-semibold text-ink ${needsText ? "" : "sr-only"}`}>
-            {needsText
+          {/* Image upload section — mandatory when needsImage, optional alongside any text field */}
+          <p className={`mt-3 text-xs font-semibold text-ink ${showText ? "" : "sr-only"}`}>
+            {showText
               ? needsImage
                 ? <>صورة مرجعية<span className="text-orange-ink"> *</span></>
                 : "صورة مرجعية (اختياري)"
@@ -136,7 +154,7 @@ export function CustomerImageUpload({
           </p>
 
           {previewUrl ? (
-            <div className={needsText ? "mt-1.5" : "mt-3"}>
+            <div className={showText ? "mt-1.5" : "mt-3"}>
               <div className="relative h-36 w-full overflow-hidden rounded-xl border border-orange/30 bg-white shadow-[var(--shadow-soft)]">
                 <Image
                   src={previewUrl}

@@ -14,8 +14,8 @@ import { IconCheck } from "./VipIcons";
  */
 export function VipCompare({
   vip,
-  standardLabel = "التصميم العادي",
-  standardNote = "صمّم وشاحك مباشرةً بالسعر الأساسي.",
+  standardLabel = "الوشاح العادي",
+  standardNote = "اطلب وشاحك مباشرةً بالسعر الأساسي.",
   standardPrice,
   onChoose,
   busy = false,

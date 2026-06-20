@@ -18,7 +18,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
  * - Wholesaler-students land here via the home-page redirect.
  * - Retail students come from the "أكمل باكج التخرّج" cart suggestion card.
  * The form shows what's included, a cap-shape picker, the price,
- * and a confirm button → redirects to /design on success.
+ * and a confirm button → redirects to /cart on success.
  */
 
 async function findCapProductId(packages: PackageTier[]): Promise<string | null> {
@@ -111,8 +111,8 @@ export default function PackagePage() {
     setSubmitting(true);
     try {
       await confirmPackage({ packageId: selected.id, capOptionId });
-      toast.success("تم اعتماد الباقة — ابدأ تصميم وشاحك");
-      router.push("/design");
+      toast.success("تم اعتماد الباقة");
+      router.push("/cart");
     } catch (e) {
       toast.error(getApiErrorMessage(e, "تعذر اعتماد الباقة"));
     } finally {
