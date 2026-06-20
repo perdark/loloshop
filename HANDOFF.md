@@ -6,6 +6,55 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
+## 2026-06-20 — Retail sash designer REMOVED → typed-spec intake (like wholesaler sashes)
+
+Committed + pushed to **main** (`d0c7009`). Migration **040 applied to Neon + verified.** Gates green:
+`tsc` 0 source errors · `eslint` 0 · backend `node --check` 0. Verified **live in the running dev browser**
+(«وشاح» parent + a child «وشاح منحني») — fields render once, correct required/optional markers, no console
+errors. `next build` NOT run (dev server was up — would conflict per prior entries); run before deploy.
+
+**What & why.** User decision: kill the Fabric.js retail sash designer; a retail sash is now ordered like any
+product — the student types its spec (color + embroidery per side), and **staff design every order and upload
+the final**. Mirrors how wholesaler sashes are captured.
+
+1. **Intake = option groups (reuses the whole cart/checkout/staff/zone pipeline — zero new backend paths).**
+   **Migration 040** adds typed-text option groups to sash products: **اللون (REQUIRED)** + **لون التطريز ·
+   تطريز يسار · تطريز يمين · تطريز من الخلف (all OPTIONAL)**. اللون + the زون fields carry an **optional photo**;
+   لون التطريز is text-only. One auto-select option per group; value rides `order_items.customer_text`
+   (+ `customer_image_url`) exactly like migrations 031/037.
+   - **INHERITANCE GOTCHA:** sash "types" are sub-products (`parent_id` → top-level «وشاح»), and
+     `catalogController.getProductFull` MERGES `[...parentGroups, ...ownGroups]`. So groups live on **top-level
+     sashes ONLY** (`parent_id IS NULL`); children inherit. Adding to children too rendered every field TWICE
+     (caught live, fixed — deleted child copies; migration scoped to `parent_id IS NULL`).
+   - Labels embed يسار/يمين/خلف → staff zone filters (`ORDER_ZONE_MATCH` sash_left/right/back) match for free.
+   - **Admin-controlled:** ordinary option groups → editable in `/admin/products` on the **«وشاح» parent**
+     (children show them inherited/read-only with a "منتج فرعي لـ… →" link up to the parent).
+2. **Backend fix** — `orderController.priceSelections` only persisted `customer_text` when *required* → optional
+   typed embroidery was silently dropped. Now persists ANY provided text + counts it toward `hasEmbroidery`
+   (embroidered sashes route to `design_complete`). Shared by cart + configure.
+3. **Frontend** — `product/[id]`: removed «صمّم وشاحك»→/design; sashes use the normal **أضف إلى السلة** bar.
+   `OptionGroupField` (`isTypedField`) + `CustomerImageUpload` (`allowOptionalText`/`allowOptionalImage`) gained
+   optional-typed-field support; detection by name (اللون / «لون التطريز» / «تطريز*»), sash-only (robe/cap
+   «اللون» keeps real swatches).
+4. **Deleted** retail designer: `app/design/*`, `hooks/useDesignDraft.ts`, `DesignerStepper`, `DesignPreview`,
+   `FabricPanelPreview`, `SashFlat`. **KEPT** (shared): staff `DesignViewer`, admin `SashSideLockEditor`,
+   `TextEditor`, `Whiteboard`, `SashGownPreview`, `GownPanelImage`, `DesignerToolsAside`, `render-sash-panel`,
+   `lib/designer*`. (GownPanelImage + DesignerToolsAside were briefly deleted then restored — kept comps import
+   them via relative paths the importer-grep missed.)
+5. **CTAs** — removed/repointed every «صمّم وشاحك»→/design: StudentNav tab + sitemap removed; ShopCover /
+   BrandStory / SpotlightReel → `/#catalog`; VIP `pick` + `package` confirm → `/cart`; VIP `onStandard` → `/`;
+   cart post-checkout no longer pushes /design.
+
+### Open follow-ups
+- **Seed not updated** for 040 (live Neon migrated; migration is idempotent + `parent_id IS NULL`-scoped).
+- **Package / VIP sashes** confirm a package → `/cart`; they do NOT collect per-side embroidery from the student
+  (the designer used to). OK under "staff design every order"; wire the new intake into the package flow if
+  students should self-spec package sashes.
+- `next build` not run (dev server up). `PROGRESS.md` not updated. Pre-existing untracked junk
+  (`backend/_seed_mock.js`, `frontend/public/queue-mockups/`) left out of the commit.
+
+---
+
 ## 2026-06-19 (b) — 7-part batch: guest cart gate · «لون التطريز» · OTP (kill 111111 + WhatsApp + unified signup design) · admin-controlled discount popup · cinematic splash · context-aware back
 
 Committed to **main** this session. Built mostly via a parallel agent workflow (6 disjoint streams)
