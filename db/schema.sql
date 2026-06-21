@@ -82,7 +82,7 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 CREATE TABLE IF NOT EXISTS users (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name          TEXT NOT NULL,
-  phone         TEXT NOT NULL UNIQUE,
+  phone         TEXT UNIQUE,  -- nullable: phoneless staff log in via the private staff portal (see migration 042)
   email         TEXT UNIQUE,
   password_hash TEXT NOT NULL,
   role          user_role NOT NULL,

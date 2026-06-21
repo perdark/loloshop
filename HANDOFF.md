@@ -6,6 +6,53 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
+## 2026-06-21 (c) — private staff portal: phoneless staff log in by name + password (no OTP), secret URL
+
+Uncommitted on **main**. Gates green: FE `tsc` 0 · `eslint` 0 · BE `node --check` 0. **Migration 042 applied to Neon + verified.**
+Verified **end-to-end (backend e2e + live dev browser)** — see below. `next build` NOT run (dev server up). Spec:
+`docs/superpowers/specs/2026-06-21-staff-portal-login-design.md`.
+
+**Why.** Staff log in with phone+password→**WhatsApp OTP**. Some staff have **no phone** → can't be created (`users.phone`
+was `NOT NULL`) and can't receive the OTP. New **private staff portal**: pick name from a dropdown + password, **no OTP**,
+behind a **secret URL**. Existing phone+OTP login is untouched (purely additive).
+
+**1. Secret URL (fail-closed).** Page `frontend/app/s/[key]/page.tsx` — the `[key]` path segment IS the secret. Backend
+validates it against env **`STAFF_PORTAL_KEY`**; wrong/missing key → plain **404** (looks like a non-existent page; zero hint
+the portal exists). If the env var is unset the portal is fully off. **The live key is `e32ed299a047eec2c7ee`** →
+URL `https://<host>/s/e32ed299a047eec2c7ee` (set in `backend/.env`; rotate there + restart). Not linked anywhere.
+
+**2. Backend (`controllers/authController.js`, `routes/auth.js`).** Two key-gated endpoints:
+   - `GET /auth/staff-portal/members?key=…` → `[{id,name}]` for `role='staff'` only (no phone/email leak). Rate-limit 30/15m.
+   - `POST /auth/staff-portal-login {key, staff_id, password}` → validates key + UUID + `role='staff'` + bcrypt → JWT via
+     `signToken`, **no OTP**. Rate-limit 20/15m (shared `loginLimit`). Generic Arabic errors. **Hard-restricted to staff** —
+     admin/wholesaler/retail can never be obtained here (verified: retail id → 401), limiting blast radius if the key leaks.
+
+**3. Migration 042** (`042_users_phone_optional.sql`, applied+verified `is_nullable=YES`): `ALTER TABLE users ALTER COLUMN
+phone DROP NOT NULL`. The existing `users_phone_key` UNIQUE already allows multiple NULLs (PG treats NULLs as distinct), so
+real phones stay unique. `schema.sql` mirrored (`phone TEXT UNIQUE`).
+
+**4. Admin staff create — phone now optional.** `adminController.createStaff`: empty/missing phone → NULL; normalize +
+dup-check only when present; password still required. `app/staff/team/page.tsx`: phone field labelled «اختياري» + hint;
+roster shows «بدون هاتف · يدخل عبر الرابط الخاص» for phoneless staff. FE `CreateStaffPayload.phone` optional. `lib/api.ts`
+interceptor: a 401 from `/auth/staff-portal` no longer triggers the global logout/redirect.
+
+**Verified.** BE e2e (temp staff, cleaned up): members=200 returns only `{id,name}`; login correct→200+token role=staff;
+wrong pw→401; wrong key→404; malformed id→401; **retail id→401**; createStaff no-phone→201 stored `phone:null`. Live browser:
+`/s/<key>` renders the branded card + name dropdown + password; full login → redirected to `/staff`, token+user(role=staff,
+phone=null) stored; `/s/WRONGKEY`→ neutral «404 الصفحة غير موجودة»; console clean (the lone 404 is the intended wrong-key).
+
+### Open follow-ups
+- **⚠️ Set `STAFF_PORTAL_KEY` in the PROD `.env` on the VPS** (+ `pm2 restart`) — without it the portal is 404 in prod.
+  Pick the same or a fresh key; share `/s/<key>` only with staff.
+- **Deliberate trade-offs:** no OTP for portal staff (they have no phone anyway); the staff-name list is visible to anyone
+  with the key; the key rides in the URL (can land in logs/Referer) → treat it like a password, rotate via env.
+- **Password min stayed 6** (consistent with `updateStaffPassword`); I did NOT bump portal staff to 8 as floated in the
+  design — do it in `createStaff`+`resetStaffPassword`+FE messages if you want it.
+- Uncommitted on main; `next build` not run; `PROGRESS.md` not updated. The browser test session is still logged in as the
+  (now-deleted) temp staff — its token will 401→logout on next call; harmless.
+
+---
+
 ## 2026-06-21 (b) — home «نحيكها» gift-bag section · wholesaler-student order = base+surcharge (no package/no لون الوشاح) · OTP delivery fixes
 
 Uncommitted on **main**. Gates green: FE `tsc` 0 · `eslint` 0 · BE `node --check` 0. Migration **041 applied to Neon + verified**.

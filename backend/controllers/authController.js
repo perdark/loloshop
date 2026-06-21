@@ -109,6 +109,58 @@ async function loginVerifyOtp(req, res) {
   });
 }
 
+// ── Private staff portal (name + password, no OTP) ──────────────────────────
+// For staff who have no phone and so can't receive a WhatsApp OTP. The portal is
+// guarded by a secret key (STAFF_PORTAL_KEY) that lives in the URL the admin shares;
+// a wrong/missing key returns 404 so students/retail never learn the portal exists.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function portalKeyOk(provided) {
+  const key = process.env.STAFF_PORTAL_KEY;
+  // Fail closed: no key configured → portal is off.
+  return !!key && typeof provided === 'string' && provided === key;
+}
+
+// GET /auth/staff-portal/members?key=… → [{ id, name }] for staff only. Key-gated.
+async function staffPortalMembers(req, res) {
+  if (!portalKeyOk(req.query.key)) {
+    return res.status(404).json({ error: 'غير موجود', code: 'ERR_NOT_FOUND' });
+  }
+  const { rows } = await query(
+    `SELECT id, name FROM users WHERE role = 'staff' ORDER BY name ASC`
+  );
+  res.json({ data: rows });
+}
+
+// POST /auth/staff-portal-login { key, staff_id, password } → JWT, no OTP. Staff only.
+async function staffPortalLogin(req, res) {
+  const { key, staff_id, password } = req.body;
+  if (!portalKeyOk(key)) {
+    return res.status(404).json({ error: 'غير موجود', code: 'ERR_NOT_FOUND' });
+  }
+  if (!staff_id || !password) {
+    return res.status(400).json({ error: 'بيانات ناقصة', code: 'ERR_VALIDATION' });
+  }
+  // Guard the UUID cast so a malformed id is a clean 401, not a 500.
+  if (!UUID_RE.test(String(staff_id))) {
+    return res.status(401).json({ error: 'بيانات خاطئة', code: 'ERR_INVALID_CREDENTIALS' });
+  }
+  const { rows } = await query(
+    `SELECT id, name, role, password_hash FROM users WHERE id = $1 AND role = 'staff'`,
+    [staff_id]
+  );
+  if (!rows.length) {
+    return res.status(401).json({ error: 'بيانات خاطئة', code: 'ERR_INVALID_CREDENTIALS' });
+  }
+  const user = rows[0];
+  const ok = await bcrypt.compare(password, user.password_hash);
+  if (!ok) {
+    return res.status(401).json({ error: 'بيانات خاطئة', code: 'ERR_INVALID_CREDENTIALS' });
+  }
+  const token = signToken(user);
+  res.json({ token, user: { id: user.id, name: user.name, role: user.role } });
+}
+
 async function me(req, res) {
   // Retail accounts carry their student profile (signup captures instagram_username,
   // university, …) so forms — e.g. the full-set wizard — can prefill from the login.
@@ -216,4 +268,4 @@ async function resetPassword(req, res) {
   res.json({ reset: true });
 }
 
-module.exports = { register, login, loginVerifyOtp, me, postVerifyOtp, resendOtp, forgotPassword, resetPassword, forgotPasswordPhone, resetPasswordPhone };
+module.exports = { register, login, loginVerifyOtp, me, postVerifyOtp, resendOtp, forgotPassword, resetPassword, forgotPasswordPhone, resetPasswordPhone, staffPortalMembers, staffPortalLogin };

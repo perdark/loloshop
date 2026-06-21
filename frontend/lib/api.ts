@@ -53,8 +53,11 @@ api.interceptors.response.use(
       const isPublicCatalog =
         url.includes("/catalog/shop") ||
         url.includes("/catalog/products/") && url.includes("/full");
+      // A bad password on the private staff portal must NOT trigger a global logout/redirect.
+      const isStaffPortal = url.includes("/auth/staff-portal");
       if (
         !isPublicCatalog &&
+        !isStaffPortal &&
         !path.startsWith("/login") &&
         !path.startsWith("/join")
       ) {

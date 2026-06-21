@@ -647,13 +647,13 @@ export default function AdminStaffPage() {
   }, [load]);
 
   async function handleCreate() {
-    if (!name.trim() || !phone.trim() || password.length < 6) {
-      toast.error("يرجى إدخال الاسم والهاتف وكلمة مرور ٦ أحرف على الأقل");
+    if (!name.trim() || password.length < 6) {
+      toast.error("يرجى إدخال الاسم وكلمة مرور ٦ أحرف على الأقل");
       return;
     }
     setSubmitting(true);
     try {
-      await createStaff({ name, phone, email, password, staff_types: staffTypesField, order_scope: orderScopeField });
+      await createStaff({ name, phone: phone.trim() || undefined, email, password, staff_types: staffTypesField, order_scope: orderScopeField });
       toast.success("تم إنشاء الموظف");
       setCreateOpen(false);
       setName("");
@@ -764,9 +764,15 @@ export default function AdminStaffPage() {
                   </span>
                   <div>
                     <p className="font-semibold text-ink">{u.name}</p>
-                    <p className="text-sm text-ink-soft" dir="ltr">
-                      {u.phone}
-                    </p>
+                    {u.phone ? (
+                      <p className="text-sm text-ink-soft" dir="ltr">
+                        {u.phone}
+                      </p>
+                    ) : (
+                      <p className="text-xs font-medium text-orange-ink">
+                        بدون هاتف · يدخل عبر الرابط الخاص
+                      </p>
+                    )}
                     {u.email && <p className="text-xs text-[var(--shop-muted)]">{u.email}</p>}
                     <div className="mt-1 flex flex-wrap gap-1">
                       {rolesOf(u).map((t) => (
@@ -848,13 +854,18 @@ export default function AdminStaffPage() {
       >
         <div className="space-y-3">
           <Input label="الاسم" value={name} onChange={(e) => setName(e.target.value)} />
-          <Input
-            label="الهاتف"
-            type="tel"
-            dir="ltr"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-          />
+          <div>
+            <Input
+              label="الهاتف (اختياري)"
+              type="tel"
+              dir="ltr"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+            />
+            <p className="mt-1 text-xs text-[var(--shop-muted)]">
+              الموظفون بدون هاتف يدخلون عبر الرابط الخاص (الاسم + كلمة المرور، بدون رمز تحقق).
+            </p>
+          </div>
           <Input
             label="البريد الإلكتروني (اختياري)"
             type="email"

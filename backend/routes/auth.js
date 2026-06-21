@@ -23,4 +23,9 @@ router.post('/reset-password', verifyLimit, c.resetPassword);
 router.post('/forgot-password-phone', otpLimit, c.forgotPasswordPhone);
 router.post('/reset-password-phone', verifyLimit, c.resetPasswordPhone);
 
+// Private staff portal (phoneless staff: name + password, no OTP). Key-gated; see authController.
+const portalLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 30 });
+router.get('/staff-portal/members', portalLimit, c.staffPortalMembers);
+router.post('/staff-portal-login', loginLimit, c.staffPortalLogin);
+
 module.exports = router;

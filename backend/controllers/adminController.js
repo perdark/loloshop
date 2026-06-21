@@ -489,10 +489,15 @@ async function listStaff(req, res) {
 }
 
 async function createStaff(req, res) {
-  // Normalize phone before duplicate-check + insert.
-  req.body.phone = normalizeIqPhone(req.body.phone);
-  const { name, phone, email, password, order_scope } = req.body;
-  if (!name || !phone || !password) {
+  // Phone is OPTIONAL: staff with no phone log in via the private staff portal
+  // (name + password, no OTP). Treat empty/missing as NULL; normalize when present.
+  const rawPhone = req.body.phone;
+  const phone =
+    rawPhone != null && String(rawPhone).trim() !== ''
+      ? normalizeIqPhone(rawPhone)
+      : null;
+  const { name, email, password, order_scope } = req.body;
+  if (!name || !password) {
     return res.status(400).json({ error: 'بيانات ناقصة', code: 'ERR_VALIDATION' });
   }
   if (String(password).length < 6) {
@@ -505,9 +510,11 @@ async function createStaff(req, res) {
   if (order_scope && !STAFF_SCOPES.includes(order_scope)) {
     return res.status(400).json({ error: 'نطاق طلبات غير صالح', code: 'ERR_VALIDATION' });
   }
-  const exists = await query(`SELECT id FROM users WHERE phone = $1`, [phone]);
-  if (exists.rows.length) {
-    return res.status(409).json({ error: 'الرقم مستخدم', code: 'ERR_PHONE_TAKEN' });
+  if (phone) {
+    const exists = await query(`SELECT id FROM users WHERE phone = $1`, [phone]);
+    if (exists.rows.length) {
+      return res.status(409).json({ error: 'الرقم مستخدم', code: 'ERR_PHONE_TAKEN' });
+    }
   }
   const primaryType = staffTypes[0] || null;
   const typesParam = staffTypes.length ? staffTypes : null;

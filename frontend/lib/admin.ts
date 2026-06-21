@@ -495,7 +495,8 @@ interface ApiStaffRow {
 
 export interface CreateStaffPayload {
   name: string;
-  phone: string;
+  /** Optional: staff with no phone log in via the private staff portal. */
+  phone?: string;
   email?: string;
   password: string;
   /** Multi-role (Migration 029): all production roles this staff member holds. */

@@ -143,4 +143,39 @@ export async function resendVerifyOtp(phone: string): Promise<void> {
   }
 }
 
+// ── Private staff portal (phoneless staff: pick name + password, no OTP) ──────
+export interface StaffPortalMember {
+  id: string;
+  name: string;
+}
+
+// Returns the staff name list for the dropdown. The secret key must be in the URL;
+// a wrong/missing key returns 404 (caller treats it as "page not found").
+export async function getStaffPortalMembers(
+  key: string
+): Promise<StaffPortalMember[]> {
+  const { data } = await api.get<{ data: StaffPortalMember[] }>(
+    "/auth/staff-portal/members",
+    { params: { key } }
+  );
+  return data.data || [];
+}
+
+export async function staffPortalLogin(
+  key: string,
+  staffId: string,
+  password: string
+): Promise<LoginResponse> {
+  try {
+    const { data } = await api.post<LoginResponse>("/auth/staff-portal-login", {
+      key,
+      staff_id: staffId,
+      password,
+    });
+    return data;
+  } catch (e) {
+    throw new Error(extractMessage(e, "بيانات الدخول غير صحيحة"));
+  }
+}
+
 export { getApiErrorMessage };
