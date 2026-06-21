@@ -1,0 +1,54 @@
+/* LoloShop brand tokens — source of truth mirror for the /staff/queue design mockups.
+   Warm-orange couture identity. RTL Arabic. NOT navy/green/gold, NOT purple/Inter. */
+@import url('https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Cairo:wght@300;400;500;600;700;800&family=Playfair+Display:wght@500;600;700;800;900&family=Great+Vibes&display=swap');
+
+:root {
+  --orange: #f47b42;          /* logo circle — large fills / buttons */
+  --orange-light: #ffa07a;
+  --orange-ink: #c2410c;      /* accents / text on light, WCAG-safe */
+  --peach: #ffdab9;
+  --blush: #ffe4e1;
+  --cream: #faf4ea;           /* warm paper — page canvas */
+  --beige: #fffdfa;           /* raised surface — cards, sheets */
+  --sink: #f5f0e6;            /* recessed bands */
+  --ink: #1a1a1a;
+  --ink-soft: #33302b;        /* body reading color */
+  --muted: #6b6356;           /* labels / metadata */
+  --line: #e3ddd0;            /* hairline borders */
+  --green: #15803d;           /* ready / done */
+  --red: #b91c1c;             /* alerts / overdue / missing design */
+  --amber: #b45309;
+
+  --brand-grad: linear-gradient(135deg, var(--orange-ink), var(--orange));
+  --shadow-soft: 0 1px 3px rgba(60, 40, 20, .07);
+  --shadow-card: 0 6px 22px -10px rgba(120, 70, 30, .28);
+  --shadow-float: 0 14px 40px -16px rgba(120, 70, 30, .42);
+
+  --font-ui: 'Cairo', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Amiri', 'Playfair Display', serif;
+  --font-latin: 'Playfair Display', serif;
+  --font-script: 'Great Vibes', cursive;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: var(--font-ui);
+  background: var(--cream);
+  color: var(--ink-soft);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+.font-display { font-family: var(--font-display); }
+.font-script  { font-family: var(--font-script); }
+.tnum { font-variant-numeric: tabular-nums; }
+
+/* Shared brand mark — every mockup gets the same identity chip in its header. */
+.brandmark { display:inline-flex; align-items:center; gap:.5rem; }
+.brandmark .dot {
+  width: 34px; height: 34px; border-radius: 999px; flex: none;
+  background: var(--brand-grad); color:#fff; font-family: var(--font-script);
+  font-size: 20px; display:grid; place-items:center; box-shadow: var(--shadow-soft);
+}
+.brandmark b { font-family: var(--font-script); font-size: 22px; color: var(--orange-ink); font-weight:400; }
+.brandmark small { font-family: var(--font-latin); font-weight:700; color: var(--ink); }

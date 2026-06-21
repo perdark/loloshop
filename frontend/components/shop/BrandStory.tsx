@@ -25,8 +25,17 @@ export function AtelierStory() {
         </h2>
       </div>
 
-      {/* The bag — centred, transparent, on the page itself (no panel/background). */}
-      <figure className="order-2 m-0 lg:order-none">
+      {/* The bag — emerges from a soft peach halo so it sits IN the warm page
+          rather than floating on top of it; ink-soft shadow keeps it grounded. */}
+      <figure className="relative order-2 m-0 lg:order-none">
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-0 z-0 m-auto aspect-square w-[90%] rounded-full blur-[8px]"
+          style={{
+            background:
+              "radial-gradient(circle, color-mix(in srgb, var(--color-peach) 51%, transparent) 0%, transparent 70%)",
+          }}
+        />
         <Image
           src="/lookbook/gift-bag.png"
           alt="حقيبة هدية لولو شوب الفاخرة السوداء بشعار المتجر البرتقالي وزخارف عربية"
@@ -34,7 +43,7 @@ export function AtelierStory() {
           height={485}
           sizes="(min-width: 1024px) 360px, 72vw"
           loading="lazy"
-          className="mx-auto h-auto w-[72vw] max-w-[300px] drop-shadow-[0_24px_36px_rgba(26,26,26,0.28)] transition-transform duration-700 ease-out hover:scale-[1.03] lg:w-[360px] lg:max-w-none"
+          className="relative z-10 mx-auto h-auto w-[72vw] max-w-[300px] drop-shadow-[0_14px_26px_rgba(26,26,26,0.14)] transition-transform duration-700 ease-out hover:scale-[1.03] lg:w-[360px] lg:max-w-none"
         />
       </figure>
 

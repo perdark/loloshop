@@ -1,0 +1,92 @@
+<!doctype html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>تصاميم شاشة خط الإنتاج — LoloShop</title>
+<link rel="stylesheet" href="tokens.css" />
+<style>
+  body { min-height: 100vh; }
+  .wrap { max-width: 1240px; margin-inline: auto; padding: clamp(1rem, 3vw, 2.25rem); }
+  header.top { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; justify-content: space-between; }
+  .title h1 { font-family: var(--font-display); font-size: clamp(1.5rem, 4vw, 2.4rem); color: var(--ink); margin: .4rem 0 .2rem; font-weight: 800; }
+  .title p { margin: 0; color: var(--muted); font-size: .95rem; max-width: 52ch; line-height: 1.7; }
+  .note { margin: 1.5rem 0 1.75rem; background: var(--beige); border: 1px solid var(--line); border-inline-start: 4px solid var(--orange); border-radius: 14px; padding: .85rem 1.1rem; color: var(--ink-soft); font-size: .9rem; line-height: 1.7; box-shadow: var(--shadow-soft); }
+  .note b { color: var(--orange-ink); }
+  .grid { display: grid; gap: 1.4rem; grid-template-columns: 1fr; }
+  @media (min-width: 720px) { .grid { grid-template-columns: 1fr 1fr; } }
+  @media (min-width: 1080px) { .grid { grid-template-columns: 1fr 1fr 1fr; } }
+
+  .card { display: flex; flex-direction: column; background: var(--beige); border: 1px solid var(--line); border-radius: 20px; overflow: hidden; box-shadow: var(--shadow-card); transition: transform .18s ease, box-shadow .18s ease; text-decoration: none; color: inherit; }
+  .card:hover { transform: translateY(-4px); box-shadow: var(--shadow-float); }
+  .thumb { position: relative; aspect-ratio: 16 / 10; overflow: hidden; background: var(--sink); border-bottom: 1px solid var(--line); }
+  .thumb iframe { position: absolute; inset-block-start: 0; inset-inline-end: 0; width: 1320px; height: 825px; border: 0; transform: scale(.345); transform-origin: top right; pointer-events: none; }
+  html[dir="rtl"] .thumb iframe { transform-origin: top right; }
+  .num { position: absolute; inset-block-start: 10px; inset-inline-start: 10px; z-index: 2; width: 34px; height: 34px; border-radius: 999px; background: var(--brand-grad); color: #fff; display: grid; place-items: center; font-weight: 800; font-size: 1rem; box-shadow: var(--shadow-card); }
+  .open { position: absolute; inset-block-end: 10px; inset-inline-start: 10px; z-index: 2; background: rgba(255,253,250,.92); backdrop-filter: blur(4px); border: 1px solid var(--line); color: var(--orange-ink); font-family: var(--font-ui); font-weight: 700; font-size: .8rem; padding: .4rem .7rem; border-radius: 999px; box-shadow: var(--shadow-soft); }
+  .body { padding: 1rem 1.15rem 1.2rem; }
+  .body h2 { margin: 0 0 .35rem; font-family: var(--font-display); font-size: 1.2rem; color: var(--ink); font-weight: 800; }
+  .body .en { font-family: var(--font-latin); font-weight: 600; color: var(--orange-ink); font-size: .78rem; letter-spacing: .02em; }
+  .body p { margin: .5rem 0 0; color: var(--ink-soft); font-size: .86rem; line-height: 1.7; }
+  .best { margin-top: .7rem; display: inline-flex; align-items: center; gap: .35rem; font-size: .76rem; color: var(--muted); }
+  .best b { color: var(--ink); }
+  footer { margin-top: 2.5rem; color: var(--muted); font-size: .82rem; text-align: center; line-height: 1.8; }
+  code { background: var(--sink); padding: .12rem .4rem; border-radius: 6px; font-size: .85em; color: var(--orange-ink); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="title">
+      <span class="brandmark"><span class="dot">L</span><b>lolo</b><small>96</small></span>
+      <h1>تصاميم شاشة خط الإنتاج</h1>
+      <p>ثلاثة اتجاهات <b style="color:var(--orange-ink)">قابلة للتوسّع</b> لشاشة <code>/staff/queue</code> — مبنية على نمط صفحة <code>/admin/orders</code> وتتحمّل <b style="color:var(--orange-ink)">+150 طلب</b> (هنا ١٦٨ طلباً حقيقياً عبر ٥ ممثلين). كلها تعرض نفس البيانات وتُدار بالفلترة و«التنقّل للأسفل» بدل النظر للكل دفعةً واحدة. اختر الأنسب وسأبنيه بالكامل.</p>
+    </div>
+  </header>
+
+  <div class="note">
+    افتح كل تصميم بملء الشاشة وجرّبه على <b>الكمبيوتر والآيباد والموبايل</b> — كلها متجاوبة وعربية RTL. المعاينات بالأسفل مصغّرة وحيّة. أخبرني برقم التصميم المفضّل (أو امزج بين عناصر من أكثر من واحد).
+  </div>
+
+  <div class="grid" id="grid"></div>
+
+  <footer>
+    كل التصاميم ملفات HTML مستقلة في <code>frontend/public/queue-mockups/</code> — تُفتح أيضاً مباشرة من الجهاز.<br>
+    البيانات التجريبية مشتركة في <code>data.js</code> · الهوية في <code>tokens.css</code>.
+  </footer>
+</div>
+
+<script>
+  const DESIGNS = [
+    { n: 'أ', file: 'table.html',   ar: 'جدول الإنتاج',     en: 'Admin-style Dense Table',
+      desc: 'الأقرب لصفحة /admin/orders: تبويب تجزئة/ممثلين + فلاتر (مرحلة·تطريز·بحث) + تنقّل للممثل ثم الدفعة + جدول كثيف قابل للفرز مع صفحات. يهضم +150 طلب بالفلترة.',
+      best: 'الأقرب لِـ /admin/orders · الأكثر أماناً للتوسّع' },
+    { n: 'ب', file: 'grouped.html', ar: 'حسب الممثل والدفعة', en: 'Rep-grouped Ledger',
+      desc: 'كل الطلبات مجمّعة: ممثل ← دفعة. كل مجموعة برأس فيه ملخّص (شريط توزيع المراحل + متأخر/مفقود/يعمل الآن). افتح المجموعة لرؤية صفوفها. تشتغل ممثل-ممثل دون ازدحام.',
+      best: 'الأفضل لِـ: العمل ممثل-بممثل على +150 طلب' },
+    { n: 'ج', file: 'console.html', ar: 'منصّة الإنتاج',     en: 'Stage-rail Console',
+      desc: 'شريط مراحل جانبي بأعداد حيّة وأشرطة حِمل (نقرة = فلترة فورية) + جدول كثيف بتبويب المصدر وفلاتر وبحث وصفحات + شريط مؤشرات (متأخر/مفقود/جاهز).',
+      best: 'الأفضل لِـ: التبديل السريع بين المراحل طوال اليوم' },
+  ];
+  const grid = document.getElementById('grid');
+  DESIGNS.forEach(d => {
+    const a = document.createElement('a');
+    a.className = 'card';
+    a.href = d.file; a.target = '_blank'; a.rel = 'noopener';
+    a.innerHTML = `
+      <div class="thumb">
+        <span class="num">${d.n}</span>
+        <span class="open">افتح بملء الشاشة ←</span>
+        <iframe src="${d.file}" loading="eager" tabindex="-1" scrolling="no" title="${d.ar}"></iframe>
+      </div>
+      <div class="body">
+        <span class="en">${d.en}</span>
+        <h2>${d.n} — ${d.ar}</h2>
+        <p>${d.desc}</p>
+        <span class="best">★ <b>${d.best.replace('الأفضل لـ: ','')}</b></span>
+      </div>`;
+    grid.appendChild(a);
+  });
+</script>
+</body>
+</html>

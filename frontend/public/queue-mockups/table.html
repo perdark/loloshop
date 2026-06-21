@@ -1,0 +1,847 @@
+<!doctype html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>جدول الإنتاج — LoloShop Staff Queue</title>
+<link rel="stylesheet" href="tokens.css" />
+<script src="data.js"></script>
+<style>
+/* ── Reset & base ─────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body { background: var(--cream); color: var(--ink-soft); font-family: var(--font-ui); min-height: 100dvh; }
+
+/* ── Layout ───────────────────────────────────────────────────────────── */
+.wrap { max-width: 1380px; margin-inline: auto; padding: clamp(.75rem, 2.5vw, 1.75rem); }
+
+/* ── Header ───────────────────────────────────────────────────────────── */
+.topbar {
+  display: flex; align-items: center; gap: 1rem;
+  justify-content: space-between; flex-wrap: wrap;
+  padding-block: .75rem;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 1.25rem;
+}
+.topbar-left { display: flex; align-items: center; gap: .9rem; }
+.topbar h1 {
+  font-family: var(--font-display); font-size: clamp(1.1rem, 2.5vw, 1.55rem);
+  color: var(--ink); font-weight: 800; line-height: 1.2;
+}
+.topbar .sub { font-size: .78rem; color: var(--muted); margin-top: .15rem; }
+.refresh-btn {
+  display: inline-flex; align-items: center; gap: .4rem;
+  height: 36px; padding-inline: 1rem;
+  border-radius: 999px; border: 1px solid var(--line);
+  background: var(--beige); color: var(--muted);
+  font-family: var(--font-ui); font-size: .8rem; font-weight: 600;
+  cursor: pointer; transition: border-color .15s, color .15s;
+  white-space: nowrap;
+}
+.refresh-btn:hover { border-color: var(--orange); color: var(--orange-ink); }
+
+/* ── Source tabs ──────────────────────────────────────────────────────── */
+.source-tabs {
+  display: flex; border-radius: 16px; overflow: hidden;
+  border: 1px solid var(--line); margin-bottom: 1.1rem;
+}
+.src-tab {
+  flex: 1; display: flex; flex-direction: column; gap: .15rem;
+  align-items: flex-start; padding: .65rem 1rem;
+  border-inline-end: 1px solid var(--line); cursor: pointer;
+  background: var(--beige); color: var(--ink); border: none;
+  font-family: var(--font-ui); text-align: start; min-height: 44px;
+  transition: background .15s;
+}
+.src-tab:last-child { border-inline-end: none; }
+.src-tab .lbl { font-size: .92rem; font-weight: 700; }
+.src-tab .sub { font-size: .76rem; color: var(--muted); display: flex; align-items: center; gap: .4rem; }
+.src-tab.active { background: var(--orange-ink); color: #fff; }
+.src-tab.active .sub { color: rgba(255,255,255,.75); }
+.badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 20px; height: 20px; padding-inline: 5px;
+  border-radius: 999px; font-size: .7rem; font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.badge-active { background: rgba(255,255,255,.22); color: #fff; }
+.badge-idle { background: var(--peach); color: var(--orange-ink); }
+
+/* ── صحة الإنتاج strip ───────────────────────────────────────────────── */
+.health-strip {
+  display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem;
+  background: rgba(244,123,66,.06); border: 1px solid rgba(244,123,66,.18);
+  border-radius: 14px; padding: .6rem .8rem;
+}
+.health-item {
+  display: flex; align-items: center; gap: .35rem;
+  padding: .28rem .65rem; border-radius: 999px; cursor: pointer;
+  border: 1px solid transparent; font-size: .78rem; font-weight: 600;
+  font-family: var(--font-ui); background: none; color: var(--ink-soft);
+  transition: background .13s, border-color .13s;
+  min-height: 32px;
+}
+.health-item:hover { background: rgba(255,255,255,.7); border-color: var(--line); }
+.health-item.active-filter { background: var(--orange-ink); color: #fff; border-color: var(--orange-ink); }
+.health-item .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.health-dot-design   { background: #7c3aed; }
+.health-dot-converting { background: #0369a1; }
+.health-dot-embroidery{ background: var(--orange); }
+.health-dot-pressing  { background: var(--amber); }
+.health-dot-preparing { background: #d97706; }
+.health-dot-ready     { background: var(--green); }
+.health-num { font-variant-numeric: tabular-nums; color: var(--ink); font-weight: 800; font-size: .85rem; }
+.health-label { display: none; }
+@media (min-width: 640px) { .health-label { display: inline; } }
+
+/* ── Filters bar ──────────────────────────────────────────────────────── */
+.filters-bar {
+  display: flex; flex-wrap: wrap; gap: .5rem;
+  margin-bottom: .75rem; align-items: center;
+}
+.search-box {
+  flex: 1; min-width: 160px; max-width: 240px;
+  height: 38px; padding-inline: .75rem;
+  border: 1px solid var(--line); border-radius: 10px;
+  background: var(--beige); font-family: var(--font-ui); font-size: .84rem;
+  color: var(--ink); outline: none;
+}
+.search-box:focus { border-color: var(--orange); box-shadow: 0 0 0 3px rgba(244,123,66,.12); }
+.chip-group { display: flex; flex-wrap: wrap; gap: .35rem; }
+.chip {
+  padding: .3rem .7rem; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--beige); color: var(--muted); font-family: var(--font-ui);
+  font-size: .78rem; font-weight: 600; cursor: pointer; white-space: nowrap;
+  transition: background .13s, border-color .13s, color .13s;
+  min-height: 32px; display: inline-flex; align-items: center;
+}
+.chip:hover { border-color: var(--orange-light); color: var(--orange-ink); }
+.chip.on { background: var(--orange-ink); color: #fff; border-color: var(--orange-ink); }
+.sep { width: 1px; height: 24px; background: var(--line); flex: none; margin-inline: .1rem; align-self: center; }
+
+/* ── Rep grid (ممثلين landing) ────────────────────────────────────────── */
+#rep-grid {
+  display: grid; gap: .85rem;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  margin-bottom: 1rem;
+}
+.rep-card {
+  background: var(--beige); border: 1px solid var(--line);
+  border-radius: 16px; padding: .85rem 1rem;
+  cursor: pointer; text-align: start; font-family: var(--font-ui);
+  box-shadow: var(--shadow-soft); transition: transform .16s, box-shadow .16s, border-color .16s;
+}
+.rep-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-card); border-color: var(--orange-light); }
+.rep-card .rep-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: .5rem; }
+.rep-name { font-family: var(--font-display); font-size: 1rem; font-weight: 700; color: var(--ink); }
+.rep-count { font-size: .78rem; font-weight: 800; color: var(--orange-ink); background: rgba(244,123,66,.1); padding: .2rem .55rem; border-radius: 999px; white-space: nowrap; }
+.rep-batches { display: flex; flex-wrap: wrap; gap: .3rem; margin-bottom: .55rem; }
+.batch-chip-sm { font-size: .72rem; background: var(--sink); border: 1px solid var(--line); color: var(--muted); border-radius: 999px; padding: .12rem .5rem; }
+.rep-ready { font-size: .74rem; color: var(--green); font-weight: 600; }
+.rep-arrow { font-size: .78rem; color: var(--orange-ink); font-weight: 700; margin-top: .4rem; }
+
+/* ── Drill-down nav bar ───────────────────────────────────────────────── */
+#drilldown-nav {
+  display: none; flex-wrap: wrap; align-items: center;
+  gap: .4rem; margin-bottom: .85rem;
+}
+#drilldown-nav.visible { display: flex; }
+.back-btn {
+  display: inline-flex; align-items: center; gap: .3rem;
+  padding: .3rem .8rem; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--beige); color: var(--ink-soft); font-family: var(--font-ui);
+  font-size: .8rem; font-weight: 600; cursor: pointer; min-height: 36px;
+  transition: border-color .13s;
+}
+.back-btn:hover { border-color: var(--orange); color: var(--orange-ink); }
+.batch-chip {
+  padding: .28rem .65rem; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--sink); color: var(--muted); font-family: var(--font-ui);
+  font-size: .76rem; font-weight: 600; cursor: pointer; min-height: 32px;
+  display: inline-flex; align-items: center;
+  transition: background .13s, border-color .13s, color .13s;
+}
+.batch-chip.on { background: rgba(244,123,66,.12); color: var(--orange-ink); border-color: rgba(244,123,66,.4); }
+
+/* ── Table wrapper ────────────────────────────────────────────────────── */
+#table-wrap {
+  background: var(--beige); border-radius: 18px;
+  border: 1px solid var(--line); box-shadow: var(--shadow-soft);
+  overflow: hidden;
+}
+#table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+table.prod-table {
+  width: 100%; border-collapse: collapse;
+  font-size: .82rem; min-width: 780px;
+}
+table.prod-table thead {
+  position: sticky; top: 0; z-index: 20;
+  background: var(--sink); border-bottom: 2px solid var(--line);
+}
+table.prod-table th {
+  padding: .55rem .75rem; font-size: .73rem; font-weight: 700;
+  color: var(--muted); text-align: right; white-space: nowrap;
+  letter-spacing: .02em; text-transform: uppercase;
+  user-select: none;
+}
+table.prod-table th.sortable { cursor: pointer; }
+table.prod-table th.sortable:hover { color: var(--orange-ink); }
+.sort-arrow { opacity: .35; font-size: .65rem; margin-inline-start: .2rem; }
+.sort-arrow.active { opacity: .85; color: var(--orange-ink); }
+
+table.prod-table tbody tr {
+  border-bottom: 1px solid var(--line);
+  transition: background .1s;
+  cursor: pointer;
+}
+table.prod-table tbody tr:last-child { border-bottom: none; }
+table.prod-table tbody tr:nth-child(odd) { background: rgba(250,244,234,.45); }
+table.prod-table tbody tr:hover { background: rgba(255,218,185,.28); }
+table.prod-table td {
+  padding: .48rem .75rem; vertical-align: middle;
+  color: var(--ink-soft);
+}
+table.prod-table td.td-name { font-weight: 600; color: var(--ink); max-width: 160px; }
+table.prod-table td.td-uni { max-width: 140px; }
+.td-name span, .td-uni span {
+  display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* ── Stage pills ──────────────────────────────────────────────────────── */
+.stage-pill {
+  display: inline-flex; align-items: center; gap: .3rem;
+  padding: .2rem .6rem; border-radius: 999px; font-size: .72rem; font-weight: 700;
+  white-space: nowrap;
+}
+.stage-design_complete { background: #ede9fe; color: #5b21b6; }
+.stage-converting      { background: #e0f2fe; color: #0369a1; }
+.stage-embroidery      { background: #fef3c7; color: #b45309; }
+.stage-pressing        { background: #ffedd5; color: #c2410c; }
+.stage-preparing       { background: #fefce8; color: #854d0e; }
+.stage-ready           { background: #dcfce7; color: #15803d; }
+
+/* ── Product chip ─────────────────────────────────────────────────────── */
+.prod-chip {
+  display: inline-flex; align-items: center;
+  padding: .18rem .55rem; border-radius: 6px; font-size: .72rem; font-weight: 700;
+  border: 1px solid;
+}
+.prod-sash { background: #fdf4e3; border-color: #f5c07a; color: #92400e; }
+.prod-robe { background: #f0fdf4; border-color: #86efac; color: #166534; }
+.prod-cap  { background: #eff6ff; border-color: #93c5fd; color: #1d4ed8; }
+
+/* ── Staff pill ───────────────────────────────────────────────────────── */
+.staff-pill {
+  display: inline-flex; align-items: center; gap: .25rem;
+  font-size: .71rem; color: var(--orange-ink); font-weight: 600; white-space: nowrap;
+}
+.staff-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--orange); flex: none; animation: pulse-dot 2s infinite; }
+@keyframes pulse-dot { 0%,100%{opacity:1}50%{opacity:.35} }
+
+/* ── Time cell ────────────────────────────────────────────────────────── */
+.time-ok   { color: var(--muted); }
+.time-late { color: var(--red); font-weight: 700; }
+.time-late::after { content: ' متأخر'; font-size: .68rem; opacity: .8; }
+
+/* ── Missing alert ────────────────────────────────────────────────────── */
+.alert-missing {
+  display: inline-flex; align-items: center; gap: .25rem;
+  font-size: .7rem; font-weight: 700; color: var(--red);
+  background: rgba(185,28,28,.08); padding: .15rem .45rem;
+  border-radius: 6px; border: 1px solid rgba(185,28,28,.18);
+}
+
+/* ── Table footer ─────────────────────────────────────────────────────── */
+tfoot.prod-foot td {
+  padding: .5rem .75rem; font-size: .8rem; font-weight: 700;
+  color: var(--ink-soft); background: var(--sink);
+  border-top: 2px solid var(--line);
+}
+tfoot.prod-foot td:first-child { color: var(--muted); font-weight: 600; }
+
+/* ── Pagination ───────────────────────────────────────────────────────── */
+.pager {
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: .5rem;
+  padding: .6rem 1rem; border-top: 1px solid var(--line);
+  background: var(--beige);
+}
+.pager-info { font-size: .78rem; color: var(--muted); }
+.pager-btns { display: flex; gap: .35rem; }
+.pager-btn {
+  min-width: 32px; height: 32px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--beige);
+  color: var(--ink-soft); font-family: var(--font-ui); font-size: .78rem; font-weight: 600;
+  cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+  padding-inline: .5rem; transition: background .12s, border-color .12s;
+  min-height: 32px;
+}
+.pager-btn:hover:not(:disabled) { border-color: var(--orange); color: var(--orange-ink); }
+.pager-btn.current { background: var(--orange-ink); color: #fff; border-color: var(--orange-ink); }
+.pager-btn:disabled { opacity: .35; cursor: default; }
+
+/* ── Mobile cards ─────────────────────────────────────────────────────── */
+#mobile-cards { display: none; }
+@media (max-width: 767px) {
+  #table-scroll { display: none; }
+  #mobile-cards { display: block; }
+  .filters-bar .search-box { max-width: 100%; }
+  .health-strip { gap: .35rem; }
+}
+
+.mcard {
+  background: var(--beige); border: 1px solid var(--line);
+  border-radius: 14px; padding: .75rem .85rem; margin-bottom: .55rem;
+  cursor: pointer; transition: box-shadow .15s;
+  box-shadow: var(--shadow-soft);
+}
+.mcard:hover { box-shadow: var(--shadow-card); }
+.mcard-head { display: flex; align-items: flex-start; justify-content: space-between; gap: .5rem; margin-bottom: .4rem; }
+.mcard-name { font-weight: 700; color: var(--ink); font-size: .9rem; line-height: 1.3; }
+.mcard-rep { font-size: .72rem; color: var(--muted); margin-top: .1rem; }
+.mcard-row { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin-top: .35rem; }
+.mcard-time { font-size: .72rem; }
+.mcard-missing { margin-top: .3rem; }
+
+/* ── Empty state ──────────────────────────────────────────────────────── */
+.empty { padding: 2.5rem 1rem; text-align: center; color: var(--muted); font-size: .9rem; }
+.empty strong { display: block; font-family: var(--font-display); color: var(--ink); font-size: 1.15rem; margin-bottom: .35rem; }
+
+/* ── Corner badge ─────────────────────────────────────────────────────── */
+.corner-badge {
+  position: fixed; bottom: 1rem; inset-inline-end: 1rem; z-index: 100;
+  background: var(--brand-grad); color: #fff; border-radius: 10px;
+  padding: .35rem .75rem; font-size: .73rem; font-weight: 700;
+  box-shadow: var(--shadow-float); pointer-events: none;
+  font-family: var(--font-ui);
+}
+
+/* ── Scrollbar ────────────────────────────────────────────────────────── */
+#table-scroll::-webkit-scrollbar { height: 5px; }
+#table-scroll::-webkit-scrollbar-track { background: var(--sink); }
+#table-scroll::-webkit-scrollbar-thumb { background: var(--line); border-radius: 99px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ── Top bar ── -->
+  <header class="topbar">
+    <div class="topbar-left">
+      <span class="brandmark">
+        <span class="dot">L</span>
+        <b>lolo</b><small>96</small>
+      </span>
+      <div>
+        <h1>جدول الإنتاج</h1>
+        <div class="sub">خط إنتاج الطلبات · مرتّب حسب المرحلة والوقت</div>
+      </div>
+    </div>
+    <button class="refresh-btn" id="refreshBtn" onclick="render()">
+      ↻ تحديث
+    </button>
+  </header>
+
+  <!-- ── Source tabs ── -->
+  <div class="source-tabs" id="sourceTabs">
+    <button class="src-tab active" data-src="retail" onclick="setSource('retail')">
+      <span class="lbl">تجزئة</span>
+      <span class="sub">طلبات مستقلة <span class="badge badge-active" id="cnt-retail">—</span></span>
+    </button>
+    <button class="src-tab" data-src="wholesaler" onclick="setSource('wholesaler')">
+      <span class="lbl">ممثلين</span>
+      <span class="sub">طلبات الجامعات <span class="badge badge-idle" id="cnt-wholesaler">—</span></span>
+    </button>
+  </div>
+
+  <!-- ── صحة الإنتاج strip ── -->
+  <div class="health-strip" id="healthStrip"></div>
+
+  <!-- ── Filters bar ── -->
+  <div class="filters-bar" id="filtersBar">
+    <input class="search-box" id="searchInput" type="search" placeholder="ابحث باسم الطالب أو الجامعة..." oninput="render()" />
+    <div class="sep"></div>
+    <div class="chip-group" id="zoneChips"></div>
+    <div class="sep" id="zoneSep"></div>
+    <div class="chip-group" id="productChips">
+      <button class="chip on" data-prod="" onclick="setProd('')">الكل</button>
+      <button class="chip" data-prod="sash" onclick="setProd('sash')">وشاح</button>
+      <button class="chip" data-prod="robe" onclick="setProd('robe')">روب</button>
+      <button class="chip" data-prod="cap" onclick="setProd('cap')">قبعة</button>
+    </div>
+  </div>
+
+  <!-- ── Rep drill-down nav ── -->
+  <div id="drilldown-nav">
+    <button class="back-btn" onclick="clearRep()">← كل الممثلين</button>
+    <div id="batchChips" class="chip-group"></div>
+  </div>
+
+  <!-- ── Rep grid OR table ── -->
+  <div id="rep-grid"></div>
+
+  <div id="table-wrap" style="display:none">
+    <!-- table scroll (desktop) -->
+    <div id="table-scroll">
+      <table class="prod-table">
+        <thead>
+          <tr>
+            <th class="sortable" onclick="setSort('student')">الطالب <span class="sort-arrow" id="sa-student">↕</span></th>
+            <th>الجامعة / القسم</th>
+            <th>المنتج</th>
+            <th class="sortable" onclick="setSort('stage')">المرحلة <span class="sort-arrow" id="sa-stage">↕</span></th>
+            <th>الدفعة / الممثل</th>
+            <th>يعمل عليه الآن</th>
+            <th class="sortable" onclick="setSort('mins')">الوقت <span class="sort-arrow" id="sa-mins">↕</span></th>
+            <th>تنبيه</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+        <tfoot class="prod-foot">
+          <tr>
+            <td id="footCount" colspan="2">—</td>
+            <td colspan="6"></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+    <!-- pagination -->
+    <div class="pager" id="pager"></div>
+    <!-- mobile cards -->
+    <div id="mobile-cards"></div>
+  </div>
+
+</div>
+
+<!-- Corner badge -->
+<div class="corner-badge">تصميم أ — جدول الإنتاج</div>
+
+<script>
+(function () {
+  /* ── State ── */
+  const D = window.QUEUE_DATA;
+  let source = 'retail';
+  let selectedRep = null;
+  let selectedBatch = null;
+  let stageFilter = '';
+  let zoneFilter = '';
+  let prodFilter = '';
+  let search = '';
+  let sortKey = 'mins';
+  let sortDir = 'desc';
+  let page = 0;
+  const PAGE_SIZE = 25;
+
+  /* ── Helpers ── */
+  const $ = (id) => document.getElementById(id);
+  const stageOrder = ['design_complete','converting','embroidery','pressing','preparing','ready'];
+  const stageMap = {};
+  D.stages.forEach(s => stageMap[s.key] = s);
+
+  const STAGE_DOT_CLASS = {
+    design_complete: 'health-dot-design',
+    converting: 'health-dot-converting',
+    embroidery: 'health-dot-embroidery',
+    pressing: 'health-dot-pressing',
+    preparing: 'health-dot-preparing',
+    ready: 'health-dot-ready',
+  };
+
+  function mins2str(m) {
+    if (m < 60) return `${m} د`;
+    const h = Math.floor(m / 60), mi = m % 60;
+    return mi ? `${h}س ${mi}د` : `${h}س`;
+  }
+
+  function esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  /* ── Tab source switch ── */
+  window.setSource = function(s) {
+    source = s;
+    selectedRep = null; selectedBatch = null;
+    stageFilter = ''; zoneFilter = ''; prodFilter = ''; search = '';
+    page = 0;
+    document.querySelectorAll('.src-tab').forEach(t => {
+      t.classList.toggle('active', t.dataset.src === s);
+      t.querySelector('.badge').className = 'badge ' + (t.dataset.src === s ? 'badge-active' : 'badge-idle');
+    });
+    $('searchInput').value = '';
+    updateZoneChips();
+    render();
+  };
+
+  /* ── Prod chip ── */
+  window.setProd = function(p) {
+    prodFilter = p; page = 0;
+    document.querySelectorAll('#productChips .chip').forEach(c => {
+      c.classList.toggle('on', c.dataset.prod === p);
+    });
+    render();
+  };
+
+  /* ── Zone chips ── */
+  function updateZoneChips() {
+    const zc = $('zoneChips');
+    zc.innerHTML = '';
+    const all = document.createElement('button');
+    all.className = 'chip' + (zoneFilter === '' ? ' on' : '');
+    all.textContent = 'كل التطريز';
+    all.onclick = () => { zoneFilter = ''; page = 0; updateZoneChips(); render(); };
+    zc.appendChild(all);
+    D.zones.forEach(z => {
+      const b = document.createElement('button');
+      b.className = 'chip' + (zoneFilter === z.key ? ' on' : '');
+      b.textContent = z.label;
+      b.onclick = () => { zoneFilter = z.key; page = 0; updateZoneChips(); render(); };
+      zc.appendChild(b);
+    });
+  }
+
+  /* ── Sort ── */
+  window.setSort = function(key) {
+    if (sortKey === key) { sortDir = sortDir === 'desc' ? 'asc' : 'desc'; }
+    else { sortKey = key; sortDir = key === 'mins' ? 'desc' : 'asc'; }
+    page = 0;
+    render();
+  };
+
+  /* ── Rep drill-down ── */
+  window.clearRep = function() {
+    selectedRep = null; selectedBatch = null; page = 0;
+    render();
+  };
+
+  window.selectRep = function(repId) {
+    selectedRep = repId; selectedBatch = null; page = 0;
+    render();
+  };
+
+  window.selectBatch = function(b) {
+    selectedBatch = b; page = 0;
+    render();
+  };
+
+  /* ── Stage filter (health strip clicks) ── */
+  window.setStage = function(key) {
+    stageFilter = (stageFilter === key) ? '' : key; page = 0;
+    render();
+  };
+
+  /* ── Filter + sort pipeline ── */
+  function filtered() {
+    let list = D.orders;
+    // source
+    list = list.filter(o => o.source === source);
+    // rep
+    if (source === 'wholesaler' && selectedRep) {
+      const rep = D.reps.find(r => r.id === selectedRep);
+      if (rep) list = list.filter(o => o.rep === rep.name);
+    }
+    // batch
+    if (selectedBatch) list = list.filter(o => o.batch === selectedBatch);
+    // stage
+    if (stageFilter) list = list.filter(o => o.stage === stageFilter);
+    // zone
+    if (zoneFilter) list = list.filter(o => o.zone === zoneFilter);
+    // product
+    if (prodFilter) list = list.filter(o => o.type === prodFilter);
+    // search
+    if (search) {
+      const q = search.toLowerCase();
+      list = list.filter(o =>
+        o.student.toLowerCase().includes(q) ||
+        o.uni.toLowerCase().includes(q) ||
+        o.dept.toLowerCase().includes(q) ||
+        (o.rep && o.rep.toLowerCase().includes(q))
+      );
+    }
+    return list;
+  }
+
+  function sorted(list) {
+    return [...list].sort((a, b) => {
+      let av, bv;
+      if (sortKey === 'mins') { av = a.mins; bv = b.mins; }
+      else if (sortKey === 'stage') {
+        av = stageOrder.indexOf(a.stage); bv = stageOrder.indexOf(b.stage);
+      } else { // student
+        av = a.student; bv = b.student;
+        return sortDir === 'asc' ? av.localeCompare(bv, 'ar') : bv.localeCompare(av, 'ar');
+      }
+      return sortDir === 'asc' ? av - bv : bv - av;
+    });
+  }
+
+  /* ── Health strip ── */
+  function renderHealth(list) {
+    const counts = {};
+    D.stages.forEach(s => { counts[s.key] = 0; });
+    list.forEach(o => { counts[o.stage] = (counts[o.stage] || 0) + 1; });
+    const strip = $('healthStrip');
+    strip.innerHTML = '';
+    D.stages.forEach(s => {
+      const btn = document.createElement('button');
+      btn.className = 'health-item' + (stageFilter === s.key ? ' active-filter' : '');
+      btn.onclick = () => setStage(s.key);
+      btn.innerHTML = `
+        <span class="dot ${STAGE_DOT_CLASS[s.key]}"></span>
+        <span class="health-num">${counts[s.key]}</span>
+        <span class="health-label">${esc(s.label)}</span>
+      `;
+      btn.title = s.label;
+      strip.appendChild(btn);
+    });
+  }
+
+  /* ── Rep grid ── */
+  function renderRepGrid() {
+    // compute per-rep counts from current source
+    const sourceOrders = D.orders.filter(o => o.source === 'wholesaler');
+    const repGrid = $('rep-grid');
+    repGrid.innerHTML = '';
+    if (!D.reps.length) {
+      repGrid.innerHTML = '<p class="empty" style="grid-column:1/-1">لا يوجد ممثلون بعد.</p>';
+      return;
+    }
+    D.reps.forEach(r => {
+      const mine = sourceOrders.filter(o => o.rep === r.name);
+      const readyCount = mine.filter(o => o.stage === 'ready').length;
+      const card = document.createElement('button');
+      card.className = 'rep-card';
+      card.onclick = () => selectRep(r.id);
+      const batches = r.batches.map(b =>
+        `<span class="batch-chip-sm">${esc(b)}</span>`
+      ).join('');
+      card.innerHTML = `
+        <div class="rep-head">
+          <span class="rep-name">${esc(r.name)}</span>
+          <span class="rep-count">${mine.length} طلب</span>
+        </div>
+        ${batches ? `<div class="rep-batches">${batches}</div>` : ''}
+        <div class="rep-ready">${readyCount} جاهز للاستلام</div>
+        <div class="rep-arrow">عرض طلبات الممثل ←</div>
+      `;
+      repGrid.appendChild(card);
+    });
+  }
+
+  /* ── Table ── */
+  function renderTable(list) {
+    const pg = sorted(list).slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
+    // ─ sort arrows ─
+    ['student','stage','mins'].forEach(k => {
+      const el = $('sa-' + k);
+      if (!el) return;
+      if (sortKey === k) {
+        el.textContent = sortDir === 'asc' ? '↑' : '↓';
+        el.className = 'sort-arrow active';
+      } else {
+        el.textContent = '↕';
+        el.className = 'sort-arrow';
+      }
+    });
+
+    // ─ tbody ─
+    const tbody = $('tableBody');
+    if (!pg.length) {
+      tbody.innerHTML = `<tr><td colspan="8"><div class="empty"><strong>لا توجد طلبات</strong>جرّب تغيير الفلاتر أو البحث.</div></td></tr>`;
+    } else {
+      tbody.innerHTML = pg.map(o => {
+        const stage = stageMap[o.stage] || { label: o.stage, short: o.stage };
+        const isLate = o.mins >= 90;
+        const prodCls = o.type === 'sash' ? 'prod-sash' : o.type === 'robe' ? 'prod-robe' : 'prod-cap';
+        const workingHtml = o.working
+          ? `<span class="staff-pill"><span class="staff-dot"></span>${esc(o.working)}</span>`
+          : `<span style="color:var(--muted);font-size:.75rem;">—</span>`;
+        const timeHtml = `<span class="${isLate ? 'time-late' : 'time-ok'}">${mins2str(o.mins)}</span>`;
+        const alertHtml = o.missing
+          ? `<span class="alert-missing">⚠ تصميم مفقود</span>` : '';
+        const repBatch = [o.batch || '', o.rep ? `<span style="color:var(--muted);font-size:.7rem">${esc(o.rep)}</span>` : ''].filter(Boolean).join(' · ');
+        return `
+          <tr onclick="alert('طلب #${o.id} — ${esc(o.student)}')" title="طلب #${o.id}">
+            <td class="td-name"><span>${esc(o.student)}</span></td>
+            <td class="td-uni"><span>${esc(o.uni)}<br><small style="color:var(--muted);font-size:.7rem">${esc(o.dept)}</small></span></td>
+            <td><span class="prod-chip ${prodCls}">${esc(o.product)}</span></td>
+            <td><span class="stage-pill stage-${esc(o.stage)}">${esc(stage.label)}</span></td>
+            <td style="font-size:.76rem;color:var(--ink-soft)">${repBatch || '<span style="color:var(--muted)">—</span>'}</td>
+            <td>${workingHtml}</td>
+            <td>${timeHtml}</td>
+            <td>${alertHtml}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    // ─ foot ─
+    $('footCount').textContent = `الإجمالي — ${list.length} طلب`;
+
+    // ─ pager ─
+    renderPager(list.length);
+
+    // ─ mobile cards ─
+    renderMobileCards(pg);
+  }
+
+  /* ── Pagination ── */
+  function renderPager(total) {
+    const totalPages = Math.ceil(total / PAGE_SIZE);
+    const pager = $('pager');
+    if (totalPages <= 1) { pager.innerHTML = ''; return; }
+
+    const from = page * PAGE_SIZE + 1;
+    const to = Math.min((page + 1) * PAGE_SIZE, total);
+    const info = `<span class="pager-info">${from}–${to} من ${total}</span>`;
+
+    // build page buttons: show max 7 page buttons around current
+    let btns = '';
+    const makeBtn = (i, label) => {
+      const isCur = i === page;
+      return `<button class="pager-btn${isCur ? ' current' : ''}" onclick="goPage(${i})" ${isCur?'aria-current="page"':''} ${!isCur?'':''}>
+        ${label !== undefined ? label : i + 1}
+      </button>`;
+    };
+
+    const WINDOW = 2;
+    const pages = [];
+    for (let i = 0; i < totalPages; i++) {
+      if (i === 0 || i === totalPages - 1 || Math.abs(i - page) <= WINDOW) {
+        pages.push(i);
+      }
+    }
+    // insert ellipses
+    const withGaps = [];
+    let prev = -1;
+    pages.forEach(i => {
+      if (prev !== -1 && i - prev > 1) withGaps.push('…');
+      withGaps.push(i); prev = i;
+    });
+
+    btns += `<button class="pager-btn" onclick="goPage(${page - 1})" ${page===0?'disabled':''}>›</button>`;
+    withGaps.forEach(v => {
+      if (v === '…') btns += `<button class="pager-btn" disabled style="border:none;background:none;min-width:auto">…</button>`;
+      else btns += makeBtn(v);
+    });
+    btns += `<button class="pager-btn" onclick="goPage(${page + 1})" ${page>=totalPages-1?'disabled':''}>‹</button>`;
+
+    pager.innerHTML = `${info}<div class="pager-btns">${btns}</div>`;
+  }
+
+  window.goPage = function(p) {
+    const D2 = filtered();
+    const totalPages = Math.ceil(D2.length / PAGE_SIZE);
+    if (p < 0 || p >= totalPages) return;
+    page = p;
+    renderTable(D2);
+    $('table-wrap').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  /* ── Mobile cards ── */
+  function renderMobileCards(pg) {
+    const mc = $('mobile-cards');
+    if (!pg.length) {
+      mc.innerHTML = `<div class="empty"><strong>لا توجد طلبات</strong>جرّب تغيير الفلاتر.</div>`;
+      return;
+    }
+    mc.innerHTML = pg.map(o => {
+      const stage = stageMap[o.stage] || { label: o.stage };
+      const isLate = o.mins >= 90;
+      const prodCls = o.type === 'sash' ? 'prod-sash' : o.type === 'robe' ? 'prod-robe' : 'prod-cap';
+      return `
+        <div class="mcard" onclick="alert('طلب #${o.id} — ${esc(o.student)}')">
+          <div class="mcard-head">
+            <div>
+              <div class="mcard-name">${esc(o.student)}</div>
+              <div class="mcard-rep">${esc(o.uni)}${o.rep ? ' · ' + esc(o.rep) : ''}</div>
+            </div>
+            <span class="stage-pill stage-${esc(o.stage)}">${esc(stage.label)}</span>
+          </div>
+          <div class="mcard-row">
+            <span class="prod-chip ${prodCls}">${esc(o.product)}</span>
+            ${o.batch ? `<span class="batch-chip-sm">${esc(o.batch)}</span>` : ''}
+            ${o.working ? `<span class="staff-pill"><span class="staff-dot"></span>${esc(o.working)}</span>` : ''}
+            <span class="mcard-time ${isLate ? 'time-late' : 'time-ok'}">${mins2str(o.mins)}</span>
+          </div>
+          ${o.missing ? `<div class="mcard-missing"><span class="alert-missing">⚠ تصميم مفقود</span></div>` : ''}
+        </div>
+      `;
+    }).join('');
+  }
+
+  /* ── Source tab badge counts ── */
+  function updateTabCounts() {
+    const retail = D.orders.filter(o => o.source === 'retail').length;
+    const ws = D.orders.filter(o => o.source === 'wholesaler').length;
+    $('cnt-retail').textContent = retail;
+    $('cnt-wholesaler').textContent = ws;
+  }
+
+  /* ── Drilldown nav ── */
+  function renderDrillNav() {
+    const nav = $('drilldown-nav');
+    if (source !== 'wholesaler' || !selectedRep) {
+      nav.classList.remove('visible');
+      return;
+    }
+    nav.classList.add('visible');
+    const rep = D.reps.find(r => r.id === selectedRep);
+    const bc = $('batchChips');
+    bc.innerHTML = '';
+    if (rep && rep.batches.length) {
+      const allB = document.createElement('button');
+      allB.className = 'batch-chip' + (!selectedBatch ? ' on' : '');
+      allB.textContent = 'كل الدفعات';
+      allB.onclick = () => { selectedBatch = null; page = 0; render(); };
+      bc.appendChild(allB);
+      rep.batches.forEach(b => {
+        const btn = document.createElement('button');
+        btn.className = 'batch-chip' + (selectedBatch === b ? ' on' : '');
+        btn.textContent = b;
+        btn.onclick = () => { selectedBatch = b; page = 0; render(); };
+        bc.appendChild(btn);
+      });
+    }
+  }
+
+  /* ── Main render ── */
+  window.render = function() {
+    search = $('searchInput').value || '';
+
+    updateTabCounts();
+
+    const showRepGrid = (source === 'wholesaler' && !selectedRep);
+
+    // rep grid vs table
+    const repGrid = $('rep-grid');
+    const tableWrap = $('table-wrap');
+    if (showRepGrid) {
+      repGrid.style.display = 'grid';
+      tableWrap.style.display = 'none';
+      renderRepGrid();
+      // health over all wholesaler
+      const wsOrders = D.orders.filter(o => o.source === 'wholesaler');
+      renderHealth(wsOrders);
+    } else {
+      repGrid.style.display = 'none';
+      tableWrap.style.display = '';
+      const list = filtered();
+      renderHealth(list); // health based on filtered
+      renderTable(list);
+    }
+
+    renderDrillNav();
+  };
+
+  /* ── Init ── */
+  updateZoneChips();
+  render();
+
+  // search live
+  $('searchInput').addEventListener('input', render);
+})();
+</script>
+</body>
+</html>

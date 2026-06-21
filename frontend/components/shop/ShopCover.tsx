@@ -3,8 +3,9 @@ import Link from "next/link";
 /**
  * The lookbook cover — the storefront's first impression. A bold, type-led cover
  * on the single warm-cream canvas (no gradient — one flat page color). Arabic-first
- * eyebrow, an oversized headline with an earned-orange accent line, and two clear
- * calls to action. Tuned for iPhone: solid brand colors, large readable type, one font.
+ * kicker, one flowing oversized headline with the ornament concentrated on an
+ * earned-orange accent word, and two clear calls to action. Tuned for iPhone:
+ * solid brand colors, large readable type, one font.
  */
 
 const CATALOG_HREF = "/#catalog";
@@ -22,35 +23,28 @@ export function ShopCover() {
       </span>
 
       <div className="mx-auto w-full max-w-5xl">
-        {/* Arabic-first eyebrow — orange rule + brand line (one font, no Latin swap). */}
-        <div
-          className="mb-5 flex items-center gap-3"
+        {/* Arabic-first kicker — quiet tracked label in the Arabic UI face (Cairo),
+            so the type voice stays consistent with the calligraphic headline. */}
+        <span
+          className="mb-[1.1rem] block font-sans text-[0.8rem] font-bold tracking-[0.12em] text-muted"
           style={{ animation: "hero-line 0.7s cubic-bezier(0.16,1,0.3,1) both" }}
         >
-          <span aria-hidden className="h-px w-9 bg-orange-ink/70" />
-          <span className="font-display text-[0.8rem] font-bold tracking-[0.04em] text-orange-ink">
-            لولو شوب · أزياء التخرّج
-          </span>
-        </div>
+          لولو شوب · أزياء التخرّج
+        </span>
 
-        <h1 className="text-balance font-display-ar text-[clamp(2.6rem,12vw,6.25rem)] font-bold leading-[1.04] text-ink">
-          <span
-            className="block"
-            style={{ animation: "hero-line 0.8s cubic-bezier(0.16,1,0.3,1) 0.08s both" }}
-          >
-            إطلالة تخرّجٍ
-          </span>
-          <span
-            className="block text-orange-ink"
-            style={{ animation: "hero-line 0.8s cubic-bezier(0.16,1,0.3,1) 0.22s both" }}
-          >
-            مصمّمة على ذوقك
-          </span>
+        {/* One flowing display line; the calligraphic ornament is concentrated on
+            the single orange accent word so the letterforms read evenly. */}
+        <h1
+          className="text-balance font-display-ar text-[clamp(2.6rem,12vw,6.25rem)] font-bold leading-[1.14] tracking-[-0.02em] text-ink"
+          style={{ animation: "hero-line 0.8s cubic-bezier(0.16,1,0.3,1) 0.1s both" }}
+        >
+          إطلالة تخرج مصممة على{" "}
+          <span className="text-orange-ink text-[1.1em]">ذوقك</span>
         </h1>
 
         <p
           className="mt-5 max-w-[44ch] text-base leading-relaxed text-ink-soft sm:text-lg"
-          style={{ animation: "hero-line 0.8s cubic-bezier(0.16,1,0.3,1) 0.36s both" }}
+          style={{ animation: "hero-line 0.8s cubic-bezier(0.16,1,0.3,1) 0.34s both" }}
         >
           أوشحة وروبات وقبعات تخرّج فاخرة، بلونك وتطريزك واسمك، بتفاصيل تليق بيومٍ
           لا يتكرّر.
@@ -58,7 +52,7 @@ export function ShopCover() {
 
         <div
           className="mt-7 flex flex-wrap items-center gap-3"
-          style={{ animation: "hero-line 0.8s cubic-bezier(0.16,1,0.3,1) 0.5s both" }}
+          style={{ animation: "hero-line 0.8s cubic-bezier(0.16,1,0.3,1) 0.48s both" }}
         >
           <PrimaryCta label="تسوّق الأوشحة" href={CATALOG_HREF} />
           <SecondaryCta label="الطقم الكامل" href={FULLSET_HREF} />

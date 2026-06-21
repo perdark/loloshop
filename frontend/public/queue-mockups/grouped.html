@@ -1,0 +1,859 @@
+<!doctype html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>طابور الإنتاج — حسب الممثل والدفعة · LoloShop</title>
+<link rel="stylesheet" href="tokens.css" />
+<script src="data.js"></script>
+<style>
+/* ─── Layout ─────────────────────────────────────────────────────────────── */
+html { scroll-behavior: smooth; }
+body { min-height: 100vh; background: var(--cream); }
+
+.app { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
+
+/* ─── Top bar ─────────────────────────────────────────────────────────────── */
+.topbar {
+  background: var(--beige);
+  border-block-end: 1px solid var(--line);
+  box-shadow: var(--shadow-soft);
+  padding: .65rem 1rem;
+  display: flex; flex-wrap: wrap; gap: .6rem;
+  align-items: center; justify-content: space-between;
+  position: sticky; top: 0; z-index: 50;
+  flex-shrink: 0;
+}
+.topbar-brand { display: flex; align-items: center; gap: .6rem; }
+.topbar-title { font-family: var(--font-display); font-size: 1.05rem; font-weight: 800; color: var(--ink); line-height: 1; }
+.topbar-sub { font-size: .72rem; color: var(--muted); }
+.topbar-controls { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+
+/* search */
+.search-wrap { position: relative; }
+.search-wrap svg { position: absolute; inset-block-start: 50%; inset-inline-start: .65rem; transform: translateY(-50%); pointer-events: none; color: var(--muted); }
+.search-input {
+  height: 36px; padding: .3rem .75rem .3rem 2rem; border-radius: 20px;
+  border: 1px solid var(--line); background: var(--cream);
+  font-family: var(--font-ui); font-size: .85rem; color: var(--ink); outline: none;
+  width: min(180px, 42vw);
+  transition: border-color .15s, box-shadow .15s;
+}
+html[dir="rtl"] .search-wrap svg { inset-inline-start: auto; inset-inline-end: .65rem; }
+html[dir="rtl"] .search-input { padding: .3rem 2rem .3rem .75rem; }
+.search-input:focus { border-color: var(--orange); box-shadow: 0 0 0 3px rgba(244,123,66,.13); }
+
+/* corner badge */
+.corner-badge {
+  position: fixed; inset-block-end: 1rem; inset-inline-end: 1rem; z-index: 99;
+  background: var(--brand-grad); color: #fff;
+  font-size: .7rem; font-weight: 700; line-height: 1.3;
+  padding: .4rem .75rem; border-radius: 20px;
+  box-shadow: var(--shadow-float); white-space: nowrap; text-align: center;
+}
+
+/* ─── Source tabs ─────────────────────────────────────────────────────────── */
+.tabs-bar {
+  display: flex; background: var(--sink); border-block-end: 1px solid var(--line);
+  flex-shrink: 0; overflow-x: auto;
+}
+.tab-btn {
+  flex: none; padding: .65rem 1.25rem; border: none; background: none; cursor: pointer;
+  font-family: var(--font-ui); font-size: .88rem; font-weight: 600; color: var(--muted);
+  border-block-end: 2.5px solid transparent; transition: color .15s, border-color .15s;
+  display: flex; align-items: center; gap: .4rem; white-space: nowrap; min-height: 44px;
+}
+.tab-btn.active { color: var(--orange-ink); border-block-end-color: var(--orange-ink); }
+.tab-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 18px; min-width: 18px; padding: 0 .35rem;
+  border-radius: 99px; font-size: .7rem; font-weight: 700;
+  background: var(--orange-ink); color: #fff;
+}
+.tab-btn:not(.active) .tab-badge { background: var(--line); color: var(--muted); }
+
+/* ─── Stage + zone filters ────────────────────────────────────────────────── */
+.filter-bar {
+  padding: .55rem 1rem; background: var(--beige);
+  border-block-end: 1px solid var(--line); flex-shrink: 0;
+  display: flex; flex-wrap: wrap; gap: .4rem; align-items: center;
+}
+.chip {
+  display: inline-flex; align-items: center; height: 30px; padding: 0 .75rem;
+  border-radius: 99px; border: 1px solid var(--line); background: var(--cream);
+  font-family: var(--font-ui); font-size: .78rem; font-weight: 600; color: var(--muted);
+  cursor: pointer; transition: all .15s; white-space: nowrap; user-select: none;
+}
+.chip:hover { border-color: var(--orange); color: var(--orange-ink); }
+.chip.on { background: var(--orange-ink); border-color: var(--orange-ink); color: #fff; }
+.chip.stage-ready.on { background: var(--green); border-color: var(--green); }
+.chip.stage-embroidery.on { background: var(--amber); border-color: var(--amber); }
+.chip.stage-pressing.on { background: #7c3aed; border-color: #7c3aed; }
+.chip.stage-design_complete.on { background: var(--orange); border-color: var(--orange); }
+.filter-sep { width: 1px; height: 20px; background: var(--line); flex-shrink: 0; margin: 0 .2rem; }
+
+/* ─── Summary stats bar ────────────────────────────────────────────────────── */
+.stats-bar {
+  display: flex; flex-wrap: wrap; gap: .5rem; padding: .55rem 1rem;
+  background: var(--sink); border-block-end: 1px solid var(--line); flex-shrink: 0;
+  align-items: center;
+}
+.stat-pill {
+  display: inline-flex; align-items: center; gap: .35rem;
+  background: var(--beige); border: 1px solid var(--line);
+  border-radius: 99px; padding: .25rem .7rem;
+  font-size: .75rem; font-weight: 600; color: var(--ink-soft);
+  white-space: nowrap;
+}
+.stat-pill .num { font-size: .88rem; font-weight: 800; color: var(--ink); }
+.stat-pill.red .num { color: var(--red); }
+.stat-pill.grn .num { color: var(--green); }
+.stat-pill.amb .num { color: var(--amber); }
+.stat-pill.org .num { color: var(--orange-ink); }
+
+/* ─── Main scroll area ────────────────────────────────────────────────────── */
+.main { flex: 1; overflow-y: auto; overflow-x: hidden; padding: .75rem .85rem 3rem; }
+
+/* ─── Expand-all toggle ────────────────────────────────────────────────────── */
+.expand-row {
+  display: flex; justify-content: flex-end; gap: .5rem; margin-block-end: .65rem;
+  align-items: center;
+}
+.text-btn {
+  background: none; border: none; cursor: pointer;
+  font-family: var(--font-ui); font-size: .78rem; font-weight: 600;
+  color: var(--orange-ink); padding: .25rem .5rem; border-radius: 6px;
+  transition: background .12s;
+}
+.text-btn:hover { background: rgba(244,123,66,.08); }
+.count-label { font-size: .78rem; color: var(--muted); }
+
+/* ─── Rep group ────────────────────────────────────────────────────────────── */
+.rep-group {
+  background: var(--beige);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  margin-block-end: .7rem;
+  overflow: hidden;
+  box-shadow: var(--shadow-soft);
+  transition: box-shadow .18s;
+}
+.rep-group.has-alert { border-color: rgba(185,28,28,.25); }
+.rep-group.pinned { order: -2; }
+.rep-group.retail-group { order: -1; }
+
+/* group header */
+.rep-header {
+  display: flex; flex-wrap: wrap; gap: .5rem; align-items: center;
+  padding: .75rem 1rem; cursor: pointer; user-select: none;
+  transition: background .12s;
+  min-height: 44px;
+}
+.rep-header:hover { background: var(--sink); }
+.rep-header.expanded { border-block-end: 1px solid var(--line); }
+
+.rep-chevron {
+  width: 22px; height: 22px; border-radius: 6px; border: 1.5px solid var(--line);
+  display: grid; place-items: center; flex-shrink: 0;
+  transition: transform .2s, border-color .15s, background .12s; color: var(--muted);
+  background: var(--cream);
+}
+.rep-header.expanded .rep-chevron { transform: rotate(180deg); border-color: var(--orange-ink); color: var(--orange-ink); background: rgba(244,123,66,.07); }
+
+.rep-name { font-family: var(--font-display); font-size: 1rem; font-weight: 800; color: var(--ink); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rep-name.retail { color: var(--orange-ink); font-size: .95rem; }
+
+.rep-meta { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; margin-inline-start: auto; }
+
+.badge {
+  display: inline-flex; align-items: center; gap: .22rem;
+  border-radius: 99px; padding: .18rem .55rem; font-size: .7rem; font-weight: 700;
+  white-space: nowrap; border: 1px solid transparent;
+}
+.badge.count { background: var(--sink); color: var(--ink-soft); border-color: var(--line); }
+.badge.alert { background: rgba(185,28,28,.1); color: var(--red); border-color: rgba(185,28,28,.25); }
+.badge.working { background: rgba(244,123,66,.1); color: var(--orange-ink); border-color: rgba(244,123,66,.25); }
+.badge.ready  { background: rgba(21,128,61,.1);  color: var(--green); border-color: rgba(21,128,61,.25); }
+
+/* ── Mini stage breakdown bar ──────────────────────────────────────────────── */
+.stage-bar-wrap { display: flex; align-items: center; gap: .5rem; padding: .4rem 1rem .45rem; background: var(--cream); border-block-end: 1px solid var(--line); overflow-x: auto; }
+.stage-bar { display: flex; height: 8px; border-radius: 99px; overflow: hidden; flex: 1; min-width: 140px; max-width: 420px; gap: 1px; }
+.seg { height: 100%; flex: none; transition: flex .3s; }
+.seg.seg-design_complete { background: var(--orange); }
+.seg.seg-converting      { background: var(--amber); }
+.seg.seg-embroidery      { background: #7c3aed; }
+.seg.seg-pressing        { background: #0891b2; }
+.seg.seg-preparing       { background: #475569; }
+.seg.seg-ready           { background: var(--green); }
+
+.stage-legend { display: flex; flex-wrap: wrap; gap: .3rem .6rem; }
+.legend-item { display: flex; align-items: center; gap: .25rem; font-size: .68rem; color: var(--muted); white-space: nowrap; }
+.legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+/* ─── Batch group ──────────────────────────────────────────────────────────── */
+.batch-group { border-block-start: 1px solid var(--line); }
+.batch-header {
+  display: flex; flex-wrap: wrap; align-items: center; gap: .4rem;
+  padding: .45rem 1rem; cursor: pointer; background: var(--sink); min-height: 44px;
+  transition: background .12s; user-select: none;
+}
+.batch-header:hover { background: rgba(227,221,208,.7); }
+.batch-header.expanded { border-block-end: 1px solid var(--line); }
+.batch-title { font-size: .82rem; font-weight: 700; color: var(--ink-soft); }
+.batch-chips { display: flex; flex-wrap: wrap; gap: .25rem; }
+.batch-chip { display: inline-flex; align-items: center; gap: .2rem; background: var(--cream); border: 1px solid var(--line); border-radius: 99px; padding: .1rem .5rem; font-size: .67rem; font-weight: 600; color: var(--muted); }
+.batch-chip.alert { border-color: rgba(185,28,28,.3); color: var(--red); background: rgba(185,28,28,.05); }
+.batch-chip.working { border-color: rgba(244,123,66,.3); color: var(--orange-ink); background: rgba(244,123,66,.07); }
+.batch-chip.ready { border-color: rgba(21,128,61,.3); color: var(--green); background: rgba(21,128,61,.07); }
+.batch-chevron { width: 18px; height: 18px; border-radius: 5px; border: 1px solid var(--line); display: grid; place-items: center; flex-shrink: 0; color: var(--muted); background: var(--cream); transition: transform .18s; margin-inline-start: auto; }
+.batch-header.expanded .batch-chevron { transform: rotate(180deg); color: var(--orange-ink); border-color: var(--orange-ink); }
+
+/* ─── Order rows ──────────────────────────────────────────────────────────── */
+.orders-table { width: 100%; border-collapse: collapse; }
+.orders-table thead tr { background: rgba(245,240,230,.6); }
+.orders-table thead th {
+  padding: .4rem .75rem; font-size: .7rem; font-weight: 700; color: var(--muted);
+  text-align: right; border-block-end: 1px solid var(--line); white-space: nowrap;
+}
+.orders-table tbody tr {
+  border-block-end: 1px solid rgba(227,221,208,.5);
+  transition: background .1s;
+}
+.orders-table tbody tr:last-child { border-block-end: none; }
+.orders-table tbody tr:hover { background: rgba(244,123,66,.04); }
+.orders-table tbody tr.bundle-first { background: rgba(244,123,66,.03); }
+.orders-table tbody tr.bundle-rest { background: rgba(244,123,66,.03); opacity: .9; }
+.orders-table tbody tr.has-alert td:first-child { border-inline-start: 3px solid var(--red); }
+
+.orders-table td {
+  padding: .52rem .75rem; font-size: .82rem; color: var(--ink-soft);
+  vertical-align: middle; white-space: nowrap;
+}
+.td-student { max-width: 160px; }
+.td-student-name { font-weight: 700; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; display: block; }
+.td-dept { font-size: .7rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; display: block; }
+
+/* stage pill */
+.pill {
+  display: inline-flex; align-items: center; height: 22px; padding: 0 .55rem;
+  border-radius: 99px; font-size: .68rem; font-weight: 700; white-space: nowrap;
+  border: 1.5px solid transparent;
+}
+.pill.design_complete { background: rgba(244,123,66,.12); color: var(--orange-ink); border-color: rgba(244,123,66,.25); }
+.pill.converting      { background: rgba(180,83,9,.12);  color: var(--amber);       border-color: rgba(180,83,9,.3);   }
+.pill.embroidery      { background: rgba(124,58,237,.12); color: #7c3aed;            border-color: rgba(124,58,237,.25); }
+.pill.pressing        { background: rgba(8,145,178,.12); color: #0891b2;            border-color: rgba(8,145,178,.25); }
+.pill.preparing       { background: rgba(71,85,105,.1);  color: #475569;            border-color: rgba(71,85,105,.2);  }
+.pill.ready           { background: rgba(21,128,61,.12);  color: var(--green);       border-color: rgba(21,128,61,.3);  }
+
+/* who's working */
+.working-tag { display: inline-flex; align-items: center; gap: .22rem; font-size: .7rem; color: var(--orange-ink); font-weight: 600; background: rgba(244,123,66,.08); border-radius: 99px; padding: .1rem .45rem; white-space: nowrap; }
+.working-dot { width: 6px; height: 6px; background: var(--orange-ink); border-radius: 50%; flex-shrink: 0; animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+/* overdue timer */
+.timer { font-size: .7rem; font-weight: 700; white-space: nowrap; }
+.timer.ok  { color: var(--muted); }
+.timer.warn { color: var(--amber); }
+.timer.over { color: var(--red); }
+
+/* alert icons */
+.alert-icon { font-size: .75rem; }
+.alert-missing { color: var(--red); }
+.bundle-tag { display: inline-flex; align-items: center; gap: .18rem; font-size: .68rem; color: var(--muted); }
+.bundle-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--orange-ink); opacity: .45; }
+
+/* product icon text */
+.prod-type { font-size: .75rem; font-weight: 700; color: var(--ink-soft); }
+.prod-type.sash { color: var(--orange-ink); }
+.prod-type.cap  { color: #7c3aed; }
+.prod-type.robe { color: #0891b2; }
+
+/* ─── Mobile card layout (< 640px) ────────────────────────────────────────── */
+.orders-cards { display: none; }
+
+@media (max-width: 639px) {
+  .orders-table { display: none; }
+  .orders-cards { display: block; }
+
+  .rep-name { font-size: .9rem; }
+  .stage-bar-wrap { padding: .35rem .75rem .4rem; }
+  .stage-legend { display: none; }
+
+  .order-card {
+    padding: .55rem .8rem;
+    border-block-end: 1px solid rgba(227,221,208,.5);
+    transition: background .1s;
+  }
+  .order-card:last-child { border-block-end: none; }
+  .order-card:hover { background: rgba(244,123,66,.04); }
+  .order-card.has-alert { border-inline-start: 3px solid var(--red); }
+  .oc-top { display: flex; align-items: baseline; justify-content: space-between; gap: .4rem; }
+  .oc-name { font-size: .88rem; font-weight: 700; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .oc-dept { font-size: .7rem; color: var(--muted); margin-block-start: .1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .oc-row { display: flex; flex-wrap: wrap; gap: .3rem; align-items: center; margin-block-start: .35rem; }
+}
+
+/* ─── Empty state ──────────────────────────────────────────────────────────── */
+.empty { padding: 2.5rem 1rem; text-align: center; color: var(--muted); font-size: .9rem; }
+.empty svg { display: block; margin: 0 auto .75rem; opacity: .3; }
+
+/* ─── Scrollbar ────────────────────────────────────────────────────────────── */
+.main::-webkit-scrollbar { width: 6px; }
+.main::-webkit-scrollbar-track { background: transparent; }
+.main::-webkit-scrollbar-thumb { background: var(--line); border-radius: 99px; }
+.main::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+
+  <!-- ── Top bar ──────────────────────────────────────────────────────────── -->
+  <div class="topbar">
+    <div class="topbar-brand">
+      <span class="brandmark"><span class="dot">L</span><b>lolo</b><small>96</small></span>
+      <div>
+        <div class="topbar-title">طابور الإنتاج</div>
+        <div class="topbar-sub">حسب الممثل والدفعة</div>
+      </div>
+    </div>
+    <div class="topbar-controls">
+      <div class="search-wrap">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden>
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        <input class="search-input" id="searchInput" type="search" placeholder="بحث: اسم، جامعة، قسم…" aria-label="بحث في الطلبات" />
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Source tabs ──────────────────────────────────────────────────────── -->
+  <div class="tabs-bar" id="tabsBar" role="tablist" aria-label="مصدر الطلبات">
+    <button class="tab-btn active" role="tab" aria-selected="true"  data-tab="all"        id="tab-all">الكل <span class="tab-badge" id="tbadge-all">0</span></button>
+    <button class="tab-btn"        role="tab" aria-selected="false" data-tab="wholesaler" id="tab-wholesaler">ممثلين <span class="tab-badge" id="tbadge-wholesaler">0</span></button>
+    <button class="tab-btn"        role="tab" aria-selected="false" data-tab="retail"     id="tab-retail">تجزئة <span class="tab-badge" id="tbadge-retail">0</span></button>
+  </div>
+
+  <!-- ── Filters ──────────────────────────────────────────────────────────── -->
+  <div class="filter-bar" id="filterBar" aria-label="فلاتر المراحل">
+    <!-- chips injected by JS -->
+  </div>
+
+  <!-- ── Stats bar ─────────────────────────────────────────────────────────── -->
+  <div class="stats-bar" id="statsBar">
+    <div class="stat-pill org"><span class="num" id="stTotal">0</span> طلب إجمالي</div>
+    <div class="stat-pill red"><span class="num" id="stOverdue">0</span> متأخر</div>
+    <div class="stat-pill red"><span class="num" id="stMissing">0</span> تصميم مفقود</div>
+    <div class="stat-pill amb"><span class="num" id="stWorking">0</span> قيد العمل الآن</div>
+    <div class="stat-pill grn"><span class="num" id="stReady">0</span> جاهز</div>
+  </div>
+
+  <!-- ── Main content ───────────────────────────────────────────────────────── -->
+  <div class="main" id="mainScroll">
+    <div class="expand-row">
+      <span class="count-label" id="groupCount"></span>
+      <button class="text-btn" id="btnExpandAll">فتح الكل</button>
+      <button class="text-btn" id="btnCollapseAll">إغلاق الكل</button>
+    </div>
+    <div id="groupContainer"></div>
+    <div class="empty" id="emptyState" style="display:none">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      لا توجد طلبات مطابقة للفلاتر الحالية.
+    </div>
+  </div>
+</div>
+
+<!-- ── Corner badge ────────────────────────────────────────────────────────── -->
+<div class="corner-badge">تصميم ب<br>حسب الممثل</div>
+
+<script>
+/* ──────────────────────────────────────────────────────────────────────────────
+   Grouped staff-queue ledger — vanilla JS, no frameworks.
+   Reads window.QUEUE_DATA (from data.js).
+   ────────────────────────────────────────────────────────────────────────────── */
+(function () {
+  'use strict';
+
+  /* ── State ─────────────────────────────────────────────────────────────── */
+  let activeTab   = 'all';      // 'all' | 'wholesaler' | 'retail'
+  let activeStage = '';         // '' = all, or stage key
+  let searchQ     = '';
+
+  /* ── Data ──────────────────────────────────────────────────────────────── */
+  const D = window.QUEUE_DATA;
+  const STAGE_LABEL = {};
+  D.stages.forEach(s => { STAGE_LABEL[s.key] = s.label; });
+
+  /* ── Stage colors for segments ─────────────────────────────────────────── */
+  const STAGE_COLOR = {
+    design_complete: 'var(--orange)',
+    converting:      'var(--amber)',
+    embroidery:      '#7c3aed',
+    pressing:        '#0891b2',
+    preparing:       '#475569',
+    ready:           'var(--green)',
+  };
+
+  /* ── Helpers ─────────────────────────────────────────────────────────────── */
+  const esc = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const fmtTime = (m) => m < 60 ? `${m}د` : `${Math.floor(m/60)}س ${m%60}د`;
+  const timerClass = (m) => m > 90 ? 'over' : m > 50 ? 'warn' : 'ok';
+
+  const prodLabel = (type) => type === 'sash' ? 'وشاح' : type === 'robe' ? 'روب' : 'قبعة';
+
+  /* ── Build filter chips ───────────────────────────────────────────────────── */
+  function buildFilterBar() {
+    const bar = document.getElementById('filterBar');
+    bar.innerHTML = '';
+
+    const allChip = document.createElement('button');
+    allChip.className = 'chip' + (activeStage === '' ? ' on' : '');
+    allChip.textContent = 'كل المراحل';
+    allChip.dataset.stage = '';
+    allChip.setAttribute('aria-pressed', activeStage === '');
+    bar.appendChild(allChip);
+
+    const sep = document.createElement('div');
+    sep.className = 'filter-sep';
+    bar.appendChild(sep);
+
+    D.stages.forEach(s => {
+      const c = document.createElement('button');
+      const isOn = activeStage === s.key;
+      c.className = `chip stage-${s.key}${isOn ? ' on' : ''}`;
+      c.textContent = s.short;
+      c.dataset.stage = s.key;
+      c.setAttribute('aria-pressed', isOn);
+      bar.appendChild(c);
+    });
+
+    bar.querySelectorAll('.chip').forEach(c => {
+      c.addEventListener('click', () => {
+        activeStage = c.dataset.stage;
+        buildFilterBar();
+        render();
+      });
+    });
+  }
+
+  /* ── Tab badges ──────────────────────────────────────────────────────────── */
+  function updateTabBadges(orders) {
+    const all = orders.length;
+    const ws  = orders.filter(o => o.source === 'wholesaler').length;
+    const ret = orders.filter(o => o.source === 'retail').length;
+    document.getElementById('tbadge-all').textContent        = all;
+    document.getElementById('tbadge-wholesaler').textContent = ws;
+    document.getElementById('tbadge-retail').textContent     = ret;
+  }
+
+  /* ── Stats bar ─────────────────────────────────────────────────────────── */
+  function updateStats(filtered) {
+    document.getElementById('stTotal').textContent   = filtered.length;
+    document.getElementById('stOverdue').textContent = filtered.filter(o => o.mins > 90).length;
+    document.getElementById('stMissing').textContent = filtered.filter(o => o.missing).length;
+    document.getElementById('stWorking').textContent = filtered.filter(o => o.working).length;
+    document.getElementById('stReady').textContent   = filtered.filter(o => o.stage === 'ready').length;
+  }
+
+  /* ── Filter orders ────────────────────────────────────────────────────────── */
+  function getFiltered() {
+    return D.orders.filter(o => {
+      if (activeTab === 'wholesaler' && o.source !== 'wholesaler') return false;
+      if (activeTab === 'retail'     && o.source !== 'retail')     return false;
+      if (activeStage && o.stage !== activeStage) return false;
+      if (searchQ) {
+        const q = searchQ.toLowerCase();
+        const hay = [o.student, o.uni, o.dept, o.rep, o.batch, o.product].join(' ').toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }
+
+  /* ── Group orders by rep → batch ─────────────────────────────────────────── */
+  function groupOrders(orders) {
+    // Map: repKey → { id, name, source, batches: Map<batchKey, orders[]> }
+    const repMap = new Map();
+
+    const repKey = (o) => o.source === 'retail' ? '__retail__' : (o.rep || '__unknown__');
+
+    orders.forEach(o => {
+      const rk = repKey(o);
+      if (!repMap.has(rk)) {
+        repMap.set(rk, {
+          id:     rk,
+          name:   rk === '__retail__' ? 'تجزئة' : (o.rep || 'غير معروف'),
+          source: o.source,
+          batches: new Map(),
+        });
+      }
+      const repEntry = repMap.get(rk);
+      const bk = o.batch || '__none__';
+      if (!repEntry.batches.has(bk)) {
+        repEntry.batches.set(bk, []);
+      }
+      repEntry.batches.get(bk).push(o);
+    });
+
+    // Sort reps: pinned = has alerts/overdue, then by total count desc.
+    const repArr = Array.from(repMap.values());
+    repArr.sort((a, b) => {
+      const scoreOf = (r) => {
+        const all = Array.from(r.batches.values()).flat();
+        const overdue = all.filter(o => o.mins > 90).length;
+        const missing = all.filter(o => o.missing).length;
+        return (overdue + missing * 2) * 1000 + all.length;
+      };
+      return scoreOf(b) - scoreOf(a);
+    });
+    return repArr;
+  }
+
+  /* ── Stage breakdown bar ──────────────────────────────────────────────────── */
+  function stageBarHtml(orders) {
+    const counts = {};
+    D.stages.forEach(s => { counts[s.key] = 0; });
+    orders.forEach(o => { if (counts[o.stage] !== undefined) counts[o.stage]++; });
+    const total = orders.length || 1;
+
+    const segs = D.stages.map(s => {
+      const pct = (counts[s.key] / total * 100).toFixed(1);
+      if (!counts[s.key]) return '';
+      return `<div class="seg seg-${s.key}" style="width:${pct}%;background:${STAGE_COLOR[s.key]}" title="${esc(s.label)}: ${counts[s.key]}"></div>`;
+    }).join('');
+
+    const legend = D.stages.map(s => {
+      if (!counts[s.key]) return '';
+      return `<span class="legend-item"><span class="legend-dot" style="background:${STAGE_COLOR[s.key]}"></span>${esc(s.short)}&nbsp;${counts[s.key]}</span>`;
+    }).join('');
+
+    return `
+      <div class="stage-bar-wrap">
+        <div class="stage-bar">${segs}</div>
+        <div class="stage-legend">${legend}</div>
+      </div>`;
+  }
+
+  /* ── Batch summary badges ─────────────────────────────────────────────────── */
+  function batchBadgesHtml(bOrders) {
+    const overdue  = bOrders.filter(o => o.mins > 90).length;
+    const missing  = bOrders.filter(o => o.missing).length;
+    const working  = bOrders.filter(o => o.working).length;
+    const ready    = bOrders.filter(o => o.stage === 'ready').length;
+    const badges = [];
+    badges.push(`<span class="batch-chip">${bOrders.length} طلب</span>`);
+    if (overdue)  badges.push(`<span class="batch-chip alert">متأخر ${overdue}</span>`);
+    if (missing)  badges.push(`<span class="batch-chip alert">مفقود ${missing}</span>`);
+    if (working)  badges.push(`<span class="batch-chip working">يعمل ${working}</span>`);
+    if (ready)    badges.push(`<span class="batch-chip ready">جاهز ${ready}</span>`);
+    return badges.join('');
+  }
+
+  /* ── Single order row HTML (table row) ──────────────────────────────────── */
+  function orderRowHtml(o, isBundleFirst, isBundleRest) {
+    const rowClass = [
+      isBundleFirst ? 'bundle-first' : '',
+      isBundleRest  ? 'bundle-rest'  : '',
+      o.missing     ? 'has-alert'    : '',
+    ].filter(Boolean).join(' ');
+
+    const stageClass = (o.stage || '').replace(/_/g,'_');
+
+    const workingHtml = o.working
+      ? `<span class="working-tag"><span class="working-dot"></span>${esc(o.working)}</span>`
+      : '<span style="color:var(--muted);font-size:.7rem">—</span>';
+
+    const timerHtml = `<span class="timer ${timerClass(o.mins)}">${fmtTime(o.mins)}</span>`;
+
+    const alertHtml = o.missing
+      ? '<span class="alert-icon alert-missing" title="تصميم مفقود">⚠ مفقود</span>'
+      : '<span style="color:var(--muted);font-size:.7rem">—</span>';
+
+    const bundleHtml = o.group
+      ? `<span class="bundle-tag"><span class="bundle-dot"></span>باقة</span>`
+      : '';
+
+    const prodClass = o.type || 'sash';
+
+    return `<tr class="${esc(rowClass)}" data-id="${o.id}">
+      <td class="td-student">
+        <span class="td-student-name" title="${esc(o.student)}">${esc(o.student)}</span>
+        <span class="td-dept" title="${esc(o.uni)} / ${esc(o.dept)}">${esc(o.dept)}</span>
+      </td>
+      <td><span class="prod-type ${esc(prodClass)}">${esc(o.product)}</span> ${bundleHtml}</td>
+      <td><span class="pill ${esc(o.stage)}">${esc(STAGE_LABEL[o.stage] || o.stage)}</span></td>
+      <td>${workingHtml}</td>
+      <td>${timerHtml}</td>
+      <td>${alertHtml}</td>
+    </tr>`;
+  }
+
+  /* ── Single order card HTML (mobile) ────────────────────────────────────── */
+  function orderCardHtml(o) {
+    const alertClass = o.missing ? 'has-alert' : '';
+    const workingHtml = o.working
+      ? `<span class="working-tag"><span class="working-dot"></span>${esc(o.working)}</span>`
+      : '';
+    const alertHtml = o.missing
+      ? `<span style="font-size:.7rem;font-weight:700;color:var(--red)">⚠ تصميم مفقود</span>`
+      : '';
+    return `<div class="order-card ${alertClass}">
+      <div class="oc-top">
+        <span class="oc-name">${esc(o.student)}</span>
+        <span class="pill ${esc(o.stage)}">${esc(STAGE_LABEL[o.stage] || o.stage)}</span>
+      </div>
+      <div class="oc-dept">${esc(o.dept)} · ${esc(o.uni)}</div>
+      <div class="oc-row">
+        <span class="prod-type ${esc(o.type)}">${esc(o.product)}</span>
+        <span class="timer ${timerClass(o.mins)}">${fmtTime(o.mins)}</span>
+        ${workingHtml}
+        ${alertHtml}
+        ${o.group ? `<span class="bundle-tag"><span class="bundle-dot"></span>باقة</span>` : ''}
+      </div>
+    </div>`;
+  }
+
+  /* ── Render batch body (table + cards) ──────────────────────────────────── */
+  function batchBodyHtml(bOrders) {
+    // Group bundle pieces together
+    const seen = {};
+    const rows = [];
+    bOrders.forEach(o => {
+      if (o.group) {
+        if (!seen[o.group]) { seen[o.group] = true; rows.push({ type:'bundle-first', o }); }
+        else { rows.push({ type:'bundle-rest', o }); }
+      } else {
+        rows.push({ type:'single', o });
+      }
+    });
+
+    const tableRows = rows.map(r =>
+      orderRowHtml(r.o, r.type==='bundle-first', r.type==='bundle-rest')
+    ).join('');
+
+    const cards = bOrders.map(o => orderCardHtml(o)).join('');
+
+    return `
+      <table class="orders-table" aria-label="قائمة الطلبات">
+        <thead>
+          <tr>
+            <th>الطالب</th>
+            <th>المنتج</th>
+            <th>المرحلة</th>
+            <th>يعمل عليه</th>
+            <th>الوقت</th>
+            <th>تنبيه</th>
+          </tr>
+        </thead>
+        <tbody>${tableRows}</tbody>
+      </table>
+      <div class="orders-cards">${cards}</div>`;
+  }
+
+  /* ── Expand/collapse state ────────────────────────────────────────────────── */
+  const repExpanded   = {};   // repId → bool
+  const batchExpanded = {};   // `${repId}::${batchKey}` → bool
+
+  /* ── Auto-expand worst groups ─────────────────────────────────────────────── */
+  function autoExpand(repArr) {
+    repArr.forEach((rep, idx) => {
+      const allOrders = Array.from(rep.batches.values()).flat();
+      const hasAlert = allOrders.some(o => o.mins > 90 || o.missing);
+      // Top 3 worst or has alert → expand
+      if (hasAlert || idx < 3) {
+        repExpanded[rep.id] = true;
+        rep.batches.forEach((bOrders, bk) => {
+          const bKey = `${rep.id}::${bk}`;
+          const bAlert = bOrders.some(o => o.mins > 90 || o.missing);
+          if (bAlert || rep.batches.size === 1) batchExpanded[bKey] = true;
+        });
+      }
+    });
+  }
+
+  /* ── Build DOM for one rep group ─────────────────────────────────────────── */
+  function buildRepGroup(rep) {
+    const allOrders = Array.from(rep.batches.values()).flat();
+    const overdue   = allOrders.filter(o => o.mins > 90).length;
+    const missing   = allOrders.filter(o => o.missing).length;
+    const working   = allOrders.filter(o => o.working).length;
+    const ready     = allOrders.filter(o => o.stage === 'ready').length;
+    const hasAlert  = overdue > 0 || missing > 0;
+    const isRetail  = rep.source === 'retail';
+    const isOpen    = repExpanded[rep.id];
+
+    const el = document.createElement('div');
+    el.className = ['rep-group', hasAlert ? 'has-alert' : '', isRetail ? 'retail-group' : ''].filter(Boolean).join(' ');
+    el.dataset.repId = rep.id;
+
+    /* Header */
+    const badges = [
+      `<span class="badge count">${allOrders.length} طلب</span>`,
+      overdue ? `<span class="badge alert">متأخر ${overdue}</span>` : '',
+      missing ? `<span class="badge alert">مفقود ${missing}</span>` : '',
+      working ? `<span class="badge working">يعمل ${working}</span>` : '',
+      ready   ? `<span class="badge ready">جاهز ${ready}</span>` : '',
+    ].filter(Boolean).join('');
+
+    const chevronSvg = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden><polyline points="6 9 12 15 18 9"/></svg>`;
+
+    el.innerHTML = `
+      <div class="rep-header${isOpen ? ' expanded' : ''}" role="button" aria-expanded="${isOpen}" tabindex="0" data-rep="${esc(rep.id)}">
+        <div class="rep-chevron">${chevronSvg}</div>
+        <span class="rep-name${isRetail ? ' retail' : ''}">${isRetail ? 'تجزئة (طلاب مستقلين)' : esc(rep.name)}</span>
+        <div class="rep-meta">${badges}</div>
+      </div>
+      ${stageBarHtml(allOrders)}
+      <div class="rep-body" style="display:${isOpen ? 'block' : 'none'}"></div>`;
+
+    /* Build batches */
+    const body = el.querySelector('.rep-body');
+    rep.batches.forEach((bOrders, bk) => {
+      const bKey = `${rep.id}::${bk}`;
+      const bLabel = bk === '__none__' ? 'بدون دفعة' : bk;
+      const isBOpen = batchExpanded[bKey];
+
+      const bDiv = document.createElement('div');
+      bDiv.className = 'batch-group';
+      bDiv.dataset.batchKey = bKey;
+
+      const bChevronSvg = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden><polyline points="6 9 12 15 18 9"/></svg>`;
+
+      bDiv.innerHTML = `
+        <div class="batch-header${isBOpen ? ' expanded' : ''}" role="button" aria-expanded="${isBOpen}" tabindex="0" data-bkey="${esc(bKey)}">
+          <span class="batch-title">${esc(bLabel)}</span>
+          <div class="batch-chips">${batchBadgesHtml(bOrders)}</div>
+          <span class="batch-chevron">${bChevronSvg}</span>
+        </div>
+        <div class="batch-body" style="display:${isBOpen ? 'block' : 'none'}">${batchBodyHtml(bOrders)}</div>`;
+
+      body.appendChild(bDiv);
+    });
+
+    return el;
+  }
+
+  /* ── Attach events to a rep group element ────────────────────────────────── */
+  function attachGroupEvents(el) {
+    const repHeader = el.querySelector('.rep-header');
+    repHeader.addEventListener('click', () => toggleRep(el));
+    repHeader.addEventListener('keydown', e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); toggleRep(el); } });
+
+    el.querySelectorAll('.batch-header').forEach(bh => {
+      bh.addEventListener('click', () => toggleBatch(bh.closest('.batch-group')));
+      bh.addEventListener('keydown', e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); toggleBatch(bh.closest('.batch-group')); } });
+    });
+  }
+
+  function toggleRep(el) {
+    const header = el.querySelector('.rep-header');
+    const body   = el.querySelector('.rep-body');
+    const repId  = header.dataset.rep;
+    const willOpen = !repExpanded[repId];
+    repExpanded[repId] = willOpen;
+    header.classList.toggle('expanded', willOpen);
+    header.setAttribute('aria-expanded', willOpen);
+    body.style.display = willOpen ? 'block' : 'none';
+  }
+
+  function toggleBatch(bDiv) {
+    const bh   = bDiv.querySelector('.batch-header');
+    const bb   = bDiv.querySelector('.batch-body');
+    const bKey = bh.dataset.bkey;
+    const willOpen = !batchExpanded[bKey];
+    batchExpanded[bKey] = willOpen;
+    bh.classList.toggle('expanded', willOpen);
+    bh.setAttribute('aria-expanded', willOpen);
+    bb.style.display = willOpen ? 'block' : 'none';
+  }
+
+  /* ── Main render ─────────────────────────────────────────────────────────── */
+  function render() {
+    const filtered = getFiltered();
+    updateTabBadges(D.orders); // always show full counts on tabs
+    updateStats(filtered);
+
+    const repArr = groupOrders(filtered);
+    const container = document.getElementById('groupContainer');
+    const empty = document.getElementById('emptyState');
+
+    if (filtered.length === 0) {
+      container.innerHTML = '';
+      empty.style.display = 'block';
+      document.getElementById('groupCount').textContent = '';
+      return;
+    }
+    empty.style.display = 'none';
+    document.getElementById('groupCount').textContent = `${repArr.length} مجموعة · ${filtered.length} طلب`;
+
+    container.innerHTML = '';
+    repArr.forEach(rep => {
+      const el = buildRepGroup(rep);
+      attachGroupEvents(el);
+      container.appendChild(el);
+    });
+  }
+
+  /* ── Expand / Collapse all ────────────────────────────────────────────────── */
+  document.getElementById('btnExpandAll').addEventListener('click', () => {
+    document.querySelectorAll('.rep-header').forEach(h => {
+      const repId = h.dataset.rep;
+      repExpanded[repId] = true;
+      h.classList.add('expanded');
+      h.setAttribute('aria-expanded', true);
+      h.closest('.rep-group').querySelector('.rep-body').style.display = 'block';
+    });
+    document.querySelectorAll('.batch-header').forEach(bh => {
+      const bKey = bh.dataset.bkey;
+      batchExpanded[bKey] = true;
+      bh.classList.add('expanded');
+      bh.setAttribute('aria-expanded', true);
+      bh.closest('.batch-group').querySelector('.batch-body').style.display = 'block';
+    });
+  });
+
+  document.getElementById('btnCollapseAll').addEventListener('click', () => {
+    document.querySelectorAll('.rep-header').forEach(h => {
+      const repId = h.dataset.rep;
+      repExpanded[repId] = false;
+      h.classList.remove('expanded');
+      h.setAttribute('aria-expanded', false);
+      h.closest('.rep-group').querySelector('.rep-body').style.display = 'none';
+    });
+    Object.keys(batchExpanded).forEach(k => { batchExpanded[k] = false; });
+  });
+
+  /* ── Tab switching ───────────────────────────────────────────────────────── */
+  document.getElementById('tabsBar').addEventListener('click', e => {
+    const btn = e.target.closest('.tab-btn');
+    if (!btn) return;
+    activeTab = btn.dataset.tab;
+    document.querySelectorAll('.tab-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.tab === activeTab);
+      b.setAttribute('aria-selected', b.dataset.tab === activeTab);
+    });
+    render();
+  });
+
+  /* ── Search ──────────────────────────────────────────────────────────────── */
+  let searchTimer;
+  document.getElementById('searchInput').addEventListener('input', e => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => {
+      searchQ = e.target.value.trim();
+      render();
+    }, 220);
+  });
+
+  /* ── Init ────────────────────────────────────────────────────────────────── */
+  buildFilterBar();
+
+  // Auto-expand worst groups on first render
+  const initialReps = groupOrders(D.orders);
+  autoExpand(initialReps);
+
+  render();
+})();
+</script>
+</body>
+</html>
