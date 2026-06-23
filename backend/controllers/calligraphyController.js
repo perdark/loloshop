@@ -122,41 +122,50 @@ async function processNext(req, res) {
   const model = batch[0].model || MODELS.standard;
   const names = batch.map((b) => b.render_text);
 
-  let gen;
-  try {
-    gen = await generateImage({ model, prompt: buildSheetPrompt(names) });
-  } catch (err) {
-    // mark this batch failed (no charge persisted), surface error
-    await query(`UPDATE calligraphy_plates SET status='failed', error=$2 WHERE id = ANY($1)`,
-      [batch.map((b) => b.id), err.code || 'ERR_OPENROUTER']);
-    const c = await jobCounts(jobId);
-    return res.status(err.status || 502).json({ error: err.message || 'فشل التوليد', code: err.code || 'ERR_OPENROUTER',
-      data: { processed: 0, ...c, remaining: c.pending, job_cost: await jobCost(jobId), plates: [] } });
+  // Generate + crop with AUTO-RETRY. The model spaces lines randomly, so a sheet
+  // that crops to the wrong band count (e.g. two names too close → merged) usually
+  // slices cleanly on a fresh generation. Regenerate until the band count matches;
+  // only flag for manual review if every attempt mismatches (never mis-slice — §11).
+  const MAX_CROP_TRIES = 4;
+  let plates = null;
+  let sheet = null;
+  let totalCost = 0;
+  let lastCount = null;
+  for (let attempt = 1; attempt <= MAX_CROP_TRIES; attempt++) {
+    let gen;
+    try {
+      gen = await generateImage({ model, prompt: buildSheetPrompt(names) });
+    } catch (err) {
+      await query(`UPDATE calligraphy_plates SET status='failed', error=$2 WHERE id = ANY($1)`,
+        [batch.map((b) => b.id), err.code || 'ERR_OPENROUTER']);
+      const c = await jobCounts(jobId);
+      return res.status(err.status || 502).json({ error: err.message || 'فشل التوليد', code: err.code || 'ERR_OPENROUTER',
+        data: { processed: 0, ...c, remaining: c.pending, job_cost: await jobCost(jobId), plates: [] } });
+    }
+    totalCost += Number(gen.cost || 0);
+    sheet = saveBufferToUploads(req, 'calligraphy/sheets', gen.buffer, 'png'); // keep latest (review fallback)
+    let cropped;
+    try {
+      cropped = await cropSheet(gen.buffer, batch.length);
+    } catch (err) {
+      console.error('crop threw:', err.message);
+      cropped = { plates: [], count: -1 };
+    }
+    lastCount = cropped.count;
+    if (cropped.count === batch.length) { plates = cropped.plates; break; }
+    console.warn(`crop mismatch attempt ${attempt}/${MAX_CROP_TRIES}: expected ${batch.length}, got ${cropped.count} — regenerating`);
   }
 
-  const sheet = saveBufferToUploads(req, 'calligraphy/sheets', gen.buffer, 'png');
-  const perCost = batch.length ? gen.cost / batch.length : 0;
+  const perCost = batch.length ? totalCost / batch.length : 0;
 
-  let plates;
-  try {
-    const cropped = await cropSheet(gen.buffer, batch.length);
-    plates = cropped.plates;
-    if (cropped.count !== batch.length) {
-      // spec §11: don't mis-slice — flag whole batch for manual review, keep the sheet
-      await query(
-        `UPDATE calligraphy_plates SET status='failed', model=$2, cost_usd=$3, sheet_path=$4,
-                error=$5 WHERE id = ANY($1)`,
-        [batch.map((b) => b.id), model, perCost, sheet.url,
-         `crop mismatch: expected ${batch.length}, got ${cropped.count}`]);
-      const c = await jobCounts(jobId);
-      return res.json({ data: { processed: 0, ...c, remaining: c.pending, job_cost: await jobCost(jobId),
-        review: true, plates: [] } });
-    }
-  } catch (err) {
-    console.error('crop failed:', err.message);
-    await query(`UPDATE calligraphy_plates SET status='failed', sheet_path=$2, error='crop error' WHERE id = ANY($1)`,
-      [batch.map((b) => b.id), sheet.url]);
-    return res.status(500).json({ error: 'فشل تقطيع الورقة', code: 'ERR_CROP' });
+  if (!plates) {
+    // every attempt mismatched — flag for manual review rather than mis-slice (spec §11)
+    await query(
+      `UPDATE calligraphy_plates SET status='failed', model=$2, cost_usd=$3, sheet_path=$4, error=$5 WHERE id = ANY($1)`,
+      [batch.map((b) => b.id), model, perCost, sheet ? sheet.url : null,
+       `crop mismatch after ${MAX_CROP_TRIES} tries: expected ${batch.length}, got ${lastCount}`]);
+    const c = await jobCounts(jobId);
+    return res.json({ data: { processed: 0, ...c, remaining: c.pending, job_cost: await jobCost(jobId), review: true, plates: [] } });
   }
 
   const updated = [];

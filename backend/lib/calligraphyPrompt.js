@@ -11,9 +11,10 @@ function buildSheetPrompt(names) {
   return [
     STYLE,
     `Write each of the following ${names.length} Arabic names as its own separate centered line,`,
-    'stacked vertically top to bottom, evenly spaced with clear blank gaps between lines so each',
-    'name can be cropped out individually. Spell each name EXACTLY as written, do not add or remove',
-    'any letters or words:',
+    'stacked vertically top to bottom. Leave a GENEROUS amount of empty white vertical space',
+    'between every line — at least the height of one full line of text — so the names are clearly',
+    'separated and never touch or overlap, and each can be cropped out individually. Keep the lines',
+    'evenly spaced. Spell each name EXACTLY as written, do not add or remove any letters or words:',
     list,
   ].join('\n');
 }
