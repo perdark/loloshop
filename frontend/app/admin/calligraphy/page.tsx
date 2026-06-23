@@ -148,7 +148,7 @@ function PlateCard({
 export default function CalligraphyPage() {
   // ── mode + model ────────────────────────────────────────────────────────────
   const [mode, setMode] = useState<InputMode>("typed");
-  const [model, setModel] = useState<ModelMode>("standard");
+  const model: ModelMode = "standard";
 
   // ── typed / txt inputs ──────────────────────────────────────────────────────
   const [typedText, setTypedText] = useState("");
@@ -169,7 +169,6 @@ export default function CalligraphyPage() {
   const [plates, setPlates] = useState<CalPlate[]>([]);
   const [done, setDone] = useState(0);
   const [total, setTotal] = useState(0);
-  const [cost, setCost] = useState(0);
 
   // ── per-plate action states ─────────────────────────────────────────────────
   const [rerollingId, setRerollingId] = useState<string | null>(null);
@@ -235,13 +234,11 @@ export default function CalligraphyPage() {
       setPlates(job.plates);
       setTotal(job.total);
       setDone(0);
-      setCost(0);
 
       let remaining = job.total;
       while (remaining > 0) {
         const r = await processCalJob(job.job_id);
         setDone(r.done);
-        setCost(r.job_cost);
         setPlates((prev) =>
           prev.map((p) => r.plates.find((u) => u.id === p.id) ?? p)
         );
@@ -255,7 +252,6 @@ export default function CalligraphyPage() {
       const full = await getCalJob(job.job_id);
       setPlates(full.plates);
       setDone(full.done);
-      setCost(full.job_cost);
     } catch (e) {
       toast.error(getApiErrorMessage(e, "فشل التوليد"));
     } finally {
@@ -321,10 +317,6 @@ export default function CalligraphyPage() {
     try {
       const updated = await rerollPlate(id);
       setPlates((prev) => prev.map((p) => (p.id === id ? updated : p)));
-      if (jobId) {
-        const full = await getCalJob(jobId);
-        setCost(full.job_cost);
-      }
       toast.success("تم إعادة توليد الصورة");
     } catch (e) {
       toast.error(getApiErrorMessage(e, "فشل إعادة التوليد"));
@@ -533,33 +525,6 @@ export default function CalligraphyPage() {
           </div>
         )}
 
-        {/* model toggle */}
-        <div className="mb-5">
-          <p className="mb-1.5 text-xs font-semibold text-ink-soft">جودة التوليد</p>
-          <div className="flex gap-2">
-            {(
-              [
-                { id: "standard" as ModelMode, label: "عادي" },
-                { id: "premium" as ModelMode, label: "فاخر" },
-              ] as const
-            ).map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                onClick={() => setModel(m.id)}
-                disabled={running}
-                className={`min-h-11 rounded-full px-5 py-2 text-sm font-semibold transition-all duration-200 disabled:opacity-60 ${
-                  model === m.id
-                    ? "bg-ink text-cream"
-                    : "border border-line bg-beige text-ink hover:border-orange/40 hover:text-orange-ink"
-                }`}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
         {/* generate button */}
         <Button
           onClick={handleGenerate}
@@ -576,12 +541,9 @@ export default function CalligraphyPage() {
       {/* ── Progress ──────────────────────────────────────────────────────── */}
       {(running || (jobId && total > 0)) && (
         <section className="surface-card rounded-2xl p-4 mb-6">
-          <div className="mb-2 flex items-center justify-between gap-3">
+          <div className="mb-2">
             <p className="text-sm font-semibold text-ink">
               التقدم: {done} / {total}
-            </p>
-            <p className="text-sm tabular-nums text-ink-soft" dir="ltr">
-              $ {cost.toFixed(2)}
             </p>
           </div>
           <div

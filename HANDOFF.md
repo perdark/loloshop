@@ -21,9 +21,11 @@ plate onto the sash order's «تطريز الوشاح من الأمام» line**
 **1. OpenRouter (`backend/lib/openrouter.js`).** `generateImage({model,prompt,resolution,aspectRatio})` → `POST
 https://openrouter.ai/api/v1/images`, body `{model,prompt,resolution:'2K',aspect_ratio:'9:16',n:1,output_format:'png'}`,
 returns base64 → Buffer + `usage.cost`. **Sole reader of `OPENROUTER_API_KEY`** (server-side, in `backend/.env` — already set,
-73 chars). `MODELS={standard:'google/gemini-3.1-flash-image' (Nano Banana 2), premium:'google/gemini-3-pro-image'}`. **Live
-verified:** model slug resolves; clean Thuluth; spelling correct. **COST IS PER IMAGE (~$0.10), not per name** → batching 10/sheet
-= $0.01/name (controller stores `gen.cost / batch.length`). A 1-name re-roll therefore costs ~$0.10.
+73 chars). **MODEL LOCKED to `google/gemini-2.5-flash-image`** (both `MODELS.standard` and `.premium`) per user decision
+2026-06-24 — chosen for cost (~**$0.039/image** → ~**$3.9 per 1,000 students**). **⚠️ TRADE-OFF the user accepted explicitly:
+this model GARBLES Arabic spelling — live test produced 0/10 correct names (pretty Thuluth of *unrelated* words). The accurate
+model `gemini-3.1-flash-image` (10/10, $0.067@1K / $0.10@2K) is deliberately NOT used.** Cost is per-image, amortized by the
+10-names/sheet batching (`gen.cost / batch.length`); a 1-name re-roll is a full ~$0.039.
 
 **2. Crop (`backend/lib/sheetCrop.js`, `sharp`).** `cropSheet(buffer, expected)` slices a vertical N-up sheet into N plates by
 horizontal ink-density valleys (noise filter + smallest-gap merge for diacritics). **Live verified 10/10** on a real sheet,
@@ -40,9 +42,10 @@ progress + resume**), `GET /jobs/:id`, `POST /plates/:id/reroll` (single 1-name,
 `render_text`). `server.js` mounts it + mkdirs `/uploads/calligraphy/{sheets,plates}` at boot. `lib/upload.js` gained
 `saveBufferToUploads` + `absFromUrl`.
 
-**4. Frontend.** `app/admin/calligraphy/page.tsx` — 3 input modes (كتابة/لصق · حسب الممثل · رفع .txt), عادي/فاخر model toggle,
-generate loop with progress bar + running cost, proof grid (image + render_text + status + re-roll/تنزيل/ربط بالطلب), ZIP
-buttons. `lib/calligraphy.ts` wrappers. Nav link «الخط العربي» in `components/AdminSidebar.tsx`. **Live browser verified:**
+**4. Frontend.** `app/admin/calligraphy/page.tsx` — 3 input modes (كتابة/لصق · حسب الممثل · رفع .txt),
+generate loop with progress bar, proof grid (image + render_text + status + re-roll/تنزيل/ربط بالطلب), ZIP
+buttons. (Per user 2026-06-24: the «جودة التوليد» عادي/فاخر toggle AND the `$` cost display were REMOVED from the UI —
+always uses the locked model; cost state dropped.) `lib/calligraphy.ts` wrappers. Nav link «الخط العربي» in `components/AdminSidebar.tsx`. **Live browser verified:**
 typed 2 names → 2/2, $0.10, both plates rendered inline as «تم», ZIP downloaded with Arabic filenames; RTL/brand clean; no
 h-scroll at mobile; console clean.
 
@@ -56,7 +59,9 @@ the link target; attach is **admin-choice** (view/download/link), never automati
 ### Open follow-ups
 - **⚠️ Set `OPENROUTER_API_KEY` in PROD `.env` on the VPS** (+ `pm2 restart`) — without it generation returns a clean Arabic
   error (`ERR_OPENROUTER_KEY`) and the tool is non-functional in prod.
-- **Cost is per-image (~$0.10).** Re-rolls cost a full ~$0.10 each. Budget accordingly (≈$24 per 1,000-student school via 10/sheet).
+- **⚠️ Locked model garbles Arabic (0/10).** User accepted this for cost. Cost ~$0.039/image (~$3.9/1,000 students). If the
+  garbled names become a problem, switch `CALLIGRAPHY_MODEL` in `lib/openrouter.js` to `google/gemini-3.1-flash-image`
+  (correct spelling; ~$0.067/image@1K, ~$0.10@2K) — one-line change. Re-rolls cost a full image each.
 - **Crop bleed:** to reduce neighbouring-line descenders on plates, the sheet prompt could ask for more vertical spacing, or
   `sheetCrop` padding/threshold tuned. 10/10 isolation already achieved; this is cosmetic.
 - **Minor a11y:** the names `<textarea>` has no `id`/label (2 devtools issues) — add `id` + `<label htmlFor>`.

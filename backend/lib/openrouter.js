@@ -1,9 +1,13 @@
 // backend/lib/openrouter.js — sole reader of OPENROUTER_API_KEY.
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/images';
 
+// LOCKED to gemini-2.5-flash-image per user decision (2026-06-24): cheapest tier
+// (~$0.039/image → ~$3.9 per 1,000 students). NOTE: this model garbles Arabic
+// spelling (0/10 in testing) — chosen for cost; gemini-3.1-flash-image is NOT used.
+const CALLIGRAPHY_MODEL = 'google/gemini-2.5-flash-image';
 const MODELS = {
-  standard: 'google/gemini-3.1-flash-image', // Nano Banana 2 @ 2K — production default
-  premium:  'google/gemini-3-pro-image',     // 4K — optional premium
+  standard: CALLIGRAPHY_MODEL,
+  premium:  CALLIGRAPHY_MODEL, // gemini-3.1 deliberately not used (locked)
 };
 
 function tagged(message, status, code) {
