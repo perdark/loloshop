@@ -22,6 +22,8 @@ export interface CalJob {
   failed: number;
   pending: number;
   job_cost: number;
+  /** Names the server refused to generate (no ≥2 Arabic letters). */
+  dropped?: string[];
   plates: CalPlate[];
 }
 
@@ -34,6 +36,8 @@ export interface CalProcess {
   remaining: number;
   job_cost: number;
   review?: boolean;
+  /** How many generation attempts this batch took (1 = clean first try). */
+  attempts?: number;
   plates: CalPlate[];
 }
 
@@ -65,6 +69,17 @@ export interface CreateJobBody {
   model?: "standard" | "premium";
   wholesaler_id?: string | null;
   items: CreateJobItem[];
+}
+
+/** Below this, the UI warns (a sheet costs the same whether it holds 1 or 10 names). */
+export const MIN_BATCH = 10;
+
+// Mirrors the backend `isRealName`: a real embroiderable name has ≥2 Arabic letters,
+// so pure numbers / Latin / emoji / single chars are flagged and never generated.
+const ARABIC_LETTER = /[ء-يٱ-ۓۺ-ۼ]/g;
+export function isRealName(text: string): boolean {
+  const m = (text || "").match(ARABIC_LETTER);
+  return !!m && m.length >= 2;
 }
 
 const API_BASE =

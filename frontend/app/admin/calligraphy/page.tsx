@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
+import { Modal } from "@/components/ui/Modal";
 import { getApiErrorMessage } from "@/lib/api";
 import {
   absUrl,
@@ -12,7 +13,9 @@ import {
   getCalJob,
   getCalNames,
   getCalWholesalers,
+  isRealName,
   linkPlate,
+  MIN_BATCH,
   processCalJob,
   rerollPlate,
   type CalGrabRow,
@@ -55,12 +58,14 @@ function PlateCard({
   plate,
   onReroll,
   onLink,
+  onPreview,
   rerolling,
   linking,
 }: {
   plate: CalPlate;
   onReroll: (id: string) => Promise<void>;
   onLink: (id: string) => Promise<void>;
+  onPreview: (plate: CalPlate) => void;
   rerolling: boolean;
   linking: boolean;
 }) {
@@ -68,17 +73,25 @@ function PlateCard({
 
   return (
     <article className="flex flex-col gap-2 rounded-2xl border border-line bg-white p-3 shadow-sm">
-      {/* image */}
+      {/* image — click to preview full size */}
       {plate.status === "done" && imgUrl ? (
-        <div className="overflow-hidden rounded-xl bg-gray-50">
+        <button
+          type="button"
+          onClick={() => onPreview(plate)}
+          className="group relative overflow-hidden rounded-xl bg-gray-50 focus:outline-none focus:ring-2 focus:ring-orange-ink/40"
+          aria-label={`معاينة ${plate.render_text}`}
+        >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={imgUrl}
             alt={plate.render_text}
-            className="w-full object-contain"
+            className="w-full object-contain transition-transform duration-200 group-hover:scale-[1.03]"
             loading="lazy"
           />
-        </div>
+          <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-ink/0 text-xs font-semibold text-white opacity-0 transition-all duration-200 group-hover:bg-ink/30 group-hover:opacity-100">
+            معاينة 🔍
+          </span>
+        </button>
       ) : plate.status === "failed" ? (
         <div className="flex min-h-[80px] items-center justify-center rounded-xl bg-red-50 p-3">
           <p className="text-center text-xs text-red-600">
@@ -143,6 +156,24 @@ function PlateCard({
   );
 }
 
+// ─── Name-count hint (valid / junk / under-minimum) ──────────────────────────
+
+function NameCountHint({ lines }: { lines: string[] }) {
+  const valid = lines.filter(isRealName).length;
+  const junk = lines.length - valid;
+  return (
+    <p className="mt-1 text-xs text-ink-soft">
+      <span className="font-semibold text-ink">{valid}</span> اسم صالح
+      {junk > 0 && (
+        <span className="text-red-600"> · {junk} غير صالح (سيُستبعد)</span>
+      )}
+      {valid > 0 && valid < MIN_BATCH && (
+        <span className="text-amber-600"> · أقل من {MIN_BATCH} — التكلفة لكل ورقة ثابتة</span>
+      )}
+    </p>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function CalligraphyPage() {
@@ -173,6 +204,34 @@ export default function CalligraphyPage() {
   // ── per-plate action states ─────────────────────────────────────────────────
   const [rerollingId, setRerollingId] = useState<string | null>(null);
   const [linkingId, setLinkingId] = useState<string | null>(null);
+
+  // ── confirm gate (junk names / small batch — admin's choice) ─────────────────
+  const [confirm, setConfirm] = useState<{
+    body: CreateJobBody;
+    junk: string[];
+    validCount: number;
+  } | null>(null);
+
+  // ── full-size plate preview (click a result) ─────────────────────────────────
+  const [preview, setPreview] = useState<CalPlate | null>(null);
+  useEffect(() => {
+    if (!preview) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setPreview(null);
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [preview]);
+
+  // ── in-flight elapsed timer (so the spinner is never a blank "is it stuck?") ──
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!running) {
+      setElapsed(0);
+      return;
+    }
+    const t0 = Date.now();
+    const id = setInterval(() => setElapsed(Math.floor((Date.now() - t0) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [running]);
 
   // ── load wholesalers once ────────────────────────────────────────────────────
   useEffect(() => {
@@ -230,6 +289,9 @@ export default function CalligraphyPage() {
     setRunning(true);
     try {
       const job = await createCalJob(body);
+      if (job.dropped && job.dropped.length) {
+        toast.message(`تم استبعاد ${job.dropped.length} اسم غير صالح`);
+      }
       setJobId(job.job_id);
       setPlates(job.plates);
       setTotal(job.total);
@@ -259,56 +321,65 @@ export default function CalligraphyPage() {
     }
   }
 
-  function buildItems(): CreateJobBody | null {
+  // Returns the job body (valid names only) plus the junk names that were excluded,
+  // so junk never reaches the paid generator. null = nothing usable (with a toast).
+  function buildItems(): { body: CreateJobBody; junk: string[] } | null {
+    let allItems: CreateJobBody["items"] = [];
+    let base: Omit<CreateJobBody, "items">;
+
     if (mode === "typed") {
-      const lines = typedText
-        .split(/\r?\n/)
-        .map((l) => l.trim())
-        .filter(Boolean);
+      const lines = typedText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
       if (!lines.length) {
         toast.error("أدخل أسماء في المربع");
         return null;
       }
-      return { source: "typed", model, items: lines.map((t) => ({ render_text: t })) };
-    }
-
-    if (mode === "txt") {
+      base = { source: "typed", model };
+      allItems = lines.map((t) => ({ render_text: t }));
+    } else if (mode === "txt") {
       if (!txtLines.length) {
         toast.error("اختر ملف .txt يحتوي على أسماء");
         return null;
       }
-      return {
-        source: "txt",
-        model,
-        items: txtLines.map((t) => ({ render_text: t })),
-      };
-    }
-
-    // wholesaler
-    if (!selectedWid) {
-      toast.error("اختر ممثلاً");
-      return null;
-    }
-    const selected = grabRows.filter((r) => checkedIds.has(r.order_item_id));
-    if (!selected.length) {
-      toast.error("اختر أسماء من القائمة");
-      return null;
-    }
-    return {
-      source: "wholesaler",
-      model,
-      wholesaler_id: selectedWid,
-      items: selected.map((r) => ({
+      base = { source: "txt", model };
+      allItems = txtLines.map((t) => ({ render_text: t }));
+    } else {
+      if (!selectedWid) {
+        toast.error("اختر ممثلاً");
+        return null;
+      }
+      const selected = grabRows.filter((r) => checkedIds.has(r.order_item_id));
+      if (!selected.length) {
+        toast.error("اختر أسماء من القائمة");
+        return null;
+      }
+      base = { source: "wholesaler", model, wholesaler_id: selectedWid };
+      allItems = selected.map((r) => ({
         render_text: r.render_text,
         student_id: r.student_id,
         order_item_id: r.order_item_id,
-      })),
-    };
+      }));
+    }
+
+    const valid = allItems.filter((it) => isRealName(it.render_text));
+    const junk = allItems.filter((it) => !isRealName(it.render_text)).map((it) => it.render_text);
+    if (!valid.length) {
+      toast.error("لا توجد أسماء صالحة — يجب أن يحتوي الاسم على حروف عربية");
+      return null;
+    }
+    return { body: { ...base, items: valid }, junk };
   }
 
   function handleGenerate() {
-    const body = buildItems();
-    if (body) runJob(body);
+    const built = buildItems();
+    if (!built) return;
+    const { body, junk } = built;
+    // Admin's choice: junk is always excluded, but if anything was excluded OR the
+    // batch is under 10, confirm before spending — otherwise generate straight away.
+    if (junk.length > 0 || body.items.length < MIN_BATCH) {
+      setConfirm({ body, junk, validCount: body.items.length });
+      return;
+    }
+    runJob(body);
   }
 
   // ── reroll ───────────────────────────────────────────────────────────────────
@@ -399,13 +470,9 @@ export default function CalligraphyPage() {
               placeholder={"محمد علي\nفاطمة حسن\nأحمد كريم"}
               className="w-full rounded-xl border border-line bg-beige px-3 py-2.5 text-sm text-ink placeholder:text-ink/30 focus:border-orange-ink focus:outline-none focus:ring-2 focus:ring-orange-ink/15 disabled:opacity-60"
             />
-            <p className="mt-1 text-xs text-ink-soft">
-              {typedText
-                .split(/\r?\n/)
-                .map((l) => l.trim())
-                .filter(Boolean).length}{" "}
-              اسم
-            </p>
+            <NameCountHint
+              lines={typedText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)}
+            />
           </div>
         )}
 
@@ -518,9 +585,12 @@ export default function CalligraphyPage() {
               className="block w-full text-sm text-ink file:me-3 file:min-h-[36px] file:cursor-pointer file:rounded-full file:border-0 file:bg-orange-ink file:px-4 file:text-xs file:font-semibold file:text-white hover:file:opacity-90 disabled:opacity-60"
             />
             {txtLines.length > 0 && (
-              <p className="text-xs text-ink-soft">
-                تم قراءة {txtLines.length} اسم من الملف
-              </p>
+              <>
+                <p className="text-xs text-ink-soft">
+                  تم قراءة {txtLines.length} سطر من الملف
+                </p>
+                <NameCountHint lines={txtLines} />
+              </>
             )}
           </div>
         )}
@@ -541,17 +611,24 @@ export default function CalligraphyPage() {
       {/* ── Progress ──────────────────────────────────────────────────────── */}
       {(running || (jobId && total > 0)) && (
         <section className="surface-card rounded-2xl p-4 mb-6">
-          <div className="mb-2">
+          <div className="mb-2 flex items-baseline justify-between gap-3">
             <p className="text-sm font-semibold text-ink">
               التقدم: {done} / {total}
             </p>
+            {running && (
+              <p className="text-xs text-ink-soft">
+                جارٍ توليد ورقة… قد تستغرق حتى دقيقة لكل ورقة ({elapsed} ثانية)
+              </p>
+            )}
           </div>
           <div
             role="progressbar"
             aria-valuenow={progress}
             aria-valuemin={0}
             aria-valuemax={100}
-            className="h-2.5 overflow-hidden rounded-full bg-orange/15"
+            className={`h-2.5 overflow-hidden rounded-full bg-orange/15 ${
+              running ? "animate-pulse" : ""
+            }`}
           >
             <div
               className="h-full rounded-full bg-orange-ink transition-all duration-500"
@@ -596,6 +673,7 @@ export default function CalligraphyPage() {
                 plate={plate}
                 onReroll={handleReroll}
                 onLink={handleLink}
+                onPreview={setPreview}
                 rerolling={rerollingId === plate.id}
                 linking={linkingId === plate.id}
               />
@@ -603,6 +681,95 @@ export default function CalligraphyPage() {
           </div>
         </section>
       )}
+
+      {/* ── Full-size plate preview ───────────────────────────────────────────── */}
+      {preview && absUrl(preview.plate_path) && (
+        <div
+          className="animate-fade-page-in fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-ink/70 p-4 backdrop-blur-sm"
+          onClick={() => setPreview(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-label={`معاينة ${preview.render_text}`}
+        >
+          <button
+            type="button"
+            onClick={() => setPreview(null)}
+            className="absolute end-4 top-4 flex h-11 w-11 items-center justify-center rounded-full bg-white/90 text-xl text-ink shadow-lg transition hover:bg-white"
+            aria-label="إغلاق"
+          >
+            ✕
+          </button>
+          <div
+            className="flex max-h-[80dvh] w-full max-w-3xl flex-col items-center gap-3 overflow-auto rounded-2xl bg-white p-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={absUrl(preview.plate_path)}
+              alt={preview.render_text}
+              className="max-h-[64dvh] w-auto max-w-full object-contain"
+            />
+            <p className="font-display text-lg font-bold text-ink">{preview.render_text}</p>
+            <a
+              href={absUrl(preview.plate_path)}
+              download
+              className="inline-flex min-h-11 items-center justify-center rounded-full bg-orange-ink px-5 py-2 text-sm font-semibold text-white transition hover:opacity-90"
+            >
+              تنزيل الصورة
+            </a>
+          </div>
+        </div>
+      )}
+
+      {/* ── Confirm gate (junk excluded / small batch) ────────────────────────── */}
+      <Modal
+        open={!!confirm}
+        onClose={() => setConfirm(null)}
+        title="تأكيد التوليد"
+        footer={
+          <>
+            <Button variant="ghost" fullWidth onClick={() => setConfirm(null)}>
+              إلغاء
+            </Button>
+            <Button
+              variant="primary"
+              fullWidth
+              onClick={() => {
+                if (confirm) runJob(confirm.body);
+                setConfirm(null);
+              }}
+            >
+              متابعة ({confirm?.validCount} اسم)
+            </Button>
+          </>
+        }
+      >
+        {confirm && (
+          <div className="space-y-3 text-sm text-ink">
+            {confirm.junk.length > 0 && (
+              <div className="rounded-xl border border-red-200 bg-red-50 p-3">
+                <p className="font-semibold text-red-700">
+                  {confirm.junk.length} اسم غير صالح سيُستبعد (لن يُولَّد):
+                </p>
+                <p className="mt-1 break-words text-xs text-red-600">
+                  {confirm.junk.slice(0, 12).join(" · ")}
+                  {confirm.junk.length > 12 ? " …" : ""}
+                </p>
+              </div>
+            )}
+            {confirm.validCount < MIN_BATCH && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-amber-800">
+                لديك <span className="font-bold">{confirm.validCount}</span> اسم فقط
+                (أقل من {MIN_BATCH}). كل ورقة تكلّف نفس السعر سواء حملت اسمًا واحدًا أو
+                {" "}{MIN_BATCH} — هل تريد المتابعة؟
+              </div>
+            )}
+            <p className="text-xs text-ink-soft">
+              سيتم توليد <span className="font-semibold text-ink">{confirm.validCount}</span> اسم صالح.
+            </p>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

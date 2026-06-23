@@ -16,6 +16,15 @@ function bad(res, msg, code = 'ERR_VALIDATION', status = 400) {
 function pickModel(model) {
   return model === 'premium' ? MODELS.premium : MODELS.standard;
 }
+// A real embroiderable name has at least two Arabic letters. Rejects pure numbers,
+// Latin, emoji, single chars and punctuation so the PAID generator is never spent
+// on junk (the "no API call for a retarded name" guard). Tatweel/diacritics aren't
+// letters and don't count. This is the server-side choke point; the UI mirrors it.
+const ARABIC_LETTER = /[ء-يٱ-ۓۺ-ۼ]/g;
+function isRealName(text) {
+  const m = String(text || '').match(ARABIC_LETTER);
+  return !!m && m.length >= 2;
+}
 function toPlate(r) {
   return {
     id: r.id, render_text: r.render_text, status: r.status,
@@ -74,6 +83,13 @@ async function createJob(req, res) {
     }))
     .filter((it) => it.render_text);
   if (!items.length) return bad(res, 'لا توجد أسماء صالحة');
+
+  // Junk guard (defense-in-depth): drop anything that isn't a real Arabic name
+  // BEFORE any paid generation. The UI flags these too, but a direct API call can't
+  // bypass it. Batch SIZE is intentionally NOT capped here (admin's choice).
+  const dropped = items.filter((it) => !isRealName(it.render_text)).map((it) => it.render_text);
+  items = items.filter((it) => isRealName(it.render_text));
+  if (!items.length) return bad(res, 'لا توجد أسماء صالحة — يجب أن يحتوي الاسم على حروف عربية');
   if (items.length > 1000) return bad(res, 'الحد الأقصى 1000 اسم لكل مهمة');
 
   // Dedup: wholesaler → by order_item_id; typed/txt → by exact render_text.
@@ -92,7 +108,7 @@ async function createJob(req, res) {
       [jobId, wholesaler_id, it.student_id, it.order_item_id, source, it.render_text, pickModel(model), req.user.id]);
     out.push(toPlate(rows[0]));
   }
-  res.status(201).json({ data: { job_id: jobId, total: out.length, plates: out } });
+  res.status(201).json({ data: { job_id: jobId, total: out.length, dropped, plates: out } });
 }
 
 async function jobCost(jobId) {
@@ -123,15 +139,19 @@ async function processNext(req, res) {
   const names = batch.map((b) => b.render_text);
 
   // Generate + crop with AUTO-RETRY. The model spaces lines randomly, so a sheet
-  // that crops to the wrong band count (e.g. two names too close → merged) usually
-  // slices cleanly on a fresh generation. Regenerate until the band count matches;
-  // only flag for manual review if every attempt mismatches (never mis-slice — §11).
-  const MAX_CROP_TRIES = 4;
+  // that crops to the wrong band count usually slices cleanly on a fresh generation.
+  // cropSheet now also salvages too-few-band sheets (gap segmentation), so a single
+  // retry is enough in the rare case it still mismatches — keep the cap LOW to bound
+  // cost (each retry is a full paid image). Flag for manual review only if every
+  // attempt mismatches (never mis-slice — §11).
+  const MAX_CROP_TRIES = 2;
   let plates = null;
   let sheet = null;
   let totalCost = 0;
   let lastCount = null;
+  let attemptsUsed = 0;
   for (let attempt = 1; attempt <= MAX_CROP_TRIES; attempt++) {
+    attemptsUsed = attempt;
     let gen;
     try {
       gen = await generateImage({ model, prompt: buildSheetPrompt(names) });
@@ -165,7 +185,7 @@ async function processNext(req, res) {
       [batch.map((b) => b.id), model, perCost, sheet ? sheet.url : null,
        `crop mismatch after ${MAX_CROP_TRIES} tries: expected ${batch.length}, got ${lastCount}`]);
     const c = await jobCounts(jobId);
-    return res.json({ data: { processed: 0, ...c, remaining: c.pending, job_cost: await jobCost(jobId), review: true, plates: [] } });
+    return res.json({ data: { processed: 0, ...c, remaining: c.pending, job_cost: await jobCost(jobId), review: true, attempts: attemptsUsed, plates: [] } });
   }
 
   const updated = [];
@@ -178,7 +198,7 @@ async function processNext(req, res) {
     updated.push(toPlate(rows[0]));
   }
   const c = await jobCounts(jobId);
-  res.json({ data: { processed: updated.length, ...c, remaining: c.pending, job_cost: await jobCost(jobId), plates: updated } });
+  res.json({ data: { processed: updated.length, ...c, remaining: c.pending, job_cost: await jobCost(jobId), attempts: attemptsUsed, plates: updated } });
 }
 
 // GET /jobs/:jobId

@@ -415,14 +415,7 @@ export default function StudentHomePage() {
             </a>
             .
           </p>
-          <a
-              href="https://revo-azure.vercel.app/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-semibold text-orange-ink underline underline-offset-2"
-            >
-              © RevoArt 
-            </a>
+          <p className="font-semibold text-ink-soft">© RevoArt</p>
         </div>
       </footer>
     </div>

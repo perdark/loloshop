@@ -1,13 +1,13 @@
 // backend/lib/openrouter.js — sole reader of OPENROUTER_API_KEY.
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/images';
 
-// LOCKED to gemini-2.5-flash-image per user decision (2026-06-24): cheapest tier
-// (~$0.039/image → ~$3.9 per 1,000 students). NOTE: this model garbles Arabic
-// spelling (0/10 in testing) — chosen for cost; gemini-3.1-flash-image is NOT used.
-const CALLIGRAPHY_MODEL = 'google/gemini-2.5-flash-image';
+// Nano Banana 2 — live-tested 2026-06-24: 10/10 CORRECT Arabic spelling, clean Thuluth,
+// ~$0.10/image @2K (= ~$0.01/student, ~$10 per 1,000 at 10 names/sheet).
+// gemini-2.5-flash-image is cheaper (~$0.039) but GARBLES Arabic (0/10) — never use it for names.
+const CALLIGRAPHY_MODEL = 'google/gemini-3.1-flash-image';
 const MODELS = {
   standard: CALLIGRAPHY_MODEL,
-  premium:  CALLIGRAPHY_MODEL, // gemini-3.1 deliberately not used (locked)
+  premium:  'google/gemini-3-pro-image', // optional: bolder Thuluth, ~$0.24/image @4K
 };
 
 function tagged(message, status, code) {
