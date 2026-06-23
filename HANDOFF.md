@@ -6,6 +6,65 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
+## 2026-06-24 — Admin calligraphy batch tool (AI name-plates via OpenRouter → crop → link to order)
+
+Committed to **main** this session. **Migration 043 applied to Neon + verified.** Gates green: FE `tsc` 0 · `eslint` 0 ·
+BE `node --check` 0 (all 7 files). **Verified live end-to-end** (real OpenRouter calls + backend HTTP e2e + dev browser).
+`next build` NOT run (dev servers up). Plan: `docs/superpowers/plans/2026-06-24-calligraphy-batch-tool.md` · spec:
+`docs/superpowers/specs/2026-06-24-calligraphy-batch-tool-design.md`. **Built via a 3-agent Workflow** (backend libs+migration ·
+backend API · frontend UI) + interactive money-gated checkpoints.
+
+**What & why.** Admin-only tool: paste/grab/upload a list of student names → AI generates Arabic-calligraphy name-plate PNGs
+(10 names per sheet → cropped into 10 individual plates) → proof grid → re-roll bad ones → ZIP download → optionally **link a
+plate onto the sash order's «تطريز الوشاح من الأمام» line** (`order_items.customer_image_url`). Replaces hand-doing name calligraphy.
+
+**1. OpenRouter (`backend/lib/openrouter.js`).** `generateImage({model,prompt,resolution,aspectRatio})` → `POST
+https://openrouter.ai/api/v1/images`, body `{model,prompt,resolution:'2K',aspect_ratio:'9:16',n:1,output_format:'png'}`,
+returns base64 → Buffer + `usage.cost`. **Sole reader of `OPENROUTER_API_KEY`** (server-side, in `backend/.env` — already set,
+73 chars). `MODELS={standard:'google/gemini-3.1-flash-image' (Nano Banana 2), premium:'google/gemini-3-pro-image'}`. **Live
+verified:** model slug resolves; clean Thuluth; spelling correct. **COST IS PER IMAGE (~$0.10), not per name** → batching 10/sheet
+= $0.01/name (controller stores `gen.cost / batch.length`). A 1-name re-roll therefore costs ~$0.10.
+
+**2. Crop (`backend/lib/sheetCrop.js`, `sharp`).** `cropSheet(buffer, expected)` slices a vertical N-up sheet into N plates by
+horizontal ink-density valleys (noise filter + smallest-gap merge for diacritics). **Live verified 10/10** on a real sheet,
+each plate one clean name top→bottom in input order. If `count !== expected` → batch flagged `failed` + `review:true`, sheet kept
+(no mis-slice). Minor cosmetic bleed of neighbouring descenders on tightly-stacked lines (acceptable; see follow-ups).
+
+**3. Data + API.** Migration **043** `calligraphy_plates` (16 cols; grouped by server-generated `job_id`; `order_item_id` =
+link target; `cost_usd`, `status pending|done|failed`, `linked_at`). All endpoints `requireRole('admin')` in
+`routes/calligraphy.js` (`controllers/calligraphyController.js`): `GET /wholesalers`, `GET /wholesalers/:id/names` (grab list from
+the sash front-embroidery line), `POST /jobs` (create pending rows, dedup — wholesaler by `order_item_id`, typed/txt by
+`render_text`), `POST /jobs/:id/process` (next ≤10 pending → 1 OpenRouter call → crop → save → done; **client loops this for
+progress + resume**), `GET /jobs/:id`, `POST /plates/:id/reroll` (single 1-name, swaps `plate_path`), `POST /plates/:id/link`
+(writes `order_items.customer_image_url`, **never touches order status**), `GET /jobs/:id/download` (streams ZIP, names by
+`render_text`). `server.js` mounts it + mkdirs `/uploads/calligraphy/{sheets,plates}` at boot. `lib/upload.js` gained
+`saveBufferToUploads` + `absFromUrl`.
+
+**4. Frontend.** `app/admin/calligraphy/page.tsx` — 3 input modes (كتابة/لصق · حسب الممثل · رفع .txt), عادي/فاخر model toggle,
+generate loop with progress bar + running cost, proof grid (image + render_text + status + re-roll/تنزيل/ربط بالطلب), ZIP
+buttons. `lib/calligraphy.ts` wrappers. Nav link «الخط العربي» in `components/AdminSidebar.tsx`. **Live browser verified:**
+typed 2 names → 2/2, $0.10, both plates rendered inline as «تم», ZIP downloaded with Arabic filenames; RTL/brand clean; no
+h-scroll at mobile; console clean.
+
+**Decisions locked with user:** render text **exactly as stored** (no auto-honorific, though `students.gender` exists if ever
+wanted); grab source = the sash order's **«تطريز الوشاح من الأمام»** `customer_text` (the "as embroidered" name) — same record is
+the link target; attach is **admin-choice** (view/download/link), never automatic.
+
+**Gotcha fixed live:** `archiver@8` dropped the classic `archiver('zip')` factory (v8 exports classes) → **pinned to
+`archiver@^7` (7.0.1)**. Caught only by the live ZIP test (static `node --check` passed because `require` is runtime).
+
+### Open follow-ups
+- **⚠️ Set `OPENROUTER_API_KEY` in PROD `.env` on the VPS** (+ `pm2 restart`) — without it generation returns a clean Arabic
+  error (`ERR_OPENROUTER_KEY`) and the tool is non-functional in prod.
+- **Cost is per-image (~$0.10).** Re-rolls cost a full ~$0.10 each. Budget accordingly (≈$24 per 1,000-student school via 10/sheet).
+- **Crop bleed:** to reduce neighbouring-line descenders on plates, the sheet prompt could ask for more vertical spacing, or
+  `sheetCrop` padding/threshold tuned. 10/10 isolation already achieved; this is cosmetic.
+- **Minor a11y:** the names `<textarea>` has no `id`/label (2 devtools issues) — add `id` + `<label htmlFor>`.
+- Dev servers left up (BE :4000, FE :3000). `next build` not run; run before deploy. Seed not updated for 043 (schema.sql
+  mirrored; migration is idempotent). `students.gender` exists → honorific auto-prefix is a future option.
+
+---
+
 ## 2026-06-21 (c) — private staff portal: phoneless staff log in by name + password (no OTP), secret URL
 
 Uncommitted on **main**. Gates green: FE `tsc` 0 · `eslint` 0 · BE `node --check` 0. **Migration 042 applied to Neon + verified.**

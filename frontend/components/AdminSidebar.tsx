@@ -18,6 +18,7 @@ const navItems: {
   { href: "/admin/wholesalers", label: "الممثلون", exact: false },
   { href: "/admin/products", label: "الكتالوج", exact: false },
   { href: "/admin/packages", label: "باقات VIP", exact: false },
+  { href: "/admin/calligraphy", label: "الخط العربي", exact: false },
   { href: "/staff", label: "الإنتاج ومتابعة الموظفين", exact: false },
 ];
 

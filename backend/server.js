@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const fs = require('fs');
 const path = require('path');
 
 const isProd = process.env.NODE_ENV === 'production';
@@ -81,6 +82,13 @@ app.use('/api/catalog', require('./routes/catalog'));
 app.use('/api/designs', require('./routes/designs'));
 app.use('/api/fonts', require('./routes/fonts'));
 app.use('/api/payroll', require('./routes/payroll'));
+app.use('/api/calligraphy', require('./routes/calligraphy'));
+
+// Ensure calligraphy upload dirs exist at boot
+['calligraphy/sheets', 'calligraphy/plates'].forEach((d) => {
+  const p = path.join(__dirname, '..', 'uploads', d);
+  if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
+});
 
 app.use((err, req, res, next) => {
   // Errors flagged `expose` carry a safe Arabic message + status (e.g. OTP rate

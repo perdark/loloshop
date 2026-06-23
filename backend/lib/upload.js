@@ -55,4 +55,22 @@ function publicUrl(req, subdir, filename) {
   return `${base}/uploads/${subdir}/${filename}`;
 }
 
-module.exports = { logoUpload, imageUpload, publicUrl };
+// Save a raw Buffer (e.g. a generated PNG) under /uploads/<subdir>/ and return its public URL.
+function saveBufferToUploads(req, subdir, buffer, ext = 'png') {
+  const dir = path.join(ROOT, subdir);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  const filename = crypto.randomBytes(16).toString('hex') + '.' + ext;
+  const absPath = path.join(dir, filename);
+  fs.writeFileSync(absPath, buffer);
+  return { filename, url: publicUrl(req, subdir, filename), absPath };
+}
+
+// Resolve a /uploads/... public URL (or bare path) to an absolute disk path, or null.
+function absFromUrl(url) {
+  if (!url) return null;
+  const m = String(url).match(/\/uploads\/(.+)$/);
+  if (!m) return null;
+  return path.join(ROOT, m[1]);
+}
+
+module.exports = { logoUpload, imageUpload, publicUrl, saveBufferToUploads, absFromUrl };
