@@ -118,7 +118,7 @@ function orderZoneClause(zone, alias = 'o') {
 }
 
 async function listOrders(req, res) {
-  const { wholesaler_id, batch_id, status, from, to, source, type, group, zone } = req.query;
+  const { wholesaler_id, batch_id, status, from, to, source, type, group, zone, approval } = req.query;
   // FIELD VISIBILITY (mirrors getOrder): this route is reachable by any staff role
   // (incl. read-only tailor/presser), so cost/profit and intake PII must NOT leak.
   // Only manager/admin see cost/profit + intake; price additionally to embroiderer.
@@ -153,6 +153,17 @@ async function listOrders(req, res) {
     params.push(to);
     where.push(`o.created_at <= $${params.length}`);
   }
+  // Wholesaler approval visibility:
+  //  • admin = full oversight (sees pending/rejected) + optional ?approval= filter
+  //  • any other role (staff via /api/orders) = gated to approved + retail only (spec: staff see only approved)
+  if (req.user.role === 'admin') {
+    if (['pending', 'approved', 'rejected'].includes(approval)) {
+      params.push(approval);
+      where.push(`o.wholesaler_approval = $${params.length}`);
+    }
+  } else {
+    where.push(`(o.wholesaler_approval IS NULL OR o.wholesaler_approval = 'approved')`);
+  }
 
   // `type` filter — only applicable in item (flat) mode
   const typeFilter = type && VALID_PRODUCT_TYPES.includes(type) ? type : null;
@@ -169,6 +180,7 @@ async function listOrders(req, res) {
              o.created_at,
              o.price, COALESCE(o.cost, 0) AS cost, COALESCE(o.profit, 0) AS profit,
              p.name_ar AS product_name, p.type AS product_type, o.status,
+             o.wholesaler_approval,
              cg.customer_name AS intake_customer_name, cg.instagram_username AS intake_instagram,
              cg.phone_primary, cg.phone_secondary, cg.governorate, cg.area_details,
              cg.event_date::text AS event_date, cg.deposit, cg.notes AS intake_notes
@@ -196,6 +208,8 @@ async function listOrders(req, res) {
           total_price: 0,
           total_cost: 0,
           total_profit: 0,
+          // wholesaler_approval is the same for every row in a bundle (set atomically per checkout_group_id).
+          wholesaler_approval: row.wholesaler_approval || null,
           // full-set form bundles carry intake (delivery/phones/event/deposit); cart bundles don't
           intake: row.intake_customer_name ? {
             customer_name: row.intake_customer_name,
@@ -273,7 +287,8 @@ async function listOrders(req, res) {
            o.working_staff_id,
            CASE WHEN o.working_since > NOW() - INTERVAL '90 seconds' THEN wk.name END AS working_staff_name,
            o.delivery_method, o.recipient_name, o.delivered_at,
-           o.price, o.cost, o.profit, o.status, o.created_at
+           o.price, o.cost, o.profit, o.status, o.created_at,
+           o.wholesaler_approval
     FROM orders o
     JOIN students s ON s.id = o.student_id
     JOIN users u ON u.id = s.user_id
@@ -1304,6 +1319,15 @@ async function configureRepFullSet(req, res) {
   }
   if (student.status !== 'approved') {
     return res.status(403).json({ error: 'يجب موافقة الممثل أولاً', code: 'ERR_NOT_APPROVED' });
+  }
+  // Lock: once the rep (or admin) has approved the student's order, the student may not edit it.
+  // The rep-fill path (wholesalerController) is NOT locked — only the student self-fill path is.
+  const lock = await query(
+    `SELECT 1 FROM orders WHERE student_id = $1 AND wholesaler_approval = 'approved' LIMIT 1`,
+    [student.id]
+  );
+  if (lock.rows.length) {
+    return res.status(403).json({ error: 'الطلب تمت الموافقة عليه ولا يمكن تعديله', code: 'ERR_LOCKED' });
   }
   const { status, json } = await persistFullSetOrder({
     student, body: req.body, actorUserId: req.user.id,

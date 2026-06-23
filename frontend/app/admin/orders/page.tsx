@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { getApiErrorMessage } from "@/lib/api";
@@ -11,8 +11,10 @@ import {
   getRepsOverview,
   updateOrderCost,
   updateCheckoutGroup,
+  approveOrderAdmin,
+  rejectOrderAdmin,
 } from "@/lib/admin";
-import type { AdminBundle, RepOverview } from "@/lib/admin";
+import type { AdminBundle, AdminOrderWithApproval, RepOverview, WholesalerApproval } from "@/lib/admin";
 import {
   ORDER_STATUS_LABELS,
   ORDER_STATUS_OPTIONS,
@@ -21,7 +23,7 @@ import {
   type EmbroideryZone,
 } from "@/lib/constants";
 import { formatDateShort, formatIQD } from "@/lib/format";
-import type { AdminOrder, AdminWholesaler, OrderStatus } from "@/lib/types";
+import type { AdminWholesaler, OrderStatus } from "@/lib/types";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Select } from "@/components/ui/Select";
 import { Input } from "@/components/ui/Input";
@@ -35,6 +37,7 @@ type ViewMode = "item" | "bundle";
 type OrderSource = "retail" | "wholesaler";
 type SortKey = "profit" | "cost" | "price" | null;
 type SortDir = "asc" | "desc";
+type ApprovalFilter = WholesalerApproval | "";
 
 const PRODUCT_TYPE_CHIPS: { value: string; label: string }[] = [
   { value: "", label: "الكل" },
@@ -76,6 +79,113 @@ function BundlesSkeleton() {
   );
 }
 
+// ─── Approval helpers ─────────────────────────────────────────────────────────
+
+const APPROVAL_BADGE: Record<
+  WholesalerApproval,
+  { label: string; className: string }
+> = {
+  pending: {
+    label: "بانتظار موافقة الممثل",
+    className:
+      "bg-amber-50 text-amber-700 border border-amber-200",
+  },
+  approved: {
+    label: "موافق عليه",
+    className:
+      "bg-green-50 text-green-700 border border-green-200",
+  },
+  rejected: {
+    label: "مُرجَع",
+    className:
+      "bg-red-50 text-red-700 border border-red-200",
+  },
+};
+
+function ApprovalBadge({ approval }: { approval: WholesalerApproval | null }) {
+  if (!approval) return null;
+  const cfg = APPROVAL_BADGE[approval];
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${cfg.className}`}
+    >
+      {cfg.label}
+    </span>
+  );
+}
+
+/** Modal for the admin to type a rejection reason. */
+function RejectReasonModal({
+  open,
+  onClose,
+  onConfirm,
+  loading,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onConfirm: (reason: string) => void;
+  loading: boolean;
+}) {
+  const [reason, setReason] = useState("");
+
+  useEffect(() => {
+    if (open) setReason("");
+  }, [open]);
+
+  if (!open) return null;
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = reason.trim();
+    if (!trimmed) { toast.error("سبب الإرجاع مطلوب"); return; }
+    onConfirm(trimmed);
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 px-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label="إرجاع الطلب"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <form
+        onSubmit={handleSubmit}
+        className="surface-card w-full max-w-sm rounded-2xl p-6 shadow-[var(--shadow-card)]"
+      >
+        <h2 className="font-display-ar text-lg font-bold text-ink">إرجاع الطلب</h2>
+        <p className="mt-1 text-sm text-ink-soft">يُرسَل السبب إلى الطالب والممثل.</p>
+        <textarea
+          className="mt-4 w-full rounded-xl border border-line bg-beige px-3 py-2.5 text-sm text-ink placeholder:text-muted focus:border-orange-ink focus:outline-none focus:ring-2 focus:ring-orange-ink/15"
+          rows={3}
+          placeholder="اكتب سبب الإرجاع…"
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          autoFocus
+          required
+          dir="rtl"
+        />
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex min-h-[44px] items-center rounded-full border border-line bg-surface px-4 py-2 text-sm font-medium text-ink-soft transition-colors hover:border-orange-ink/40"
+          >
+            إلغاء
+          </button>
+          <button
+            type="submit"
+            disabled={loading}
+            className="inline-flex min-h-[44px] items-center rounded-full bg-red-600 px-5 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+          >
+            {loading ? "جارٍ الإرجاع…" : "إرجاع"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Format an Iraqi phone as a tel: link-friendly string; strips leading 0 and prepends 964. */
@@ -98,9 +208,13 @@ function daysUntil(dateStr: string | null): number | null {
 function BundleCard({
   bundle,
   onBundlesChange,
+  onApprove,
+  onReject,
 }: {
   bundle: AdminBundle;
   onBundlesChange: (updater: (prev: AdminBundle[]) => AdminBundle[]) => void;
+  onApprove: (cgId: string) => void;
+  onReject: (cgId: string) => void;
 }) {
   const isSingle = bundle.items.length === 1 && bundle.checkout_group_id === null;
   const { intake } = bundle;
@@ -154,15 +268,44 @@ function BundleCard({
             <p className="text-sm text-ink-soft">{bundle.university_name}</p>
           )}
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {!isSingle && (
-            <span className="rounded-full border border-orange-ink/25 bg-orange-ink/8 px-2.5 py-0.5 text-xs font-semibold text-orange-ink">
-              باقة ({bundle.items.length})
-            </span>
+        <div className="flex shrink-0 flex-col items-end gap-1.5">
+          <div className="flex items-center gap-2">
+            {!isSingle && (
+              <span className="rounded-full border border-orange-ink/25 bg-orange-ink/8 px-2.5 py-0.5 text-xs font-semibold text-orange-ink">
+                باقة ({bundle.items.length})
+              </span>
+            )}
+            <span className="text-xs text-muted">{formatDateShort(bundle.created_at)}</span>
+          </div>
+          {bundle.wholesalerApproval && (
+            <ApprovalBadge approval={bundle.wholesalerApproval} />
           )}
-          <span className="text-xs text-muted">{formatDateShort(bundle.created_at)}</span>
+          {bundle.wholesalerApproval === "rejected" && bundle.wholesalerRejectReason && (
+            <p className="text-xs text-red-600">السبب: {bundle.wholesalerRejectReason}</p>
+          )}
         </div>
       </div>
+
+      {/* Admin approval override buttons (wholesaler bundles pending approval) */}
+      {bundle.wholesalerApproval === "pending" && bundle.checkout_group_id && (
+        <div className="mt-3 flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5">
+          <span className="flex-1 text-xs font-medium text-amber-800">بانتظار موافقة الممثل</span>
+          <button
+            type="button"
+            onClick={() => onApprove(bundle.checkout_group_id!)}
+            className="inline-flex min-h-[36px] items-center rounded-full bg-green-600 px-3 py-1.5 text-xs font-semibold text-white transition-opacity hover:opacity-90"
+          >
+            موافقة مدير
+          </button>
+          <button
+            type="button"
+            onClick={() => onReject(bundle.checkout_group_id!)}
+            className="inline-flex min-h-[36px] items-center rounded-full bg-red-600 px-3 py-1.5 text-xs font-semibold text-white transition-opacity hover:opacity-90"
+          >
+            إرجاع
+          </button>
+        </div>
+      )}
 
       {/* Intake strip */}
       {intake && (
@@ -351,7 +494,7 @@ function BundleCard({
 // ─── Orders section (used for both retail + wholesaler) ───────────────────────
 
 interface OrdersSectionProps {
-  orders: AdminOrder[];
+  orders: AdminOrderWithApproval[];
   bundles: AdminBundle[];
   viewMode: ViewMode;
   loading: boolean;
@@ -367,6 +510,8 @@ interface OrdersSectionProps {
   onSort: (key: SortKey) => void;
   onRetry: () => void;
   onBundlesChange: (updater: (prev: AdminBundle[]) => AdminBundle[]) => void;
+  onApproveBundle: (cgId: string) => void;
+  onRejectBundle: (cgId: string) => void;
 }
 
 function OrdersSection({
@@ -386,6 +531,8 @@ function OrdersSection({
   onSort,
   onRetry,
   onBundlesChange,
+  onApproveBundle,
+  onRejectBundle,
 }: OrdersSectionProps) {
   function sortArrow(key: SortKey) {
     if (sortKey !== key) return <span className="ms-1 opacity-30">↕</span>;
@@ -428,6 +575,8 @@ function OrdersSection({
             key={b.checkout_group_id ?? `single-${idx}`}
             bundle={b}
             onBundlesChange={onBundlesChange}
+            onApprove={onApproveBundle}
+            onReject={onRejectBundle}
           />
         ))}
       </div>
@@ -496,9 +645,14 @@ function OrdersSection({
                   {order.profit != null ? formatIQD(order.profit) : "—"}
                 </td>
                 <td className="px-4 py-3">
-                  <span className="inline-flex rounded-full bg-ink/[0.06] px-2.5 py-1 text-xs font-medium text-muted">
-                    {ORDER_STATUS_LABELS[order.status]}
-                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    <span className="inline-flex rounded-full bg-ink/[0.06] px-2.5 py-1 text-xs font-medium text-muted">
+                      {ORDER_STATUS_LABELS[order.status]}
+                    </span>
+                    {order.wholesalerApproval && (
+                      <ApprovalBadge approval={order.wholesalerApproval} />
+                    )}
+                  </div>
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap items-center gap-2">
@@ -608,9 +762,14 @@ function OrdersSection({
                 حفظ
               </Button>
             </div>
-            <p className="mt-2 text-xs text-[var(--shop-muted)]">
-              {ORDER_STATUS_LABELS[order.status]} · {formatDateShort(order.createdAt)}
-            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <span className="text-xs text-[var(--shop-muted)]">
+                {ORDER_STATUS_LABELS[order.status]} · {formatDateShort(order.createdAt)}
+              </span>
+              {order.wholesalerApproval && (
+                <ApprovalBadge approval={order.wholesalerApproval} />
+              )}
+            </div>
           </article>
         ))}
 
@@ -660,6 +819,13 @@ export default function AdminOrdersPage() {
   const [typeFilter, setTypeFilter] = useState("");
   const [zoneFilter, setZoneFilter] = useState<EmbroideryZone | "">("");
 
+  // Approval filter (wholesaler source only)
+  const [approvalFilter, setApprovalFilter] = useState<ApprovalFilter>("");
+
+  // Reject reason modal
+  const [rejectTarget, setRejectTarget] = useState<string | null>(null);
+  const [rejectLoading, setRejectLoading] = useState(false);
+
   // Reps drill-down (ممثلين tab): selected batch + the reps→batches landing grid
   const [batchId, setBatchId] = useState("");
   const [repsOverview, setRepsOverview] = useState<RepOverview[]>([]);
@@ -668,8 +834,8 @@ export default function AdminOrdersPage() {
   const [viewMode, setViewMode] = useState<ViewMode>("item");
 
   // Data — separate per source
-  const [retailOrders, setRetailOrders] = useState<AdminOrder[]>([]);
-  const [wholesalerOrders, setWholesalerOrders] = useState<AdminOrder[]>([]);
+  const [retailOrders, setRetailOrders] = useState<AdminOrderWithApproval[]>([]);
+  const [wholesalerOrders, setWholesalerOrders] = useState<AdminOrderWithApproval[]>([]);
   const [retailBundles, setRetailBundles] = useState<AdminBundle[]>([]);
   const [wholesalerBundles, setWholesalerBundles] = useState<AdminBundle[]>([]);
   const [wholesalers, setWholesalers] = useState<AdminWholesaler[]>([]);
@@ -729,6 +895,7 @@ export default function AdminOrdersPage() {
             dateTo: dateTo || undefined,
             type: typeFilter || undefined,
             zone: zoneFilter || undefined,
+            approval: approvalFilter || undefined,
           }),
         ]);
         setRetailOrders(retailData);
@@ -747,7 +914,7 @@ export default function AdminOrdersPage() {
     } finally {
       setLoading(false);
     }
-  }, [viewMode, wholesalerId, batchId, status, dateFrom, dateTo, typeFilter, zoneFilter]);
+  }, [viewMode, wholesalerId, batchId, status, dateFrom, dateTo, typeFilter, zoneFilter, approvalFilter]);
 
   useEffect(() => {
      
@@ -794,7 +961,36 @@ export default function AdminOrdersPage() {
     }
   }
 
-  function sortOrders(list: AdminOrder[]) {
+  async function handleApproveBundle(cgId: string) {
+    try {
+      await approveOrderAdmin(cgId);
+      toast.success("تمت الموافقة على الطلب");
+      await load(true);
+    } catch (e) {
+      toast.error(getApiErrorMessage(e, "تعذر الموافقة على الطلب"));
+    }
+  }
+
+  function handleRejectBundle(cgId: string) {
+    setRejectTarget(cgId);
+  }
+
+  async function handleConfirmReject(reason: string) {
+    if (!rejectTarget) return;
+    setRejectLoading(true);
+    try {
+      await rejectOrderAdmin(rejectTarget, reason);
+      toast.success("تم إرجاع الطلب");
+      setRejectTarget(null);
+      await load(true);
+    } catch (e) {
+      toast.error(getApiErrorMessage(e, "تعذر إرجاع الطلب"));
+    } finally {
+      setRejectLoading(false);
+    }
+  }
+
+  function sortOrders(list: AdminOrderWithApproval[]) {
     if (!sortKey) return list;
     return [...list].sort((a, b) => {
       const av = (a[sortKey] as number | null) ?? -Infinity;
@@ -963,6 +1159,33 @@ export default function AdminOrdersPage() {
           </Button>
         </div>
       </div>
+
+      {/* ── Approval filter chips — wholesaler source only ── */}
+      {activeSource === "wholesaler" && (
+        <div className="mb-5 flex flex-wrap gap-2">
+          {(
+            [
+              { value: "" as ApprovalFilter, label: "كل حالات الموافقة" },
+              { value: "pending" as ApprovalFilter, label: "بانتظار موافقة الممثل" },
+              { value: "approved" as ApprovalFilter, label: "موافق عليه" },
+              { value: "rejected" as ApprovalFilter, label: "مُرجَع" },
+            ] as const
+          ).map((chip) => (
+            <button
+              key={chip.value}
+              type="button"
+              onClick={() => setApprovalFilter(chip.value)}
+              className={`inline-flex min-h-[44px] items-center rounded-full border px-4 py-2 text-sm font-medium transition-colors ${
+                approvalFilter === chip.value
+                  ? "border-orange-ink bg-orange-ink text-white"
+                  : "border-line bg-surface text-ink-soft hover:border-orange-ink/40 hover:text-ink"
+              }`}
+            >
+              {chip.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* ── Component type chips — item mode only ── */}
       {viewMode === "item" && (
@@ -1183,6 +1406,8 @@ export default function AdminOrdersPage() {
             onSort={handleSort}
             onRetry={load}
             onBundlesChange={handleBundlesChange}
+            onApproveBundle={handleApproveBundle}
+            onRejectBundle={handleRejectBundle}
           />
         </>
       )}
@@ -1202,6 +1427,14 @@ export default function AdminOrdersPage() {
           }
         </div>
       )}
+
+      {/* Reject reason modal */}
+      <RejectReasonModal
+        open={rejectTarget !== null}
+        onClose={() => setRejectTarget(null)}
+        onConfirm={handleConfirmReject}
+        loading={rejectLoading}
+      />
 
     </div>
   );

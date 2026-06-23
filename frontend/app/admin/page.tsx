@@ -3,7 +3,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { toast } from "sonner";
-import { getAdminAnalytics, getAdminAccounting } from "@/lib/admin";
+import { getAdminAnalytics, getAdminAccounting, getPendingApprovalCount } from "@/lib/admin";
 import { PromoControl } from "@/components/admin/PromoControl";
 import { getTailorSummary, type TailorSummary } from "@/lib/staff";
 import { ORDER_STATUS_LABELS } from "@/lib/constants";
@@ -121,6 +121,7 @@ export default function AdminDashboardPage() {
   const [data, setData] = useState<AdminAnalytics | null>(null);
   const [accounting, setAccounting] = useState<AdminAccounting | null>(null);
   const [tailor, setTailor] = useState<TailorSummary | null>(null);
+  const [pendingApproval, setPendingApproval] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -144,6 +145,12 @@ export default function AdminDashboardPage() {
     // failure here never blocks the core dashboard.
     try {
       setTailor(await getTailorSummary());
+    } catch {
+      /* leave previous value */
+    }
+    // Pending approval count — non-critical, fetched separately.
+    try {
+      setPendingApproval(await getPendingApprovalCount());
     } catch {
       /* leave previous value */
     }
@@ -240,6 +247,29 @@ export default function AdminDashboardPage() {
         />
         <Figure label="عدد الطلبات" value={String(data.orderCount)} />
       </dl>
+
+      {/* Pending approval count — shown only when > 0 */}
+      {pendingApproval !== null && pendingApproval > 0 && (
+        <section className="mt-8">
+          <Link
+            href="/admin/orders"
+            className="flex items-center justify-between gap-4 rounded-2xl border-2 border-amber-300 bg-amber-50 px-6 py-5 transition-colors hover:bg-amber-100"
+          >
+            <div>
+              <p className="text-sm font-semibold text-amber-900">بانتظار موافقة الممثل</p>
+              <p className="mt-0.5 text-xs text-amber-700">
+                طلبات وصلت ولم يوافق عليها الممثل بعد — يمكنك الموافقة مباشرةً
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-[2rem] font-bold tabular-nums text-amber-800 leading-none">
+                {toArabicDigits(pendingApproval)}
+              </span>
+              <span className="text-2xl" aria-hidden>←</span>
+            </div>
+          </Link>
+        </section>
+      )}
 
       {/* Daily orders */}
       <section className="mt-14">

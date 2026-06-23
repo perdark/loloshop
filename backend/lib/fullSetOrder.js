@@ -307,9 +307,12 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
       let oid;
       if (existing.rows.length) {
         oid = existing.rows[0].id;
+        // Any edit re-enters approval: reset wholesaler_approval to 'pending' and clear reject reason.
+        // status is NOT touched — the production state machine lives in orderController only.
         await client.query(
           `UPDATE orders SET price=$1, cost=$2, batch_id=$3, package_id=$4, checkout_group_id=$5,
-             status=$6, has_embroidery=$7, needs_pressing=FALSE, measurements=$8, notes=$9
+             status=$6, has_embroidery=$7, needs_pressing=FALSE, measurements=$8, notes=$9,
+             wholesaler_approval='pending', wholesaler_reject_reason=NULL
            WHERE id=$10`,
           [itemPrice[type], itemCost[type], resolvedBatchId, package_id, cgId, flags.status, flags.has_embroidery, measurementsJson, groupNotes, oid]
         );
@@ -317,8 +320,9 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
       } else {
         const o = await client.query(
           `INSERT INTO orders (student_id, product_id, batch_id, package_id, checkout_group_id,
-                               price, cost, status, has_embroidery, needs_pressing, measurements, notes)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,FALSE,$10,$11) RETURNING id`,
+                               price, cost, status, has_embroidery, needs_pressing, measurements, notes,
+                               wholesaler_approval)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,FALSE,$10,$11,'pending') RETURNING id`,
           [student.id, prodId, resolvedBatchId, package_id, cgId,
            itemPrice[type], itemCost[type], flags.status, flags.has_embroidery, measurementsJson, groupNotes]
         );

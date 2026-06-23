@@ -164,6 +164,8 @@ async function getQueue(req, res) {
        -- تم التسليم column is bounded to the last 90 days so the console can't grow unbounded.
        -- NULL delivered_at (legacy/migrated rows) is kept so a delivered order never just vanishes.
        AND (o.status::text <> 'delivered' OR o.delivered_at IS NULL OR o.delivered_at > NOW() - INTERVAL '90 days')
+       -- Wholesaler approval gate: only show approved (or retail, i.e. NULL) orders to staff.
+       AND (o.wholesaler_approval IS NULL OR o.wholesaler_approval = 'approved')
        ${designerPending
          ? "AND (o.status::text <> 'design_complete' OR ((o.design_id IS NOT NULL AND d.approval_status = 'pending') OR (o.design_id IS NULL AND o.has_embroidery = TRUE)))"
          : ''}

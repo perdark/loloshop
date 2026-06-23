@@ -1,6 +1,7 @@
 const { query, tx } = require('../lib/db');
 const { publicUrl } = require('../lib/upload');
 const { persistFullSetOrder, readFullSetOrder, loadWholesalerPricing } = require('../lib/fullSetOrder');
+const { setBundleApproval, notifyUser } = require('../lib/orderApproval');
 
 async function getWholesalerId(userId) {
   const { rows } = await query(`SELECT id FROM wholesalers WHERE user_id = $1`, [userId]);
@@ -278,9 +279,118 @@ async function createFullSetOrder(req, res) {
   res.status(status).json(json);
 }
 
+// ── Order approval endpoints (T4) ──
+
+// GET /api/wholesaler/orders?approval=pending|approved|rejected|all
+// Returns the rep's students' bundles, grouped by checkout_group_id.
+async function listOrdersForApproval(req, res) {
+  const wId = await getWholesalerId(req.user.id);
+  if (!wId) return res.status(404).json({ error: 'حساب الممثل غير موجود', code: 'ERR_NOT_FOUND' });
+  const f = String(req.query.approval || 'pending');
+  const params = [wId];
+  let clause = 'AND o.wholesaler_approval IS NOT NULL';
+  if (['pending', 'approved', 'rejected'].includes(f)) {
+    params.push(f);
+    clause += ` AND o.wholesaler_approval = $2`;
+  }
+  const { rows } = await query(
+    `SELECT o.checkout_group_id,
+            MIN(o.created_at)                          AS submitted_at,
+            MAX(o.wholesaler_approval::text)           AS approval,
+            MAX(o.wholesaler_reject_reason)            AS reject_reason,
+            s.id                                       AS student_id,
+            u.name                                     AS student_name,
+            SUM(o.price)                               AS total_price,
+            STRING_AGG(p.name_ar, '، ' ORDER BY p.type) AS product_summary
+       FROM orders o
+       JOIN students s ON s.id = o.student_id
+       JOIN users    u ON u.id = s.user_id
+       JOIN products p ON p.id = o.product_id
+      WHERE s.wholesaler_id = $1 AND o.checkout_group_id IS NOT NULL ${clause}
+      GROUP BY o.checkout_group_id, s.id, u.name
+      ORDER BY submitted_at DESC`,
+    params
+  );
+  res.json({ data: rows.map(r => ({ ...r, total_price: Number(r.total_price || 0) })) });
+}
+
+// POST /api/wholesaler/orders/:checkoutGroupId/approve
+async function approveOrder(req, res) {
+  const wId = await getWholesalerId(req.user.id);
+  if (!wId) return res.status(404).json({ error: 'حساب الممثل غير موجود', code: 'ERR_NOT_FOUND' });
+  const r = await setBundleApproval({
+    checkoutGroupId: req.params.checkoutGroupId,
+    decision: 'approved',
+    actorUserId: req.user.id,
+    repWholesalerId: wId,
+  });
+  await notifyUser(r.studentUserId, 'order_approved', 'تمت الموافقة على طلبك', 'طلبك الآن قيد الإنتاج', '/my-order');
+  res.json({ data: { ok: true } });
+}
+
+// POST /api/wholesaler/orders/:checkoutGroupId/reject  body: { reason }
+async function rejectOrder(req, res) {
+  const wId = await getWholesalerId(req.user.id);
+  if (!wId) return res.status(404).json({ error: 'حساب الممثل غير موجود', code: 'ERR_NOT_FOUND' });
+  const reason = String((req.body && req.body.reason) || '').trim();
+  if (!reason) return res.status(400).json({ error: 'سبب الإرجاع مطلوب', code: 'ERR_VALIDATION' });
+  const r = await setBundleApproval({
+    checkoutGroupId: req.params.checkoutGroupId,
+    decision: 'rejected',
+    actorUserId: req.user.id,
+    reason,
+    repWholesalerId: wId,
+  });
+  await notifyUser(
+    r.studentUserId, 'order_rejected',
+    'أعاد الممثل طلبك',
+    `السبب: ${reason} — يرجى التعديل وإعادة الإرسال`,
+    '/my-order'
+  );
+  res.json({ data: { ok: true } });
+}
+
+// POST /api/wholesaler/orders/bulk  body: { checkoutGroupIds:[], action:'approve'|'reject', reason? }
+async function bulkOrders(req, res) {
+  const wId = await getWholesalerId(req.user.id);
+  if (!wId) return res.status(404).json({ error: 'حساب الممثل غير موجود', code: 'ERR_NOT_FOUND' });
+  const ids = Array.isArray(req.body && req.body.checkoutGroupIds) ? req.body.checkoutGroupIds : [];
+  const action = req.body && req.body.action;
+  const reason = String((req.body && req.body.reason) || '').trim();
+  if (!ids.length || !['approve', 'reject'].includes(action)) {
+    return res.status(400).json({ error: 'طلب غير صالح', code: 'ERR_VALIDATION' });
+  }
+  if (action === 'reject' && !reason) {
+    return res.status(400).json({ error: 'سبب الإرجاع مطلوب', code: 'ERR_VALIDATION' });
+  }
+  let done = 0;
+  const skipped = [];
+  for (const cg of ids) {
+    try {
+      const r = await setBundleApproval({
+        checkoutGroupId: cg,
+        decision: action === 'approve' ? 'approved' : 'rejected',
+        actorUserId: req.user.id,
+        reason,
+        repWholesalerId: wId,
+      });
+      await notifyUser(
+        r.studentUserId,
+        action === 'approve' ? 'order_approved' : 'order_rejected',
+        action === 'approve' ? 'تمت الموافقة على طلبك' : 'أعاد الممثل طلبك',
+        action === 'approve' ? 'طلبك الآن قيد الإنتاج' : `السبب: ${reason}`,
+        '/my-order'
+      );
+      done++;
+    } catch { skipped.push(cg); }
+  }
+  res.json({ data: { done, skipped } });
+}
+
 module.exports = {
   dashboard, pendingStudents, listStudents, approve, reject, bulkSetStatus,
   getSashConfig, updateSashConfig,
   fullSetPackages, getStudent, getStudentOrder, createFullSetOrder, uploadImage,
   updateEmbroideryColor,
+  listOrdersForApproval, approveOrder, rejectOrder, bulkOrders,
 };

@@ -94,6 +94,8 @@ interface ApiOrderRow {
   source?: "retail" | "wholesaler";
   working_staff_id?: string | null;
   working_staff_name?: string | null;
+  wholesaler_approval?: WholesalerApproval | null;
+  checkout_group_id?: string | null;
 }
 
 interface ApiWholesalerRow {
@@ -137,7 +139,13 @@ function mapAddons(raw?: Partial<WholesalerPricingAddons> | null): WholesalerPri
   };
 }
 
-function mapOrder(row: ApiOrderRow): AdminOrder {
+/** AdminOrder extended with approval state (present only for wholesaler orders). */
+export type AdminOrderWithApproval = AdminOrder & {
+  wholesalerApproval: WholesalerApproval | null;
+  checkoutGroupId: string | null;
+};
+
+function mapOrder(row: ApiOrderRow): AdminOrderWithApproval {
   return {
     id: row.id,
     studentId: row.student_id,
@@ -153,6 +161,8 @@ function mapOrder(row: ApiOrderRow): AdminOrder {
     createdAt: row.created_at,
     source: row.source,
     workingStaffName: row.working_staff_name ?? null,
+    wholesalerApproval: (row.wholesaler_approval as WholesalerApproval) ?? null,
+    checkoutGroupId: row.checkout_group_id ?? null,
   };
 }
 
@@ -198,6 +208,34 @@ function mapAnalytics(raw: ApiAnalytics): AdminAnalytics {
   };
 }
 
+// ─── Wholesaler order approval ───────────────────────────────────────────────
+
+/** Orthogonal approval state of a wholesaler order bundle (NULL for retail). */
+export type WholesalerApproval = "pending" | "approved" | "rejected";
+
+/** Approve a wholesaler bundle (admin override, no ownership check). */
+export async function approveOrderAdmin(checkoutGroupId: string): Promise<void> {
+  await api.post(`/admin/orders/${checkoutGroupId}/approve`);
+}
+
+/** Reject a wholesaler bundle with a reason (admin override). */
+export async function rejectOrderAdmin(
+  checkoutGroupId: string,
+  reason: string
+): Promise<void> {
+  await api.post(`/admin/orders/${checkoutGroupId}/reject`, { reason });
+}
+
+/** GET /admin/orders-pending-count → number of bundles awaiting rep approval. */
+export async function getPendingApprovalCount(): Promise<number> {
+  const { data } = await api.get<{ data: { pending_bundles: number } }>(
+    "/admin/orders-pending-count"
+  );
+  return Number(data.data?.pending_bundles ?? 0);
+}
+
+// ─── Orders filters ───────────────────────────────────────────────────────────
+
 export interface OrdersFilters {
   wholesalerId?: string;
   /** Filter to a single batch (دفعة) of a rep. */
@@ -210,6 +248,8 @@ export interface OrdersFilters {
   type?: string;
   /** Embroidery-zone / pleat filter key (see EMBROIDERY_ZONE_LABELS). */
   zone?: string;
+  /** Wholesaler approval state filter. Only honoured on the wholesaler source. */
+  approval?: WholesalerApproval | "";
 }
 
 export async function getAdminAnalytics(): Promise<AdminAnalytics> {
@@ -226,7 +266,7 @@ export async function updateOrderCost(
 
 export async function getAdminOrders(
   filters: OrdersFilters = {}
-): Promise<AdminOrder[]> {
+): Promise<AdminOrderWithApproval[]> {
   const { data } = await api.get<{ data: ApiOrderRow[] }>("/admin/orders", {
     params: {
       wholesaler_id: filters.wholesalerId || undefined,
@@ -237,6 +277,7 @@ export async function getAdminOrders(
       source: filters.source || undefined,
       type: filters.type || undefined,
       zone: filters.zone || undefined,
+      approval: filters.approval || undefined,
     },
   });
   return (data.data || []).map(mapOrder);
@@ -280,6 +321,9 @@ export interface AdminBundle {
   items: AdminBundleItem[];
   /** Present only for full-set form bundles (null for cart/legacy bundles). */
   intake: BundleIntake | null;
+  /** Wholesaler order approval state (null for retail bundles). */
+  wholesalerApproval: WholesalerApproval | null;
+  wholesalerRejectReason: string | null;
 }
 
 interface ApiBundleItem {
@@ -312,6 +356,8 @@ interface ApiBundle {
     deposit: string | number;
     notes: string | null;
   } | null;
+  wholesaler_approval?: WholesalerApproval | null;
+  wholesaler_reject_reason?: string | null;
 }
 
 function mapBundle(raw: ApiBundle): AdminBundle {
@@ -345,6 +391,8 @@ function mapBundle(raw: ApiBundle): AdminBundle {
           notes: raw.intake.notes,
         }
       : null,
+    wholesalerApproval: (raw.wholesaler_approval as WholesalerApproval) ?? null,
+    wholesalerRejectReason: raw.wholesaler_reject_reason ?? null,
   };
 }
 

@@ -392,6 +392,50 @@ export async function submitRepFullSetOrder(
   return { total: data.data.total, packageName: data.data.package_name };
 }
 
+// ── Rep order approval ──
+
+export interface RepOrderRow {
+  checkout_group_id: string;
+  student_id: string;
+  student_name: string;
+  product_summary: string;
+  total_price: number;
+  submitted_at: string;
+  approval: "pending" | "approved" | "rejected";
+  reject_reason: string | null;
+}
+
+export async function getRepOrders(
+  approval: "pending" | "approved" | "rejected" | "all" = "pending"
+): Promise<RepOrderRow[]> {
+  const { data } = await api.get<{ data: RepOrderRow[] }>(
+    `/wholesaler/orders?approval=${approval}`
+  );
+  return data.data;
+}
+
+export async function approveRepOrder(checkoutGroupId: string): Promise<void> {
+  await api.post(`/wholesaler/orders/${checkoutGroupId}/approve`);
+}
+
+export async function rejectRepOrder(
+  checkoutGroupId: string,
+  reason: string
+): Promise<void> {
+  await api.post(`/wholesaler/orders/${checkoutGroupId}/reject`, { reason });
+}
+
+export async function bulkRepOrders(
+  checkoutGroupIds: string[],
+  action: "approve" | "reject",
+  reason?: string
+): Promise<{ done: number; skipped: string[] }> {
+  const { data } = await api.post<{
+    data: { done: number; skipped: string[] };
+  }>(`/wholesaler/orders/bulk`, { checkoutGroupIds, action, reason });
+  return data.data;
+}
+
 /** Rep self-edit: PATCH /api/wholesaler/embroidery-color */
 export async function updateEmbroideryColor(
   color: string

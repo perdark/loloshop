@@ -63,6 +63,7 @@ async function wholesalerOrders(req, res) {
      LEFT JOIN designs d ON d.id = o.design_id
      WHERE s.wholesaler_id = $1
        AND o.status::text <> 'cancelled'
+       AND (o.wholesaler_approval IS NULL OR o.wholesaler_approval = 'approved')
        ${zoneClause ? 'AND ' + zoneClause : ''}
      ORDER BY u.name ASC, p.type ASC`,
     [id]

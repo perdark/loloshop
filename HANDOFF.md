@@ -6,6 +6,67 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
+## 2026-06-24 (b) — Wholesaler two-stage order approval (rep approves the student's order → it surfaces to staff + dashboard)
+
+Committed to **main** this session. **Migration 044 applied to Neon + verified.** Gates green: FE `tsc` 0 · `eslint` 0 ·
+BE `node --check` 0 (9 files). **Verified live end-to-end** (full backend HTTP e2e + rep UI driven in the dev browser).
+`next build` NOT run (dev servers up). Plan: `docs/superpowers/plans/2026-06-24-wholesaler-order-approval.md` · spec:
+`docs/superpowers/specs/2026-06-24-wholesaler-order-approval-design.md`. **Built via an 8-agent Workflow** (foundation + 3 FE +
+3 BE + verify) + orchestrator live e2e.
+
+**Why.** Stage 1 (rep approves each **student**) already existed; their **order** flowed straight to production. Now (user
+decision) **every** wholesaler order must be **approved by the rep** before staff/dashboard see it. Rep can **Approve** or
+**Reject** (sends back to the student to fix); approved orders **lock** from student edits; **admin** has oversight + override.
+
+**1. Orthogonal approval column (NOT a new status — production state machine untouched, like `tailor_status`).** Migration
+**044**: enum `wholesaler_approval_status('pending','approved','rejected')` + `orders.wholesaler_approval` (NULL=retail,
+always visible), `wholesaler_approved_at/by`, `wholesaler_reject_reason`, index. **Backfill grandfathered existing wholesaler
+orders → 'approved'** (6 rows) so live work didn't vanish; retail stays NULL (10 rows).
+
+**2. Creation sets `pending`.** `lib/fullSetOrder.js persistFullSetOrder` sets `wholesaler_approval='pending'` on all 3 bundle
+rows on BOTH create and the idempotent re-save (any edit re-enters approval, clears reject_reason). Single choke point → covers
+rep-fill AND student `/my-order`.
+
+**3. Shared helper `lib/orderApproval.js`** — `setBundleApproval({checkoutGroupId, decision, actorUserId, reason, repWholesalerId})`
+flips ALL rows of a `checkout_group` (the bundle = unit of approval), scoped `wholesaler_approval IS NOT NULL` (never touches
+retail) + optional rep-ownership subquery; writes audit_log; publishes eventBus; returns student/rep user ids. `notifyUser` inserts
+a notification. **GOTCHA fixed live:** the enum param needs a cast — `SET wholesaler_approval = $2::wholesaler_approval_status`
+(else PG: "inconsistent types deduced for parameter $2" because the same `$2` was compared to text `'approved'` in a CASE). Static
+`node --check` couldn't catch this; the orchestrator HTTP e2e did.
+
+**4. API (key = `checkout_group_id`).** Rep (`routes/wholesaler.js` — note `/orders/bulk` declared BEFORE `/orders/:cg/...`):
+`GET /wholesaler/orders?approval=pending|approved|rejected` (grouped per bundle), `POST /wholesaler/orders/:cg/approve`,
+`.../reject {reason}`, `POST /wholesaler/orders/bulk`. Admin override (`routes/admin.js`): `POST /admin/orders/:cg/approve|reject`
+(no ownership; notifies BOTH student + rep), `GET /admin/orders-pending-count`.
+
+**5. Gates (the visibility rule).** `productionController.getQueue` + `staffController.wholesalerOrders` + (NEW this session)
+`orderController.listOrders` for **non-admin** callers all filter `(wholesaler_approval IS NULL OR ='approved')`. **Admin
+`listOrders` is NOT gated** (oversight) and takes `?approval=` to filter; admin dashboard uses admin-only `/api/admin/orders`.
+Student **lock**: `orderController` rep-full-set POST returns **403 `ERR_LOCKED`** if the student already has an `approved` order.
+
+**6. Frontend.** Rep: NEW `app/wholesaler/orders/page.tsx` («الطلبات» nav added) — pending/approved/rejected tabs, per-student
+cards (name · products · price · date · reject reason), Approve / Reject(reason modal) + bulk approve. Student:
+`app/(student)/my-order/page.tsx` — approval banner (pending amber / approved green+form-locked / rejected red+reason+editable),
+handles 403 ERR_LOCKED. Admin: `app/admin/orders/page.tsx` («بانتظار موافقة الممثل» filter + badge + override buttons),
+`app/admin/page.tsx` (pending count card), `lib/{wholesaler,admin}.ts` wrappers.
+
+**Verified live (orchestrator e2e + browser).** Pending hidden from getQueue + staff `/api/orders`; rep lists pending → approve
+→ surfaces to queue + student notified; reject stores reason + notifies, empty reason→400; student edit of approved→403
+ERR_LOCKED; admin pending-count + override approve + both notified; retail unaffected; bulk approve done=1. Rep UI driven in
+browser: «دابي» 2 pending bundles → «موافقة» moved one out of pending (2→1). (Ownership-guard e2e skipped: only one wholesaler
+in dev DB.)
+
+### Open follow-ups
+- **Demo data left for hand-testing:** rep «دابي» (wholesaler `78fea03e…`) has its 2 bundles set to `wholesaler_approval='pending'`
+  so the rep «الطلبات» page has orders to approve/reject. Approving them is the natural way to clear it.
+- **Decision recorded:** managers (staff_type) are gated like staff in `listOrders` (only admin role sees pending). If managers
+  should also see pending for oversight, widen the `req.user.role !== 'admin'` check in `orderController.listOrders`.
+- Known edge (spec §14): wholesaler orders are assumed created only via `persistFullSetOrder`; a wholesaler student placing a
+  plain retail-cart order would be created NULL and bypass the gate. Out of scope.
+- `next build` not run (dev servers up); run before deploy. Seed not updated for 044 (schema.sql mirrored; migration idempotent).
+
+---
+
 ## 2026-06-24 — Admin calligraphy batch tool (AI name-plates via OpenRouter → crop → link to order)
 
 Committed to **main** this session. **Migration 043 applied to Neon + verified.** Gates green: FE `tsc` 0 · `eslint` 0 ·

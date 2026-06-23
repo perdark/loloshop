@@ -45,4 +45,12 @@ router.post('/staff/:id/goal', salary.setStaffGoal);
 // Site settings — discount popup promo config
 router.patch('/promo', c.updatePromo);
 
+// Order-approval override (T5) — admin can approve/reject any bundle regardless of rep ownership.
+// POST verb, suffix /approve|/reject — does NOT shadow PATCH /orders/:id/cost (different verb + suffix).
+router.post('/orders/:checkoutGroupId/approve', c.approveOrderAdmin);
+router.post('/orders/:checkoutGroupId/reject', c.rejectOrderAdmin);
+
+// Dashboard pending-approval count (T7).
+router.get('/orders-pending-count', c.pendingApprovalCount);
+
 module.exports = router;

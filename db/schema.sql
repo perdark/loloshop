@@ -574,6 +574,18 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS tailor_done_at TIMESTAMPTZ;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS tailor_done_by UUID REFERENCES users(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_orders_tailor_pending ON orders(tailor_status) WHERE tailor_status = 'pending';
 
+-- Migration 044: wholesaler order-approval gate (orthogonal, mirrors tailor_status pattern).
+-- NULL = retail / not applicable (always visible to staff).
+-- 'pending' = waiting for rep approval. 'approved' = enters staff queue. 'rejected' = sent back.
+DO $$ BEGIN
+  CREATE TYPE wholesaler_approval_status AS ENUM ('pending','approved','rejected');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS wholesaler_approval     wholesaler_approval_status;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS wholesaler_approved_at  TIMESTAMPTZ;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS wholesaler_approved_by  UUID REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS wholesaler_reject_reason TEXT;
+CREATE INDEX IF NOT EXISTS idx_orders_wholesaler_approval ON orders(wholesaler_approval);
+
 -- Staff presence: who is actively working on an order (admin monitor + soft lock).
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS working_staff_id UUID REFERENCES users(id) ON DELETE SET NULL;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS working_since TIMESTAMPTZ;

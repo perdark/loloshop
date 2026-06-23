@@ -2,6 +2,7 @@ const bcrypt = require('bcrypt');
 const { query, tx } = require('../lib/db');
 const { DEFAULT_ADDONS, sanitizeAddons } = require('../lib/fullSetOrder');
 const { normalizeIqPhone } = require('../lib/otp');
+const { setBundleApproval, notifyUser } = require('../lib/orderApproval');
 
 const SALT_ROUNDS = 10;
 
@@ -662,6 +663,78 @@ async function updatePromo(req, res) {
   res.json({ data: cfg });
 }
 
+// ---------- Admin: order-approval override (T5) ----------
+
+// POST /api/admin/orders/:checkoutGroupId/approve
+// No ownership check — admin overrides regardless of which rep owns the bundle.
+// Notifies BOTH the student and the owning rep.
+async function approveOrderAdmin(req, res) {
+  const r = await setBundleApproval({
+    checkoutGroupId: req.params.checkoutGroupId,
+    decision: 'approved',
+    actorUserId: req.user.id,
+  });
+  await notifyUser(
+    r.studentUserId,
+    'order_approved',
+    'تمت الموافقة على طلبك',
+    'طلبك الآن قيد الإنتاج',
+    '/my-order'
+  );
+  await notifyUser(
+    r.wholesalerUserId,
+    'order_approved',
+    'تمت الموافقة على طلب',
+    `وافق المدير على طلب ${r.studentName || ''}`.trim(),
+    '/wholesaler/orders'
+  );
+  res.json({ data: { ok: true } });
+}
+
+// POST /api/admin/orders/:checkoutGroupId/reject  { reason }
+// No ownership check — admin overrides regardless of which rep owns the bundle.
+// Notifies BOTH the student and the owning rep.
+async function rejectOrderAdmin(req, res) {
+  const reason = String((req.body && req.body.reason) || '').trim();
+  if (!reason) {
+    return res.status(400).json({ error: 'سبب الإرجاع مطلوب', code: 'ERR_VALIDATION' });
+  }
+  const r = await setBundleApproval({
+    checkoutGroupId: req.params.checkoutGroupId,
+    decision: 'rejected',
+    actorUserId: req.user.id,
+    reason,
+  });
+  await notifyUser(
+    r.studentUserId,
+    'order_rejected',
+    'أعاد المدير طلبك',
+    `السبب: ${reason} — يرجى التعديل`,
+    '/my-order'
+  );
+  await notifyUser(
+    r.wholesalerUserId,
+    'order_rejected',
+    'أعاد المدير طلبًا',
+    `طلب ${r.studentName || ''} — السبب: ${reason}`.trim(),
+    '/wholesaler/orders'
+  );
+  res.json({ data: { ok: true } });
+}
+
+// ---------- Admin: pending-approval dashboard count (T7) ----------
+
+// GET /api/admin/orders-pending-count
+// Returns the number of distinct bundles awaiting rep approval.
+async function pendingApprovalCount(req, res) {
+  const { rows } = await query(
+    `SELECT COUNT(DISTINCT checkout_group_id)::int AS n
+       FROM orders
+      WHERE wholesaler_approval = 'pending'`
+  );
+  res.json({ data: { pending_bundles: rows[0].n } });
+}
+
 module.exports = {
   analytics, accounting, updateOrderCost, updateCheckoutGroup,
   listWholesalers, createWholesaler, updateWholesaler, updateDeadline, updatePricing, deleteWholesaler,
@@ -669,4 +742,5 @@ module.exports = {
   wholesalerStudents, toggleEditException,
   listStaff, createStaff, updateStaffType, updateStaffScope, updateStaffPassword, deleteStaff,
   repsOverview, updatePromo,
+  approveOrderAdmin, rejectOrderAdmin, pendingApprovalCount,
 };
