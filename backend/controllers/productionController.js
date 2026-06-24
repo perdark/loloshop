@@ -395,8 +395,22 @@ async function getOrder(req, res) {
     'ready→delivered':            'تأكيد التسليم',
   };
 
+  // Per-zone embroidery checklist (محمد عماد ticks each zone; all-done auto-advances).
+  // Computed BEFORE available_actions so it can gate the manual advance. Only meaningful at the
+  // embroidery stage. Never leak the raw o.embroidery_zones jsonb on the order — strip it after.
+  let embroidery_zones = [];
+  if (order.status === 'embroidery') {
+    embroidery_zones = await detectEmbroideryZones(order.id, order.embroidery_zones);
+  }
+  delete order.embroidery_zones;
+  // Mandatory checklist: a non-manager embroiderer must tick EVERY zone. While any zone is
+  // unticked the manual advance is hidden here AND rejected in advance() — so the per-zone
+  // checklist can't be skipped. Manager/admin keep the manual advance as a fallback.
+  const embroideryIncomplete =
+    order.status === 'embroidery' && embroidery_zones.length > 0 && !embroidery_zones.every((z) => z.done);
+
   const available_actions = {
-    advance: nextTo && canTransition(u, order.status, nextTo)
+    advance: nextTo && canTransition(u, order.status, nextTo) && !(embroideryIncomplete && !isManager(u))
       ? { to: nextTo, label: ADVANCE_LABEL_AR[`${order.status}→${nextTo}`] ?? 'تقدم للمرحلة التالية' }
       : null,
     revert: revertTo && canTransition(u, order.status, revertTo)
@@ -413,15 +427,6 @@ async function getOrder(req, res) {
       order.status === 'design_complete' &&
       (uTypes.includes('designer') || isManager(u)),
   };
-
-  // Per-zone embroidery checklist (محمد عماد ticks each zone; all-done auto-advances).
-  // Only meaningful while the order is actually at the embroidery stage. Never leak the
-  // raw o.embroidery_zones jsonb on the order object to restricted roles — strip it after.
-  let embroidery_zones = [];
-  if (order.status === 'embroidery') {
-    embroidery_zones = await detectEmbroideryZones(order.id, order.embroidery_zones);
-  }
-  delete order.embroidery_zones;
 
   res.json({
     data: {
@@ -500,6 +505,16 @@ async function advance(req, res) {
   }
   if (!canStaffTransition(req.user, order.status, to)) {
     return res.status(403).json({ error: 'ممنوع', code: 'ERR_FORBIDDEN' });
+  }
+  // Mandatory checklist: a non-manager embroiderer can't manually leave التطريز while any
+  // detected zone is still unticked — he must complete each zone (which auto-advances). This
+  // closes the bypass so the manual «نقل للكوي» can't skip the per-zone tracking.
+  if (order.status === 'embroidery' && !isManager(req.user)) {
+    const prog = (await query('SELECT embroidery_zones FROM orders WHERE id = $1', [id])).rows[0]?.embroidery_zones || {};
+    const zones = await detectEmbroideryZones(id, prog);
+    if (zones.length > 0 && !zones.every((z) => z.done)) {
+      return res.status(409).json({ error: 'أكمل مناطق التطريز أولاً', code: 'ERR_EMBROIDERY_ZONES_INCOMPLETE' });
+    }
   }
   const updated = await performAdvance(order, req.user);
   res.json({ data: updated });
@@ -588,6 +603,15 @@ async function advanceBulk(req, res) {
     // a bulk advance would set delivered with NULLs. Skip it; the detail-page modal handles it.
     if (to === 'delivered') {
       results.push({ id, ok: false, reason: 'needs_delivery' }); continue;
+    }
+    // Mandatory checklist (same as single advance): a non-manager embroiderer can't bulk-skip
+    // التطريز while any zone is unticked — close the bulk bypass too.
+    if (order.status === 'embroidery' && !isManager(req.user)) {
+      const prog = (await query('SELECT embroidery_zones FROM orders WHERE id = $1', [id])).rows[0]?.embroidery_zones || {};
+      const zones = await detectEmbroideryZones(id, prog);
+      if (zones.length > 0 && !zones.every((z) => z.done)) {
+        results.push({ id, ok: false, reason: 'embroidery_zones_incomplete' }); continue;
+      }
     }
     try {
       const updated = await performAdvance(order, req.user);

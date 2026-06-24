@@ -85,6 +85,17 @@ the real accounts محمد عماد (embroiderer) + ابو عبدو (tailor):**
 - Demo data used: order `4c46f10e` (دابي / احمد علي قاسم) was temporarily moved preparing→embroidery and **reverted to
   preparing** after. No residual state.
 
+**6. Mandatory checklist for the embroiderer (user request, after live testing).** The manual «نقل للكوي» advance let an
+embroiderer skip the per-zone checklist (root cause of a «تعذر تحديث الحالة» confusion: a robe had been advanced past التطريز
+via the manual button, `embroidery_zones={}`). Now a **non-manager embroiderer must tick EVERY detected zone**; while any zone
+is unticked the manual advance is **hidden** (`getOrder` available_actions.advance=null) AND **rejected server-side** in BOTH
+`advance()` (409 `ERR_EMBROIDERY_ZONES_INCOMPLETE` «أكمل مناطق التطريز أولاً») and `advanceBulk()` (skipped, reason
+`embroidery_zones_incomplete`). Manager/admin keep the manual advance as a fallback; completing all zones still auto-advances.
+Verified live (محمد عماد token): incomplete→advance null + 409 + bulk-skip; admin→advance still shown; tick all→auto-advance to
+كوي. **Robe embroidery is NOT missing** — «تطريز ردن الروب الأيمن» maps to `robe_sleeve_right`; a robe at التطريز shows «الروب —
+الردن الأيمن». NB: `staffController.wholesalerOrders.can_advance` does NOT yet account for the zone gate, so the rep-console
+checkbox for an embroidery order may look enabled but bulk will report it skipped — minor, gate later if it bothers.
+
 ### Open follow-ups
 - **Audit findings NOT fixed (user deferred):** **#4** legacy `staff_review`/`printing` orders are a queue dead-end (no role
   sees them, `nextStageFor`→null) — only reachable via seed/old data; drain them to `embroidery` or add to `MANAGER_VIEW_STAGES`
