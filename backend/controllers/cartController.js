@@ -131,7 +131,7 @@ async function checkout(req, res) {
   if (!cart.rows.length) return res.status(400).json({ error: 'السلة فارغة', code: 'ERR_EMPTY_CART' });
   const cartId = cart.rows[0].id;
   const itemsRes = await query(
-    `SELECT ci.id, ci.product_id, ci.design_id, ci.selections, ci.qty, ci.measurements, p.customizable
+    `SELECT ci.id, ci.product_id, ci.design_id, ci.selections, ci.qty, ci.measurements, p.customizable, p.type AS product_type
      FROM cart_items ci JOIN products p ON p.id = ci.product_id
      WHERE ci.cart_id = $1 ORDER BY ci.created_at`,
     [cartId]
@@ -159,7 +159,7 @@ async function checkout(req, res) {
 
       // Compute routing flags
       const has_embroidery = !!ci.design_id || priced.hasEmbroidery;
-      const needs_pressing = !!ci.design_id;
+      const needs_pressing = (ci.product_type === 'sash' || ci.product_type === 'robe');
 
       if (ci.design_id) {
         // Designed sash → finalize the design and place it into the approval pipeline.

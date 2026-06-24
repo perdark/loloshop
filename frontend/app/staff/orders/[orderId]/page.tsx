@@ -15,6 +15,7 @@ import { formatDateIQ } from "@/lib/format";
 import {
   getProductionOrder,
   advanceOrder,
+  markEmbroideryZone,
   confirmDelivery,
   revertOrder,
   claimOrder,
@@ -511,6 +512,89 @@ function InstaCopyButton({
   );
 }
 
+// ─── Embroidery zones checklist (FEATURE 1 — محمد عماد) ───────────────────────
+
+/**
+ * Per-zone checklist shown to the embroiderer (and manager/admin) while the order
+ * is at the embroidery stage. Toggling a zone calls the backend, which auto-advances
+ * the order once all present zones are done.
+ */
+function EmbroideryZonesCard({
+  zones,
+  orderId,
+  onChanged,
+}: {
+  zones: { key: string; label: string; done: boolean }[];
+  orderId: string;
+  onChanged: () => void | Promise<void>;
+}) {
+  // The zone key currently being toggled (its checkbox is disabled while in flight).
+  const [pendingZone, setPendingZone] = useState<string | null>(null);
+
+  async function handleToggle(zone: string, nextDone: boolean) {
+    setPendingZone(zone);
+    try {
+      const res = await markEmbroideryZone(orderId, zone, nextDone);
+      if (res.advanced) {
+        toast.success(
+          `تم نقل الطلب إلى ${ORDER_STATUS_LABELS[res.status as keyof typeof ORDER_STATUS_LABELS] ?? res.status}`
+        );
+      }
+      await onChanged();
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "تعذر تحديث منطقة التطريز"));
+    } finally {
+      setPendingZone(null);
+    }
+  }
+
+  const doneCount = zones.filter((z) => z.done).length;
+
+  return (
+    <article className="rounded-2xl border border-orange-ink/20 bg-orange-ink/5 p-5 shadow-[var(--shadow-soft)]">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <h3 className="font-display-ar text-sm font-bold text-ink">مناطق التطريز</h3>
+        <span className="rounded-full bg-surface px-2.5 py-0.5 text-xs font-semibold text-ink-soft tabular-nums">
+          {doneCount} / {zones.length}
+        </span>
+      </div>
+      <ul className="space-y-2">
+        {zones.map((z) => {
+          const busy = pendingZone === z.key;
+          return (
+            <li key={z.key}>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => handleToggle(z.key, !z.done)}
+                aria-pressed={z.done}
+                className={`flex min-h-[44px] w-full items-center gap-3 rounded-xl border px-4 py-2 text-start text-sm font-medium transition-colors disabled:opacity-60 ${
+                  z.done
+                    ? "border-orange-ink/30 bg-orange-ink/10 text-orange-ink"
+                    : "border-line bg-surface text-ink hover:border-orange-ink/40 hover:bg-surface-sink"
+                }`}
+              >
+                <span
+                  className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md border-2 text-sm ${
+                    z.done ? "border-orange-ink bg-orange-ink text-white" : "border-ink/30"
+                  }`}
+                  aria-hidden
+                >
+                  {busy ? "…" : z.done ? "✓" : ""}
+                </span>
+                <span className="min-w-0 flex-1">{z.label}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="mt-3 text-xs text-muted">
+        عند إكمال جميع المناطق يُنقل الطلب تلقائياً للمرحلة التالية.
+      </p>
+    </article>
+  );
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function ProductionOrderDetailPage() {
@@ -752,7 +836,7 @@ export default function ProductionOrderDetailPage() {
     );
   }
 
-  const { order, design, items, package_orders, bundle, can_see_design, available_actions } = detail;
+  const { order, design, items, package_orders, bundle, can_see_design, available_actions, embroidery_zones } = detail;
   const intake = order.intake ?? null;
   const productLabel = PRODUCT_TYPE_LABELS[order.product_type as keyof typeof PRODUCT_TYPE_LABELS] ?? "المنتج";
   const isAdmin = user?.role === "admin";
@@ -820,74 +904,193 @@ export default function ProductionOrderDetailPage() {
   const isTailorOnly =
     user?.role === "staff" && myRoles.length > 0 && myRoles.every((r) => r === "tailor");
 
+  // Embroidery-zone checklist (FEATURE 1): visible to the embroiderer + manager/admin
+  // when the backend supplies zones (only at the embroidery stage).
+  const canMarkEmbroideryZones =
+    user?.role === "admin" || myRoles.some((r) => r === "embroiderer" || r === "manager");
+  const showEmbroideryZones = canMarkEmbroideryZones && embroidery_zones.length > 0;
+
   // Missing final-design alert: order reached a stage where a final design should exist
   // (it has embroidery/a design) but none was uploaded.
   const designExpected = !!order.has_embroidery || !!design || !!order.design_id;
   const designStageReached = ["embroidery", "pressing", "preparing", "ready", "delivered"].includes(order.status);
   const missingFinalDesign = designExpected && designStageReached && !order.final_design_url;
 
-  // ── مفصل (tailor): stripped read-only view — student name + sash/shawl info only ──
+  // ── مفصل (tailor / ابو عبدو): full فصال read-only view ──────────────────────────
+  // Backend now sends full فصال detail (catalog photo, measurements, university/dept,
+  // ALL size/spec items) with money + contact stripped. Caps are excluded server-side.
   if (isTailorOnly) {
-    const sashItems = items.filter(
-      (i) => i.group_id !== null || !!i.customer_text || !!i.customer_image_url
-    );
+    const productPhoto = resolveImageUrl(order.product_image_url);
+    const m = order.measurements;
+    const measureRows: { label: string; value: number }[] = m
+      ? [
+          { label: "الكتف", value: m.shoulder_cm },
+          ...(m.chest_cm != null ? [{ label: "محيط الصدر", value: m.chest_cm }] : []),
+          { label: "طول الروب", value: m.robe_length_cm },
+          { label: "طول الردن", value: m.sleeve_length_cm },
+        ]
+      : [];
+
     return (
       <div dir="rtl" lang="ar">
         <div className="mb-4">
           <Link
             href="/staff"
-            className="inline-flex items-center gap-1 text-sm font-medium text-orange-ink hover:underline"
+            className="inline-flex min-h-[44px] items-center gap-1 text-sm font-medium text-orange-ink hover:underline"
           >
             <span aria-hidden>→</span> العودة
           </Link>
         </div>
         <PageHeader title={order.student_name} subtitle={order.product_name} />
-        <div className="space-y-4">
-          <article className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
-            <h2 className="font-display-ar text-lg font-bold text-ink">بيانات الطالب</h2>
-            <p className="mt-2 text-sm">
-              <span className="text-muted">الاسم: </span>
-              <span className="font-semibold text-ink">{order.student_name}</span>
-            </p>
-          </article>
-          <article className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
-            <h3 className="mb-3 text-sm font-semibold text-ink">معلومات الوشاح والشال الأمريكي</h3>
-            {sashItems.length > 0 ? (
-              <ul className="space-y-3">
-                {sashItems.map((item, idx) => (
-                  <li key={idx} className="space-y-1.5">
-                    <div className="flex items-center justify-between gap-2 text-sm">
-                      <span className="text-ink-soft">{item.label_snapshot}</span>
-                      {item.customer_text && (
-                        <span className="font-semibold text-ink">{item.customer_text}</span>
-                      )}
-                    </div>
-                    {item.customer_image_url && (
-                      <a
-                        href={resolveImageUrl(item.customer_image_url) ?? "#"}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="block w-fit"
-                        aria-label={`عرض صورة ${item.label_snapshot} بالحجم الكامل`}
-                      >
-                        <Image
-                          src={resolveImageUrl(item.customer_image_url) ?? ""}
-                          alt={`صورة — ${item.label_snapshot}`}
-                          width={240}
-                          height={240}
-                          className="max-h-56 w-auto rounded-lg border border-line object-contain"
-                          loading="lazy"
-                          unoptimized
-                        />
-                      </a>
-                    )}
-                  </li>
-                ))}
-              </ul>
+
+        <div className="grid gap-4 lg:grid-cols-2 lg:gap-8">
+          {/* Catalog product photo */}
+          <section className="rounded-3xl border border-line bg-surface p-4 shadow-[var(--shadow-card)] lg:p-6">
+            <h2 className="mb-4 font-display-ar text-lg font-bold text-ink">صورة المنتج</h2>
+            {productPhoto ? (
+              <a
+                href={productPhoto}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="عرض صورة المنتج بالحجم الكامل"
+                className="block"
+              >
+                <div className="relative h-72 w-full overflow-hidden rounded-2xl border border-line bg-surface-sink">
+                  <Image
+                    src={productPhoto}
+                    alt={order.product_name}
+                    fill
+                    sizes="(max-width: 1024px) 100vw, 50vw"
+                    className="object-contain"
+                    loading="eager"
+                    unoptimized
+                  />
+                </div>
+              </a>
             ) : (
-              <p className="text-sm text-ink-soft">لا توجد تفاصيل وشاح لهذا الطلب.</p>
+              <div className="flex min-h-48 items-center justify-center rounded-2xl border border-dashed border-line bg-surface-sink p-6 text-center">
+                <p className="text-sm text-ink-soft">لا تتوفر صورة للمنتج.</p>
+              </div>
             )}
-          </article>
+          </section>
+
+          {/* Details */}
+          <section className="space-y-4">
+            {/* Student + context */}
+            <article className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
+              <h2 className="font-display-ar text-lg font-bold text-ink">بيانات الطالب</h2>
+              <dl className="mt-3 space-y-2.5 text-sm">
+                <div className="flex justify-between gap-4 border-b border-line pb-2.5">
+                  <dt className="text-muted">الاسم</dt>
+                  <dd className="font-semibold text-ink">{order.student_name}</dd>
+                </div>
+                <div className="flex justify-between gap-4 border-b border-line pb-2.5">
+                  <dt className="text-muted">المنتج</dt>
+                  <dd className="font-medium text-ink">{order.product_name}</dd>
+                </div>
+                <div className="flex justify-between gap-4 border-b border-line pb-2.5">
+                  <dt className="text-muted">الجامعة</dt>
+                  <dd className="font-medium text-ink">{order.university_name || "—"}</dd>
+                </div>
+                <div className="flex justify-between gap-4 border-b border-line pb-2.5">
+                  <dt className="text-muted">القسم</dt>
+                  <dd className="font-medium text-ink">{order.department || "—"}</dd>
+                </div>
+                {order.batch_name && (
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-muted">الدفعة</dt>
+                    <dd className="font-medium text-ink">{order.batch_name}</dd>
+                  </div>
+                )}
+              </dl>
+            </article>
+
+            {/* Robe measurements (قياسات الروب) */}
+            {measureRows.length > 0 && (
+              <article className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
+                <h3 className="mb-3 text-sm font-semibold text-ink">قياسات الروب</h3>
+                <dl className="space-y-2 text-sm">
+                  {measureRows.map((row, idx) => (
+                    <div
+                      key={row.label}
+                      className={`flex justify-between gap-4 ${
+                        idx < measureRows.length - 1 ? "border-b border-line pb-2" : ""
+                      }`}
+                    >
+                      <dt className="text-muted">{row.label}</dt>
+                      <dd className="font-medium text-ink" dir="ltr">{row.value} cm</dd>
+                    </div>
+                  ))}
+                </dl>
+                {m?.tailor_notes?.trim() && (
+                  <div className="mt-3 rounded-xl border border-line bg-beige/60 p-3">
+                    <p className="mb-1 text-xs font-semibold text-muted">ملاحظات لفصال الروب</p>
+                    <p className="whitespace-pre-wrap text-sm text-ink">{m.tailor_notes}</p>
+                  </div>
+                )}
+                {m?.receipt_image_url?.trim() && (
+                  <div className="mt-3 rounded-xl border border-line bg-beige/60 p-3">
+                    <p className="mb-2 text-xs font-semibold text-muted">صورة الوصل</p>
+                    <a
+                      href={resolveImageUrl(m.receipt_image_url) ?? "#"}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block w-fit"
+                      aria-label="عرض صورة الوصل بالحجم الكامل"
+                    >
+                      <Image
+                        src={resolveImageUrl(m.receipt_image_url) ?? ""}
+                        alt="صورة الوصل"
+                        width={240}
+                        height={240}
+                        className="max-h-56 w-auto rounded-lg border border-line object-contain"
+                        loading="lazy"
+                        unoptimized
+                      />
+                    </a>
+                  </div>
+                )}
+              </article>
+            )}
+
+            {/* ALL order items — sizes + spec lines with text + reference photos */}
+            {items.length > 0 && (
+              <article className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
+                <h3 className="mb-3 text-sm font-semibold text-ink">تفاصيل الطلب</h3>
+                <ul className="space-y-3">
+                  {items.map((item, idx) => (
+                    <li key={idx} className="space-y-1.5">
+                      <div className="flex items-center justify-between gap-2 text-sm">
+                        <span className="text-ink-soft">{item.label_snapshot}</span>
+                        {item.customer_text && (
+                          <span className="font-semibold text-ink">{item.customer_text}</span>
+                        )}
+                      </div>
+                      {item.customer_image_url && (
+                        <a
+                          href={resolveImageUrl(item.customer_image_url) ?? "#"}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block w-fit"
+                          aria-label={`عرض صورة ${item.label_snapshot} بالحجم الكامل`}
+                        >
+                          <Image
+                            src={resolveImageUrl(item.customer_image_url) ?? ""}
+                            alt={`صورة — ${item.label_snapshot}`}
+                            width={240}
+                            height={240}
+                            className="max-h-56 w-auto rounded-lg border border-line object-contain"
+                            loading="lazy"
+                            unoptimized
+                          />
+                        </a>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </article>
+            )}
+          </section>
         </div>
       </div>
     );
@@ -1182,6 +1385,15 @@ export default function ProductionOrderDetailPage() {
               </div>
             </dl>
           </article>
+
+          {/* Embroidery zones checklist (FEATURE 1 — embroiderer/manager/admin) */}
+          {showEmbroideryZones && (
+            <EmbroideryZonesCard
+              zones={embroidery_zones}
+              orderId={orderId}
+              onChanged={load}
+            />
+          )}
 
           {/* Intake card — full-set form bundles only */}
           {intake && (

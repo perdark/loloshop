@@ -72,6 +72,40 @@ function isManager(u) {
   return u.role === 'admin' || staffTypesOf(u).includes('manager');
 }
 
+// Canonical embroidery zones, detected from an order's spec lines (order_items.label_snapshot) that carry real
+// content (customer_text or customer_image_url). Mirrors orderController's ORDER_ZONE_MATCH heuristics in JS.
+const ZONE_DEFS = [
+  { key: 'sash_right', label: 'الوشاح — جهة الاسم',  test: (l) => /يمين|اليمن/.test(l) },
+  { key: 'sash_left',  label: 'الوشاح — جهة السنة',  test: (l) => /يسار|اليسر/.test(l) },
+  { key: 'sash_back',  label: 'الوشاح — من الخلف',   test: (l) => /خلف/.test(l) },
+  { key: 'sash_front', label: 'الوشاح — من الأمام',  test: (l) => /وشاح/.test(l) && /أمام/.test(l) },
+  // NOTE: «شال امريكي» is deliberately NOT a zone — the American shawl is an add-on, not embroidery
+  // (تطريز). It carries a required photo (so it's "content") but must be IGNORED by the embroiderer's
+  // checklist, which is ONLY the 5 real embroidery zones: sash (name/year/back) + cap (top/side).
+  { key: 'cap_top',    label: 'القبعة — من الأعلى',  test: (l) => /أعلى|اعلى/.test(l) },
+  { key: 'cap_side',   label: 'القبعة — من الجانب',  test: (l) => /جانب/.test(l) },
+  { key: 'robe_sleeve_right', label: 'الروب — الردن الأيمن', test: (l) => /ردن/.test(l) && /أيمن/.test(l) },
+  { key: 'robe_sleeve_left',  label: 'الروب — الردن الأيسر', test: (l) => /ردن/.test(l) && /أيسر/.test(l) },
+];
+async function detectEmbroideryZones(orderId, progress) {
+  const { rows } = await query(
+    `SELECT label_snapshot, customer_text, customer_image_url FROM order_items WHERE order_id = $1`, [orderId]);
+  const seen = new Set();
+  const zones = [];
+  for (const it of rows) {
+    const label = it.label_snapshot || '';
+    const hasContent = (it.customer_text && it.customer_text.trim() !== '') || it.customer_image_url;
+    if (!hasContent) continue;
+    for (const z of ZONE_DEFS) {
+      if (!seen.has(z.key) && z.test(label)) {
+        seen.add(z.key);
+        zones.push({ key: z.key, label: z.label, done: !!(progress && progress[z.key]) });
+      }
+    }
+  }
+  return zones;
+}
+
 // Route-aware next stage: design-bearing sashes must use approve (not advance).
 // Advance is for: converting, embroidery, pressing, preparing, ready + design-less embroidery orders
 // from design_complete. An APPROVED design at design_complete may also advance (sash done, move on).
@@ -194,12 +228,13 @@ async function getOrder(req, res) {
     `SELECT o.id, o.status, o.created_at, o.price, o.design_id, o.package_id, o.checkout_group_id,
             o.batch_id, o.student_id,
             o.has_embroidery, o.needs_pressing, o.measurements, o.final_design_url,
+            o.embroidery_zones,
             o.working_staff_id, o.working_since,
             o.delivered_at, o.delivery_method, o.recipient_name, o.delivery_address,
             o.delivery_phone, o.delivery_notes, du.name AS delivered_by_name,
             u.name AS student_name, u.phone AS student_phone,
             s.university_name, s.department, s.gender, s.study_type, s.instagram_username,
-            p.name_ar AS product_name, p.type AS product_type,
+            p.name_ar AS product_name, p.type AS product_type, p.image_url AS product_image_url,
             b.name_ar AS batch_name, b.deadline,
             CASE WHEN s.wholesaler_id IS NULL THEN 'retail' ELSE 'wholesaler' END AS source,
             wu.name AS wholesaler_name,
@@ -260,13 +295,20 @@ async function getOrder(req, res) {
     order.recipient_name = null;
     order.delivery_notes = null;
   }
-  // Tailor (مفصل) is the most-restricted role: ONLY student name + sash/shawl spec lines
-  // (the items[] below). Rebuild `order` from an ALLOW-LIST so nothing else can ever leak
-  // via a direct API call — not price, contact, intake, demographics, measurements, the
-  // final-design URL, batch, or wholesaler. (Allow-list, not deny-list, so a future column
-  // added to the SELECT can't silently re-open the hole.)
+  // Tailor (مفصل / الفصال) sees فصال-relevant detail — student name, the catalog photo,
+  // measurements/sizes, and university/batch context — but NEVER money or contact. Rebuild
+  // `order` from an ALLOW-LIST so nothing else can ever leak via a direct API call (price,
+  // intake, working_*, delivery_*, demographics, the final-design URL). Allow-list, not
+  // deny-list, so a future column added to the SELECT can't silently re-open the hole.
+  // Caps are out of the فصال scope entirely.
   if (tailorOnly) {
-    const ALLOWED = new Set(['id', 'status', 'created_at', 'student_name', 'product_name', 'product_type']);
+    if (order.product_type === 'cap') {
+      return res.status(403).json({ error: 'هذا الطلب خارج نطاق الفصال', code: 'ERR_FORBIDDEN' });
+    }
+    const ALLOWED = new Set([
+      'id', 'status', 'created_at', 'student_name', 'product_name', 'product_type',
+      'product_image_url', 'measurements', 'university_name', 'department', 'batch_name', 'source',
+    ]);
     for (const k of Object.keys(order)) if (!ALLOWED.has(k)) delete order[k];
   }
 
@@ -299,11 +341,9 @@ async function getOrder(req, res) {
   let items = itemsRes.rows.map((it) =>
     presserOnly ? { ...it, customer_image_url: null, customer_text: null } : it
   );
-  // Tailor: only sash/shawl spec lines with real content, and never the per-line price.
+  // Tailor: sees ALL items (the size selections he tailors to), but never the per-line price.
   if (tailorOnly) {
-    items = items
-      .filter((it) => it.group_id !== null || it.customer_text || it.customer_image_url)
-      .map((it) => ({ ...it, price_snapshot: null }));
+    items = items.map((it) => ({ ...it, price_snapshot: null }));
   }
 
   // Bundle siblings
@@ -342,18 +382,22 @@ async function getOrder(req, res) {
 
   const { canStaffTransition: canTransition } = require('./orderController');
 
+  // Key the advance label on the actual EDGE (status→next), not just the current status —
+  // at 'embroidery' the next stage is pressing OR preparing (needs_pressing-driven), so a
+  // status-keyed label would lie ("نقل للكوي" even when going straight to التجهيز).
   const ADVANCE_LABEL_AR = {
-    design_complete: 'إرسال للتحويل / التطريز',
-    converting:      'إنهاء التحويل، نقل للتطريز',
-    embroidery:      'إنهاء التطريز، نقل للكوي',
-    pressing:        'إنهاء الكوي، نقل للتجهيز',
-    preparing:       'إنهاء التجهيز، تحديد جاهز',
-    ready:           'تأكيد التسليم',
+    'design_complete→converting': 'إرسال للتحويل / التطريز',
+    'converting→embroidery':      'إنهاء التحويل، نقل للتطريز',
+    'embroidery→pressing':        'إنهاء التطريز، نقل للكوي',
+    'embroidery→preparing':       'إنهاء التطريز، نقل للتجهيز',
+    'pressing→preparing':         'إنهاء الكوي، نقل للتجهيز',
+    'preparing→ready':            'إنهاء التجهيز، تحديد جاهز',
+    'ready→delivered':            'تأكيد التسليم',
   };
 
   const available_actions = {
     advance: nextTo && canTransition(u, order.status, nextTo)
-      ? { to: nextTo, label: ADVANCE_LABEL_AR[order.status] ?? 'تقدم للمرحلة التالية' }
+      ? { to: nextTo, label: ADVANCE_LABEL_AR[`${order.status}→${nextTo}`] ?? 'تقدم للمرحلة التالية' }
       : null,
     revert: revertTo && canTransition(u, order.status, revertTo)
       ? { to: revertTo }
@@ -370,6 +414,15 @@ async function getOrder(req, res) {
       (uTypes.includes('designer') || isManager(u)),
   };
 
+  // Per-zone embroidery checklist (محمد عماد ticks each zone; all-done auto-advances).
+  // Only meaningful while the order is actually at the embroidery stage. Never leak the
+  // raw o.embroidery_zones jsonb on the order object to restricted roles — strip it after.
+  let embroidery_zones = [];
+  if (order.status === 'embroidery') {
+    embroidery_zones = await detectEmbroideryZones(order.id, order.embroidery_zones);
+  }
+  delete order.embroidery_zones;
+
   res.json({
     data: {
       order,
@@ -378,6 +431,7 @@ async function getOrder(req, res) {
       bundle,
       package_orders: bundle, // backward-compat alias
       can_see_design: !presserOnly && !tailorOnly,
+      embroidery_zones,
       available_actions,
     },
   });
@@ -451,6 +505,62 @@ async function advance(req, res) {
   res.json({ data: updated });
 }
 
+// ---------- Per-zone embroidery checklist (محمد عماد ticks each zone) ----------
+// The embroiderer no longer flips the whole order in one click; he toggles each present
+// embroidery zone. When EVERY present zone is done (and there's at least one), the order
+// AUTO-ADVANCES through the normal advance path (embroidery→pressing/preparing via
+// needs_pressing). Only embroiderer + manager/admin may tick; only while at 'embroidery'.
+async function markEmbroideryZone(req, res) {
+  const { id } = req.params;
+  const { zone, done } = req.body;
+  const uTypes = staffTypesOf(req.user);
+  if (!isManager(req.user) && !uTypes.includes('embroiderer')) {
+    return res.status(403).json({ error: 'ممنوع', code: 'ERR_FORBIDDEN' });
+  }
+  const order = await loadAdvanceRow(id);
+  if (!order) return res.status(404).json({ error: 'الطلب غير موجود', code: 'ERR_NOT_FOUND' });
+  if (!staffScopeAllows(req.user, order.wholesaler_id == null)) {
+    return res.status(403).json({ error: 'هذا الطلب خارج نطاقك', code: 'ERR_FORBIDDEN' });
+  }
+  if (order.status !== 'embroidery') {
+    return res.status(409).json({ error: 'لا يمكن تعديل التطريز في هذه المرحلة', code: 'ERR_INVALID_TRANSITION' });
+  }
+  // Validate the zone is one this order actually has, from current progress.
+  const prog = (await query('SELECT embroidery_zones FROM orders WHERE id = $1', [id])).rows[0]?.embroidery_zones || {};
+  const zones = await detectEmbroideryZones(id, prog);
+  if (!zones.some((z) => z.key === zone)) {
+    return res.status(400).json({ error: 'منطقة تطريز غير صالحة', code: 'ERR_VALIDATION' });
+  }
+  // Merge the toggle into the jsonb progress map.
+  await query(
+    `UPDATE orders SET embroidery_zones = embroidery_zones || $1::jsonb WHERE id = $2`,
+    [JSON.stringify({ [zone]: !!done }), id]
+  );
+  await query(
+    `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
+     VALUES ($1, 'embroidery_zone', 'order', $2, $3)`,
+    [req.user.id, id, JSON.stringify({ zone, done: !!done })]
+  );
+  // Recompute with the new progress; if every present zone is now done → auto-advance.
+  const newProg = (await query('SELECT embroidery_zones FROM orders WHERE id = $1', [id])).rows[0]?.embroidery_zones || {};
+  const recomputed = await detectEmbroideryZones(id, newProg);
+  let advanced = false;
+  let status = 'embroidery';
+  if (recomputed.length > 0 && recomputed.every((z) => z.done)) {
+    const fresh = await loadAdvanceRow(id);
+    const to = nextStageFor(fresh);
+    // Gate the auto-advance through the SAME state-machine check the manual advance uses,
+    // so this can never become a ghost transition if STAGE_AUTHZ for the embroidery edges
+    // ever changes. Zones stay saved either way; only the stage move is gated.
+    if (to && canStaffTransition(req.user, fresh.status, to)) {
+      const updated = await performAdvance(fresh, req.user);
+      advanced = true;
+      status = updated?.status ?? 'embroidery';
+    }
+  }
+  res.json({ data: { zones: recomputed, advanced, status } });
+}
+
 // ---------- Bulk advance: "إكمال" multiple orders one stage at a time ----------
 // Each order is guarded INDEPENDENTLY (scope + state-machine + role) and advanced in
 // its own tx, so one bad/locked order never blocks the rest. Orders the caller can't
@@ -473,6 +583,11 @@ async function advanceBulk(req, res) {
     const to = nextStageFor(order);
     if (!to || !canStaffTransition(req.user, order.status, to)) {
       results.push({ id, ok: false, reason: 'not_advanceable' }); continue;
+    }
+    // ready→delivered must capture hand-off details (recipient/method/address) via /deliver —
+    // a bulk advance would set delivered with NULLs. Skip it; the detail-page modal handles it.
+    if (to === 'delivered') {
+      results.push({ id, ok: false, reason: 'needs_delivery' }); continue;
     }
     try {
       const updated = await performAdvance(order, req.user);
@@ -793,6 +908,7 @@ async function tailorQueue(req, res) {
      LEFT JOIN batches b ON b.id = o.batch_id
      WHERE s.wholesaler_id IS NULL
        AND o.status::text <> 'cancelled'
+       AND p.type <> 'cap'
        AND o.tailor_status::text = $1
      ORDER BY b.deadline ASC NULLS LAST, o.created_at ASC`,
     [tailorStatus]
@@ -997,6 +1113,6 @@ async function monitor(req, res) {
 
 module.exports = {
   getQueue, getOrder, advance, advanceBulk, deliver, revert, claim, release, completed, uploadFinalDesign, monitor,
-  streamEvents, nextStageFor,
+  streamEvents, nextStageFor, markEmbroideryZone,
   tailorQueue, tailorComplete, tailorReopen, tailorCompleteBulk, tailorSummary,
 };

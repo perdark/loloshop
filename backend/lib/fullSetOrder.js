@@ -298,6 +298,7 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
     for (const type of ['sash', 'robe', 'cap']) {
       const prodId = byType[type];
       const flags = itemFlags[type];
+      const needsPressing = type !== 'cap';
       const measurementsJson = type === 'robe' ? JSON.stringify(meas) : null;
       const existing = await client.query(
         `SELECT id FROM orders
@@ -311,10 +312,10 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
         // status is NOT touched — the production state machine lives in orderController only.
         await client.query(
           `UPDATE orders SET price=$1, cost=$2, batch_id=$3, package_id=$4, checkout_group_id=$5,
-             status=$6, has_embroidery=$7, needs_pressing=FALSE, measurements=$8, notes=$9,
+             status=$6, has_embroidery=$7, needs_pressing=$8, measurements=$9, notes=$10,
              wholesaler_approval='pending', wholesaler_reject_reason=NULL
-           WHERE id=$10`,
-          [itemPrice[type], itemCost[type], resolvedBatchId, package_id, cgId, flags.status, flags.has_embroidery, measurementsJson, groupNotes, oid]
+           WHERE id=$11`,
+          [itemPrice[type], itemCost[type], resolvedBatchId, package_id, cgId, flags.status, flags.has_embroidery, needsPressing, measurementsJson, groupNotes, oid]
         );
         await client.query(`DELETE FROM order_items WHERE order_id = $1`, [oid]);
       } else {
@@ -322,9 +323,9 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
           `INSERT INTO orders (student_id, product_id, batch_id, package_id, checkout_group_id,
                                price, cost, status, has_embroidery, needs_pressing, measurements, notes,
                                wholesaler_approval)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,FALSE,$10,$11,'pending') RETURNING id`,
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pending') RETURNING id`,
           [student.id, prodId, resolvedBatchId, package_id, cgId,
-           itemPrice[type], itemCost[type], flags.status, flags.has_embroidery, measurementsJson, groupNotes]
+           itemPrice[type], itemCost[type], flags.status, flags.has_embroidery, needsPressing, measurementsJson, groupNotes]
         );
         oid = o.rows[0].id;
       }

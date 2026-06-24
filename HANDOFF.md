@@ -6,6 +6,104 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
+## 2026-06-24 (c) — كوي (pressing) routing fix · per-zone embroidery checkboxes (محمد عماد) · ابو عبدو (الفصال) full view
+
+Uncommitted on **main** (alongside the calligraphy working-tree changes). **Migration 047 applied to Neon + verified.**
+Gates green: FE `tsc` 0 · `eslint` 0 · BE `node --check` 0 (5 files). **Built via a 6-agent Workflow** (3 backend ∥ → FE → gates+critic),
+then orchestrator applied the migration + fixed the 2 critic findings + verified the backfill against live data. **NOT yet
+driven in a browser**; `next build` not run (dev servers up).
+
+**Why.** User report: pressing «إنهاء التطريز، نقل للكوي» sent the order to **التجهيز, not كوي**, and **كوي must also apply to روب**.
+Two root causes: (1) the advance label was keyed on the *current* status, so at `embroidery` it ALWAYS read «نقل للكوي» even
+when `nextStageFor` routed to `preparing`; (2) `needs_pressing` was `!!design_id` (retail) / hard-`FALSE` (full-set), so robes
+& full-set sashes never got `needs_pressing=true` → always skipped كوي. Plus the user spec'd per-zone embroidery checkboxes for
+محمد عماد and a fuller فصال view for ابو عبدو.
+
+**1. كوي routing → TYPE-BASED `needs_pressing` (وشاح + روب press; قبعة skips to تجهيز).** Fixed in ALL 5 write paths:
+`orderController.configureOrder` (`= productType==='sash'||'robe'`), `orderController.configureFullSet` + `lib/fullSetOrder.js`
++ (critic-caught gap) `orderController.configurePackage` (`= type!=='cap'`, per-type in the loop), and `cartController` checkout
+(added `p.type AS product_type` to the checkout SELECT; `= ci.product_type==='sash'||'robe'`). `has_embroidery`/`initialStatus`
+logic untouched. NB: `needs_pressing` is only consulted on the `embroidery→next` edge, so non-embroidered pieces (which start at
+`preparing`) are unaffected.
+
+**2. Truthful advance label.** `productionController.getOrder` — `ADVANCE_LABEL_AR` re-keyed on the `${from}→${to}` EDGE
+(`embroidery→pressing`=«…نقل للكوي», `embroidery→preparing`=«…نقل للتجهيز», `pressing→preparing`=«إنهاء الكوي، نقل للتجهيز», …).
+Label now matches reality; no more lie. FE reads `available_actions.advance.label` (already backend-driven).
+
+**3. محمد عماد — per-zone embroidery checklist.** NEW `orders.embroidery_zones jsonb DEFAULT '{}'` (migration 047). NEW
+`POST /production/orders/:id/embroidery-zone {zone, done}` (`markEmbroideryZone`, route mounted next to `/advance`). The
+embroiderer ticks each present zone; **when EVERY present zone is done (≥1) the order auto-advances** via `performAdvance`
+(embroidery→pressing for sash/robe, →preparing for cap). Zones are **detected from the order's spec lines** (`order_items.label_snapshot`
+with content) via a self-contained `ZONE_DEFS`/`detectEmbroideryZones` in productionController (mirrors orderController's
+ORDER_ZONE_MATCH heuristics in JS — يمين/يسار/خلف/أمام/أعلى/جانب/ردن). `getOrder` returns a top-level `embroidery_zones:[{key,label,done}]`
+ONLY at `status==='embroidery'` (else `[]`); raw jsonb stripped off `order`. Guards: embroiderer/manager-admin only · status must be
+`embroidery` · zone validated against the order's actual zones · scope enforced. **Critic hardening applied:** the auto-advance now
+goes through the SAME `canStaffTransition` guard as the manual button (was calling `performAdvance` directly → potential ghost
+transition if STAGE_AUTHZ ever changed). **GOTCHA:** a *designed retail sash* has its embroidery on the canvas, NOT as order_items
+zone lines → `detectEmbroideryZones` returns 0 zones → no checklist shown, embroiderer uses the manual advance button (by design;
+documented behavior). Retail full-set & wholesaler sash zone lines DO detect (اليمنى/اليسرى/خلف match).
+
+**4. ابو عبدو (الفصال / tailor) — fuller view, caps excluded.** `tailorQueue` now excludes caps (`AND p.type <> 'cap'`); opening a
+cap as tailor-only → 403. `getOrder` adds `p.image_url AS product_image_url` (catalog photo, exposed to all). The tailorOnly
+allow-list widened to: `id,status,created_at,student_name,product_name,product_type,product_image_url,measurements,
+university_name,department,batch_name,source` + ALL `items` (size selections) with `price_snapshot` nulled. Still stripped: price,
+intake, working_*, delivery_*, demographics, `final_design_url`, design canvas (`can_see_design:false`). FE `isTailorOnly` branch
+rewritten into a real فصال view (catalog photo + lightbox · قياسات الروب · all spec lines + customer photos). Mirror gate in
+`page.tsx`.
+
+**Files.** BE: `controllers/{orderController,productionController,cartController}.js`, `lib/fullSetOrder.js`,
+`routes/production.js`; NEW `db/migrations/047_embroidery_zones.sql` + `db/schema.sql` mirror. FE: `app/staff/orders/[orderId]/page.tsx`,
+`lib/{staff,staff-types}.ts`.
+
+**Verified.** All gates green. Migration 047 applied + verified live: `embroidery_zones` column present; scoped backfill ran →
+**0 embroidered sash/robe in-flight skip كوي**, **0 caps** wrongly flagged pressing. Decision recorded below re: the unembroidered
+in-flight rows. **Backend e2e + browser click-through NOT done yet.**
+
+**5. Follow-up staff-pipeline audit (critic, same كوي bug-class) → 3 fixes applied, gates re-green.** User asked to hunt for more
+label⟂behavior / ghost-button / routing bugs. Fixed (chosen by user):
+- **#1 (🔴 silent delivery via bulk «إكمال»).** `advanceBulk` (productionController) now SKIPS any `ready→delivered` edge
+  (`reason:'needs_delivery'`) and `staffController.wholesalerOrders.can_advance` is `false` when `to==='delivered'` — so a
+  `ready` order can no longer be bulk-advanced to delivered with NULL recipient/method/address. Delivery must go through the
+  `/deliver` modal (single-order path). Verified `nextStageFor('ready')==='delivered'` so the guard is the right edge.
+- **#2 (🔴 multi-role staff land on wrong `/staff` home).** `app/staff/page.tsx` now reads the `staff_types[]` union
+  (`myTypes = user.staff_types ?? [primary]`): `isManager = role==='admin' || myTypes.includes('manager')`; queue role =
+  first `myTypes` member in `QUEUE_META`. Fixes designer+manager losing the dashboard and tailor+embroiderer hitting «الدور غير محدد».
+- **#3 → REVERSED by user.** The critic flagged the shawl as "missing embroidery work"; I briefly added an `american_shawl`
+  ZONE_DEF. **User corrected: «شال امريكي» is an ADD-ON, NOT تطريز** — it must NOT be a checklist zone. Reverted: ZONE_DEFS is
+  ONLY the 5 real embroidery zones (sash name/year/back + cap top/side). The shawl line (with its required photo) is now
+  deliberately ignored by `detectEmbroideryZones` — it still shows under «خيارات الطلب» as order data, just never as a checkbox.
+  So a sash with front + shawl correctly auto-advances once the real embroidery zones are ticked.
+
+**Live-verified via `/showme` (browser, desktop 1440 + mobile 390, zero console errors), tokens minted via `signToken` for
+the real accounts محمد عماد (embroiderer) + ابو عبدو (tailor):**
+- محمد عماد lands on his «قائمة التطريز» (multi-role fix #2 — single-role embroiderer routes correctly).
+- Order detail at embroidery shows «مناطق التطريز» card = «من الأمام» + «من الخلف» (this wholesaler full-set sash has 2 zones; a
+  retail sash shows the 3 name/year/back) — **no شال امريكي in the checklist** (shawl shows only under order options). Ticking
+  both → toast «تم نقل الطلب إلى قيد الكوي» + status → «قيد الكوي» (كوي routing + auto-advance confirmed end-to-end).
+- ابو عبدو «الفصال» queue = 12 retail orders, **no قبعة**; opening a robe shows صورة المنتج (catalog photo) + قياسات الروب
+  (shoulder/chest/length/sleeve + notes + receipt) + fabric/color/sleeve details + **no price value**.
+- Demo data used: order `4c46f10e` (دابي / احمد علي قاسم) was temporarily moved preparing→embroidery and **reverted to
+  preparing** after. No residual state.
+
+### Open follow-ups
+- **Audit findings NOT fixed (user deferred):** **#4** legacy `staff_review`/`printing` orders are a queue dead-end (no role
+  sees them, `nextStageFor`→null) — only reachable via seed/old data; drain them to `embroidery` or add to `MANAGER_VIEW_STAGES`
+  if any exist. **#5** `orderController.listOrders` flat mode leaks `recipient_name`/`delivery_*` to read-only roles
+  (tailor/presser) — same side-door class as the 2026-06-18 price fix; gate behind `canSeeMoney`. **#6** designer can't
+  approve a pending-design sash from the rep console (checkbox just disabled — no ghost, a workflow dead-spot). **#7**
+  `StaffSidebar` role-link label still keyed on primary `staff_type` (cosmetic sibling of #2).
+- **USER DECISION (2026-06-24):** 23 existing full-set orders (11 sash + 12 robe) at `design_complete` with `has_embroidery=FALSE`
+  are **deliberately left** routing `embroidery→preparing` (skip كوي). User chose "leave them" — only new/edited orders get the
+  type-based كوي routing. If they should press too, run: `UPDATE orders o SET needs_pressing=TRUE FROM products p WHERE p.id=o.product_id
+  AND p.type IN ('sash','robe') AND o.status::text IN ('designing','design_complete','converting','embroidery') AND o.needs_pressing=FALSE;`
+- **Decision recorded:** caps do NOT press (وشاح + روب only). One-line flip if that changes.
+- **Designed retail sash shows no zone checkboxes** (canvas embroidery isn't order_items zones) → embroiderer uses the manual
+  advance button there. If per-zone tracking is wanted for designed sashes too, derive zones from the design canvas sides instead.
+- **Live drive pending:** tick sash zones as محمد عماد → confirm jump to «قيد الكوي»; open as ابو عبدو → full view, no caps. `next build` before deploy.
+- Uncommitted on main; `PROGRESS.md` not updated; seed not updated for 047 (schema.sql mirrored; migration idempotent).
+
+---
+
 ## 2026-06-24 (b) — Wholesaler two-stage order approval (rep approves the student's order → it surfaces to staff + dashboard)
 
 Committed to **main** this session. **Migration 044 applied to Neon + verified.** Gates green: FE `tsc` 0 · `eslint` 0 ·

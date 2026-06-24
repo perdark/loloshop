@@ -538,7 +538,7 @@ async function configureOrder(req, res) {
 
   // Compute routing flags
   const has_embroidery = !!design_id || priced.hasEmbroidery;
-  const needs_pressing = !!design_id;
+  const needs_pressing = (productType === 'sash' || productType === 'robe');
 
   // Determine initial status based on routing
   let initialStatus;
@@ -718,19 +718,23 @@ async function configurePackage(req, res) {
       // Only the sash is designed by the student; robe + cap have nothing to design,
       // so they enter the preparer's queue directly.
       const pkgStatus = prodId === byType.sash ? 'designing' : 'preparing';
+      // كوي (pressing) follows embroidery for sashes & robes; caps skip it. (Only the
+      // sash actually reaches the embroidery→pressing edge here — robe/cap start at
+      // 'preparing' — but keep it type-based for consistency with every other path.)
+      const pkgNeedsPressing = prodId === byType.sash || prodId === byType.robe;
       let oid;
       if (existing.rows.length) {
         oid = existing.rows[0].id;
         await client.query(
-          `UPDATE orders SET price = $1, batch_id = $2, package_id = $3, status = $4 WHERE id = $5`,
-          [price, resolvedBatchId, package_id, pkgStatus, oid]
+          `UPDATE orders SET price = $1, batch_id = $2, package_id = $3, status = $4, needs_pressing = $5 WHERE id = $6`,
+          [price, resolvedBatchId, package_id, pkgStatus, pkgNeedsPressing, oid]
         );
         await client.query(`DELETE FROM order_items WHERE order_id = $1`, [oid]);
       } else {
         const o = await client.query(
-          `INSERT INTO orders (student_id, product_id, batch_id, package_id, price, status)
-           VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-          [student.id, prodId, resolvedBatchId, package_id, price, pkgStatus]
+          `INSERT INTO orders (student_id, product_id, batch_id, package_id, price, status, needs_pressing)
+           VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+          [student.id, prodId, resolvedBatchId, package_id, price, pkgStatus, pkgNeedsPressing]
         );
         oid = o.rows[0].id;
       }
@@ -1011,6 +1015,7 @@ async function configureFullSet(req, res) {
     for (const type of ['sash', 'robe', 'cap']) {
       const prodId = byType[type];
       const flags = itemFlags[type];
+      const needsPressing = type !== 'cap';
       const measurementsJson = type === 'robe' ? JSON.stringify(meas) : null;
       const existing = await client.query(
         `SELECT id FROM orders
@@ -1022,18 +1027,18 @@ async function configureFullSet(req, res) {
         oid = existing.rows[0].id;
         await client.query(
           `UPDATE orders SET price=$1, batch_id=$2, package_id=$3, checkout_group_id=$4,
-             status=$5, has_embroidery=$6, needs_pressing=FALSE, measurements=$7
-           WHERE id = $8`,
-          [itemPrice[type], resolvedBatchId, package_id, cgId, flags.status, flags.has_embroidery, measurementsJson, oid]
+             status=$5, has_embroidery=$6, needs_pressing=$7, measurements=$8
+           WHERE id = $9`,
+          [itemPrice[type], resolvedBatchId, package_id, cgId, flags.status, flags.has_embroidery, needsPressing, measurementsJson, oid]
         );
         await client.query(`DELETE FROM order_items WHERE order_id = $1`, [oid]);
       } else {
         const o = await client.query(
           `INSERT INTO orders (student_id, product_id, batch_id, package_id, checkout_group_id,
                                price, status, has_embroidery, needs_pressing, measurements)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,FALSE,$9) RETURNING id`,
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
           [student.id, prodId, resolvedBatchId, package_id, cgId,
-           itemPrice[type], flags.status, flags.has_embroidery, measurementsJson]
+           itemPrice[type], flags.status, flags.has_embroidery, needsPressing, measurementsJson]
         );
         oid = o.rows[0].id;
       }

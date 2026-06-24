@@ -163,6 +163,8 @@ export interface ProductionOrderDetail {
     instagram_username: string | null;
     product_name: string;
     product_type: string;
+    /** Catalog product photo — shown to the tailor (مفصل) for the فصال view. Null when unset. */
+    product_image_url?: string | null;
     batch_name: string | null;
     deadline: string | null;
     /** Order source — "retail" or "wholesaler". */
@@ -230,6 +232,12 @@ export interface ProductionOrderDetail {
    */
   bundle: BundleItem[] | null;
   can_see_design: boolean;
+  /**
+   * Embroidery zones for the embroiderer's per-zone checklist.
+   * Populated ONLY when order.status === 'embroidery'; otherwise [].
+   * Each entry's `done` reflects whether that zone's stitching is finished.
+   */
+  embroidery_zones: { key: string; label: string; done: boolean }[];
   /** Actions the requesting user may perform on this order right now.
    *  Derived server-side from the same state machine used by POST handlers. */
   available_actions: {

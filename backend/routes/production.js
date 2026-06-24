@@ -16,6 +16,9 @@ router.get('/monitor', requireStaffType(), c.monitor); // no types → manager s
 router.get('/completed', c.completed);
 router.get('/orders/:id', c.getOrder);
 router.post('/orders/:id/advance', c.advance);
+// Per-zone embroidery checklist — embroiderer ticks each zone (all-done auto-advances).
+// Permission (embroiderer OR manager/admin) is enforced inside the controller.
+router.post('/orders/:id/embroidery-zone', c.markEmbroideryZone);
 // Bulk "إكمال" — advance many orders one stage (per-order guards inside the controller).
 router.post('/advance-bulk', c.advanceBulk);
 router.post('/orders/:id/deliver', c.deliver);

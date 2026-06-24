@@ -864,7 +864,11 @@ function StaffPageContent() {
     return <PageLoader />;
   }
 
-  const isManager = user.role === "admin" || user.staff_type === "manager";
+  // Multi-role staff: staff_types[] is authoritative (the backend scopes off the union, not the
+  // primary scalar). Landing on the wrong home was a real bug — a designer+manager lost the
+  // dashboard, a tailor+embroiderer hit «الدور غير محدد».
+  const myTypes = user.staff_types ?? (user.staff_type ? [user.staff_type] : []);
+  const isManager = user.role === "admin" || myTypes.includes("manager");
   const showSourceFilter = isManager || user.order_scope === "both";
 
   if (isManager) {
@@ -876,7 +880,8 @@ function StaffPageContent() {
     );
   }
 
-  const staffType = user.staff_type;
+  // First role the staffer holds that has a queue view (falls through to the empty state if none).
+  const staffType = myTypes.find((t) => t in QUEUE_META) ?? null;
 
   if (staffType && staffType in QUEUE_META) {
     return (

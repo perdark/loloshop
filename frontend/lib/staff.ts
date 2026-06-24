@@ -126,6 +126,21 @@ export async function advanceOrder(id: string): Promise<{ id: string; status: Or
   return data.data;
 }
 
+/**
+ * POST /production/orders/:id/embroidery-zone
+ * Embroiderer (or manager/admin) marks one embroidery zone done/undone.
+ * When the last present zone becomes done the order auto-advances
+ * (advanced=true, status = the new pipeline status).
+ */
+export async function markEmbroideryZone(id: string, zone: string, done: boolean) {
+  const { data } = await api.post(`/production/orders/${id}/embroidery-zone`, { zone, done });
+  return data.data as {
+    zones: { key: string; label: string; done: boolean }[];
+    advanced: boolean;
+    status: string;
+  };
+}
+
 // ─── Wholesaler order-working console (one rep's students' orders) ─────────────
 
 /** One order in the rep-scoped orders console (GET /{staff,admin}/wholesalers/:id/orders). */

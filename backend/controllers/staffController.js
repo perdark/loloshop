@@ -70,7 +70,9 @@ async function wholesalerOrders(req, res) {
   );
   const data = rows.map((r) => {
     const to = nextStageFor(r);
-    const canAdvance = !!to && canStaffTransition(req.user, r.status, to);
+    // ready→delivered needs the delivery-details modal (/deliver), so it is NOT a bulk-advance
+    // edge — keep the checkbox disabled for `ready` so the console can't silently deliver.
+    const canAdvance = !!to && to !== 'delivered' && canStaffTransition(req.user, r.status, to);
     return {
       id: r.id,
       student_id: r.student_id,
