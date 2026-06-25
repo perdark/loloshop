@@ -897,12 +897,13 @@ export default function ProductionOrderDetailPage() {
   // Show price only when backend returns it (admin + embroiderer)
   const showPrice = typeof order.price === "number" && order.price > 0;
 
-  // Multi-role: مفصل (tailor) read-only view — only when tailor is the user's sole role
-  // (a tailor who is also a designer sees the full view). Mirrors the backend strip.
+  // View layout is backend-driven (single source of truth — the UI never re-derives
+  // role→visibility). 'tailor' = الفصال read-only · 'embroidery' = embroiderer minimal station.
   const myRoles: StaffType[] =
     user?.staff_types ?? (user?.staff_type ? [user.staff_type] : []);
-  const isTailorOnly =
-    user?.role === "staff" && myRoles.length > 0 && myRoles.every((r) => r === "tailor");
+  const layout = detail.view?.layout ?? "full";
+  const isTailorOnly = layout === "tailor";
+  const isEmbroideryOnly = layout === "embroidery";
 
   // Embroidery-zone checklist (FEATURE 1): visible to the embroiderer + manager/admin
   // when the backend supplies zones (only at the embroidery stage).
@@ -1092,6 +1093,125 @@ export default function ProductionOrderDetailPage() {
             )}
           </section>
         </div>
+      </div>
+    );
+  }
+
+  // ── تطريز (embroiderer / محمد عماد): minimal station view ──────────────────────
+  // Only the student name + the embroidery text/photo lines + the per-zone checklist.
+  // Contact, price, measurements, design canvas and the package siblings are all stripped
+  // server-side. Ticking every zone auto-advances; a no-zone order shows the advance button.
+  if (isEmbroideryOnly) {
+    const embroideryItems = items.filter(
+      (i) => i.group_id !== null || !!i.customer_text || !!i.customer_image_url
+    );
+    return (
+      <div dir="rtl" lang="ar">
+        <div className="mb-4">
+          <Link
+            href="/staff"
+            className="inline-flex min-h-[44px] items-center gap-1 text-sm font-medium text-orange-ink hover:underline"
+          >
+            <span aria-hidden>→</span> العودة
+          </Link>
+        </div>
+        <PageHeader
+          title={order.student_name}
+          subtitle={`${ORDER_STATUS_LABELS[order.status] ?? order.status} · ${order.product_name}`}
+        />
+
+        <div className="mx-auto max-w-xl space-y-4">
+          {/* The embroiderer's work — per-zone checklist (auto-advances when all done) */}
+          {showEmbroideryZones && (
+            <EmbroideryZonesCard
+              zones={embroidery_zones}
+              orderId={orderId}
+              onChanged={load}
+            />
+          )}
+
+          {/* What to stitch — the name (text) + reference photo for each embroidery line */}
+          {embroideryItems.length > 0 ? (
+            <article className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
+              <h3 className="mb-3 text-sm font-semibold text-ink">تفاصيل التطريز</h3>
+              <ul className="space-y-3">
+                {embroideryItems.map((item, idx) => (
+                  <li key={idx} className="space-y-1.5">
+                    <div className="flex items-center justify-between gap-2 text-sm">
+                      <span className="text-ink-soft">{item.label_snapshot}</span>
+                      {item.customer_text && (
+                        <span className="font-semibold text-ink">{item.customer_text}</span>
+                      )}
+                    </div>
+                    {item.customer_image_url && (
+                      <a
+                        href={resolveImageUrl(item.customer_image_url) ?? "#"}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block w-fit"
+                        aria-label={`عرض صورة ${item.label_snapshot} بالحجم الكامل`}
+                      >
+                        <Image
+                          src={resolveImageUrl(item.customer_image_url) ?? ""}
+                          alt={`صورة — ${item.label_snapshot}`}
+                          width={240}
+                          height={240}
+                          className="max-h-56 w-auto rounded-lg border border-line object-contain"
+                          loading="lazy"
+                          unoptimized
+                        />
+                      </a>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </article>
+          ) : (
+            !showEmbroideryZones && (
+              <div className="rounded-2xl border border-dashed border-line bg-surface-sink p-6 text-center text-sm text-ink-soft">
+                لا توجد تفاصيل تطريز مُدخلة لهذا الطلب.
+              </div>
+            )
+          )}
+
+          {/* Advance / revert — for the no-zone case (designed sash) + manager fallback.
+              available_actions is backend-gated, so the button shows only when allowed. */}
+          {(showAdvance || showRevert) && (
+            <div className="flex flex-col gap-2">
+              {showAdvance && (
+                <Button fullWidth loading={actionLoading} onClick={onPrimaryAction}>
+                  {advanceLabel}
+                </Button>
+              )}
+              {showRevert && (
+                <Button variant="ghost" fullWidth onClick={() => setRevertOpen(true)}>
+                  إرجاع للتعديل
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Revert confirm modal (the إرجاع button above triggers it) */}
+        <Modal
+          open={revertOpen}
+          onClose={() => setRevertOpen(false)}
+          title="إرجاع الطلب للتعديل"
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setRevertOpen(false)}>
+                إلغاء
+              </Button>
+              <Button variant="danger" loading={revertSubmitting} onClick={handleRevert}>
+                تأكيد الإرجاع
+              </Button>
+            </>
+          }
+        >
+          <p className="text-sm text-ink-soft">
+            سيتم إرجاع الطلب للمرحلة السابقة. هل أنت متأكد؟
+          </p>
+        </Modal>
       </div>
     );
   }
@@ -1304,14 +1424,18 @@ export default function ProductionOrderDetailPage() {
           <article className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
             <h2 className="font-display-ar text-lg font-bold text-ink">بيانات الطالب</h2>
             <dl className="mt-4 space-y-2.5 text-sm">
-              <div className="flex justify-between gap-4 border-b border-line pb-2.5">
-                <dt className="text-muted">الهاتف</dt>
-                <dd dir="ltr">{order.student_phone || "—"}</dd>
-              </div>
-              <div className="flex justify-between gap-4 border-b border-line pb-2.5">
-                <dt className="text-muted">انستغرام</dt>
-                <dd dir="ltr">
-                  {order.instagram_username ? (
+              {/* Contact rows render only when the backend supplies them (front-desk/manager).
+                  Lean production roles get them stripped server-side → rows simply disappear. */}
+              {order.student_phone && (
+                <div className="flex justify-between gap-4 border-b border-line pb-2.5">
+                  <dt className="text-muted">الهاتف</dt>
+                  <dd dir="ltr">{order.student_phone}</dd>
+                </div>
+              )}
+              {order.instagram_username && (
+                <div className="flex justify-between gap-4 border-b border-line pb-2.5">
+                  <dt className="text-muted">انستغرام</dt>
+                  <dd dir="ltr">
                     <a
                       href={`https://instagram.com/${order.instagram_username}`}
                       target="_blank"
@@ -1320,11 +1444,9 @@ export default function ProductionOrderDetailPage() {
                     >
                       @{order.instagram_username}
                     </a>
-                  ) : (
-                    "—"
-                  )}
-                </dd>
-              </div>
+                  </dd>
+                </div>
+              )}
               <div className="flex justify-between gap-4 border-b border-line pb-2.5">
                 <dt className="text-muted">الجامعة</dt>
                 <dd className="font-medium text-ink">{order.university_name || "—"}</dd>

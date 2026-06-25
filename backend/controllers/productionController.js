@@ -215,14 +215,29 @@ async function getQueue(req, res) {
 async function getOrder(req, res) {
   const { id } = req.params;
   const u = req.user;
-  // Presser is the only role barred from the canvas/contact details. A multi-role user who
-  // is ALSO a presser still sees them via their other role, so block only when presser is the
-  // sole role.
+  // A "sole-role" worker gets the lean, station-specific projection; a multi-role user
+  // (e.g. designer+embroiderer) keeps the richer union, so block only when it IS the sole role.
   const uTypes = staffTypesOf(u);
-  const presserOnly = !isManager(u) && uTypes.includes('presser') && uTypes.every((t) => t === 'presser');
-  // مفصل (tailor) is a READ-ONLY view: only student name + sash + American-shawl info.
-  // Applies when tailor is the sole role (a tailor who is also a designer sees the full view).
-  const tailorOnly = !isManager(u) && uTypes.includes('tailor') && uTypes.every((t) => t === 'tailor');
+  const mgr = isManager(u);
+  const soleRole = (r) => !mgr && uTypes.includes(r) && uTypes.every((t) => t === r);
+  // Presser: no canvas/contact — colour + status only (sash info for الكوي).
+  const presserOnly = soleRole('presser');
+  // مفصل (tailor): READ-ONLY فصال view (photo + measurements + sizes). Allow-list rebuilt below.
+  const tailorOnly = soleRole('tailor');
+  // تطريز (embroiderer / محمد عماد): minimal station — student name + the embroidery text/photo
+  // lines + the per-zone checklist. NO contact, money, measurements, design canvas, or package.
+  const embroidererOnly = soleRole('embroiderer');
+  // Front-desk / delivery (preparer) + managers see the full record (contact, money,
+  // measurements, the whole package). Every OTHER production station gets a "lean" view.
+  const frontDesk = mgr || uTypes.includes('preparer');
+  const lean = !frontDesk;
+  // Capability flags — also returned to the client so the UI never re-derives visibility
+  // (single source of truth, mirrors the available_actions pattern).
+  const canSeeContact = frontDesk;
+  const canSeeMoney = frontDesk;
+  const canSeeMeasurements = frontDesk || tailorOnly; // الفصال needs the robe قياسات
+  const canSeePackage = frontDesk;                    // only front-desk/manager hop between siblings
+  const canSeeDesign = !presserOnly && !tailorOnly && !embroidererOnly;
 
   const base = await query(
     `SELECT o.id, o.status, o.created_at, o.price, o.design_id, o.package_id, o.checkout_group_id,
@@ -278,11 +293,20 @@ async function getOrder(req, res) {
     return res.status(403).json({ error: 'هذا الطلب خارج نطاقك', code: 'ERR_FORBIDDEN' });
   }
 
-  // PRICE VISIBILITY: only manager/admin/embroiderer sees price (deposit is money too)
-  if (!isManager(u) && !uTypes.includes('embroiderer') && u.role !== 'admin') {
+  // PRICE VISIBILITY: only front-desk (preparer) + manager/admin see money. The embroiderer
+  // no longer sees the price — his station needs the name + the stitch, not the cash.
+  if (!canSeeMoney) {
     delete order.price;
     if (order.intake) delete order.intake.deposit;
   }
+  // CONTACT VISIBILITY: phone + Instagram are front-desk/manager only. Every production
+  // station (designer, digitizer, embroiderer, presser) works from the design + spec.
+  if (!canSeeContact) {
+    order.student_phone = null;
+    order.instagram_username = null;
+  }
+  // MEASUREMENTS: only the tailor (الفصال) + front-desk/manager need the robe قياسات.
+  if (!canSeeMeasurements) order.measurements = null;
   // Presser gets no customer contact/address — just the event date for urgency.
   if (presserOnly && order.intake) {
     order.intake = { event_date: order.intake.event_date };
@@ -312,24 +336,43 @@ async function getOrder(req, res) {
     for (const k of Object.keys(order)) if (!ALLOWED.has(k)) delete order[k];
   }
 
+  // تطريز (embroiderer / محمد عماد) — minimal station view. Rebuild `order` from an ALLOW-LIST
+  // (like the tailor) so nothing leaks: only the name + product/batch context and the routing
+  // flags the checklist/advance need. NO contact, money, measurements, design, intake, delivery,
+  // or package siblings (checkout_group_id/package_id dropped → no bundle below).
+  if (embroidererOnly) {
+    order.intake = null;
+    const ALLOWED = new Set([
+      'id', 'status', 'created_at', 'student_name', 'product_name', 'product_type',
+      'batch_name', 'source', 'design_id', 'has_embroidery', 'needs_pressing', 'embroidery_zones',
+    ]);
+    for (const k of Object.keys(order)) if (!ALLOWED.has(k)) delete order[k];
+  }
+  // LEAN production (designer / digitizer, no front-desk role): keep the design/work layout but
+  // drop the full-set intake card (phones/address/deposit). Contact, money + measurements are
+  // already stripped above; the package siblings are gated by canSeePackage below.
+  if (lean && !presserOnly && !tailorOnly && !embroidererOnly) {
+    order.intake = null;
+  }
+
+  // Design fetch is gated by canSeeDesign (designer/digitizer/manager/admin get the full artwork;
+  // presser gets colour-only; embroiderer/tailor get none).
   let design = null;
-  if (order.design_id && !tailorOnly) {
-    if (presserOnly) {
-      // sash info only — colour + status, NO artwork/canvas/logos.
-      const d = await query(
-        `SELECT id, sash_color, approval_status, completed FROM designs WHERE id = $1`,
-        [order.design_id]
-      );
-      design = d.rows[0] || null;
-    } else {
-      const d = await query(
-        `SELECT id, sash_color, left_canvas, right_canvas, logo_url, extra_image_url,
-                fonts_used, notes, approval_status, rejection_reason, completed
-         FROM designs WHERE id = $1`,
-        [order.design_id]
-      );
-      design = d.rows[0] || null;
-    }
+  if (order.design_id && canSeeDesign) {
+    const d = await query(
+      `SELECT id, sash_color, left_canvas, right_canvas, logo_url, extra_image_url,
+              fonts_used, notes, approval_status, rejection_reason, completed
+       FROM designs WHERE id = $1`,
+      [order.design_id]
+    );
+    design = d.rows[0] || null;
+  } else if (order.design_id && presserOnly) {
+    // sash info only — colour + status, NO artwork/canvas/logos.
+    const d = await query(
+      `SELECT id, sash_color, approval_status, completed FROM designs WHERE id = $1`,
+      [order.design_id]
+    );
+    design = d.rows[0] || null;
   }
 
   // Option selections (sizes etc.). Customer reference photos are design-side → hide from presser.
@@ -341,14 +384,16 @@ async function getOrder(req, res) {
   let items = itemsRes.rows.map((it) =>
     presserOnly ? { ...it, customer_image_url: null, customer_text: null } : it
   );
-  // Tailor: sees ALL items (the size selections he tailors to), but never the per-line price.
-  if (tailorOnly) {
+  // Per-line price is money — strip it for everyone but front-desk/manager (covers tailor,
+  // embroiderer + lean designer/digitizer). The UI never renders it, but defence in depth.
+  if (!canSeeMoney) {
     items = items.map((it) => ({ ...it, price_snapshot: null }));
   }
 
-  // Bundle siblings
+  // Bundle siblings — only front-desk/manager may hop between the package pieces. Production
+  // stations (embroiderer, designer, digitizer, presser, tailor) see their one piece only.
   let bundle = null;
-  const hasBundle = order.checkout_group_id != null || order.package_id != null;
+  const hasBundle = canSeePackage && (order.checkout_group_id != null || order.package_id != null);
   if (hasBundle) {
     const sib = await query(
       `SELECT o.id, o.status, o.price, p.name_ar AS product_name, p.type AS product_type
@@ -435,9 +480,14 @@ async function getOrder(req, res) {
       items,
       bundle,
       package_orders: bundle, // backward-compat alias
-      can_see_design: !presserOnly && !tailorOnly,
+      can_see_design: canSeeDesign,
       embroidery_zones,
       available_actions,
+      // The UI never re-derives visibility from roles — it reads this layout discriminator
+      // (mirrors the available_actions single-source pattern).
+      view: {
+        layout: embroidererOnly ? 'embroidery' : tailorOnly ? 'tailor' : presserOnly ? 'presser' : 'full',
+      },
     },
   });
 }

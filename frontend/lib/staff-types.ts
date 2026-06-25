@@ -246,6 +246,10 @@ export interface ProductionOrderDetail {
     can_approve: boolean;
     can_reject: boolean;
   };
+  /** Backend-driven render layout (single source of truth — the UI never re-derives
+   *  role→visibility). 'tailor' = الفصال read-only · 'embroidery' = embroiderer minimal
+   *  station · 'presser' = الكوي colour-only · 'full' = designer/digitizer/preparer/manager. */
+  view?: { layout: "embroidery" | "tailor" | "presser" | "full" };
 }
 
 // ─── Monitor types ────────────────────────────────────────────────────────────
