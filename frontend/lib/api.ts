@@ -1,5 +1,5 @@
 import axios, { type AxiosError } from "axios";
-import { logout, getToken } from "./auth";
+import { logout } from "./auth";
 import type { ApiError } from "./types";
 
 const baseURL =
@@ -44,70 +44,34 @@ export async function apiUploadFile(
   return data;
 }
 
-// Verify-once cache so several simultaneous 401s share a SINGLE /auth/me probe.
-let sessionProbe: Promise<boolean> | null = null;
-
-/** Is the stored token ACTUALLY dead, or did one request just 401 spuriously?
- *  Probe the auth-truth endpoint once with a raw fetch (so it never re-enters this
- *  interceptor). Returns true ONLY on a real 401 from /auth/me. A 200 means the
- *  original 401 was endpoint-specific/transient → keep the session (the whole point
- *  of the logout-narrowing). A network/5xx is inconclusive → do NOT tear down. */
-async function tokenIsDead(): Promise<boolean> {
-  if (sessionProbe) return sessionProbe;
-  sessionProbe = (async () => {
-    const token = getToken();
-    if (!token) return true;
-    try {
-      const res = await fetch(`${baseURL}/api/auth/me`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      return res.status === 401;
-    } catch {
-      return false;
-    } finally {
-      sessionProbe = null;
-    }
-  })();
-  return sessionProbe;
-}
-
-function redirectToLogin() {
-  if (
-    typeof window !== "undefined" &&
-    !window.location.pathname.startsWith("/login")
-  ) {
-    window.location.href = "/login";
-  }
-}
-
 api.interceptors.response.use(
   (res) => res,
-  async (error: AxiosError<ApiError>) => {
+  (error: AxiosError<ApiError>) => {
     if (error.response?.status === 401 && typeof window !== "undefined") {
       const path = window.location.pathname;
       const url = error.config?.url || "";
-      // Guards (kept): never bounce a user mid login/join; never let a public-catalog
-      // 401 or a wrong staff-portal password trigger a logout/redirect.
+      // SINGLE SOURCE OF TRUTH FOR LOGOUT: only the auth-truth endpoint (/auth/me,
+      // called by useRequireAuth on protected dashboard loads) may tear down the
+      // session. Background polls (notifications every 30s, queues, the my-order
+      // approval poll, …) can return a transient/spurious 401 — those must NOT nuke a
+      // valid 7-day session, and a browsing student with a stale token must NOT be
+      // hard-redirected to /login. A genuinely expired token still logs out: the next
+      // dashboard load hits /auth/me → 401 → here → logout(). (Earlier this session a
+      // "verify-on-401 + global redirect" variant flooded the server with /auth/me
+      // probes and yanked students to /login on every stale-token 401 — reverted.)
+      const isAuthTruth = url.includes("/auth/me");
       const isPublicCatalog =
         url.includes("/catalog/shop") ||
         (url.includes("/catalog/products/") && url.includes("/full"));
       const isStaffPortal = url.includes("/auth/staff-portal");
-      const isAuthTruth = url.includes("/auth/me");
-      const onAuthPage = path.startsWith("/login") || path.startsWith("/join");
-
-      if (!onAuthPage && !isPublicCatalog && !isStaffPortal) {
-        if (isAuthTruth) {
-          // The auth-truth endpoint itself rejected us → genuinely dead. Clear the
-          // session; the page guard (useRequireAuth) handles the redirect.
-          logout();
-        } else if (getToken() && (await tokenIsDead())) {
-          // ANY other authed endpoint 401'd AND /auth/me confirms the token is dead.
-          // This is what makes the fix apply EVERYWHERE — student/retail pages with no
-          // useRequireAuth guard, and background polls — WITHOUT ever logging out a
-          // still-valid session (a spurious 401 leaves /auth/me at 200 → no logout).
-          logout();
-          redirectToLogin();
-        }
+      if (
+        isAuthTruth &&
+        !isPublicCatalog &&
+        !isStaffPortal &&
+        !path.startsWith("/login") &&
+        !path.startsWith("/join")
+      ) {
+        logout();
       }
     }
     return Promise.reject(error);
