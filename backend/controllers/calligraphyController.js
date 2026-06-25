@@ -7,7 +7,11 @@ const { cropSheet } = require('../lib/sheetCrop');
 const { buildSheetPrompt, buildSinglePrompt } = require('../lib/calligraphyPrompt');
 const { saveBufferToUploads } = require('../lib/upload');
 
-const FRONT_LABEL = 'تطريز الوشاح من الأمام';
+const FRONT_LABEL   = 'تطريز الوشاح من الأمام';
+const BACK_LABEL    = 'تطريز الوشاح من الخلف';
+const CAP_TOP_LABEL = 'تطريز القبعة من الأعلى';
+const LABEL_VARIANT = { [FRONT_LABEL]: 'front', [BACK_LABEL]: 'back', [CAP_TOP_LABEL]: 'cap' };
+const VARIANTS = ['front', 'back', 'cap'];
 const BATCH = 10;
 
 function bad(res, msg, code = 'ERR_VALIDATION', status = 400) {
@@ -28,6 +32,7 @@ function isRealName(text) {
 function toPlate(r) {
   return {
     id: r.id, render_text: r.render_text, status: r.status,
+    variant: r.variant, element_text: r.element_text,
     plate_path: r.plate_path, sheet_path: r.sheet_path,
     student_id: r.student_id, order_item_id: r.order_item_id,
     linked: !!r.linked_at, cost_usd: Number(r.cost_usd || 0), error: r.error,
@@ -44,42 +49,107 @@ async function listWholesalers(req, res) {
   res.json({ data: rows });
 }
 
-// GET /wholesalers/:id/names — grab list from the sash front-embroidery line
+// GET /wholesalers/:id/names — grab list from sash front/back AND cap-top embroidery lines
 async function wholesalerNames(req, res) {
   const { id } = req.params;
+  const ALL_LABELS = [FRONT_LABEL, BACK_LABEL, CAP_TOP_LABEL];
   const { rows } = await query(
     `SELECT s.id AS student_id, u.name AS student_name,
             oi.id AS order_item_id, oi.customer_text AS render_text,
+            oi.label_snapshot AS label,
             cp.id AS plate_id, cp.status AS plate_status, cp.plate_path, cp.linked_at
        FROM students s
        JOIN users u   ON u.id = s.user_id
        JOIN orders o  ON o.student_id = s.id AND o.status::text <> 'cancelled'
-       JOIN products p ON p.id = o.product_id AND p.type = 'sash'
-       JOIN order_items oi ON oi.order_id = o.id AND oi.label_snapshot = $2
+       JOIN products p ON p.id = o.product_id AND p.type IN ('sash','cap')
+       JOIN order_items oi ON oi.order_id = o.id AND oi.label_snapshot = ANY($2)
        LEFT JOIN LATERAL (
             SELECT id, status, plate_path, linked_at FROM calligraphy_plates c
              WHERE c.order_item_id = oi.id ORDER BY created_at DESC LIMIT 1
        ) cp ON TRUE
       WHERE s.wholesaler_id = $1 AND COALESCE(oi.customer_text,'') <> ''
-      ORDER BY u.name`, [id, FRONT_LABEL]);
+      ORDER BY u.name,
+               array_position(ARRAY['تطريز الوشاح من الأمام','تطريز الوشاح من الخلف','تطريز القبعة من الأعلى']::text[], oi.label_snapshot)`,
+    [id, ALL_LABELS]);
   res.json({ data: rows.map((r) => ({
     student_id: r.student_id, student_name: r.student_name,
     order_item_id: r.order_item_id, render_text: r.render_text,
+    variant: LABEL_VARIANT[r.label] || 'front',
     plate_id: r.plate_id, plate_status: r.plate_status,
     plate_path: r.plate_path, linked: !!r.linked_at,
   })) });
 }
 
+// ---------------------------------------------------------------------------
+// Shared insert helper — inserts pending plate rows and returns toPlate[].
+// Each item must have: render_text, variant, element_text (nullable),
+// student_id (nullable), order_item_id (nullable), wholesaler_id (nullable).
+// ---------------------------------------------------------------------------
+async function insertPlates(jobId, items, { source, model, createdBy }) {
+  const out = [];
+  for (const it of items) {
+    const { rows } = await query(
+      `INSERT INTO calligraphy_plates
+         (job_id, wholesaler_id, student_id, order_item_id, source, render_text, variant, element_text, status, model, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'pending',$9,$10) RETURNING *`,
+      [jobId, it.wholesaler_id || null, it.student_id || null, it.order_item_id || null,
+       source, it.render_text, it.variant || 'front', it.element_text || null, model, createdBy]);
+    out.push(toPlate(rows[0]));
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Pool helper — un-plated embroidery names for a given zone variant.
+// "Needs a plate" = order_item with the zone label + non-empty customer_text
+// + no 'done' plate already. Applies isRealName junk-guard before returning.
+// ---------------------------------------------------------------------------
+const ZONE_LABEL = { front: FRONT_LABEL, back: BACK_LABEL, cap: CAP_TOP_LABEL };
+
+async function poolFor(variant, limit = 1000) {
+  const label = ZONE_LABEL[variant];
+  if (!label) return [];
+  const { rows } = await query(
+    `SELECT oi.id AS order_item_id, s.id AS student_id, u.name AS student_name,
+            oi.customer_text AS render_text, s.wholesaler_id
+       FROM order_items oi
+       JOIN orders o    ON o.id = oi.order_id AND o.status::text <> 'cancelled'
+       JOIN products p  ON p.id = o.product_id AND p.type IN ('sash','cap')
+       JOIN students s  ON s.id = o.student_id
+       JOIN users u     ON u.id = s.user_id
+      WHERE oi.label_snapshot = $1 AND COALESCE(oi.customer_text,'') <> ''
+        AND NOT EXISTS (
+              SELECT 1 FROM calligraphy_plates cp
+               WHERE cp.order_item_id = oi.id AND cp.status = 'done')
+      ORDER BY o.created_at
+      LIMIT $2`,
+    [label, limit]);
+  // Apply the same junk guard used in createJob — never pool non-Arabic junk
+  return rows
+    .filter((r) => isRealName(r.render_text))
+    .map((r) => ({
+      order_item_id: r.order_item_id,
+      student_id: r.student_id,
+      student_name: r.student_name,
+      render_text: r.render_text,
+      variant,
+      wholesaler_id: r.wholesaler_id,
+    }));
+}
+
 // POST /jobs — create pending rows (dedup), no generation yet
 async function createJob(req, res) {
   const { source, wholesaler_id = null, model = 'standard' } = req.body || {};
+  const jobVariant = VARIANTS.includes(req.body && req.body.variant) ? req.body.variant : 'front';
   let items = Array.isArray(req.body && req.body.items) ? req.body.items : [];
   if (!['typed', 'wholesaler', 'txt'].includes(source)) return bad(res, 'مصدر غير صالح');
   items = items
     .map((it) => ({
       render_text: String((it && it.render_text) || '').trim(),
+      element_text: String((it && it.element_text) || '').trim() || null,
       student_id: (it && it.student_id) || null,
       order_item_id: (it && it.order_item_id) || null,
+      variant: VARIANTS.includes(it && it.variant) ? it.variant : jobVariant,
     }))
     .filter((it) => it.render_text);
   if (!items.length) return bad(res, 'لا توجد أسماء صالحة');
@@ -92,22 +162,21 @@ async function createJob(req, res) {
   if (!items.length) return bad(res, 'لا توجد أسماء صالحة — يجب أن يحتوي الاسم على حروف عربية');
   if (items.length > 1000) return bad(res, 'الحد الأقصى 1000 اسم لكل مهمة');
 
-  // Dedup: wholesaler → by order_item_id; typed/txt → by exact render_text.
+  // Dedup:
+  //   wholesaler → by order_item_id (each zone row is already unique per student)
+  //   typed/txt  → by variant::render_text (same name may appear as both front and back)
   const seen = new Set();
   items = items.filter((it) => {
-    const key = source === 'wholesaler' ? (it.order_item_id || it.render_text) : it.render_text;
+    const key = source === 'wholesaler'
+      ? (it.order_item_id || it.render_text)
+      : `${it.variant}::${it.render_text}`;
     if (seen.has(key)) return false; seen.add(key); return true;
   });
 
   const jobId = crypto.randomUUID();
-  const out = [];
-  for (const it of items) {
-    const { rows } = await query(
-      `INSERT INTO calligraphy_plates (job_id, wholesaler_id, student_id, order_item_id, source, render_text, status, model, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,'pending',$7,$8) RETURNING *`,
-      [jobId, wholesaler_id, it.student_id, it.order_item_id, source, it.render_text, pickModel(model), req.user.id]);
-    out.push(toPlate(rows[0]));
-  }
+  const out = await insertPlates(jobId, items.map((it) => ({ ...it, wholesaler_id })), {
+    source, model: pickModel(model), createdBy: req.user.id,
+  });
   res.status(201).json({ data: { job_id: jobId, total: out.length, dropped, plates: out } });
 }
 
@@ -125,18 +194,29 @@ async function jobCounts(jobId) {
   return rows[0];
 }
 
-// POST /jobs/:jobId/process — next batch of <=10 pending
+// POST /jobs/:jobId/process — next batch of <=10 pending (single-variant per sheet)
 async function processNext(req, res) {
   const { jobId } = req.params;
+
+  // Pick the variant of the OLDEST pending plate, then take up to BATCH of that variant.
+  // This guarantees one sheet = one prompt (front and back must never share a sheet).
+  const { rows: head } = await query(
+    `SELECT variant FROM calligraphy_plates WHERE job_id=$1 AND status='pending' ORDER BY created_at LIMIT 1`,
+    [jobId]);
+  if (!head.length) {
+    const c = await jobCounts(jobId);
+    return res.json({ data: { processed: 0, ...c, remaining: c.pending, job_cost: await jobCost(jobId), plates: [] } });
+  }
+  const variant = head[0].variant;
   const { rows: batch } = await query(
-    `SELECT * FROM calligraphy_plates WHERE job_id=$1 AND status='pending' ORDER BY created_at LIMIT $2`,
-    [jobId, BATCH]);
+    `SELECT * FROM calligraphy_plates WHERE job_id=$1 AND status='pending' AND variant=$3 ORDER BY created_at LIMIT $2`,
+    [jobId, BATCH, variant]);
   if (!batch.length) {
     const c = await jobCounts(jobId);
     return res.json({ data: { processed: 0, ...c, remaining: c.pending, job_cost: await jobCost(jobId), plates: [] } });
   }
   const model = batch[0].model || MODELS.standard;
-  const names = batch.map((b) => b.render_text);
+  const names = batch.map((b) => ({ text: b.render_text, element: b.element_text }));
 
   // Generate + crop with AUTO-RETRY. The model spaces lines randomly, so a sheet
   // that crops to the wrong band count usually slices cleanly on a fresh generation.
@@ -154,7 +234,7 @@ async function processNext(req, res) {
     attemptsUsed = attempt;
     let gen;
     try {
-      gen = await generateImage({ model, prompt: buildSheetPrompt(names) });
+      gen = await generateImage({ model, prompt: buildSheetPrompt(names, variant) });
     } catch (err) {
       await query(`UPDATE calligraphy_plates SET status='failed', error=$2 WHERE id = ANY($1)`,
         [batch.map((b) => b.id), err.code || 'ERR_OPENROUTER']);
@@ -218,7 +298,7 @@ async function reroll(req, res) {
   const p = pr[0];
   const model = p.model || MODELS.standard;
   let gen;
-  try { gen = await generateImage({ model, prompt: buildSinglePrompt(p.render_text) }); }
+  try { gen = await generateImage({ model, prompt: buildSinglePrompt(p.render_text, p.variant, p.element_text) }); }
   catch (err) { return res.status(err.status || 502).json({ error: err.message, code: err.code || 'ERR_OPENROUTER' }); }
   // single-name image: trim to one band (expected 1); fall back to full image
   let plateBuf = gen.buffer;
@@ -272,4 +352,94 @@ async function downloadZip(req, res) {
   archive.finalize();
 }
 
-module.exports = { listWholesalers, wholesalerNames, createJob, processNext, getJob, reroll, linkToOrder, downloadZip };
+// ---------------------------------------------------------------------------
+// GET /queue — per-zone pending count + up to 200 item previews
+// ---------------------------------------------------------------------------
+async function getQueue(req, res) {
+  const data = {};
+  for (const variant of VARIANTS) {
+    // TRUE count: pool with a high limit so we never under-count
+    const full = await poolFor(variant, 10000);
+    const items = full.slice(0, 200).map(({ wholesaler_id: _wid, ...rest }) => rest); // strip wholesaler_id
+    data[variant] = { pending: full.length, items };
+  }
+  res.json({ data });
+}
+
+// ---------------------------------------------------------------------------
+// POST /queue/generate — create a job from the pending pool for one variant
+// body: { variant: 'front'|'back'|'cap', mode: 'full'|'all' }
+// ---------------------------------------------------------------------------
+async function queueGenerate(req, res) {
+  const { variant, mode } = req.body || {};
+  if (!VARIANTS.includes(variant)) return bad(res, 'variant غير صالح — يجب أن يكون front أو back أو cap');
+  if (!['full', 'all'].includes(mode)) return bad(res, 'mode غير صالح — يجب أن يكون full أو all');
+
+  const pool = await poolFor(variant, 1000);
+  if (!pool.length) return bad(res, 'لا توجد أسماء بانتظار التوليد', 'ERR_EMPTY', 400);
+
+  let selected;
+  if (mode === 'full') {
+    const fullSheets = Math.floor(pool.length / BATCH);
+    if (fullSheets === 0) {
+      return bad(res, 'لا توجد أسماء كافية لورقة كاملة (١٠) — انتظر وصول المزيد', 'ERR_NOT_ENOUGH', 400);
+    }
+    selected = pool.slice(0, fullSheets * BATCH);
+  } else {
+    // mode === 'all'
+    selected = pool;
+  }
+
+  const jobId = crypto.randomUUID();
+  const plates = await insertPlates(jobId, selected.map((it) => ({ ...it })), {
+    source: 'wholesaler', model: MODELS.standard, createdBy: req.user.id,
+  });
+  res.status(201).json({ data: { job_id: jobId, total: plates.length, dropped: [], plates } });
+}
+
+// ---------------------------------------------------------------------------
+// GET /recent?limit=60 — recent done plates for UI survival across refresh
+// ---------------------------------------------------------------------------
+async function recentPlates(req, res) {
+  const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 60));
+  const { rows } = await query(
+    `SELECT * FROM calligraphy_plates WHERE status='done' ORDER BY created_at DESC LIMIT $1`,
+    [limit]);
+  res.json({ data: { plates: rows.map(toPlate) } });
+}
+
+// POST /plates/:id/compose — receive merged PNG from the compositor, save as new plate image
+async function composePlate(req, res) {
+  const { id } = req.params;
+  const { rows: pr } = await query(`SELECT * FROM calligraphy_plates WHERE id=$1`, [id]);
+  if (!pr.length) return bad(res, 'الصورة غير موجودة', 'ERR_NOT_FOUND', 404);
+  if (!req.file || !req.file.buffer) return bad(res, 'لم يتم استلام الصورة');
+  const saved = saveBufferToUploads(req, 'calligraphy/plates', req.file.buffer, 'png');
+  const { rows } = await query(
+    `UPDATE calligraphy_plates SET plate_path=$2, linked_at=NULL, status='done' WHERE id=$1 RETURNING *`,
+    [id, saved.url]);
+  res.json({ data: toPlate(rows[0]) });
+}
+
+// POST /element — generate a standalone motif for the compositor (white bg → transparent)
+async function generateElement(req, res) {
+  const word = String((req.body && req.body.word) || '').trim();
+  if (!word) return bad(res, 'اكتب اسم العنصر');
+  if (word.length > 60) return bad(res, 'اسم العنصر طويل جداً (الحد 60 حرفاً)');
+  const { buildElementPrompt } = require('../lib/calligraphyPrompt');
+  const { whiteToTransparent } = require('../lib/imageFx');
+  let gen;
+  try {
+    gen = await generateImage({ model: MODELS.standard, prompt: buildElementPrompt(word), resolution: '1K', aspectRatio: '1:1' });
+  } catch (err) {
+    return res.status(err.status || 502).json({ error: err.message || 'فشل التوليد', code: err.code || 'ERR_OPENROUTER' });
+  }
+  const png = await whiteToTransparent(gen.buffer);
+  const saved = saveBufferToUploads(req, 'calligraphy/elements', png, 'png');
+  res.json({ data: { url: saved.url, cost: Number(gen.cost || 0) } });
+}
+
+module.exports = {
+  listWholesalers, wholesalerNames, createJob, processNext, getJob, reroll, linkToOrder, downloadZip,
+  getQueue, queueGenerate, recentPlates, composePlate, generateElement,
+};

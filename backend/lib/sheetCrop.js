@@ -25,10 +25,9 @@ function inkRuns(rowDark, height, thr) {
   return runs;
 }
 
-// PRIMARY: drop noise runs by min height, then merge the smallest-gap pairs down
-// to `expected` (handles floated ornaments / diacritics that split a line into
-// several runs). Proven on well-spaced sheets. May land BELOW `expected` when a
-// genuine but short line is filtered as noise — the fallback recovers that case.
+// Drop noise runs by min height, then merge the smallest-gap pairs down to `expected`.
+// Good on loose, clean sheets. May land BELOW `expected` when a genuine short line is
+// filtered as noise — the other methods recover that case.
 function primaryBands(rowDark, height, thr, expected) {
   let bands = inkRuns(rowDark, height, thr);
   const minH = Math.max(2, Math.round(height * 0.015));
@@ -46,19 +45,15 @@ function primaryBands(rowDark, height, thr, expected) {
   return bands;
 }
 
-// FALLBACK (only when primary != expected): the page has `expected` names, so the
-// `expected - 1` LARGEST vertical gaps between ink runs ARE the line separators.
-// Group the runs at those gaps. This rescues both failure modes the primary can't:
-//   • a short/faint line dropped by the noise filter (too FEW bands), and
-//   • lines too close to leave a sub-threshold valley (would otherwise merge).
-// Each name's diacritics/ornaments sit a small gap from its body, so they fall in
-// the same group. Returns null when there aren't even `expected` runs to split.
+// The page has `expected` names, so the `expected - 1` LARGEST vertical gaps between ink
+// runs ARE the line separators. Group the runs at those gaps. Filters out small specks
+// FIRST (textured/cream backgrounds throw off many tiny runs) so a speck can't steal a
+// line slot. Returns null when there aren't even `expected` real runs to split.
 function gapSegment(rowDark, height, thr, expected) {
   let runs = inkRuns(rowDark, height, thr);
-  // Drop only hairline specks (~5px) — keep short-but-real name bodies (the bug
-  // was a 16px line dropped by the 20px primary filter).
-  const tiny = Math.max(1, Math.round(height * 0.004));
-  runs = runs.filter(([a, b]) => b - a + 1 >= tiny);
+  // Drop specks (background texture, stray dots) — keep only real name-body-sized runs.
+  const minH = Math.max(2, Math.round(height * 0.012));
+  runs = runs.filter(([a, b]) => b - a + 1 >= minH);
   if (runs.length < expected) return null;     // can't form enough groups
   if (runs.length === expected) return runs;
 
@@ -74,16 +69,14 @@ function gapSegment(rowDark, height, thr, expected) {
   return groups;
 }
 
-// LAST-RESORT (when the page is bold/tightly-spaced so ink never returns to zero
-// between lines → the whole sheet is ONE run and the gap fallback can't split it).
-// The model is prompted to space names EVENLY, so place the `expected - 1` cuts at
-// the lowest-density (smoothed) row in a window around each evenly-spaced boundary.
-// Always returns exactly `expected` bands (or null if there isn't enough content).
-function valleySegment(rowDark, height, expected) {
-  const maxD = rowDark.reduce((m, v) => (v > m ? v : m), 0) || 1;
-  const lo = maxD * 0.04;
-  let top = 0; while (top < height && rowDark[top] <= lo) top++;
-  let bot = height - 1; while (bot > top && rowDark[bot] <= lo) bot--;
+// LAST-RESORT for bold/tight sheets where ink never returns near the background between
+// lines → too few runs to gap-segment. The model is prompted to space names EVENLY, so
+// place the `expected - 1` cuts at the lowest-density (smoothed) row near each evenly-
+// spaced boundary. `marginLo` strips the page margins (background-relative, so it works
+// on cream sheets where a maxD-relative threshold would set top=0).
+function valleySegment(rowDark, height, expected, marginLo) {
+  let top = 0; while (top < height && rowDark[top] <= marginLo) top++;
+  let bot = height - 1; while (bot > top && rowDark[bot] <= marginLo) bot--;
   if (bot - top < expected * 4) return null;
 
   const H = bot - top + 1;
@@ -116,13 +109,39 @@ function valleySegment(rowDark, height, expected) {
   return bands.length === expected ? bands : null;
 }
 
-async function extractBands(buffer, bands, width, height) {
-  const pad = Math.round(height * 0.012);
+// Slice the sheet into one plate per band. To avoid bleeding a neighbouring line into a
+// plate (the tight-spacing failure), we DON'T just crop band±fixed-pad:
+//   1) the boundary between two lines is the DEEPEST row valley in the gap between them —
+//      cut there, so each plate is bounded by the cleanest rows available;
+//   2) inside that segment, trim back to this band's own ink (drops the page margin /
+//      inter-line whitespace and any sub-threshold sliver of a neighbour near the valley),
+//      then add a small symmetric pad.
+async function extractBands(buffer, bands, width, height, rowDark, trimThr) {
+  const sorted = bands.slice().sort((x, y) => x[0] - y[0]);
+  const n = sorted.length;
+  if (!n) return [];
+
+  // inter-line cut rows = deepest valley in each between-band gap
+  const cuts = [];
+  for (let i = 0; i < n - 1; i++) {
+    const gs = sorted[i][1] + 1;
+    const ge = sorted[i + 1][0] - 1;
+    let by = Math.floor((gs + ge) / 2), bv = Infinity;
+    for (let y = gs; y <= ge; y++) if (rowDark[y] < bv) { bv = rowDark[y]; by = y; }
+    cuts.push(by);
+  }
+
+  const pad = Math.max(2, Math.round(height * 0.008)); // small breathing room
   const plates = [];
-  for (const [a, b] of bands) {
-    const top = Math.max(0, a - pad);
-    const bot = Math.min(height, b + 1 + pad);
-    const h = bot - top;
+  for (let i = 0; i < n; i++) {
+    const segTop = i === 0 ? 0 : cuts[i - 1] + 1;
+    const segBot = i === n - 1 ? height - 1 : cuts[i];
+    // trim the segment down to its own ink span (rows above the background threshold)
+    let t = segTop; while (t < segBot && rowDark[t] <= trimThr) t++;
+    let b = segBot; while (b > t && rowDark[b] <= trimThr) b--;
+    const top = Math.max(segTop, t - pad);
+    const bot = Math.min(segBot, b + pad);
+    const h = bot - top + 1;
     if (h <= 0) continue;
     const out = await sharp(buffer).extract({ left: 0, top, width, height: h }).png().toBuffer();
     plates.push(out);
@@ -134,27 +153,40 @@ async function cropSheet(buffer, expected) {
   const { data, info } = await sharp(buffer).greyscale().raw().toBuffer({ resolveWithObject: true });
   const { width, height } = info; // 1 channel (greyscale)
   const rowDark = rowDarkness(data, width, height);
-  const maxD = rowDark.reduce((m, v) => (v > m ? v : m), 0) || 1;
-  const thr = maxD * 0.06; // ink-row threshold (tuned at live checkpoint)
 
-  let bands = primaryBands(rowDark, height, thr, expected);
-  // Two-stage fallback when the primary pass misses `expected` — only ever adopt a
-  // result that hits EXACTLY `expected` (never mis-slice — spec §11):
-  //   1) gapSegment: well-separated lines a short/faint line was dropped from, OR
-  //      lines too close to leave a sub-threshold gap (≥ expected ink runs exist).
-  //   2) valleySegment: bold/tight sheets where ink never returns to zero between
-  //      lines → ONE run, so gapSegment can't split; cut at the inter-line valleys.
-  if (expected > 0 && bands.length !== expected) {
+  // Background baseline from a low percentile (= page margins + inter-line gaps). Generated
+  // sheets are sometimes cream/textured rather than pure white, so a maxD-only threshold
+  // reads the whole page as ink and the valleys vanish. Make every threshold RELATIVE to
+  // the background so off-white/textured sheets segment as cleanly as white ones.
+  const srt = Float64Array.from(rowDark).sort();
+  const base = srt[Math.floor(0.10 * (srt.length - 1))] || 0;
+  const maxD = srt[srt.length - 1] || 1;
+  const span = Math.max(1, maxD - base);
+  const thr = base + span * 0.18;      // ink-row threshold
+  const trimThr = base + span * 0.10;  // a row counts as content (for trimming) above this
+  const marginLo = base + span * 0.06; // margin/background for valley top/bot detection
+
+  // Segmentation (only ever adopt an EXACTLY `expected` result — never mis-slice, spec §11):
+  //   1) gapSegment — largest inter-run gaps are the separators; with the background-relative
+  //      threshold + speck filter this is robust on textured AND clean sheets.
+  //   2) valleySegment — for bold/tight sheets with too few runs (cut at even-boundary valleys).
+  //   3) primaryBands — smallest-gap merge (loose, clean sheets).
+  let bands = null;
+  if (expected > 1) {
     const gap = gapSegment(rowDark, height, thr, expected);
-    if (gap && gap.length === expected) {
-      bands = gap;
-    } else {
-      const valley = valleySegment(rowDark, height, expected);
-      if (valley && valley.length === expected) bands = valley;
-    }
+    if (gap && gap.length === expected) bands = gap;
   }
+  if (!bands && expected > 0) {
+    const valley = valleySegment(rowDark, height, expected, marginLo);
+    if (valley && valley.length === expected) bands = valley;
+  }
+  if (!bands) {
+    const prim = primaryBands(rowDark, height, thr, expected);
+    if (expected === 0 || prim.length === expected) bands = prim;
+  }
+  if (!bands) bands = primaryBands(rowDark, height, thr, expected); // mismatch → caller flags review
 
-  const plates = await extractBands(buffer, bands, width, height);
+  const plates = await extractBands(buffer, bands, width, height, rowDark, trimThr);
   return { plates, count: plates.length, expected };
 }
 

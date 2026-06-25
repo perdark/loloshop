@@ -85,7 +85,7 @@ app.use('/api/payroll', require('./routes/payroll'));
 app.use('/api/calligraphy', require('./routes/calligraphy'));
 
 // Ensure calligraphy upload dirs exist at boot
-['calligraphy/sheets', 'calligraphy/plates'].forEach((d) => {
+['calligraphy/sheets', 'calligraphy/plates', 'calligraphy/elements'].forEach((d) => {
   const p = path.join(__dirname, '..', 'uploads', d);
   if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
 });

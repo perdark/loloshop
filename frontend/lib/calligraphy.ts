@@ -1,6 +1,13 @@
 import { api } from "@/lib/api";
 
 export type CalSource = "typed" | "wholesaler" | "txt";
+export type CalVariant = "front" | "back" | "cap";
+
+export const VARIANT_LABEL: Record<CalVariant, string> = {
+  front: "أمامي",
+  back: "خلفي",
+  cap: "قبعة",
+};
 
 export interface CalPlate {
   id: string;
@@ -13,6 +20,8 @@ export interface CalPlate {
   linked: boolean;
   cost_usd: number;
   error: string | null;
+  variant: CalVariant;
+  element_text: string | null;
 }
 
 export interface CalJob {
@@ -56,18 +65,22 @@ export interface CalGrabRow {
   plate_status: string | null;
   plate_path: string | null;
   linked: boolean;
+  variant: CalVariant;
 }
 
 export interface CreateJobItem {
   render_text: string;
   student_id?: string | null;
   order_item_id?: string | null;
+  variant?: CalVariant;
+  element_text?: string | null;
 }
 
 export interface CreateJobBody {
   source: CalSource;
   model?: "standard" | "premium";
   wholesaler_id?: string | null;
+  variant?: CalVariant;
   items: CreateJobItem[];
 }
 
@@ -136,4 +149,52 @@ export async function linkPlate(id: string): Promise<{ ok: boolean }> {
 
 export function calDownloadUrl(jobId: string, sheets = false): string {
   return `${API_BASE}/api/calligraphy/jobs/${jobId}/download${sheets ? "?sheets=1" : ""}`;
+}
+
+// ─── Queue ───────────────────────────────────────────────────────────────────
+
+export interface CalQueueItem {
+  order_item_id: string;
+  student_id: string;
+  student_name: string;
+  render_text: string;
+  variant: CalVariant;
+}
+
+export interface CalQueueZone {
+  pending: number;
+  items: CalQueueItem[];
+}
+
+export interface CalQueue {
+  front: CalQueueZone;
+  back: CalQueueZone;
+  cap: CalQueueZone;
+}
+
+export async function getCalQueue(): Promise<CalQueue> {
+  const { data } = await api.get<{ data: CalQueue }>("/calligraphy/queue");
+  return data.data;
+}
+
+export async function generateFromQueue(variant: CalVariant, mode: "full" | "all"): Promise<CalJob> {
+  const { data } = await api.post<{ data: CalJob }>("/calligraphy/queue/generate", { variant, mode });
+  return data.data;
+}
+
+export async function getRecentPlates(limit = 60): Promise<CalPlate[]> {
+  const { data } = await api.get<{ data: { plates: CalPlate[] } }>(`/calligraphy/recent?limit=${limit}`);
+  return data.data.plates;
+}
+
+export async function composePlate(id: string, image: Blob): Promise<CalPlate> {
+  const fd = new FormData();
+  fd.append("image", image, "plate.png");
+  const { data } = await api.post<{ data: CalPlate }>(`/calligraphy/plates/${id}/compose`, fd);
+  return data.data;
+}
+
+export async function generateElement(word: string): Promise<{ url: string; cost: number }> {
+  const { data } = await api.post<{ data: { url: string; cost: number } }>(`/calligraphy/element`, { word });
+  return data.data;
 }

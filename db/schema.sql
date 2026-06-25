@@ -564,6 +564,8 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS measurements JSONB;
 --   needs_pressing: order also passes through the pressing stage (sash only).
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS has_embroidery BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS needs_pressing BOOLEAN NOT NULL DEFAULT FALSE;
+-- Migration 047: embroiderer per-zone checklist progress, keyed by zone key e.g. {"sash_right": true}.
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS embroidery_zones JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 -- Migration 036: parallel «الفصال» (tailor) track for retail orders — independent of status.
 DO $$ BEGIN
@@ -740,6 +742,11 @@ DO $$ BEGIN
   CREATE TYPE calligraphy_status AS ENUM ('pending','done','failed');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
+-- Migration 045: per-plate embroidery zone (front / back / cap).
+DO $$ BEGIN
+  CREATE TYPE calligraphy_variant AS ENUM ('front','back','cap');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
 CREATE TABLE IF NOT EXISTS calligraphy_plates (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   job_id        UUID NOT NULL,
@@ -748,6 +755,8 @@ CREATE TABLE IF NOT EXISTS calligraphy_plates (
   order_item_id UUID REFERENCES order_items(id) ON DELETE SET NULL,
   source        calligraphy_source NOT NULL,
   render_text   TEXT NOT NULL,
+  element_text  TEXT,
+  variant       calligraphy_variant NOT NULL DEFAULT 'front',
   status        calligraphy_status NOT NULL DEFAULT 'pending',
   model         TEXT,
   cost_usd      NUMERIC(10,5) NOT NULL DEFAULT 0,
