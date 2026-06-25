@@ -1296,6 +1296,11 @@ async function repFullSetContext(req, res) {
   let packages = [];
   let existing = null;
   let pricing = null;
+  // Approval state of the student's existing full-set order (orthogonal to the
+  // production state machine). The waiting student's page polls this to flip from
+  // "pending" → "approved"/"rejected". All rows of the bundle share one value.
+  let wholesalerApproval = null;
+  let wholesalerRejectReason = null;
   if (isRep) {
     const pk = await query(
       `SELECT id, name_ar, price FROM packages
@@ -1306,8 +1311,27 @@ async function repFullSetContext(req, res) {
     const p = await loadWholesalerPricing(student.wholesaler_id);
     pricing = { base: p.wholesalerPrice, addons: p.addons };
     if (approved) existing = await readFullSetOrder(student.id);
+    const ap = await query(
+      `SELECT o.wholesaler_approval, o.wholesaler_reject_reason
+       FROM orders o JOIN products p ON p.id = o.product_id
+       WHERE o.student_id = $1 AND o.status <> 'cancelled' AND o.design_id IS NULL
+         AND p.type IN ('sash','robe','cap')
+       ORDER BY o.created_at DESC
+       LIMIT 1`,
+      [student.id]
+    );
+    if (ap.rows.length) {
+      wholesalerApproval = ap.rows[0].wholesaler_approval ?? null;
+      wholesalerRejectReason = ap.rows[0].wholesaler_reject_reason ?? null;
+    }
   }
-  res.json({ data: { is_rep_student: isRep, approved, packages, existing, pricing } });
+  res.json({
+    data: {
+      is_rep_student: isRep, approved, packages, existing, pricing,
+      wholesaler_approval: wholesalerApproval,
+      wholesaler_reject_reason: wholesalerRejectReason,
+    },
+  });
 }
 
 // Student creates/updates their own full-set order.

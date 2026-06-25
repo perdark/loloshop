@@ -163,7 +163,7 @@ export interface ProductionOrderDetail {
     instagram_username: string | null;
     product_name: string;
     product_type: string;
-    /** Catalog product photo — shown to the tailor (مفصل) for the فصال view. Null when unset. */
+    /** Catalog product photo — shown to ALL staff roles. Null when unset. */
     product_image_url?: string | null;
     batch_name: string | null;
     deadline: string | null;

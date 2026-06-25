@@ -40,6 +40,50 @@ function resolveImageUrl(url: string | null | undefined): string | null {
   return `${base}${url.startsWith("/") ? "" : "/"}${url}`;
 }
 
+// ─── Catalog product photo card (shown to ALL staff roles) ────────────────────
+// The storefront product photo with click-to-open-fullsize. Reused across every
+// staff view (tailor / embroiderer / designer / digitizer / preparer / presser / manager).
+
+function ProductPhotoCard({
+  imageUrl,
+  productName,
+}: {
+  imageUrl: string | null | undefined;
+  productName: string;
+}) {
+  const productPhoto = resolveImageUrl(imageUrl);
+  return (
+    <section className="rounded-3xl border border-line bg-surface p-4 shadow-[var(--shadow-card)] lg:p-6">
+      <h2 className="mb-4 font-display-ar text-lg font-bold text-ink">صورة المنتج</h2>
+      {productPhoto ? (
+        <a
+          href={productPhoto}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="عرض صورة المنتج بالحجم الكامل"
+          className="block"
+        >
+          <div className="relative h-72 w-full overflow-hidden rounded-2xl border border-line bg-surface-sink">
+            <Image
+              src={productPhoto}
+              alt={productName}
+              fill
+              sizes="(max-width: 1024px) 100vw, 50vw"
+              className="object-contain"
+              loading="eager"
+              unoptimized
+            />
+          </div>
+        </a>
+      ) : (
+        <div className="flex min-h-48 items-center justify-center rounded-2xl border border-dashed border-line bg-surface-sink p-6 text-center">
+          <p className="text-sm text-ink-soft">لا تتوفر صورة للمنتج.</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
 // ─── Final design upload widget ───────────────────────────────────────────────
 
 function FinalDesignUpload({
@@ -921,7 +965,6 @@ export default function ProductionOrderDetailPage() {
   // Backend now sends full فصال detail (catalog photo, measurements, university/dept,
   // ALL size/spec items) with money + contact stripped. Caps are excluded server-side.
   if (isTailorOnly) {
-    const productPhoto = resolveImageUrl(order.product_image_url);
     const m = order.measurements;
     const measureRows: { label: string; value: number }[] = m
       ? [
@@ -946,34 +989,7 @@ export default function ProductionOrderDetailPage() {
 
         <div className="grid gap-4 lg:grid-cols-2 lg:gap-8">
           {/* Catalog product photo */}
-          <section className="rounded-3xl border border-line bg-surface p-4 shadow-[var(--shadow-card)] lg:p-6">
-            <h2 className="mb-4 font-display-ar text-lg font-bold text-ink">صورة المنتج</h2>
-            {productPhoto ? (
-              <a
-                href={productPhoto}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label="عرض صورة المنتج بالحجم الكامل"
-                className="block"
-              >
-                <div className="relative h-72 w-full overflow-hidden rounded-2xl border border-line bg-surface-sink">
-                  <Image
-                    src={productPhoto}
-                    alt={order.product_name}
-                    fill
-                    sizes="(max-width: 1024px) 100vw, 50vw"
-                    className="object-contain"
-                    loading="eager"
-                    unoptimized
-                  />
-                </div>
-              </a>
-            ) : (
-              <div className="flex min-h-48 items-center justify-center rounded-2xl border border-dashed border-line bg-surface-sink p-6 text-center">
-                <p className="text-sm text-ink-soft">لا تتوفر صورة للمنتج.</p>
-              </div>
-            )}
-          </section>
+          <ProductPhotoCard imageUrl={order.product_image_url} productName={order.product_name} />
 
           {/* Details */}
           <section className="space-y-4">
@@ -1121,6 +1137,9 @@ export default function ProductionOrderDetailPage() {
         />
 
         <div className="mx-auto max-w-xl space-y-4">
+          {/* Catalog product photo — same storefront image every staff role sees */}
+          <ProductPhotoCard imageUrl={order.product_image_url} productName={order.product_name} />
+
           {/* The embroiderer's work — per-zone checklist (auto-advances when all done) */}
           {showEmbroideryZones && (
             <EmbroideryZonesCard
@@ -1362,6 +1381,11 @@ export default function ProductionOrderDetailPage() {
           </dl>
         </section>
       )}
+
+      {/* Catalog product photo — same storefront image every staff role sees */}
+      <div className="mb-4">
+        <ProductPhotoCard imageUrl={order.product_image_url} productName={order.product_name} />
+      </div>
 
       <div className="grid gap-4 lg:grid-cols-2 lg:gap-8">
         {/* ── Design / sash preview panel ── */}

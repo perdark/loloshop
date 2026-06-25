@@ -344,7 +344,8 @@ async function getOrder(req, res) {
     order.intake = null;
     const ALLOWED = new Set([
       'id', 'status', 'created_at', 'student_name', 'product_name', 'product_type',
-      'batch_name', 'source', 'design_id', 'has_embroidery', 'needs_pressing', 'embroidery_zones',
+      'product_image_url', 'batch_name', 'source', 'design_id', 'has_embroidery',
+      'needs_pressing', 'embroidery_zones',
     ]);
     for (const k of Object.keys(order)) if (!ALLOWED.has(k)) delete order[k];
   }

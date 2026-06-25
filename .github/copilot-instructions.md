@@ -1,4 +1,4 @@
-# LoloShop — Copilot / Cursor instructions
+# LoloShop — AI assistant instructions
 
 Premium graduation fashion brand (gowns, caps, custom sashes), Arabic-first RTL, mobile-first. Next.js 16 + React 19 + Tailwind v4. Do **not** use the current/shipped website design as reference — it is being deliberately replaced. Source of truth for design direction is `.impeccable.md` at repo root; this section mirrors it.
 

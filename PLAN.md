@@ -201,8 +201,7 @@ Each task is **small and self-contained**. Claude Code picks ONE task at a time,
 > **SUPERSEDED by v2 Phase 9** (option configurator). Product detail/ordering = Task 9.1. Only the home/listing below remains.
 
 ### Task 5.1 — Student Home + product listing (mobile-first)
-**Files:** `frontend/app/(student)/page.tsx`  *(Cursor — FE)*
-**Do:**
+**Files:** `frontend/app/(student)/page.tsx` **Do:**
 - List all products from API: **sash, robe, cap, shawl** (not just sash/robe) — gender-filtered (shawl female-only).
 - Big "صمم وشاحك" CTA → sash; each product → its Phase 9 configurator.
 - Clean, premium look — Arabic RTL, brand-tokens.css.
@@ -214,7 +213,7 @@ Configurator (dynamic options + price breakdown + designer link) replaces the ol
 ---
 
 ## PHASE 6 — Staff Panel — DONE
-> Status API now live: `GET /api/orders` + `PATCH /api/orders/:id/status` (staff+admin). Cursor: point `staff.ts` at these (was mock fallback).
+> Status API now live: `GET /api/orders` + `PATCH /api/orders/:id/status` (staff+admin). Point `staff.ts` at these (was mock fallback).
 
 ### Task 6.1 — Staff Orders View (iPad-first)
 **Files:** `frontend/app/staff/page.tsx`
@@ -269,8 +268,7 @@ Configurator (dynamic options + price breakdown + designer link) replaces the ol
 **Don't:** Let staff/customers write.
 
 ### Task 8.3 — Admin catalog UI (laptop-first)
-**Files:** `frontend/app/admin/products/page.tsx` (+ option editors)  *(Cursor — FE)*
-**Do:**
+**Files:** `frontend/app/admin/products/page.tsx` (+ option editors) **Do:**
 - List products; per product edit option groups + options inline.
 - Each field: toggle required/optional, toggle/upload illustrative image, set price delta (per role), edit Arabic label + hint.
 - Live preview of student-facing price breakdown.
@@ -281,8 +279,7 @@ Configurator (dynamic options + price breakdown + designer link) replaces the ol
 ## PHASE 9 — Option-based ordering + price breakdown (customer)
 
 ### Task 9.1 — Product configurator (mobile-first)
-**Files:** `frontend/app/(student)/product/[id]/page.tsx`  *(Cursor — FE)*
-**Do:**
+**Files:** `frontend/app/(student)/product/[id]/page.tsx` **Do:**
 - Render option groups dynamically (single_select / toggle / counter), show illustrative image + hint when present, enforce `required` + `max_select`.
 - Honor `gender_restriction` (shawl female-only) based on student profile.
 - Sash page: "صمّم وشاحك" link → Fabric designer, returns to config.
@@ -301,8 +298,7 @@ Configurator (dynamic options + price breakdown + designer link) replaces the ol
 ## PHASE 10 — Packages + role-based pricing (wholesaler students)
 
 ### Task 10.1 — Package selection
-**Files:** backend catalog/order controllers; `frontend/.../package` *(Cursor — FE)*
-**Do:**
+**Files:** backend catalog/order controllers; `frontend/.../package`**Do:**
 - Rep students pick a package (robe + sash + cap); package tier determined by **sash type**, cap independently swappable (royal sash + normal cap allowed).
 - Apply package price (role = wholesaler) instead of summed item price where a package applies.
 **Don't:** Lock cap to sash — they're mixable.
@@ -315,14 +311,13 @@ Configurator (dynamic options + price breakdown + designer link) replaces the ol
 ## PHASE 11 — Batches (دفعات) + accounting dashboard
 
 ### Task 11.1 — Batch model + countdown
-**Files:** backend batch routes; `frontend/app/admin/batches/...`, wholesaler batch view *(Cursor — FE)*
-**Do:**
+**Files:** backend batch routes; `frontend/app/admin/batches/...`, wholesaler batch view**Do:**
 - Admin/rep create batch (e.g. "طب عام 2026") with deadline; assign rep's students.
 - Batch view: deadline **countdown**, each student (الاسم الثنائي) + total, **batch grand total**. Visible to rep + admin.
 **Don't:** Use countdown of days only — show actual deadline date too.
 
 ### Task 11.2 — Accounting / profit dashboard (admin)
-**Files:** `frontend/app/admin/page.tsx` accounting widgets *(Cursor — FE)*; backend analytics
+**Files:** `frontend/app/admin/page.tsx` accounting widgets; backend analytics
 **Do:**
 - Admin enters cost per order → profit auto. Aggregate revenue / cost / profit by batch, by wholesaler, and for independent retail.
 - Clear, simple tables — goal: replace the paper ledger.

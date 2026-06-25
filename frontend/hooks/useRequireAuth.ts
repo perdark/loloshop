@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { fetchMe } from "@/lib/auth-api";
-import { getToken, setUser, logout } from "@/lib/auth";
+import { getToken, getUser, setUser, logout } from "@/lib/auth";
 import type { User, UserRole } from "@/lib/types";
 
 /**
@@ -38,6 +38,18 @@ export function useRequireAuth(allowedRoles?: UserRole | UserRole[]) {
 
   useEffect(() => {
     let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let attempts = 0;
+    const MAX_TRANSIENT_RETRIES = 4; // ~12s of /auth/me unreachable with no cached user
+
+    function applyRole(u: User): boolean {
+      // Returns true if the page should keep the user; false if it redirected.
+      if (rolesArray && !rolesArray.includes(u.role)) {
+        router.replace("/login");
+        return false;
+      }
+      return true;
+    }
 
     async function check() {
       const token = getToken();
@@ -52,24 +64,52 @@ export function useRequireAuth(allowedRoles?: UserRole | UserRole[]) {
         if (cancelled) return;
         setUser(me);
         setUserState(me);
-
-        if (rolesArray && !rolesArray.includes(me.role)) {
-          router.replace("/login");
-          return;
-        }
-      } catch {
-        if (!cancelled) {
+        applyRole(me);
+        setLoading(false);
+      } catch (err) {
+        if (cancelled) return;
+        const status = (err as { response?: { status?: number } })?.response
+          ?.status;
+        // The response interceptor tears down the session (clears the token)
+        // ONLY on a real /auth/me 401, so a now-missing token means the
+        // auth-truth endpoint rejected us → genuinely log out + redirect.
+        const sessionTornDown = !getToken();
+        if (status === 401 || sessionTornDown) {
           logout();
           router.replace("/login");
+          setLoading(false);
+          return;
         }
-      } finally {
-        if (!cancelled) setLoading(false);
+        // Transient failure (network blip / 5xx / Neon cold-start) — do NOT
+        // destroy the session. Fall back to the cached user if present, else
+        // keep a loading state and retry shortly.
+        const cached = getUser();
+        if (cached) {
+          setUserState(cached);
+          applyRole(cached);
+          setLoading(false);
+          return;
+        }
+        // No cached user AND the auth-truth endpoint is unreachable. Retry a few
+        // times (cold-start recovery), but don't spin forever — after the cap,
+        // fall through to /login rather than leaving an indefinite <PageLoader/>.
+        attempts += 1;
+        if (attempts >= MAX_TRANSIENT_RETRIES) {
+          logout();
+          router.replace("/login");
+          setLoading(false);
+          return;
+        }
+        retryTimer = setTimeout(() => {
+          if (!cancelled) check();
+        }, 3000);
       }
     }
 
     check();
     return () => {
       cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
     };
     // rolesArray is derived from rolesKey; depending on the stable string key
     // keeps this effect from re-firing on every render.

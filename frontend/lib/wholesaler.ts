@@ -317,6 +317,27 @@ export async function uploadWholesalerImage(file: File): Promise<string> {
   return res.data.url;
 }
 
+// ── Quick custom order (name-only student, both approvals skipped) ──
+// The rep adds a student by name only (no account) + the same full-set order in one POST;
+// the backend creates the pre-approved student and flips the bundle straight to approved.
+export interface QuickFullSetPayload extends CreateFullSetPayload {
+  /** اسم الطالب — the only student field collected for a name-only quick order. */
+  student_name: string;
+}
+
+export async function createQuickFullSetOrder(
+  payload: QuickFullSetPayload
+): Promise<{ studentId: string; total: number; packageName: string }> {
+  const { data } = await api.post<{
+    data: { student_id: string; total: number; package_name: string };
+  }>("/wholesaler/quick-full-set-order", payload);
+  return {
+    studentId: data.data.student_id,
+    total: data.data.total,
+    packageName: data.data.package_name,
+  };
+}
+
 /** Existing full-set order reconstructed into form shape (for EDIT pre-fill). */
 export interface FullSetExistingOrder {
   package_id: string | null;

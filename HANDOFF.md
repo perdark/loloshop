@@ -6,6 +6,75 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
+## 2026-06-25 — Session-persistence (auto-logout) fix · wholesaler name-only «custom order» (skip both approvals) · product photo for ALL staff roles
+
+Uncommitted on **main**. **No DB migration** (verified the data model supports all 3). Gates green: FE `tsc` 0 · `eslint` 0 ·
+BE `node --check` 0. **Built via a 5-agent Workflow** (3 ∥ build slices → gates + adversarial critic), then the orchestrator
+applied the critic's medium/low fixes + ran live **backend e2e on the Neon DB** (the riskiest path). `next build` NOT run; the
+frontend BEHAVIORAL click-through (logout-prevention timing, photo card render) is NOT browser-driven yet — see follow-ups.
+
+**Context.** Site just went live (`lolo-shop96.com`, public storefront healthy). User reported 3 things: ① wholesalers & their
+students get logged out after a few minutes / on revisiting, and a waiting student isn't advanced when the rep approves; ② a
+wholesaler couldn't make a «custom order»; ③ only ابو عبدو (الفصال/tailor) saw the catalog product photo — extend to all staff.
+
+**① Session-persistence bug — fixed the recurring "single 401 nukes the session" class, EVERYWHERE.**
+- `frontend/lib/api.ts`: **verify-on-401** (final approach — supersedes a first cut that only narrowed logout to `/auth/me`).
+  On ANY 401 the interceptor probes `/auth/me` ONCE (raw `fetch`, deduped via `sessionProbe`) and only `logout()` + redirects if
+  the token is GENUINELY dead. A spurious 401 (NotificationBell's 30s `/notifications` poll, queues, Neon cold-start) leaves
+  `/auth/me` at 200 → session kept. This makes the fix apply to **every role, page, and endpoint** — incl. student/retail pages
+  with NO `useRequireAuth` guard and background polls — without ever logging out a valid 7-day session. (`/auth/me`'s own 401 →
+  direct `logout()`, the page guard redirects; `/login`/`/join` pages + public-catalog + staff-portal excluded.) NB: `authRequired`
+  returns 401 on a dead token AND on a hard DB failure — the same ambiguity `useRequireAuth` already had; acceptable + consistent.
+- `frontend/hooks/useRequireAuth.ts`: logs out only on a real 401 (or token already cleared); on transient (network/5xx) it
+  falls back to cached `getUser()`. **Bounded** the no-cache retry to 4 attempts (~12s) then → `/login` (was an unbounded 3s
+  loop / infinite spinner).
+- `frontend/app/(student)/my-order/page.tsx`: added `usePolling(pollApproval, 12000, isWaiting)` so the waiting screen
+  auto-advances the moment the rep approves/rejects (re-applies state ONLY on a real transition so it never wipes in-progress
+  edits). Dead-token handling is delegated to the global verify-on-401 interceptor (an earlier per-page logout patch was reverted).
+- `backend/controllers/orderController.js` `repFullSetContext`: now returns top-level `wholesaler_approval` +
+  `wholesaler_reject_reason` (read from the student's sash/robe/cap bundle) — the FE banner reads exactly these.
+
+**② Wholesaler «custom order» = rep adds a NAME-ONLY student & places the same full-set طقم order, skipping BOTH approvals.**
+NEW `quickFullSetOrder` (`wholesalerController.js`) + route `POST /api/wholesaler/quick-full-set-order` (declared before the
+`/students/:studentId/...` params). Flow: validate `student_name` → in a `tx` INSERT a name-only `users` row (phone=NULL,
+email=NULL, role='retail', `password_hash`=bcrypt(randomUUID) ⇒ **un-loginable**: no phone⇒no OTP) + a `students` row
+(`status='approved'`, inheriting the rep's جامعة/قسم) → `persistFullSetOrder({student:{…, phone:''}, …})` → flip the bundle to
+`wholesaler_approval='approved'` via `setBundleApproval`. So the order lands straight in staff/dashboard. **No migration**
+(`students.user_id` is NOT NULL so a name-only student needs a `users` row, but `users.phone/email` are nullable + allow multiple
+NULLs since migration 042). FE: NEW `app/wholesaler/custom-order/page.tsx` (اسم الطالب + the reused `FullSetOrderForm`), entry
+buttons on `wholesaler/students` + `wholesaler/page.tsx`, `lib/wholesaler.ts` wrapper.
+- **BUG the live e2e caught (gates/static could NOT): `checkout_groups.phone_primary` is NOT NULL** → a name-only student (no
+  phone) 500'd the order. **Fix:** pass `phone:''` (empty, not null) into `persistFullSetOrder` — `users.phone` stays NULL
+  (un-loginable); the '' only fills the order's display contact. (`persistFullSetOrder` uses `student.phone` solely for
+  `phone_primary`.)
+- **Orchestrator hardening (critic medium):** `quickFullSetOrder` now only deletes the name-only user on failure when NO orders
+  exist (avoids the silent `orders.student_id` RESTRICT mask), logs cleanup failures instead of swallowing, and wraps
+  `setBundleApproval` so a flip failure leaves the order recoverably **pending** (rep can approve) instead of 500-ing.
+
+**③ Product photo for ALL staff.** `productionController.getOrder`: added `'product_image_url'` to the **embroiderer** allow-list
+(tailor already had it; lean/default views keep it) → every role's payload now carries the catalog photo (`products.image_url`,
+the same storefront image). FE: extracted a shared `ProductPhotoCard` in `staff/orders/[orderId]/page.tsx`, rendered in the
+tailor, embroiderer, and default/full views. Only `product_image_url` added — no price/PII/design leak (critic-confirmed).
+
+**Verified.** Gates re-green after the orchestrator fixes (BE `node --check`, FE `tsc` 0 / `eslint` 0). **Live backend e2e on Neon
+(then self-cleaned, 0 leftover):** ② `POST /quick-full-set-order` → 201; student `status='approved'`; user phone+email NULL &
+role retail (un-loginable); 3 linked orders all `wholesaler_approval='approved'`; all 3 pass the staff/dashboard visibility gate.
+① `GET /orders/rep-full-set` returns `wholesaler_approval` + `wholesaler_reject_reason` keys (200). ③ confirmed statically
+(allow-list line + 3 render sites). Critic found nothing critical/high.
+
+### Open follow-ups
+- **Browser click-through NOT done** (disk 92%/5.1G → skipped `next dev`/`next build`; backend dev server left UP on :4000).
+  USER (or a follow-up) should drive: (①) log in as wholesaler/student, let it sit past the old ~few-minute logout window
+  (NotificationBell polling) → confirm NO logout; on the waiting screen have a rep approve → confirm `/my-order` auto-flips within
+  ~12s without wiping edits; (②) `/wholesaler/custom-order` add a name → fill طقم → submit → appears in staff queue + dashboard;
+  (③) open an `embroidery`-stage order as محمد عماد → see «صورة المنتج».
+- **② idempotency (critic medium, NOT fixed):** `quickFullSetOrder` creates a fresh student every POST — a lost response on
+  retry yields a duplicate name-only student+order. Low harm (admin can delete); add a client request-key if it bites.
+- Uncommitted on main; `PROGRESS.md` not updated; seed unchanged (no migration). The name-only student shows «بدون هاتف» in the
+  rep roster (cosmetic fix applied).
+
+---
+
 ## 2026-06-24 (c) — كوي (pressing) routing fix · per-zone embroidery checkboxes (محمد عماد) · ابو عبدو (الفصال) full view
 
 Uncommitted on **main** (alongside the calligraphy working-tree changes). **Migration 047 applied to Neon + verified.**
@@ -469,7 +538,7 @@ popup active/inactive, embroidery field, back-scroll); user did their own browse
   user pastes them into `backend/.env`. Verify a real send after.
 - `next build` not run (disk/`.next`); run before VPS deploy. Seeds not updated for 037/038 (schema mirrored).
 - Pre-existing uncommitted FE work (admin/staff/wholesaler `layout.tsx`, `VipHomeBand.tsx`) + screenshots/junk were
-  **left out of this commit** (likely Cursor's in-progress work — avoid FE collisions).
+  **left out of this commit** (likely in-progress work from another editor — avoid FE collisions).
 - `/verify-otp` still uses the old `VerifyOtpForm`; could share `OtpVerifyForm` too.
 
 ### Files (this session)
@@ -872,7 +941,7 @@ on branch `feat/wholesaler-fullset-order` (NOT yet on main — user merges/deplo
 - Backend **end-to-end on the live Neon DB**: rep create→201, rep read-back
   reconstructs measurements/type/embroidery, student context returns
   is_rep_student/approved/packages/existing, student self-create→201. All idempotent.
-- `tsc` 0 errors; `eslint` clean on new files (one pre-existing warning in Cursor's
+- `tsc` 0 errors; `eslint` clean on new files (one pre-existing warning in the
   `wholesaler/page.tsx` effect, untouched).
 
 **Open follow-ups**

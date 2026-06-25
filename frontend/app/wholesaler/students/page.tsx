@@ -132,6 +132,13 @@ export default function WholesalerStudentsPage() {
         <BackLink />
       </div>
 
+      <Link
+        href="/wholesaler/custom-order"
+        className="flex min-h-12 w-full items-center justify-center gap-1 rounded-2xl bg-orange-ink px-4 text-sm font-semibold text-white shadow-[var(--shadow-soft)] transition-transform hover:-translate-y-0.5 active:scale-[0.99]"
+      >
+        + طلب مخصص لطالب (بالاسم فقط)
+      </Link>
+
       <div className="grid grid-cols-3 gap-3">
         <StatCard label="الكل" value={String(stats.total)} />
         <StatCard label="بانتظار الموافقة" value={String(stats.pending)} />
@@ -195,8 +202,11 @@ export default function WholesalerStudentsPage() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="truncate font-display-ar font-bold text-ink">{s.name}</p>
-                    <p className="mt-0.5 text-sm tabular-nums text-ink-soft" dir="ltr">
-                      {s.phone}
+                    <p
+                      className="mt-0.5 text-sm tabular-nums text-ink-soft"
+                      dir={s.phone ? "ltr" : "rtl"}
+                    >
+                      {s.phone || "بدون هاتف"}
                     </p>
                     <p className="mt-1 text-xs text-[var(--shop-muted)]">
                       {s.universityName || "—"}

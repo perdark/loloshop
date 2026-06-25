@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { api, getApiErrorMessage } from "@/lib/api";
+import { usePolling } from "@/lib/hooks/usePolling";
 import {
   submitRepFullSetOrder,
   type RepFullSetContext,
@@ -95,6 +96,25 @@ export default function StudentMyOrderPage() {
   const [done, setDone] = useState(false);
   const [formKey, setFormKey] = useState(0);
 
+  // Apply a fresh /orders/rep-full-set response to state. Bumping formKey
+  // re-mounts the form so it pre-fills with the latest saved values.
+  function applyRaw(raw: RawRepFullSetData) {
+    setCtx({
+      isRepStudent: raw.is_rep_student,
+      approved: raw.approved,
+      packages: raw.packages || [],
+      existing: raw.existing,
+      pricing: raw.pricing ?? null,
+    });
+    const nextApproval = raw.wholesaler_approval ?? null;
+    setApproval(nextApproval);
+    setRejectReason(raw.wholesaler_reject_reason ?? null);
+    setFormKey((k) => k + 1);
+    // Leave the post-submit "done" success screen ONLY while still pending; once
+    // the rep resolves it (approved/rejected) drop to the correct resolved view.
+    if (nextApproval !== "pending") setDone(false);
+  }
+
   async function load() {
     setLoading(true);
     setLoadError(false);
@@ -105,21 +125,12 @@ export default function StudentMyOrderPage() {
         "/orders/rep-full-set"
       );
       const raw = data.data;
-
-      setCtx({
-        isRepStudent: raw.is_rep_student,
-        approved: raw.approved,
-        packages: raw.packages || [],
-        existing: raw.existing,
-        pricing: raw.pricing ?? null,
-      });
-      setApproval(raw.wholesaler_approval ?? null);
-      setRejectReason(raw.wholesaler_reject_reason ?? null);
-      setFormKey((k) => k + 1);
-
+      applyRaw(raw);
       // Non-rep students don't belong here — send them to the shop.
       if (!raw.is_rep_student) router.replace("/");
     } catch (err) {
+      // A genuinely-dead token is handled globally by the api interceptor (verify →
+      // logout → redirect); here we just surface a transient load failure.
       setLoadError(true);
       toast.error(getApiErrorMessage(err, "تعذر تحميل النموذج"));
     } finally {
@@ -131,6 +142,39 @@ export default function StudentMyOrderPage() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // While the student is WAITING — not yet approved to join the cohort, or their
+  // order is pending the rep's approval — poll so the screen flips itself the
+  // moment the rep approves/rejects (no manual refresh). Stops once resolved.
+  const isWaiting =
+    !loading &&
+    !loadError &&
+    !submitting &&
+    !!ctx?.isRepStudent &&
+    (!ctx.approved || approval === "pending");
+
+  async function pollApproval() {
+    try {
+      const { data } = await api.get<{ data: RawRepFullSetData }>(
+        "/orders/rep-full-set"
+      );
+      const raw = data.data;
+      if (!raw.is_rep_student) {
+        router.replace("/");
+        return;
+      }
+      const nextApproval = raw.wholesaler_approval ?? null;
+      const joinFlipped = raw.approved && ctx != null && !ctx.approved;
+      const approvalFlipped = nextApproval !== approval;
+      // Only re-render on a REAL transition. Re-applying while still pending
+      // would remount the form and wipe any edits the waiting student is making.
+      if (joinFlipped || approvalFlipped) applyRaw(raw);
+    } catch {
+      // Transient poll failure — ignore; keep the current view and retry next tick.
+    }
+  }
+
+  usePolling(pollApproval, 12000, isWaiting);
 
   async function handleSubmit(payload: CreateFullSetPayload) {
     setSubmitting(true);
@@ -144,19 +188,7 @@ export default function StudentMyOrderPage() {
       // Refresh so a later edit pre-fills with the saved values.
       api
         .get<{ data: RawRepFullSetData }>("/orders/rep-full-set")
-        .then(({ data: d }) => {
-          const raw = d.data;
-          setCtx({
-            isRepStudent: raw.is_rep_student,
-            approved: raw.approved,
-            packages: raw.packages || [],
-            existing: raw.existing,
-            pricing: raw.pricing ?? null,
-          });
-          setApproval(raw.wholesaler_approval ?? null);
-          setRejectReason(raw.wholesaler_reject_reason ?? null);
-          setFormKey((k) => k + 1);
-        })
+        .then(({ data: d }) => applyRaw(d.data))
         .catch(() => {});
     } catch (err) {
       // 403 ERR_LOCKED = the order was approved while the form was open — show a

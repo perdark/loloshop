@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { toast } from "sonner";
 import {
   approveStudent,
@@ -160,6 +161,14 @@ export default function WholesalerDashboardPage() {
         <StatCard label="بانتظار الموافقة" value={String(dashboard.pendingCount)} />
         <StatCard label="تصاميم مكتملة" value={String(dashboard.completedDesigns)} accent="profit" />
       </div>
+
+      {/* Quick custom order — name-only student, both approvals skipped */}
+      <Link
+        href="/wholesaler/custom-order"
+        className="flex min-h-12 w-full items-center justify-center gap-1 rounded-2xl bg-orange-ink px-4 text-sm font-semibold text-white shadow-[var(--shadow-soft)] transition-transform hover:-translate-y-0.5 active:scale-[0.99]"
+      >
+        + طلب مخصص لطالب (بالاسم فقط)
+      </Link>
 
       {(dashboard.earnedCommission ?? 0) > 0 && (
         <section className="surface-card rounded-2xl p-5 text-center">

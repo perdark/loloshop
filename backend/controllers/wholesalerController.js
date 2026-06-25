@@ -1,3 +1,5 @@
+const bcrypt = require('bcrypt');
+const crypto = require('crypto');
 const { query, tx } = require('../lib/db');
 const { publicUrl } = require('../lib/upload');
 const { persistFullSetOrder, readFullSetOrder, loadWholesalerPricing } = require('../lib/fullSetOrder');
@@ -279,6 +281,110 @@ async function createFullSetOrder(req, res) {
   res.status(status).json(json);
 }
 
+// ── Quick custom order (name-only student, BOTH approvals skipped) ──
+// The rep adds a student BY NAME ONLY (no login account) and places the SAME full-set
+// طقم order for them in one shot. Skips the student approval (the student is created
+// pre-'approved') AND the order approval (the new bundle is flipped to 'approved'
+// immediately) → it goes straight to staff + the dashboard. The created users row is
+// intentionally UN-LOGINABLE: no phone/email (so no OTP path) + a random, unrecoverable
+// bcrypt hash (so no password works).
+async function quickFullSetOrder(req, res) {
+  const wId = await getWholesalerId(req.user.id);
+  if (!wId) return res.status(403).json({ error: 'حساب الممثل غير موجود', code: 'ERR_NOT_FOUND' });
+
+  const name = String((req.body && req.body.student_name) || '').trim();
+  if (!name) return res.status(400).json({ error: 'اسم الطالب مطلوب', code: 'ERR_VALIDATION' });
+  if (name.length > 120) {
+    return res.status(400).json({ error: 'اسم الطالب طويل جداً', code: 'ERR_VALIDATION' });
+  }
+
+  // Student inherits the rep's جامعة/قسم (mirrors joinController's inheritance).
+  const wRow = await query(
+    `SELECT university_name, department FROM wholesalers WHERE id = $1`,
+    [wId]
+  );
+  const university = wRow.rows[0]?.university_name || null;
+  const department = wRow.rows[0]?.department || null;
+
+  // Create the name-only, pre-approved student in one transaction so a failure here leaves
+  // NO orphan user/student. The random password hash keeps the account un-loginable.
+  const hash = await bcrypt.hash(crypto.randomUUID(), 10);
+  const created = await tx(async (client) => {
+    const u = await client.query(
+      `INSERT INTO users (name, phone, email, password_hash, role)
+       VALUES ($1, NULL, NULL, $2, 'retail') RETURNING id`,
+      [name, hash]
+    );
+    const s = await client.query(
+      `INSERT INTO students (user_id, wholesaler_id, full_name_third, university_name, department, status)
+       VALUES ($1, $2, $3, $4, $5, 'approved') RETURNING id`,
+      [u.rows[0].id, wId, name, university, department]
+    );
+    return { userId: u.rows[0].id, studentId: s.rows[0].id };
+  });
+
+  // Place the order. persistFullSetOrder runs its OWN atomic transaction. It can throw
+  // EITHER before committing (validation/build) OR after committing the orders (its
+  // post-commit audit_log + publish). Only delete the just-created name-only user when
+  // NO order rows exist — otherwise the cascade to students hits orders.student_id
+  // ON DELETE RESTRICT, which would just mask a committed order. Log (don't swallow).
+  const cleanupUser = async (reason) => {
+    const has = await query(`SELECT 1 FROM orders WHERE student_id = $1 LIMIT 1`, [
+      created.studentId,
+    ]).catch(() => ({ rows: [] }));
+    if (has.rows.length) {
+      console.error(
+        `quickFullSetOrder: ${reason} but orders already exist for student ${created.studentId} — left in place (manual review)`
+      );
+      return;
+    }
+    await query(`DELETE FROM users WHERE id = $1`, [created.userId]).catch((e) =>
+      console.error('quickFullSetOrder: cleanup delete failed:', e.message)
+    );
+  };
+
+  let result;
+  try {
+    result = await persistFullSetOrder({
+      // phone '' (not null): a name-only student has no phone, but checkout_groups.phone_primary
+      // is NOT NULL. The users row keeps phone=NULL (un-loginable); this only fills the order's
+      // display contact field. (persistFullSetOrder uses student.phone solely for phone_primary.)
+      student: { id: created.studentId, name, phone: '', wholesaler_id: wId },
+      body: req.body,
+      actorUserId: req.user.id,
+    });
+  } catch (err) {
+    await cleanupUser('persistFullSetOrder threw');
+    throw err;
+  }
+  if (result.status !== 201) {
+    await cleanupUser('persistFullSetOrder rejected');
+    return res.status(result.status).json(result.json);
+  }
+
+  // Skip the ORDER approval too → flip the new bundle straight to 'approved' so it
+  // surfaces to staff + the dashboard without the rep approving it separately. If this
+  // flip fails the order is NOT lost — it stays 'pending' and shows in the rep's
+  // approval list (recoverable), so log loudly instead of 500-ing away a created order.
+  try {
+    await setBundleApproval({
+      checkoutGroupId: result.json.data.checkout_group_id,
+      decision: 'approved',
+      actorUserId: req.user.id,
+      repWholesalerId: wId,
+    });
+  } catch (e) {
+    console.error(
+      `quickFullSetOrder: auto-approve failed for checkout_group ${result.json.data.checkout_group_id} — order left pending, rep can approve manually:`,
+      e.message
+    );
+  }
+
+  res.status(201).json({
+    data: { student_id: created.studentId, ...result.json.data },
+  });
+}
+
 // ── Order approval endpoints (T4) ──
 
 // GET /api/wholesaler/orders?approval=pending|approved|rejected|all
@@ -390,7 +496,7 @@ async function bulkOrders(req, res) {
 module.exports = {
   dashboard, pendingStudents, listStudents, approve, reject, bulkSetStatus,
   getSashConfig, updateSashConfig,
-  fullSetPackages, getStudent, getStudentOrder, createFullSetOrder, uploadImage,
+  fullSetPackages, getStudent, getStudentOrder, createFullSetOrder, quickFullSetOrder, uploadImage,
   updateEmbroideryColor,
   listOrdersForApproval, approveOrder, rejectOrder, bulkOrders,
 };
