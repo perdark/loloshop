@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { toast } from "sonner";
 import { getAdminAnalytics, getAdminAccounting, getPendingApprovalCount } from "@/lib/admin";
 import { PromoControl } from "@/components/admin/PromoControl";
+import { MaintenanceControl } from "@/components/admin/MaintenanceControl";
 import { getTailorSummary, type TailorSummary } from "@/lib/staff";
 import { ORDER_STATUS_LABELS } from "@/lib/constants";
 import Link from "next/link";
@@ -301,6 +302,12 @@ export default function AdminDashboardPage() {
       <section className="mt-16">
         <SectionHead title="الإعلانات والعروض" />
         <PromoControl />
+      </section>
+
+      {/* Maintenance mode control */}
+      <section className="mt-16">
+        <SectionHead title="الموقع" />
+        <MaintenanceControl />
       </section>
 
       {/* الفصال — parallel tailoring progress (independent of the pipeline) */}

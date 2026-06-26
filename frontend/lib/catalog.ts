@@ -425,6 +425,19 @@ export async function getPromo(): Promise<PromoConfig> {
   return data.data;
 }
 
+// ─── Maintenance Mode ────────────────────────────────────────────────────────
+
+export interface MaintenanceConfig {
+  active: boolean;
+  message_ar: string;
+}
+
+/** Public endpoint — no auth required. Returns the maintenance-mode flag. */
+export async function getMaintenance(): Promise<MaintenanceConfig> {
+  const { data } = await api.get<{ data: MaintenanceConfig }>("/catalog/maintenance");
+  return data.data;
+}
+
 /** @deprecated Use getShopFeed */
 export async function listCatalogProducts(): Promise<CatalogProductSummary[]> {
   return listCatalogProductsAdmin();

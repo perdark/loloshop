@@ -1,6 +1,6 @@
 import { api } from "./api";
 import { mapHeroSlide } from "./catalog";
-import type { PromoConfig } from "./catalog";
+import type { MaintenanceConfig, PromoConfig } from "./catalog";
 import type {
   AdminAccounting,
   AdminAnalytics,
@@ -29,6 +29,19 @@ export type { PromoConfig };
 /** Admin-only: save the storefront promo config. */
 export async function updatePromo(payload: PromoConfig): Promise<PromoConfig> {
   const { data } = await api.patch<{ data: PromoConfig }>("/admin/promo", payload);
+  return data.data;
+}
+
+export type { MaintenanceConfig };
+
+/** Admin-only: toggle/save the maintenance-mode flag. */
+export async function updateMaintenance(
+  payload: MaintenanceConfig
+): Promise<MaintenanceConfig> {
+  const { data } = await api.patch<{ data: MaintenanceConfig }>(
+    "/admin/maintenance",
+    payload
+  );
   return data.data;
 }
 

@@ -11,7 +11,7 @@ import {
   getUser,
   shouldSkipDashboardRedirect,
 } from "@/lib/auth";
-import { getShopFeed } from "@/lib/catalog";
+import { getShopFeed, getMaintenance, type MaintenanceConfig } from "@/lib/catalog";
 import { SHOP_SECTION_TITLES, SHOP_TYPE_ORDER } from "@/lib/constants";
 import type { ProductType, ShopFeed, ShopProductCard } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
@@ -20,6 +20,7 @@ import { ShopCover } from "@/components/shop/ShopCover";
 import { AtelierStory, MilestoneStory, DesignProcess } from "@/components/shop/BrandStory";
 import { VipHomeBand } from "@/components/vip/VipHomeBand";
 import { FullSetBand } from "@/components/shop/FullSetBand";
+import { MaintenanceScreen } from "@/components/MaintenanceScreen";
 
 type FilterKey = "all" | ProductType;
 
@@ -109,6 +110,9 @@ export default function StudentHomePage() {
   // chose "زيارة الموقع الرئيسي" — then show a return pill instead.
   const [redirecting, setRedirecting] = useState(false);
   const [panelHref, setPanelHref] = useState<string | null>(null);
+  // Maintenance mode — public visitors see a notice instead of the shop.
+  const [maintenance, setMaintenance] = useState<MaintenanceConfig | null>(null);
+  const [maintenanceLoading, setMaintenanceLoading] = useState(true);
   const catalogSectionRef = useRef<HTMLElement | null>(null);
 
   /**
@@ -154,7 +158,8 @@ export default function StudentHomePage() {
   }, [router]);
 
   useEffect(() => {
-    const href = dashboardPathFor(getUser()?.role);
+    const role = getUser()?.role;
+    const href = dashboardPathFor(role);
     if (href) {
       if (!shouldSkipDashboardRedirect()) {
         setRedirecting(true);
@@ -163,7 +168,20 @@ export default function StudentHomePage() {
       }
       setPanelHref(href);
     }
-    loadShop();
+    // Maintenance gate: public visitors see the notice instead of the shop.
+    // Admins always bypass so they can preview/manage the live site.
+    // Fail open — if the check errors, load the shop normally.
+    getMaintenance()
+      .then((m) => {
+        setMaintenance(m);
+        if (m.active && role !== "admin") return; // skip the shop entirely
+        loadShop();
+      })
+      .catch(() => {
+        setMaintenance({ active: false, message_ar: "الموقع قيد الصيانة" });
+        loadShop();
+      })
+      .finally(() => setMaintenanceLoading(false));
   }, [loadShop, router]);
 
   // A detail-page back button lands here as «/#catalog», but the grid only renders
@@ -234,7 +252,14 @@ export default function StudentHomePage() {
     return featuredFirst(feed.byType[filter] ?? []);
   }, [feed, filter, allProducts]);
 
-  if (loading || redirecting) return <ShopSkeleton />;
+  if (redirecting || maintenanceLoading) return <ShopSkeleton />;
+
+  // Maintenance mode — public visitors only; admins bypass (loadShop already ran).
+  if (maintenance?.active && getUser()?.role !== "admin") {
+    return <MaintenanceScreen message={maintenance.message_ar} />;
+  }
+
+  if (loading) return <ShopSkeleton />;
 
   // Admin/staff browsing the shop on purpose — floating pill back to their
   // panel; clicking it re-arms the auto-redirect on "/".

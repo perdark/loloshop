@@ -711,6 +711,22 @@ async function getPromo(req, res) {
   });
 }
 
+// ---------- PUBLIC: maintenance mode flag ----------
+const MAINTENANCE_DEFAULTS = { active: false, message_ar: 'الموقع قيد الصيانة' };
+
+async function getMaintenance(req, res) {
+  const { rows } = await query(
+    `SELECT value FROM site_settings WHERE key = 'maintenance_mode'`
+  );
+  const cfg = rows[0] ? rows[0].value : MAINTENANCE_DEFAULTS;
+  res.json({
+    data: {
+      active:     typeof cfg.active === 'boolean' ? cfg.active : false,
+      message_ar: cfg.message_ar || MAINTENANCE_DEFAULTS.message_ar,
+    },
+  });
+}
+
 module.exports = {
   getHeroSlides, listHeroSlidesAdmin, createHeroSlide, updateHeroSlide, deleteHeroSlide,
   priceRoleForUser, getProductFull, getShop, listProductsAdmin,
@@ -721,5 +737,5 @@ module.exports = {
   setOptionPriceRole, setProductPriceRole, uploadImage,
   lockGroupOption, unlockGroupOption,
   listPackages, createPackage, updatePackage, deletePackage, setPackageRule, setPackageProducts,
-  getPromo,
+  getPromo, getMaintenance,
 };

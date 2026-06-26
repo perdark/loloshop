@@ -663,6 +663,32 @@ async function updatePromo(req, res) {
   res.json({ data: cfg });
 }
 
+// ---------- Admin: maintenance mode flag ----------
+async function updateMaintenance(req, res) {
+  const { active, message_ar } = req.body;
+
+  // active: coerce to boolean
+  const activeVal = !!active;
+
+  // message_ar: optional, trimmed, max 300 chars; falls back to the default.
+  let msgTrimmed = typeof message_ar === 'string' ? message_ar.trim() : '';
+  if (msgTrimmed.length > 300) {
+    return res.status(400).json({ error: 'الرسالة طويلة جداً (الحد 300 حرف)', code: 'ERR_VALIDATION' });
+  }
+  if (!msgTrimmed) msgTrimmed = 'الموقع قيد الصيانة';
+
+  const cfg = { active: activeVal, message_ar: msgTrimmed };
+
+  await query(
+    `INSERT INTO site_settings (key, value, updated_at)
+     VALUES ('maintenance_mode', $1::jsonb, now())
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+    [JSON.stringify(cfg)]
+  );
+
+  res.json({ data: cfg });
+}
+
 // ---------- Admin: order-approval override (T5) ----------
 
 // POST /api/admin/orders/:checkoutGroupId/approve
@@ -741,6 +767,6 @@ module.exports = {
   getWholesalerSashConfig, updateWholesalerSashConfig,
   wholesalerStudents, toggleEditException,
   listStaff, createStaff, updateStaffType, updateStaffScope, updateStaffPassword, deleteStaff,
-  repsOverview, updatePromo,
+  repsOverview, updatePromo, updateMaintenance,
   approveOrderAdmin, rejectOrderAdmin, pendingApprovalCount,
 };

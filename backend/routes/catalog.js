@@ -9,6 +9,7 @@ router.get('/products/:id/full', optionalAuth, c.getProductFull);  // full confi
 router.get('/packages', optionalAuth, c.listPackages);             // active packages for wholesaler students
 router.get('/hero', c.getHeroSlides);                              // active home-slider slides
 router.get('/promo', c.getPromo);                                  // discount popup config (public, no auth)
+router.get('/maintenance', c.getMaintenance);                      // maintenance-mode flag (public, no auth)
 
 // Everything below is admin-only
 router.use(authRequired, requireRole('admin'));

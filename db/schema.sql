@@ -752,6 +752,14 @@ CREATE TABLE IF NOT EXISTS site_settings (
   updated_at TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
+-- Migration 049: maintenance-mode flag — { active, message_ar }. active=true → home page "/" shows the message.
+INSERT INTO site_settings (key, value)
+VALUES (
+  'maintenance_mode',
+  jsonb_build_object('active', false, 'message_ar', 'الموقع قيد الصيانة')
+)
+ON CONFLICT (key) DO NOTHING;
+
 -- Migration 043: admin calligraphy batch tool — one row per name-plate, grouped by job_id.
 DO $$ BEGIN
   CREATE TYPE calligraphy_source AS ENUM ('typed','wholesaler','txt');
