@@ -6,6 +6,45 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
+## 2026-06-26 — OTP bans root-caused & fixed: trusted-device login + phone validation + prod security hardening
+
+**Shipped to prod** (commit `8c1c4dd` on **main**, deployed via GitHub Actions → `scripts/deploy.sh`). Migration **048 applied to
+Neon** (dev+prod share one DB). Gates green: FE `tsc`/`eslint` 0 · BE `node --check` 0. Verified: 17/17 lib e2e + 4/4 login-controller
+e2e on Neon (send-free, artifacts cleaned) + live public-API smoke (invalid phone → 400 on prod). Spec:
+`docs/superpowers/specs/2026-06-26-auth-trusted-device-ban-hardening-design.md`.
+
+**Incident → root cause.** "OTP not sending for all" started as a Zentramsg outage (live-debugged: `404 Device not found` = key↔device
+account mismatch; user's subscribed key is `b3482ab8`; then `400 No active subscription`; then the device was **banned** → messages
+sat `pending`, no delivery). User linked a NEW device `9968d548` (sender `9647888255587`) → delivery restored. But the ROOT of the
+recurring bans is the app's send behavior: **no phone validation** (blasting OTPs to garbage numbers `03`/`010`/`07788888` = Meta's
+#1 spambot signal), **OTP on every login** (volume), and the **per-phone cap was gated on `NODE_ENV==='production'` while prod ran
+`development`** (cap off). Each linked WhatsApp sender got banned, relink, repeat.
+
+**Fix (3 pillars, all live).**
+- **A — Trusted-device login.** `trusted_devices` table (mig 048) + `backend/lib/trustedDevice.js`. `login-verify`/`verify-otp` mint a
+  sha-256-hashed, user-bound, 90-day device token, return it; FE stores it (`localStorage loloshop_device_token`, **survives logout**)
+  and sends it on `/auth/login` → **skips the WhatsApp OTP** (password still verified every login). Password reset revokes all the
+  user's devices. `login()` now returns `{token,user}` (trusted) OR `{otp_required}` — login page branches.
+- **B — Ban prevention.** `isValidIqMobile = /^07\d{9}$/` rejects garbage before any send (register/login/join/forgot/resend + backstop
+  in `createOtp` + hard recipient guard in `sendViaZentramsg` requiring ids `^964\d{10}$`). Per-phone cap **always** enforced (NODE_ENV
+  gate removed).
+- **C — Prod security (`.env`, done on server + restarted).** `NODE_ENV=production` (user flipped it), `JWT_EXPIRES_IN=30d` (was 7d),
+  `ALLOW_PROD_MASTER_OTP` commented (was the armed backdoor), `DEV_MASTER_OTP` commented. Prior security debt RESOLVED.
+
+**Files.** BE: `controllers/{authController,joinController}.js`, `lib/otp.js`, NEW `lib/trustedDevice.js`; NEW `db/migrations/048_*.sql`
++ `db/schema.sql` mirror. FE: `app/login/page.tsx`, `lib/{auth,auth-api,types}.ts`.
+
+### Open follow-ups
+- **User-side smoke test pending:** log in as a real student → first login OTPs (device gets trusted) → log out → log in again on the
+  same phone → should skip the OTP (password only). Confirm in a browser.
+- **This HANDOFF entry is committed locally but NOT pushed** (a push redeploys prod via Actions; didn't want a gratuitous rebuild for a
+  docs change). It rides the next deploy.
+- **Future cure if bans persist:** swap `sendViaZentramsg` → official WhatsApp Cloud API (deferred; seam is `lib/otp.js`).
+- **Zentramsg subscription/device are the user's to keep alive** — if the new device `9968d548` gets banned again, relink + update
+  prod `.env ZENTRAMSG_DEVICE_UUID` + restart. (The fix above should drastically cut ban risk.)
+
+---
+
 ## 2026-06-25 — Session-persistence (auto-logout) fix · wholesaler name-only «custom order» (skip both approvals) · product photo for ALL staff roles
 
 Uncommitted on **main**. **No DB migration** (verified the data model supports all 3). Gates green: FE `tsc` 0 · `eslint` 0 ·
