@@ -59,6 +59,8 @@ export interface User {
 export interface LoginResponse {
   token: string;
   user: User;
+  // Present after a login/signup OTP — a trusted-device token to skip future OTPs.
+  device_token?: string;
 }
 
 export interface AdminAnalytics {

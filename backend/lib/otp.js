@@ -20,6 +20,14 @@ function normalizeIqPhone(input) {
   return d;
 }
 
+// A real Iraqi mobile in canonical local form is exactly `07` + 9 digits (11 total),
+// e.g. 07713644460. Garbage like `03`, `010`, `0771`, `07788888` fails this. Blasting
+// WhatsApp messages to non-existent numbers is the #1 reason an unofficial-gateway sender
+// number gets spam-banned by Meta — so NOTHING is sent unless the recipient passes this.
+function isValidIqMobile(phone) {
+  return typeof phone === 'string' && /^07\d{9}$/.test(phone);
+}
+
 // Express middleware: normalise `req.body.phone` on the way in so every downstream
 // handler (register/login/OTP/reset) sees the canonical form.
 function normalizePhoneBody(req, _res, next) {
@@ -41,21 +49,30 @@ function generateCode() {
 }
 
 async function createOtp(phone, purpose = 'verify') {
-  // Enforced in production only — dev has the master-OTP bypass, so the cap would
-  // just add friction to repeated test logins for the same phone.
-  if (process.env.NODE_ENV === 'production') {
-    const recent = await query(
-      `SELECT COUNT(*)::int AS n FROM otp_codes
-       WHERE phone = $1 AND created_at > NOW() - INTERVAL '1 hour'`,
-      [phone]
-    );
-    if (recent.rows[0].n >= MAX_OTP_REQUESTS_PER_HOUR) {
-      const err = new Error('تم طلب عدد كبير من الرموز. يرجى المحاولة بعد قليل.');
-      err.status = 429;
-      err.code = 'ERR_OTP_RATE';
-      err.expose = true;
-      throw err;
-    }
+  // Backstop validation: never generate/send an OTP for a number that isn't a real Iraqi
+  // mobile. Controllers validate too (for nicer errors); this guarantees NO code path can
+  // ever blast WhatsApp at a garbage number and get the sender banned.
+  if (!isValidIqMobile(phone)) {
+    const err = new Error('رقم هاتف غير صحيح');
+    err.status = 400;
+    err.code = 'ERR_INVALID_PHONE';
+    err.expose = true;
+    throw err;
+  }
+  // Per-phone hourly cap — ALWAYS enforced. (Was gated on NODE_ENV==='production', which
+  // silently disabled it the whole time prod ran in development mode.) IP-independent: stops
+  // one number from being blasted with codes (brute-force reset + sender-ban protection).
+  const recent = await query(
+    `SELECT COUNT(*)::int AS n FROM otp_codes
+     WHERE phone = $1 AND created_at > NOW() - INTERVAL '1 hour'`,
+    [phone]
+  );
+  if (recent.rows[0].n >= MAX_OTP_REQUESTS_PER_HOUR) {
+    const err = new Error('تم طلب عدد كبير من الرموز. يرجى المحاولة بعد قليل.');
+    err.status = 429;
+    err.code = 'ERR_OTP_RATE';
+    err.expose = true;
+    throw err;
   }
   const code = generateCode();
   const expiresAt = new Date(Date.now() + TTL * 1000);
@@ -169,6 +186,14 @@ async function sendViaZentramsg(phone, code) {
   // creds are present (no more blind OTP loops in development).
   if (process.env.NODE_ENV !== 'production') console.log(`[OTP DEV] ${phone} -> ${code}`);
 
+  // Final hard guard (belt & suspenders behind createOtp): never POST to WhatsApp for a
+  // non-Iraqi-mobile recipient. Sending to invalid numbers is what gets the sender banned.
+  const ids = toIntlDigits(phone);
+  if (!isValidIqMobile(phone) || !/^964\d{10}$/.test(ids)) {
+    console.error(`[OTP] refusing to send to invalid recipient: ${phone} (${ids})`);
+    return;
+  }
+
   const token = process.env.ZENTRAMSG_API_KEY;       // x-api-token
   const device = process.env.ZENTRAMSG_DEVICE_UUID;  // device_uuid (the WhatsApp sender device)
   if (!token || !device) {
@@ -186,7 +211,7 @@ async function sendViaZentramsg(phone, code) {
     form.append('text_message', `رمز التحقق LoloShop: ${code}`);
     form.append('type_message', 'text');
     form.append('type_contact', 'numbers');
-    form.append('ids', toIntlDigits(phone));
+    form.append('ids', ids);
     // Native fetch sets the multipart Content-Type (with boundary) from the FormData.
     const res = await fetch(ZENTRAMSG_URL, {
       method: 'POST',
@@ -199,4 +224,4 @@ async function sendViaZentramsg(phone, code) {
   }
 }
 
-module.exports = { createOtp, verifyOtp, toIntlDigits, normalizeIqPhone, normalizePhoneBody };
+module.exports = { createOtp, verifyOtp, toIntlDigits, normalizeIqPhone, normalizePhoneBody, isValidIqMobile };

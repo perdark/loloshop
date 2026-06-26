@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/Input";
 import { OtpVerifyForm } from "@/components/auth/OtpVerifyForm";
 import { login, loginVerifyOtp, resendLoginOtp, getApiErrorMessage } from "@/lib/auth-api";
 import { setToken, setUser, safeRedirectTarget } from "@/lib/auth";
-import type { UserRole } from "@/lib/types";
+import type { User, UserRole } from "@/lib/types";
 
 const ROLE_REDIRECT: Record<UserRole, string> = {
   admin: "/admin",
@@ -30,29 +30,7 @@ export default function LoginPage() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
 
-  async function handleCredentials(e: React.FormEvent) {
-    e.preventDefault();
-    const eMap: Record<string, string> = {};
-    if (!phone.trim()) eMap.phone = "رقم الهاتف مطلوب";
-    if (!password) eMap.password = "كلمة المرور مطلوبة";
-    setErrors(eMap);
-    if (Object.keys(eMap).length > 0) return;
-
-    setLoading(true);
-    try {
-      await login(phone.trim(), password);
-      setStep("otp");
-    } catch (err) {
-      toast.error(getApiErrorMessage(err, "بيانات الدخول غير صحيحة"));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function verifyOtp(code: string) {
-    // loginVerifyOtp already throws Error with Arabic message on failure;
-    // OtpVerifyForm catches it, shows it, clears digits, refocuses.
-    const { token, user } = await loginVerifyOtp(phone.trim(), code);
+  function finishLogin(token: string, user: User) {
     setToken(token);
     setUser(user);
     toast.success(`مرحباً ${user.name} 🎉`);
@@ -63,6 +41,38 @@ export default function LoginPage() {
     router.replace(
       redirect && user.role === "retail" ? redirect : ROLE_REDIRECT[user.role]
     );
+  }
+
+  async function handleCredentials(e: React.FormEvent) {
+    e.preventDefault();
+    const eMap: Record<string, string> = {};
+    if (!phone.trim()) eMap.phone = "رقم الهاتف مطلوب";
+    if (!password) eMap.password = "كلمة المرور مطلوبة";
+    setErrors(eMap);
+    if (Object.keys(eMap).length > 0) return;
+
+    setLoading(true);
+    try {
+      const res = await login(phone.trim(), password);
+      // Trusted device → backend skipped the OTP and logged us straight in.
+      if ("token" in res) {
+        finishLogin(res.token, res.user);
+        return;
+      }
+      setStep("otp");
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "بيانات الدخول غير صحيحة"));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function verifyOtp(code: string) {
+    // loginVerifyOtp already throws Error with Arabic message on failure;
+    // OtpVerifyForm catches it, shows it, clears digits, refocuses. It also stores the
+    // returned device_token so this device skips the OTP next time.
+    const { token, user } = await loginVerifyOtp(phone.trim(), code);
+    finishLogin(token, user);
   }
 
   return (

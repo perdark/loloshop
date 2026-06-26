@@ -1,6 +1,6 @@
 const bcrypt = require('bcrypt');
 const { query, tx } = require('../lib/db');
-const { createOtp } = require('../lib/otp');
+const { createOtp, isValidIqMobile } = require('../lib/otp');
 
 async function getReferral(req, res) {
   const { code } = req.params;
@@ -39,6 +39,9 @@ async function joinReferral(req, res) {
   const studentName = name || full_name_third;
   if (!studentName || !phone || !password) {
     return res.status(400).json({ error: 'بيانات ناقصة', code: 'ERR_VALIDATION' });
+  }
+  if (!isValidIqMobile(phone)) {
+    return res.status(400).json({ error: 'رقم هاتف غير صحيح', code: 'ERR_INVALID_PHONE' });
   }
   // Cap free-text so a large JSON body can't stuff multi-MB junk into columns.
   const MAX_FIELD_LEN = 120;

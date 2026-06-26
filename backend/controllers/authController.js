@@ -2,7 +2,8 @@ const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const { query } = require('../lib/db');
 const { signToken } = require('../middleware/auth');
-const { createOtp, verifyOtp } = require('../lib/otp');
+const { createOtp, verifyOtp, isValidIqMobile } = require('../lib/otp');
+const { issueDeviceToken, isTrustedDevice, revokeUserDevices } = require('../lib/trustedDevice');
 const { sendPasswordReset } = require('../lib/email');
 
 const SALT_ROUNDS = 10;
@@ -21,6 +22,9 @@ async function register(req, res) {
   }
   if (tooLong(name, email, university_name, department, instagram_username) || String(phone).length > 32) {
     return res.status(400).json({ error: 'قيمة طويلة جداً في أحد الحقول', code: 'ERR_VALIDATION' });
+  }
+  if (!isValidIqMobile(phone)) {
+    return res.status(400).json({ error: 'رقم هاتف غير صحيح', code: 'ERR_INVALID_PHONE' });
   }
   if (!['retail'].includes(role)) {
     return res.status(403).json({ error: 'دور غير مسموح', code: 'ERR_FORBIDDEN' });
@@ -68,9 +72,12 @@ async function register(req, res) {
 }
 
 async function login(req, res) {
-  const { phone, password } = req.body;
+  const { phone, password, device_token } = req.body;
   if (!phone || !password) {
     return res.status(400).json({ error: 'بيانات ناقصة', code: 'ERR_VALIDATION' });
+  }
+  if (!isValidIqMobile(phone)) {
+    return res.status(400).json({ error: 'رقم هاتف غير صحيح', code: 'ERR_INVALID_PHONE' });
   }
   const { rows } = await query(
     `SELECT id, name, phone, email, role, password_hash, phone_verified FROM users WHERE phone = $1`,
@@ -83,6 +90,16 @@ async function login(req, res) {
   const ok = await bcrypt.compare(password, user.password_hash);
   if (!ok) {
     return res.status(401).json({ error: 'بيانات خاطئة', code: 'ERR_INVALID_CREDENTIALS' });
+  }
+  // Trusted device → skip the WhatsApp OTP entirely (the password is already verified).
+  // This is the change that cuts OTP volume to ~zero for returning users and protects the
+  // gateway sender number from spam bans.
+  if (device_token && (await isTrustedDevice(user.id, device_token))) {
+    const token = signToken(user);
+    return res.json({
+      token,
+      user: { id: user.id, name: user.name, role: user.role, phone_verified: user.phone_verified },
+    });
   }
   await createOtp(phone, 'login');
   res.json({ otp_required: true, phone });
@@ -103,8 +120,11 @@ async function loginVerifyOtp(req, res) {
   );
   if (!rows.length) return res.status(404).json({ error: 'المستخدم غير موجود', code: 'ERR_NOT_FOUND' });
   const token = signToken(rows[0]);
+  // Completing the login OTP trusts this device for 90 days → future logins skip the OTP.
+  const device_token = await issueDeviceToken(rows[0].id, req.get('user-agent'));
   res.json({
     token,
+    device_token,
     user: { id: rows[0].id, name: rows[0].name, role: rows[0].role, phone_verified: rows[0].phone_verified },
   });
 }
@@ -188,7 +208,9 @@ async function postVerifyOtp(req, res) {
   );
   if (!rows.length) return res.status(404).json({ error: 'المستخدم غير موجود', code: 'ERR_NOT_FOUND' });
   const token = signToken(rows[0]);
-  res.json({ verified: true, token });
+  // Verifying at signup trusts this device for 90 days → first real login skips the OTP.
+  const device_token = await issueDeviceToken(rows[0].id, req.get('user-agent'));
+  res.json({ verified: true, token, device_token });
 }
 
 async function resendOtp(req, res) {
@@ -196,6 +218,9 @@ async function resendOtp(req, res) {
   if (!phone) return res.status(400).json({ error: 'بيانات ناقصة', code: 'ERR_VALIDATION' });
   if (!['verify', 'login', 'reset'].includes(purpose)) {
     return res.status(400).json({ error: 'بيانات ناقصة', code: 'ERR_VALIDATION' });
+  }
+  if (!isValidIqMobile(phone)) {
+    return res.status(400).json({ error: 'رقم هاتف غير صحيح', code: 'ERR_INVALID_PHONE' });
   }
   const { expires_in } = await createOtp(phone, purpose);
   res.json({ sent: true, expires_in });
@@ -224,6 +249,9 @@ async function forgotPassword(req, res) {
 async function forgotPasswordPhone(req, res) {
   const { phone } = req.body;
   if (!phone) return res.status(400).json({ error: 'بيانات ناقصة', code: 'ERR_VALIDATION' });
+  if (!isValidIqMobile(phone)) {
+    return res.status(400).json({ error: 'رقم هاتف غير صحيح', code: 'ERR_INVALID_PHONE' });
+  }
   const { rows } = await query(`SELECT id, role FROM users WHERE phone = $1`, [phone]);
   // Don't leak whether the phone is registered — always 200.
   if (rows.length && !['admin', 'staff'].includes(rows[0].role)) {
@@ -246,6 +274,9 @@ async function resetPasswordPhone(req, res) {
     [hash, phone]
   );
   if (!rows.length) return res.status(403).json({ error: 'غير مصرح', code: 'ERR_FORBIDDEN' });
+  // A password change must invalidate every trusted device (a stolen device token can't
+  // outlive the reset). The user re-OTPs once on next login to re-trust the device.
+  await revokeUserDevices(rows[0].id);
   res.json({ reset: true });
 }
 
@@ -265,6 +296,8 @@ async function resetPassword(req, res) {
   const hash = await bcrypt.hash(password, SALT_ROUNDS);
   await query(`UPDATE users SET password_hash = $1 WHERE id = $2`, [hash, rows[0].user_id]);
   await query(`UPDATE password_resets SET used = TRUE WHERE id = $1`, [rows[0].id]);
+  // Invalidate trusted devices on password change (parallel to the phone-reset path).
+  await revokeUserDevices(rows[0].user_id);
   res.json({ reset: true });
 }
 

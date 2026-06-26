@@ -2,6 +2,10 @@ import type { User } from "./types";
 
 const TOKEN_KEY = "token";
 const USER_KEY = "user";
+// Trusted-device token: minted by the backend after a login/signup OTP, sent back on
+// every login to skip the WhatsApp OTP for ~90 days. Deliberately survives logout (a
+// normal logout keeps the device trusted); the backend clears it on password reset.
+const DEVICE_TOKEN_KEY = "loloshop_device_token";
 // Session flag: admin/staff clicked "زيارة الموقع الرئيسي" — don't bounce them
 // from "/" back to their panel until they explicitly return.
 const SKIP_DASHBOARD_REDIRECT_KEY = "skipDashboardRedirect";
@@ -30,9 +34,20 @@ export function setUser(user: User): void {
   localStorage.setItem(USER_KEY, JSON.stringify(user));
 }
 
+export function getDeviceToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(DEVICE_TOKEN_KEY);
+}
+
+export function setDeviceToken(token: string): void {
+  localStorage.setItem(DEVICE_TOKEN_KEY, token);
+}
+
 export function logout(): void {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
+  // NOTE: device token is intentionally NOT cleared — a normal logout keeps the device
+  // trusted so the user skips the OTP on their next login.
   clearSkipDashboardRedirect();
 }
 

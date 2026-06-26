@@ -126,6 +126,25 @@ CREATE TABLE IF NOT EXISTS password_resets (
 );
 
 -- =====================================================
+-- TRUSTED DEVICES — skip the login OTP on a known device (migration 048)
+-- After a login/signup OTP we mint a random device token, store its sha-256 hash,
+-- and hand the raw token to the client. A matching non-expired row lets the next
+-- login skip the WhatsApp OTP (password still required). Cuts OTP volume → protects
+-- the WhatsApp sender number from spam bans. Password reset deletes the user's rows.
+-- =====================================================
+CREATE TABLE IF NOT EXISTS trusted_devices (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash   TEXT NOT NULL,
+  user_agent   TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_used_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at   TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_trusted_devices_user ON trusted_devices(user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_trusted_devices_token ON trusted_devices(token_hash);
+
+-- =====================================================
 -- WHOLESALERS — extends users for role=wholesaler
 -- =====================================================
 CREATE TABLE IF NOT EXISTS wholesalers (

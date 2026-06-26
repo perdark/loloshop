@@ -1,6 +1,6 @@
 import axios from "axios";
 import { api, getApiErrorMessage } from "./api";
-import { getUser } from "./auth";
+import { getUser, getDeviceToken, setDeviceToken } from "./auth";
 import type { LoginResponse, User } from "./types";
 
 function extractMessage(e: unknown, fallback: string): string {
@@ -10,16 +10,26 @@ function extractMessage(e: unknown, fallback: string): string {
   return fallback;
 }
 
+// login() now has two possible outcomes:
+//  • trusted device → backend skips the OTP and returns { token, user } (logged in)
+//  • otherwise      → backend sends a WhatsApp OTP and returns { otp_required, phone }
+export type LoginResult =
+  | { otp_required: true; phone: string }
+  | { token: string; user: User };
+
 export async function login(
   phone: string,
   password: string
-): Promise<{ otp_required: true; phone: string }> {
+): Promise<LoginResult> {
   try {
-    const { data } = await api.post<{ otp_required: true; phone: string }>("/auth/login", {
-      phone,
-      password,
-    });
-    return data;
+    const { data } = await api.post<Partial<LoginResponse> & { otp_required?: true }>(
+      "/auth/login",
+      { phone, password, device_token: getDeviceToken() || undefined }
+    );
+    if (data.token && data.user) {
+      return { token: data.token, user: data.user };
+    }
+    return { otp_required: true, phone };
   } catch (e) {
     throw new Error(extractMessage(e, "بيانات الدخول غير صحيحة"));
   }
@@ -34,6 +44,8 @@ export async function loginVerifyOtp(
       phone,
       code,
     });
+    // Trust this device so future logins skip the OTP.
+    if (data.device_token) setDeviceToken(data.device_token);
     return data;
   } catch (e) {
     throw new Error(extractMessage(e, "رمز غير صحيح"));
@@ -125,10 +137,12 @@ export async function verifyRegistrationOtp(
   code: string
 ): Promise<{ token: string }> {
   try {
-    const { data } = await api.post<{ verified: boolean; token: string }>(
+    const { data } = await api.post<{ verified: boolean; token: string; device_token?: string }>(
       "/auth/verify-otp",
       { phone, code }
     );
+    // Trust this device so the first real login skips the OTP.
+    if (data.device_token) setDeviceToken(data.device_token);
     return { token: data.token };
   } catch (e) {
     throw new Error(extractMessage(e, "رمز غير صحيح"));
