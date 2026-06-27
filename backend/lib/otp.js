@@ -191,7 +191,7 @@ async function sendViaZentramsg(phone, code) {
   const ids = toIntlDigits(phone);
   if (!isValidIqMobile(phone) || !/^964\d{10}$/.test(ids)) {
     console.error(`[OTP] refusing to send to invalid recipient: ${phone} (${ids})`);
-    return;
+    return { success: false, error: 'رقم هاتف غير صالح للإرسال' };
   }
 
   const token = process.env.ZENTRAMSG_API_KEY;       // x-api-token
@@ -203,7 +203,7 @@ async function sendViaZentramsg(phone, code) {
     if (process.env.NODE_ENV === 'production') {
       console.error('ZENTRAMSG_API_KEY / ZENTRAMSG_DEVICE_UUID missing — OTP cannot be sent in production.');
     }
-    return;
+    return { success: false, error: 'إعدادات API الواتساب غير موجودة. يرجى التحقق من متغيرات البيئة.' };
   }
   try {
     const form = new FormData();
@@ -218,9 +218,23 @@ async function sendViaZentramsg(phone, code) {
       headers: { 'x-api-token': token },
       body: form,
     });
-    if (!res.ok) console.error('Zentramsg send failed:', res.status, await res.text());
+    const text = await res.text();
+    let body = null;
+    try { body = JSON.parse(text); } catch { /* non-JSON response — keep raw text */ }
+    // Zentramsg confirms real delivery acceptance in the JSON BODY, not just the HTTP
+    // status: a banned/expired sender device still returns HTTP 200 with success:false
+    // (the message sits "pending" and is never delivered). Per the WhatsApp guide, count
+    // it as sent ONLY when the body says success:true && msg:"MESSAGE_CREATED" — otherwise
+    // log loudly so a silent ban is visible instead of looking like a successful send.
+    const accepted = res.ok && body && body.success === true && body.msg === 'MESSAGE_CREATED';
+    if (!accepted) {
+      console.error('WhatsApp API rejected:', res.status, body?.msg ?? text, body?.errors ?? '');
+      return { success: false, status: res.status, msg: body?.msg, errors: body?.errors, details: text };
+    }
+    return { success: true, msg: body.msg, sentTo: ids };
   } catch (e) {
-    console.error('Zentramsg error:', e.message);
+    console.error('WhatsApp API error:', e.message);
+    return { success: false, error: e.message, details: e.stack };
   }
 }
 

@@ -6,6 +6,36 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
+## 2026-06-27 (c) — OTP send: body-based success detection (catch silent ZentraMsg bans)
+
+Uncommitted on **main**. **No migration, no env change** (per user: do NOT rename env vars — kept `ZENTRAMSG_API_KEY`/
+`ZENTRAMSG_DEVICE_UUID`/`ZENTRAMSG_API_URL`). BE `node --check` 0. Verified via a stubbed-fetch/stubbed-db harness (no real send,
+no DB): 4/4. Aligned `backend/lib/otp.js` send path to the WhatsApp guide (`~/Downloads/whatsapp-messages-agent-guide.md`, the
+ZentraMsg project doing 1000+/day).
+
+**Why.** `sendViaZentramsg` only checked the HTTP status (`res.ok`). ZentraMsg returns **HTTP 200 with `success:false`** when the
+sender device is banned/expired (message sits "pending", never delivered) — so the recurring "OTP not sending" looked like a
+*successful* send in our logs. Root-cause class of the ban incidents (see [[project_prod_otp_zentramsg]]).
+
+**Fix (logging/visibility only — login flow behavior unchanged).** Parse the JSON body; treat as sent ONLY when
+`res.ok && body.success === true && body.msg === 'MESSAGE_CREATED'` (the guide's contract). On anything else, log
+`WhatsApp API rejected: <status> <msg> <errors>` and return `{success:false,...}`. `createOtp` is still **non-blocking** (it ignores
+the return — the code is still written to DB; a transient send failure does NOT hard-block login, per prior decision) — the change
+is purely that a real ban is now **visible in `pm2 logs`** instead of silent. Early guards (invalid recipient / missing creds) now
+also return the guide's `{success:false, error}` shape. `test-zentramsg.js` updated to print ✅/❌ on the same body contract.
+
+**Verified (harness).** ① MESSAGE_CREATED → no rejection log, `x-api-token` header sent. ② HTTP200+success:false → logs rejection
+with msg+errors. ③ HTTP 500 → logs rejection, no throw. ④ prod path does NOT print the live code.
+
+### Open follow-ups
+- **Live test pending:** run `node backend/test-zentramsg.js 07XXXXXXXXX` against the real device → expect `✅ MESSAGE_CREATED`. If
+  it prints `❌` with `success:false`/a ban msg, the ZentraMsg device is banned again (relink + update prod `.env`, restart).
+- Uncommitted on main; not pushed (a push auto-deploys). Env var names deliberately kept as `ZENTRAMSG_*`.
+- Not changed (out of scope): making `createOtp` surface the send failure to the user. Today a failed send still returns
+  `expires_in` and the user sees "code sent". If you want login to fail fast on a ban, have `createOtp` check the return.
+
+---
+
 ## 2026-06-27 (b) — Retail cap photo · wholesaler طقم form all-optional · storefront location map
 
 On **main**, pushed (auto-deploys). Migration **050 applied to the shared Neon DB** (dev+prod = one DB, so prod is covered;

@@ -40,10 +40,16 @@ async function main() {
 
   try {
     const res = await fetch(URL, { method: 'POST', headers: { 'x-api-token': token }, body: form });
-    const body = await res.text();
+    const text = await res.text();
+    let json = null;
+    try { json = JSON.parse(text); } catch { /* non-JSON */ }
     console.log(`\nHTTP ${res.status}`);
-    console.log(body);
-    process.exit(res.ok ? 0 : 1);
+    console.log(text);
+    // Same contract the OTP flow uses: delivered only when the BODY confirms it.
+    // HTTP 200 with success:false means the device is banned/expired (message pending).
+    const accepted = res.ok && json && json.success === true && json.msg === 'MESSAGE_CREATED';
+    console.log(accepted ? '\n✅ MESSAGE_CREATED — accepted by Zentramsg' : '\n❌ NOT accepted (check device/subscription/ban)');
+    process.exit(accepted ? 0 : 1);
   } catch (e) {
     console.error('Request failed:', e.message);
     process.exit(1);
