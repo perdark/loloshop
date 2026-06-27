@@ -6,6 +6,82 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
+## 2026-06-27 (b) — Retail cap photo · wholesaler طقم form all-optional · storefront location map
+
+On **main**, pushed (auto-deploys). Migration **050 applied to the shared Neon DB** (dev+prod = one DB, so prod is covered;
+deploy's `npm run migrate` runs schema.sql only, not numbered files). Gates green: BE `node --check` 0 · FE `tsc` 0 · `eslint` 0.
+Verified **live on Neon** (cap-photo 4/4 + inheritance; full-set-optional 10/10; both self-cleaning). `next build` NOT run locally
+(disk 94%/3.9G — built on the server by the deploy). Browser click-through pending.
+
+**① Retail cap photo (migration 050).** Caps now let a retail student upload an OPTIONAL reference photo. Implemented via the
+existing customer-image plumbing — added a single-option, photo-only option group **«صورة القبعة»** (`required=FALSE`,
+`requires_customer_image=FALSE`) to the **top-level** cap (`parent_id IS NULL`); children inherit via `getProductFull`'s
+parent+own merge (so it lives ONLY on the parent — adding to children would double-render, per the migration-040 gotcha). FE:
+`OptionGroupField` treats «صورة القبعة» as a typed field → auto-selects its sole option + hides the selector; `product/[id]`
+detects `isCapPhoto` → renders `<CustomerImageUpload allowOptionalImage>` (photo-only). `CustomerImageUpload` header reworded so an
+optional photo-only field says «أرفق صورة» (not «...مطلوبة منك»). Backend: `priceSelections.hasEmbroidery` now also flips on a
+PROVIDED image (not just text) → a photo'd cap routes to `design_complete`; a photoless cap stays `preparing` (plain «قبعة سادة»).
+**Wholesaler full-set caps are UNAFFECTED** (that path builds cap spec lines by hand, never reads cap option groups) — so "just
+retail" is satisfied for free. NB: caps already had required groups (لون/جانب/أعلى/الشكل); the photo is purely additive + optional.
+
+**② Wholesaler طقم order form = EVERYTHING optional.** Per request, a rep/student can now save the full-set order with NOTHING
+filled (sash/cap type, robe measurements, embroidery, shawl photo — all optional) and complete it later. Backend `fullSetOrder.js`:
+dropped the 400s for measurements / نوع الوشاح / نوع القبعة / shawl photo; type spec lines emitted only when chosen; measurements
+stored per-field (null when blank) and the robe JSON is null when fully empty; a PROVIDED measurement is STILL range-checked (typo
+guard). **One guard kept:** `wholesaler_price <= 0` still 400s («لم يُحدَّد سعر الطقم…») — that's admin pricing config, not a form
+field. FE `FullSetOrderForm.tsx`: removed the required validations (only the "wait for in-flight upload" check stays); per-field
+null-safe measurement seeds; shawl photo relabelled «(اختياري)». `CreateFullSetPayload.sash_type/cap_type` made optional.
+
+**③ Storefront location map.** NEW `components/shop/StoreLocation.tsx` — a «موقعنا» section (embedded Google Map iframe + «افتح في
+خرائط جوجل» link, owner-provided embed/share URL) rendered on the home page just above the footer (`app/(student)/page.tsx`).
+Brand-warm, RTL, responsive aspect-ratio frame.
+
+**Files.** BE: `controllers/orderController.js` (hasEmbroidery on image), `lib/fullSetOrder.js`; NEW `db/migrations/050_cap_photo.sql`.
+FE: `app/(student)/page.tsx`, `app/(student)/product/[id]/page.tsx`, `components/catalog/{OptionGroupField,CustomerImageUpload}.tsx`,
+`components/wholesaler/FullSetOrderForm.tsx`, `lib/wholesaler.ts`; NEW `components/shop/StoreLocation.tsx`.
+
+### Open follow-ups
+- **Browser click-through pending:** (①) open a retail cap → upload a photo → confirm it shows for staff at `design_complete`;
+  a photoless cap stays plain. (②) `/wholesaler/custom-order` or a rep student order → submit a blank طقم → 201, appears in queue.
+  (③) load `/` → scroll to «موقعنا» → map renders + link opens. Run `next build` before relying on it (done on the server by deploy).
+- Seed not updated for 050 (live shared DB has it; schema.sql unchanged — it's a data row, no new columns). Fresh installs via seed
+  won't get the cap photo group until seed is updated.
+- Decision: cap photo is OPTIONAL (a «قبعة سادة» needs none). If it should be mandatory, set the group `requires_customer_image=TRUE`
+  (the product page would then enforce + show the required asterisk automatically).
+
+---
+
+## 2026-06-27 — Wholesaler students: NO OTP (kills the "two codes" bug + the bulk spam-ban)
+
+Uncommitted on **main**. **No migration** (uses existing `students.wholesaler_id`). BE `node --check` 0. Verified **live on Neon**
+(6/6 self-cleaning login-controller e2e). NOT pushed/deployed yet.
+
+**Why.** A wholesaler-linked student got **two** WhatsApp OTPs during onboarding, and 100+ students signing in together blasted the
+gateway → repeated sender bans. Root cause was two independent sends: ① `joinController.joinReferral` called `createOtp(phone)` on
+join — but the join UI never asks for the code (it shows «طلبك قيد المراجعة»), so it was an **orphan/spam** send; ② `authController.login`
+sent a `login` OTP on every login. Different purposes ⇒ nothing deduped them ⇒ two messages.
+
+**Fix (2 edits, additive — nothing else touched).**
+- **`joinController.js`** — removed the orphan `createOtp(phone)` on join (and the now-unused import). Phone format is still
+  validated (`isValidIqMobile`) so junk numbers are still rejected; we just don't SEND. Account is still created `pending_approval`.
+- **`authController.login`** — wholesaler-linked students (`role='retail'` AND a `students` row with `wholesaler_id IS NOT NULL`)
+  now log in **password-only**: returns `{token,user}` straight away (same shape as the trusted-device branch the FE already handles),
+  **no `createOtp`**. The flag is computed in the existing user-lookup SELECT via an `EXISTS(...)` subquery (no extra round-trip);
+  the branch sits BEFORE the trusted-device check so it also covers first-ever logins. Self-registered retail (38 in DB) still OTPs
+  via `/register`; reps/staff/admin are role≠retail so never match. No FE change (login page already branches on `"token" in res`).
+
+**Verified (live, self-cleaning throwaway WS student).** Correct pw → 200 + token + **0 `otp_codes` rows** (no send); `otp_required`
+absent; wrong pw → 401. Live classification: **168 wholesaler students** (now OTP-free) vs 38 plain retail.
+
+### Open follow-ups
+- Uncommitted on main; **not pushed** (a push auto-deploys prod via GitHub Actions). Commit/deploy when ready.
+- Wholesaler students keep `phone_verified=FALSE` now (was set TRUE by the old login-OTP). Nothing gates on it (verified by grep);
+  purely cosmetic in admin views. Set it TRUE on rep-approval if a "verified" count ever matters.
+- Edge: if a wholesaler is deleted, the student's `wholesaler_id` goes NULL (FK ON DELETE SET NULL) → that student falls back to
+  OTP login. Rare, acceptable. `forgot-password-phone` still OTPs (individual reset, not bulk — intentionally kept).
+
+---
+
 ## 2026-06-26 — OTP bans root-caused & fixed: trusted-device login + phone validation + prod security hardening
 
 **Shipped to prod** (commit `8c1c4dd` on **main**, deployed via GitHub Actions → `scripts/deploy.sh`). Migration **048 applied to

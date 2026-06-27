@@ -282,11 +282,12 @@ export interface CreateFullSetPayload {
     /** ملاحظات لفصال الروب */
     tailor_notes?: string;
   };
-  sash_type: PieceType;
-  cap_type: PieceType;
+  /** عادي/ملكي — optional (the whole طقم form is optional; omitted when not chosen). */
+  sash_type?: PieceType;
+  cap_type?: PieceType;
   /** فصال الروب: كسرة الكتف (yes/no). */
   shoulder_pleat?: boolean;
-  /** شال امريكي (yes/no) — image required when enabled. */
+  /** شال امريكي (yes/no) — photo optional. */
   american_shawl?: { enabled: boolean; image_url?: string };
   embroidery: {
     cap_side?: EmbroideryZone;

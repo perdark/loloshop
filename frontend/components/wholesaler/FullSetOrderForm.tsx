@@ -57,18 +57,13 @@ export function FullSetOrderForm({
   onUploadImage,
   onSubmit,
 }: FullSetOrderFormProps) {
-  const [robeLen, setRobeLen] = useState(
-    initial?.measurements ? String(initial.measurements.robe_length_cm) : ""
-  );
-  const [sleeveLen, setSleeveLen] = useState(
-    initial?.measurements ? String(initial.measurements.sleeve_length_cm) : ""
-  );
-  const [shoulder, setShoulder] = useState(
-    initial?.measurements ? String(initial.measurements.shoulder_cm) : ""
-  );
-  const [chest, setChest] = useState(
-    initial?.measurements?.chest_cm ? String(initial.measurements.chest_cm) : ""
-  );
+  // Per-field null-safe seed: measurements are all optional, so a missing field stays blank
+  // (never renders the literal "null").
+  const measSeed = (v: number | null | undefined) => (v == null ? "" : String(v));
+  const [robeLen, setRobeLen] = useState(measSeed(initial?.measurements?.robe_length_cm));
+  const [sleeveLen, setSleeveLen] = useState(measSeed(initial?.measurements?.sleeve_length_cm));
+  const [shoulder, setShoulder] = useState(measSeed(initial?.measurements?.shoulder_cm));
+  const [chest, setChest] = useState(measSeed(initial?.measurements?.chest_cm));
   const [tailorNotes, setTailorNotes] = useState(
     initial?.measurements?.tailor_notes || ""
   );
@@ -119,14 +114,10 @@ export function FullSetOrderForm({
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!robeLen || !sleeveLen || !shoulder || !chest)
-      return toast.error("يرجى إدخال قياسات الروب كاملة");
-    if (!sashType) return toast.error("يرجى اختيار نوع الوشاح");
-    if (!capType) return toast.error("يرجى اختيار نوع القبعة");
+    // Every field is optional — the rep/student can save now and complete later. The only
+    // guard left is waiting for an in-flight image upload so it isn't lost on submit.
     if (shawlUploading || Object.values(zones).some((z) => z.uploading))
       return toast.error("يرجى الانتظار حتى انتهاء رفع الصور");
-    if (shawlEnabled && !shawlImage)
-      return toast.error("صورة الشال الأمريكي مطلوبة");
 
     const zone = (z: ZoneState) => ({
       text: z.text.trim() || undefined,
@@ -140,8 +131,8 @@ export function FullSetOrderForm({
         chest_cm: chest,
         tailor_notes: tailorNotes.trim() || undefined,
       },
-      sash_type: sashType,
-      cap_type: capType,
+      sash_type: sashType || undefined,
+      cap_type: capType || undefined,
       shoulder_pleat: shoulderPleat,
       american_shawl: {
         enabled: shawlEnabled,
@@ -267,7 +258,7 @@ export function FullSetOrderForm({
       </Section>
 
       {/* ── شال امريكي ── */}
-      <Section title="شال امريكي" hint="صورة الشال إجبارية عند الاختيار">
+      <Section title="شال امريكي" hint="صورة اختيارية">
         <div className="space-y-3">
           <YesNoToggle
             label="إضافة شال امريكي"
@@ -277,7 +268,8 @@ export function FullSetOrderForm({
           {shawlEnabled && (
             <div className="space-y-2">
               <p className="text-sm font-medium text-ink">
-                صورة الشال <span className="text-danger">*</span>
+                صورة الشال{" "}
+                <span className="text-xs font-normal text-ink-soft">(اختياري)</span>
               </p>
               <div className="flex items-center gap-2.5">
                 {shawlImage ? (

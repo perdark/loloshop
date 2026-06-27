@@ -75,7 +75,9 @@ export function CustomerImageUpload({
     <div className="mt-3 rounded-2xl border border-orange/40 bg-orange/5 p-4 ring-1 ring-orange/10">
       <p className="inline-flex items-center gap-1.5 text-sm font-semibold text-ink">
         <span aria-hidden className="h-2 w-2 rounded-full bg-brand-gradient" />
-        {showText ? (textPrompt ? textPrompt : "كتابة مطلوبة منك") : "صورة مطلوبة منك"}
+        {showText
+          ? (textPrompt ? textPrompt : "كتابة مطلوبة منك")
+          : (needsImage ? "صورة مطلوبة منك" : "أرفق صورة")}
         {needsText || needsImage ? (
           <span className="text-orange-ink">*</span>
         ) : (

@@ -38,7 +38,8 @@ export function OptionGroupField({
   const isTypedField =
     (isColorGroup && group.requiresCustomerText) || // sash «اللون» (typed); robe/cap «اللون» = swatches
     group.nameAr === "لون التطريز" || // thread color — typed even when optional (sash-only by name)
-    group.nameAr.startsWith("تطريز"); // embroidery zones يسار/يمين/من الخلف (sash-only by name)
+    group.nameAr.startsWith("تطريز") || // embroidery zones يسار/يمين/من الخلف (sash-only by name)
+    group.nameAr === "صورة القبعة"; // retail cap photo — sole option auto-selected, photo-only UI
   const soleActiveId =
     group.options.find((o) => o.active)?.id ?? group.options[0]?.id ?? null;
 

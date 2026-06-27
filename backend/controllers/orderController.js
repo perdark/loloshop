@@ -450,9 +450,11 @@ async function priceSelections({ productId, role, selections, studentGender }) {
       s.customer_text != null && String(s.customer_text).trim() !== ''
         ? String(s.customer_text).trim()
         : null;
-    // Track embroidery: a required image/text — or any embroidery text the customer typed —
-    // means there's embroidery work, so the piece routes to the staff design stage.
-    if (needsImage || needsText || providedText) hasEmbroidery = true;
+    const providedImage = s.customer_image_url ? String(s.customer_image_url) : null;
+    // Track embroidery/design work: a required image/text — OR any reference photo / text the
+    // customer supplied (e.g. an optional «صورة القبعة» cap photo, or an image-only sash zone) —
+    // means there's design work, so the piece routes to the staff design stage (design_complete).
+    if (needsImage || needsText || providedText || providedImage) hasEmbroidery = true;
 
     const line = opt.price_delta * qty;
     total += line;

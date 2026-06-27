@@ -1,6 +1,6 @@
 const bcrypt = require('bcrypt');
 const { query, tx } = require('../lib/db');
-const { createOtp, isValidIqMobile } = require('../lib/otp');
+const { isValidIqMobile } = require('../lib/otp');
 
 async function getReferral(req, res) {
   const { code } = req.params;
@@ -113,7 +113,11 @@ async function joinReferral(req, res) {
     );
     return { user_id: u.rows[0].id, student_id: s.rows[0].id };
   });
-  await createOtp(phone);
+  // No OTP on join. The student account is created as 'pending_approval' and the rep
+  // approves it in-app — the join UI never asks for an OTP code (it only shows "قيد
+  // المراجعة"), so any code sent here was an orphan WhatsApp message: pure spam that,
+  // multiplied across 100+ students joining together, risks banning the gateway sender.
+  // Phone format is still validated above (isValidIqMobile); we just don't send.
   res.status(201).json({
     data: { ...result, status: 'pending_approval', message_ar: 'طلبك بانتظار موافقة الممثل' },
   });

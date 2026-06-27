@@ -20,6 +20,7 @@ import { ShopCover } from "@/components/shop/ShopCover";
 import { AtelierStory, MilestoneStory, DesignProcess } from "@/components/shop/BrandStory";
 import { VipHomeBand } from "@/components/vip/VipHomeBand";
 import { FullSetBand } from "@/components/shop/FullSetBand";
+import { StoreLocation } from "@/components/shop/StoreLocation";
 import { MaintenanceScreen } from "@/components/MaintenanceScreen";
 
 type FilterKey = "all" | ProductType;
@@ -422,6 +423,10 @@ export default function StudentHomePage() {
       )}
 
       </section>
+
+      {/* ── Store location — embedded map + directions link ── */}
+      <div className="full-bleed h-px bg-line" aria-hidden />
+      <StoreLocation />
 
       {/* Quiet, human close — same cream canvas, a hairline rule sets it apart */}
       <footer className="full-bleed mt-0 border-t border-line px-4 py-10 sm:px-6">

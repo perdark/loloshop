@@ -114,24 +114,34 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
   // robe measurements (قياسات الروب) — typo-guarded. محيط الصدر (chest_cm) is a required
   // measurement; ملاحظات لفصال الروب (tailor_notes) is an optional free-text note that rides
   // the measurements JSON (no range check — skipped because it isn't in MEAS_RANGE).
+  // EVERYTHING in the طقم form is OPTIONAL (per request): a rep/student can save the order
+  // with nothing filled and complete it later. Measurements are kept per-field only when a
+  // valid positive number is given (null otherwise); a value that IS provided is still
+  // range-checked to catch obvious typos (e.g. 5000 سم).
   const m = measurements || {};
+  const measNum = (v) => {
+    const n = Number(normalizeDigits(v));
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
   const meas = {
-    shoulder_cm: Number(normalizeDigits(m.shoulder_cm)),
-    chest_cm: Number(normalizeDigits(m.chest_cm)),
-    robe_length_cm: Number(normalizeDigits(m.robe_length_cm)),
-    sleeve_length_cm: Number(normalizeDigits(m.sleeve_length_cm)),
+    shoulder_cm: measNum(m.shoulder_cm),
+    chest_cm: measNum(m.chest_cm),
+    robe_length_cm: measNum(m.robe_length_cm),
+    sleeve_length_cm: measNum(m.sleeve_length_cm),
     tailor_notes: clean(m.tailor_notes, 500),
   };
   for (const [k, [lo, hi]] of Object.entries(MEAS_RANGE)) {
-    if (!isFinite(meas[k]) || meas[k] < lo || meas[k] > hi) {
+    if (meas[k] != null && (meas[k] < lo || meas[k] > hi)) {
       return err(400, `قياسات الروب غير صالحة — ${MEAS_LABEL[k]} يجب أن يكون بين ${lo} و ${hi} سم`);
     }
   }
+  const hasAnyMeasurement =
+    ['shoulder_cm', 'chest_cm', 'robe_length_cm', 'sleeve_length_cm'].some((k) => meas[k] != null) ||
+    !!meas.tailor_notes;
 
+  // النوع (عادي/ملكي) — optional now; null when not chosen → no spec line, no surcharge.
   const sashType = PIECE_TYPES.includes(sash_type) ? sash_type : null;
   const capType = PIECE_TYPES.includes(cap_type) ? cap_type : null;
-  if (!sashType) return err(400, 'نوع الوشاح مطلوب (عادي أو ملكي)');
-  if (!capType) return err(400, 'نوع القبعة مطلوب (عادي أو ملكي)');
 
   const e = embroidery || {};
   const zone = (z) => ({ text: clean(z?.text, 200), image_url: clean(z?.image_url, 500) });
@@ -153,8 +163,8 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
   const shawlIn = body.american_shawl || {};
   const shawlEnabled =
     shawlIn.enabled === true || shawlIn.enabled === 'true' || shawlIn.enabled === 'نعم';
+  // شال امريكي photo is OPTIONAL now (was required when enabled). Stored when present.
   const shawlImage = clean(shawlIn.image_url, 500);
-  if (shawlEnabled && !shawlImage) return err(400, 'صورة الشال الأمريكي مطلوبة');
 
   // لون الوشاح (sash color) — optional typed free-text color + optional reference photo.
   // Captured as a sash spec line only when non-empty (frontend no longer sends it; kept
@@ -237,7 +247,7 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
         ? [{ label: 'لون الوشاح', customer_text: colorText, customer_image_url: colorImage }] : []),
       ...(embroideryColor
         ? [{ label: 'لون التطريز', customer_text: embroideryColor }] : []),
-      { label: 'نوع الوشاح', customer_text: sashType },
+      ...(sashType ? [{ label: 'نوع الوشاح', customer_text: sashType }] : []),
       ...(shawlEnabled
         ? [{ label: 'شال امريكي', customer_text: 'نعم', customer_image_url: shawlImage }] : []),
       ...(emb.sash_front.text || emb.sash_front.image_url
@@ -246,7 +256,7 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
         ? [{ label: 'تطريز الوشاح من الخلف', customer_text: emb.sash_back.text, customer_image_url: emb.sash_back.image_url }] : []),
     ],
     cap: [
-      { label: 'نوع القبعة', customer_text: capType },
+      ...(capType ? [{ label: 'نوع القبعة', customer_text: capType }] : []),
       ...(emb.cap_side.text || emb.cap_side.image_url
         ? [{ label: 'تطريز القبعة من الجانب', customer_text: emb.cap_side.text, customer_image_url: emb.cap_side.image_url }] : []),
       ...(emb.cap_top.text || emb.cap_top.image_url
@@ -299,7 +309,9 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
       const prodId = byType[type];
       const flags = itemFlags[type];
       const needsPressing = type !== 'cap';
-      const measurementsJson = type === 'robe' ? JSON.stringify(meas) : null;
+      // Store robe measurements only when at least one field/note was given (else null, so the
+      // edit form re-opens clean instead of showing "null"s).
+      const measurementsJson = type === 'robe' && hasAnyMeasurement ? JSON.stringify(meas) : null;
       const existing = await client.query(
         `SELECT id FROM orders
          WHERE student_id = $1 AND product_id = $2 AND design_id IS NULL AND status <> 'cancelled'`,

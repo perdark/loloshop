@@ -365,7 +365,11 @@ export default function StudentProductPage() {
           const isSashThreadColor =
             product.type === "sash" && group.nameAr === "لون التطريز";
           const isSashTypedField = isSashEmbroideryZone || isSashThreadColor;
-          const showUploadBlock = needsImage || needsText || isSashTypedField;
+          // Retail cap photo (migration 050): an OPTIONAL reference photo the student uploads
+          // for the cap — rendered photo-only, like a sash embroidery zone's optional image.
+          const isCapPhoto =
+            product.type === "cap" && group.nameAr === "صورة القبعة";
+          const showUploadBlock = needsImage || needsText || isSashTypedField || isCapPhoto;
           const key =
             optionId != null ? selectionKey(group.id, optionId) : null;
 
@@ -393,7 +397,7 @@ export default function StudentProductPage() {
                     setConfirmed(null);
                   }}
                   allowOptionalText={isSashTypedField && !needsText}
-                  allowOptionalImage={isSashEmbroideryZone}
+                  allowOptionalImage={isSashEmbroideryZone || isCapPhoto}
                   showErrors={showErrors}
                 />
               )}

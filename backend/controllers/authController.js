@@ -80,7 +80,12 @@ async function login(req, res) {
     return res.status(400).json({ error: 'رقم هاتف غير صحيح', code: 'ERR_INVALID_PHONE' });
   }
   const { rows } = await query(
-    `SELECT id, name, phone, email, role, password_hash, phone_verified FROM users WHERE phone = $1`,
+    `SELECT u.id, u.name, u.phone, u.email, u.role, u.password_hash, u.phone_verified,
+            EXISTS (
+              SELECT 1 FROM students s
+              WHERE s.user_id = u.id AND s.wholesaler_id IS NOT NULL
+            ) AS is_wholesaler_student
+     FROM users u WHERE u.phone = $1`,
     [phone]
   );
   if (!rows.length) {
@@ -90,6 +95,19 @@ async function login(req, res) {
   const ok = await bcrypt.compare(password, user.password_hash);
   if (!ok) {
     return res.status(401).json({ error: 'بيانات خاطئة', code: 'ERR_INVALID_CREDENTIALS' });
+  }
+  // Wholesaler-linked students log in with password ONLY — no WhatsApp OTP. A rep
+  // onboards 100+ students who all sign in around the same time; blasting that many
+  // OTPs is exactly what spam-bans the gateway sender number. They already joined via
+  // the rep's referral link and were approved by the rep, so the phone-ownership check
+  // an OTP provides is redundant here. (Self-registered retail still OTPs — see register.)
+  // Checked before the trusted-device branch so it covers first-ever logins too.
+  if (user.role === 'retail' && user.is_wholesaler_student) {
+    const token = signToken(user);
+    return res.json({
+      token,
+      user: { id: user.id, name: user.name, role: user.role, phone_verified: user.phone_verified },
+    });
   }
   // Trusted device → skip the WhatsApp OTP entirely (the password is already verified).
   // This is the change that cuts OTP volume to ~zero for returning users and protects the
