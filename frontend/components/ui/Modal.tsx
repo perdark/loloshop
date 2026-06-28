@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Button } from "./Button";
 
 interface ModalProps {
@@ -19,6 +20,9 @@ export function Modal({ open, onClose, title, children, footer, descriptionId }:
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
+  // Mount guard: createPortal needs document.body, which only exists client-side.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
@@ -69,9 +73,13 @@ export function Modal({ open, onClose, title, children, footer, descriptionId }:
     };
   }, [open]);
 
-  if (!open) return null;
+  if (!open || !mounted) return null;
 
-  return (
+  // Portaled to <body> so the overlay escapes any ancestor stacking context
+  // (e.g. the wholesaler/student layouts whose `animate-page-in` leaves a
+  // persistent transform on <main>, which would otherwise trap this z-50 below
+  // the fixed bottom nav and clip the footer buttons off-screen).
+  return createPortal(
     <div
       className="animate-fade-page-in fixed inset-0 z-50 flex items-end justify-center bg-ink/45 p-4 backdrop-blur-sm sm:items-center"
       onClick={() => onCloseRef.current()}
@@ -106,6 +114,7 @@ export function Modal({ open, onClose, title, children, footer, descriptionId }:
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
