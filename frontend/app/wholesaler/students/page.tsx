@@ -278,7 +278,7 @@ function BackLink() {
       href="/wholesaler"
       className="inline-flex min-h-11 items-center text-sm font-medium text-orange-ink hover:underline"
     >
-      ← رجوع
+      → رجوع
     </Link>
   );
 }

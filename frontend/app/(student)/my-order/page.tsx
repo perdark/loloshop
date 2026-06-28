@@ -288,12 +288,12 @@ export default function StudentMyOrderPage() {
     <div className="space-y-5">
       <header>
         <h1 className="section-heading font-display-ar text-2xl font-bold text-ink">
-          {ctx.existing ? "تعديل طلبك" : "طلب طقم التخرج"}
+          {ctx.existing ? "تعديل طلبك" : "طلب قطع التخرج"}
         </h1>
         <p className="mt-1 text-sm text-ink-soft">
           {ctx.existing
             ? "الحقول معبّأة بقيم طلبك الحالي — عدّلها ثم احفظ."
-            : "املأ النموذج لطلب طقم تخرجك (روب + وشاح + قبعة)."}
+            : "اختر القطع التي تريدها ثم املأ تفاصيل كل قطعة."}
         </p>
       </header>
 

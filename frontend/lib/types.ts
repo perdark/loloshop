@@ -124,6 +124,12 @@ export interface WholesalerPricingAddons {
   extra_cap_embroidery: number;
   robe_sleeve_each: number;
   american_shawl: number;
+  piece_sash_normal: number;
+  piece_sash_royal: number;
+  piece_cap_normal: number;
+  piece_cap_royal: number;
+  piece_robe_normal: number;
+  piece_robe_royal: number;
 }
 
 export interface AdminWholesaler {

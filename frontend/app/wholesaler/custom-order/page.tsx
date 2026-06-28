@@ -118,7 +118,7 @@ function BackLink() {
       href="/wholesaler/students"
       className="inline-flex min-h-11 shrink-0 items-center text-sm font-medium text-orange-ink hover:underline"
     >
-      ← رجوع
+      → رجوع
     </Link>
   );
 }

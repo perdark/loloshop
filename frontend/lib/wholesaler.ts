@@ -191,8 +191,8 @@ export interface FullSetPackage {
   price: number;
 }
 
-/** «التسعيرة» the rep/student sees on the order form: base طقم price + add-on surcharges.
- *  `base` of 0 means the rep hasn't configured a price → fall back to the package price. */
+/** «التسعيرة» the rep/student sees on the order form.
+ *  `base` is the full package price; partial selections use the editable piece prices below. */
 export interface FullSetPricing {
   base: number;
   addons: {
@@ -201,6 +201,12 @@ export interface FullSetPricing {
     extra_cap_embroidery: number;
     robe_sleeve_each: number;
     american_shawl: number;
+    piece_sash_normal: number;
+    piece_sash_royal: number;
+    piece_cap_normal: number;
+    piece_cap_royal: number;
+    piece_robe_normal: number;
+    piece_robe_royal: number;
   };
 }
 
@@ -210,6 +216,12 @@ export const DEFAULT_FULLSET_ADDONS: FullSetPricing["addons"] = {
   extra_cap_embroidery: 3000,
   robe_sleeve_each: 5000,
   american_shawl: 25000,
+  piece_sash_normal: 20000,
+  piece_sash_royal: 25000,
+  piece_cap_normal: 15000,
+  piece_cap_royal: 20000,
+  piece_robe_normal: 25000,
+  piece_robe_royal: 25000,
 };
 
 export interface FullSetPackagesResult {
@@ -264,6 +276,7 @@ export async function getWholesalerStudent(
 }
 
 export type PieceType = "عادي" | "ملكي";
+export type ProductPiece = "sash" | "cap" | "robe";
 
 export interface EmbroideryZone {
   text?: string;
@@ -273,6 +286,8 @@ export interface EmbroideryZone {
 export interface CreateFullSetPayload {
   /** Legacy field — no longer sent by the form; backend ignores it. */
   package_id?: string;
+  /** The graduation pieces the student wants; at least one is required. */
+  selected_pieces: ProductPiece[];
   measurements: {
     robe_length_cm: number | string;
     sleeve_length_cm: number | string;
@@ -342,6 +357,7 @@ export async function createQuickFullSetOrder(
 /** Existing full-set order reconstructed into form shape (for EDIT pre-fill). */
 export interface FullSetExistingOrder {
   package_id: string | null;
+  selected_pieces?: ProductPiece[];
   measurements: {
     robe_length_cm: number;
     sleeve_length_cm: number;

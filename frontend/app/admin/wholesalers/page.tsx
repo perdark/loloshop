@@ -61,16 +61,22 @@ export default function AdminWholesalersPage() {
   const [createEmbroideryColor, setCreateEmbroideryColor] = useState("");
   // «التسعيرة» — create modal base prices (add-ons default server-side, tweak later).
   const [adminPrice, setAdminPrice] = useState("0");
-  const [wholesalerPrice, setWholesalerPrice] = useState("0");
+  const [wholesalerPrice, setWholesalerPrice] = useState("50000");
   // «التسعيرة» edit modal: two base prices + the 5 editable add-on surcharges.
   const emptyPricing = {
     adminPrice: "0",
-    wholesalerPrice: "0",
+    wholesalerPrice: "50000",
     royal_sash: String(DEFAULT_PRICING_ADDONS.royal_sash),
     royal_cap_when_normal_sash: String(DEFAULT_PRICING_ADDONS.royal_cap_when_normal_sash),
     extra_cap_embroidery: String(DEFAULT_PRICING_ADDONS.extra_cap_embroidery),
     robe_sleeve_each: String(DEFAULT_PRICING_ADDONS.robe_sleeve_each),
     american_shawl: String(DEFAULT_PRICING_ADDONS.american_shawl),
+    piece_sash_normal: String(DEFAULT_PRICING_ADDONS.piece_sash_normal),
+    piece_sash_royal: String(DEFAULT_PRICING_ADDONS.piece_sash_royal),
+    piece_cap_normal: String(DEFAULT_PRICING_ADDONS.piece_cap_normal),
+    piece_cap_royal: String(DEFAULT_PRICING_ADDONS.piece_cap_royal),
+    piece_robe_normal: String(DEFAULT_PRICING_ADDONS.piece_robe_normal),
+    piece_robe_royal: String(DEFAULT_PRICING_ADDONS.piece_robe_royal),
   };
   const [pricingForm, setPricingForm] = useState(emptyPricing);
 
@@ -135,7 +141,7 @@ export default function AdminWholesalersPage() {
       setReferralCode("");
       setDeadline("");
       setAdminPrice("0");
-      setWholesalerPrice("0");
+      setWholesalerPrice("50000");
       setUniversity("");
       setDepartment("");
       setCreateEmbroideryColor("");
@@ -189,6 +195,12 @@ export default function AdminWholesalersPage() {
           extra_cap_embroidery: num(pricingForm.extra_cap_embroidery),
           robe_sleeve_each: num(pricingForm.robe_sleeve_each),
           american_shawl: num(pricingForm.american_shawl),
+          piece_sash_normal: num(pricingForm.piece_sash_normal),
+          piece_sash_royal: num(pricingForm.piece_sash_royal),
+          piece_cap_normal: num(pricingForm.piece_cap_normal),
+          piece_cap_royal: num(pricingForm.piece_cap_royal),
+          piece_robe_normal: num(pricingForm.piece_robe_normal),
+          piece_robe_royal: num(pricingForm.piece_robe_royal),
         },
       });
       toast.success("تم تحديث التسعيرة");
@@ -361,12 +373,18 @@ export default function AdminWholesalersPage() {
                       setSelected(w);
                       setPricingForm({
                         adminPrice: String(w.adminPrice ?? 0),
-                        wholesalerPrice: String(w.wholesalerPrice ?? 0),
+                        wholesalerPrice: String(w.wholesalerPrice || 50000),
                         royal_sash: String(w.pricingAddons.royal_sash),
                         royal_cap_when_normal_sash: String(w.pricingAddons.royal_cap_when_normal_sash),
                         extra_cap_embroidery: String(w.pricingAddons.extra_cap_embroidery),
                         robe_sleeve_each: String(w.pricingAddons.robe_sleeve_each),
                         american_shawl: String(w.pricingAddons.american_shawl),
+                        piece_sash_normal: String(w.pricingAddons.piece_sash_normal),
+                        piece_sash_royal: String(w.pricingAddons.piece_sash_royal),
+                        piece_cap_normal: String(w.pricingAddons.piece_cap_normal),
+                        piece_cap_royal: String(w.pricingAddons.piece_cap_royal),
+                        piece_robe_normal: String(w.pricingAddons.piece_robe_normal),
+                        piece_robe_royal: String(w.pricingAddons.piece_robe_royal),
                       });
                       setPricingOpen(true);
                     }}
@@ -588,6 +606,45 @@ export default function AdminWholesalersPage() {
                 onChange={(v) => setPricingForm((f) => ({ ...f, american_shawl: v }))}
               />
             </div>
+          </div>
+
+          <div>
+            <h4 className="mb-2 text-sm font-bold text-ink">أسعار القطع عند الطلب الجزئي</h4>
+            <div className="space-y-2.5">
+              <PricingAddonRow
+                label="وشاح عادي"
+                value={pricingForm.piece_sash_normal}
+                onChange={(v) => setPricingForm((f) => ({ ...f, piece_sash_normal: v }))}
+              />
+              <PricingAddonRow
+                label="وشاح ملكي"
+                value={pricingForm.piece_sash_royal}
+                onChange={(v) => setPricingForm((f) => ({ ...f, piece_sash_royal: v }))}
+              />
+              <PricingAddonRow
+                label="قبعة عادية"
+                value={pricingForm.piece_cap_normal}
+                onChange={(v) => setPricingForm((f) => ({ ...f, piece_cap_normal: v }))}
+              />
+              <PricingAddonRow
+                label="قبعة ملكية"
+                value={pricingForm.piece_cap_royal}
+                onChange={(v) => setPricingForm((f) => ({ ...f, piece_cap_royal: v }))}
+              />
+              <PricingAddonRow
+                label="روب عادي"
+                value={pricingForm.piece_robe_normal}
+                onChange={(v) => setPricingForm((f) => ({ ...f, piece_robe_normal: v }))}
+              />
+              <PricingAddonRow
+                label="روب ملكي"
+                value={pricingForm.piece_robe_royal}
+                onChange={(v) => setPricingForm((f) => ({ ...f, piece_robe_royal: v }))}
+              />
+            </div>
+            <p className="mt-1.5 text-xs text-ink-soft">
+              تُستخدم هذه الأسعار فقط إذا لم يختر الطالب الطقم الكامل.
+            </p>
           </div>
         </div>
       </Modal>

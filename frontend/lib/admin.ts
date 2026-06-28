@@ -138,6 +138,12 @@ export const DEFAULT_PRICING_ADDONS: WholesalerPricingAddons = {
   extra_cap_embroidery: 3000,
   robe_sleeve_each: 5000,
   american_shawl: 25000,
+  piece_sash_normal: 20000,
+  piece_sash_royal: 25000,
+  piece_cap_normal: 15000,
+  piece_cap_royal: 20000,
+  piece_robe_normal: 25000,
+  piece_robe_royal: 25000,
 };
 
 function mapAddons(raw?: Partial<WholesalerPricingAddons> | null): WholesalerPricingAddons {
@@ -149,6 +155,12 @@ function mapAddons(raw?: Partial<WholesalerPricingAddons> | null): WholesalerPri
     extra_cap_embroidery: Number(raw?.extra_cap_embroidery ?? DEFAULT_PRICING_ADDONS.extra_cap_embroidery),
     robe_sleeve_each: Number(raw?.robe_sleeve_each ?? DEFAULT_PRICING_ADDONS.robe_sleeve_each),
     american_shawl: Number(raw?.american_shawl ?? DEFAULT_PRICING_ADDONS.american_shawl),
+    piece_sash_normal: Number(raw?.piece_sash_normal ?? DEFAULT_PRICING_ADDONS.piece_sash_normal),
+    piece_sash_royal: Number(raw?.piece_sash_royal ?? DEFAULT_PRICING_ADDONS.piece_sash_royal),
+    piece_cap_normal: Number(raw?.piece_cap_normal ?? DEFAULT_PRICING_ADDONS.piece_cap_normal),
+    piece_cap_royal: Number(raw?.piece_cap_royal ?? DEFAULT_PRICING_ADDONS.piece_cap_royal),
+    piece_robe_normal: Number(raw?.piece_robe_normal ?? DEFAULT_PRICING_ADDONS.piece_robe_normal),
+    piece_robe_royal: Number(raw?.piece_robe_royal ?? DEFAULT_PRICING_ADDONS.piece_robe_royal),
   };
 }
 
