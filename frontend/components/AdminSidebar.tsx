@@ -15,6 +15,8 @@ const navItems: {
 }[] = [
   { href: "/admin", label: "لوحة التحكم", exact: true },
   { href: "/admin/orders", label: "الطلبات", exact: false },
+  { href: "/admin/custom-order", label: "طلب مخصص", exact: false },
+  { href: "/admin/attendance", label: "بصمة الموظفين", exact: false },
   { href: "/admin/wholesalers", label: "الممثلون", exact: false },
   { href: "/admin/products", label: "الكتالوج", exact: false },
   { href: "/admin/packages", label: "باقات VIP", exact: false },

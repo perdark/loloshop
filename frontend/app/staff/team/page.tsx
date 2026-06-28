@@ -21,6 +21,7 @@ import {
   getStaffActivity,
   getStaffGoal,
   getStaffSalary,
+  removeStaffSalaryTransaction,
   resetStaffPassword,
   setStaffGoal,
   setStaffSalary,
@@ -67,6 +68,7 @@ function SalaryPanel({ userId, userName }: SalaryPanelProps) {
   const [deductionAmount, setDeductionAmount] = useState("");
   const [deductionReason, setDeductionReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [removingTxnId, setRemovingTxnId] = useState<string | null>(null);
 
   // Goal
   const [goal, setGoal] = useState<StaffGoal | null>(null);
@@ -162,6 +164,20 @@ function SalaryPanel({ userId, userName }: SalaryPanelProps) {
       toast.error(getApiErrorMessage(e, "تعذر إضافة الخصم"));
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleRemoveTransaction(txnId: string) {
+    if (!window.confirm("حذف هذه المعاملة من الراتب؟")) return;
+    setRemovingTxnId(txnId);
+    try {
+      const next = await removeStaffSalaryTransaction(userId, txnId, "حذف من الأدمن");
+      setSalaryData(next);
+      toast.success("تم حذف المعاملة");
+    } catch (e) {
+      toast.error(getApiErrorMessage(e, "تعذر حذف المعاملة"));
+    } finally {
+      setRemovingTxnId(null);
     }
   }
 
@@ -382,6 +398,16 @@ function SalaryPanel({ userId, userName }: SalaryPanelProps) {
                         >
                           {formatIQD(txn.amount)}
                         </span>
+                        {txn.sourceType === "manual" && (txn.type === "bonus" || txn.type === "deduction") && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleRemoveTransaction(txn.id)}
+                            loading={removingTxnId === txn.id}
+                          >
+                            حذف
+                          </Button>
+                        )}
                       </li>
                     ))}
                   </ul>

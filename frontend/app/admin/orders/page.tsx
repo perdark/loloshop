@@ -1026,31 +1026,39 @@ export default function AdminOrdersPage() {
         title="الطلبات"
         subtitle="مقسّمة حسب المصدر — تجزئة وممثلين"
         action={
-          <button
-            type="button"
-            onClick={() => load()}
-            disabled={loading}
-            className="group inline-flex shrink-0 items-center gap-2 rounded-full border border-ink/15 bg-beige px-4 py-2 text-sm font-semibold text-ink-soft transition-colors hover:border-orange/40 hover:text-orange-ink disabled:opacity-50"
-          >
-            <svg
-              aria-hidden
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className={`transition-transform duration-500 ${loading ? "animate-spin" : "group-hover:rotate-180"}`}
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/admin/custom-order"
+              className="inline-flex shrink-0 items-center rounded-full bg-orange-ink px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
             >
-              <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
-              <path d="M21 3v5h-5" />
-              <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
-              <path d="M3 21v-5h5" />
-            </svg>
-            تحديث
-          </button>
+              طلب مخصص
+            </Link>
+            <button
+              type="button"
+              onClick={() => load()}
+              disabled={loading}
+              className="group inline-flex shrink-0 items-center gap-2 rounded-full border border-ink/15 bg-beige px-4 py-2 text-sm font-semibold text-ink-soft transition-colors hover:border-orange/40 hover:text-orange-ink disabled:opacity-50"
+            >
+              <svg
+                aria-hidden
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className={`transition-transform duration-500 ${loading ? "animate-spin" : "group-hover:rotate-180"}`}
+              >
+                <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+                <path d="M21 3v5h-5" />
+                <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+                <path d="M3 21v-5h5" />
+              </svg>
+              تحديث
+            </button>
+          </div>
         }
       />
 

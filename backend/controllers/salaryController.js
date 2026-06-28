@@ -40,9 +40,9 @@ async function buildSalarySummary(userId) {
 
   // transactions
   const txRows = await query(
-    `SELECT id, type, amount, reason_ar, created_by, created_at
+    `SELECT id, type, amount, reason_ar, source_type, source_id, created_by, created_at
      FROM staff_salary_transactions
-     WHERE user_id = $1
+     WHERE user_id = $1 AND deleted_at IS NULL
      ORDER BY created_at DESC`,
     [userId]
   );
@@ -101,12 +101,13 @@ async function buildGoalSummary(userId) {
       if (!upd.rows.length) return false;
       if (Number(goal.bonus_amount) > 0) {
         await client.query(
-          `INSERT INTO staff_salary_transactions (user_id, type, amount, reason_ar, created_by)
-           VALUES ($1, 'bonus', $2, $3, $4)`,
+          `INSERT INTO staff_salary_transactions (user_id, type, amount, reason_ar, source_type, source_id, created_by)
+           VALUES ($1, 'bonus', $2, $3, 'goal', $4, $5)`,
           [
             userId,
             goal.bonus_amount,
             `حافز إنجاز الهدف${goal.title_ar ? ': ' + goal.title_ar : ''}`,
+            goal.id,
             goal.created_by,
           ]
         );
@@ -257,8 +258,8 @@ async function addBonus(req, res) {
   const reason_ar = req.body.reason_ar ? String(req.body.reason_ar).trim() : null;
 
   await query(
-    `INSERT INTO staff_salary_transactions (user_id, type, amount, reason_ar, created_by)
-     VALUES ($1, 'bonus', $2, $3, $4)`,
+    `INSERT INTO staff_salary_transactions (user_id, type, amount, reason_ar, source_type, created_by)
+     VALUES ($1, 'bonus', $2, $3, 'manual', $4)`,
     [id, amount, reason_ar, req.user.id]
   );
 
@@ -287,13 +288,45 @@ async function addDeduction(req, res) {
   const reason_ar = req.body.reason_ar ? String(req.body.reason_ar).trim() : null;
 
   await query(
-    `INSERT INTO staff_salary_transactions (user_id, type, amount, reason_ar, created_by)
-     VALUES ($1, 'deduction', $2, $3, $4)`,
+    `INSERT INTO staff_salary_transactions (user_id, type, amount, reason_ar, source_type, created_by)
+     VALUES ($1, 'deduction', $2, $3, 'manual', $4)`,
     [id, amount, reason_ar, req.user.id]
   );
 
   const summary = await buildSalarySummary(id);
   res.json({ data: summary });
+}
+
+/**
+ * DELETE /admin/staff/:id/salary/transactions/:txnId
+ * Soft-remove a manual bonus/deduction without erasing audit history.
+ */
+async function removeTransaction(req, res) {
+  const { id, txnId } = req.params;
+  const { err } = await resolveStaffUser(id);
+  if (err) return res.status(err.status).json(err.body);
+
+  const note = req.body?.reason_ar ? String(req.body.reason_ar).trim() : null;
+  const { rows } = await query(
+    `UPDATE staff_salary_transactions
+        SET deleted_at = NOW(),
+            deleted_by = $3,
+            delete_reason_ar = $4
+      WHERE id = $1
+        AND user_id = $2
+        AND type IN ('bonus', 'deduction')
+        AND source_type = 'manual'
+        AND deleted_at IS NULL
+      RETURNING id`,
+    [txnId, id, req.user.id, note]
+  );
+  if (!rows.length) {
+    return res.status(404).json({
+      error: 'لا يمكن حذف هذه المعاملة',
+      code: 'ERR_NOT_FOUND',
+    });
+  }
+  res.json({ data: await buildSalarySummary(id) });
 }
 
 /**
@@ -384,6 +417,7 @@ module.exports = {
   setStaffSalary,
   addBonus,
   addDeduction,
+  removeTransaction,
   getStaffActivity,
   getStaffGoal,
   setStaffGoal,

@@ -1,6 +1,7 @@
-import { api } from "./api";
+import { api, apiUploadFile } from "./api";
 import { mapHeroSlide } from "./catalog";
 import type { MaintenanceConfig, PromoConfig } from "./catalog";
+import type { CreateFullSetPayload, FullSetPackage, FullSetPricing } from "./wholesaler";
 import type {
   AdminAccounting,
   AdminAnalytics,
@@ -14,6 +15,9 @@ import type {
   PackageTier,
   SalaryTransaction,
   SalaryTxnType,
+  StaffAttendanceRecord,
+  StaffAttendanceSettings,
+  StaffAttendanceUserSetting,
   StaffActivity,
   StaffGoal,
   StaffSalary,
@@ -709,6 +713,7 @@ interface ApiSalaryTxn {
   type: SalaryTxnType;
   amount: number;
   reason_ar: string | null;
+  source_type?: string;
   created_at: string;
 }
 
@@ -725,6 +730,7 @@ function mapSalaryTxn(r: ApiSalaryTxn): SalaryTransaction {
     type: r.type,
     amount: Number(r.amount),
     reasonAr: r.reason_ar,
+    sourceType: r.source_type,
     createdAt: r.created_at,
   };
 }
@@ -763,6 +769,293 @@ export async function addStaffDeduction(
     amount,
     reason_ar: reasonAr || undefined,
   });
+}
+
+export async function removeStaffSalaryTransaction(
+  userId: string,
+  txnId: string,
+  reasonAr?: string
+): Promise<StaffSalary> {
+  const { data } = await api.delete<{ data: ApiStaffSalary }>(
+    `/admin/staff/${userId}/salary/transactions/${txnId}`,
+    { data: { reason_ar: reasonAr || undefined } }
+  );
+  return {
+    userId: data.data.user_id,
+    baseSalary: Number(data.data.base_salary),
+    balance: Number(data.data.balance),
+    transactions: (data.data.transactions || []).map(mapSalaryTxn),
+  };
+}
+
+// ─── Staff Attendance / بصمة الموظفين ─────────────────────────────────────────
+
+interface ApiAttendanceSettings {
+  start_time: string;
+  end_time: string;
+  grace_minutes: number;
+  deduction_per_minute: number;
+  verification_mode: StaffAttendanceSettings["verificationMode"];
+  allowed_ip_ranges: string[];
+  shop_latitude: number | null;
+  shop_longitude: number | null;
+  shop_radius_meters: number;
+  timezone: string;
+  updated_at?: string | null;
+  is_user_override?: boolean;
+}
+
+interface ApiAttendanceUserSetting {
+  user_id: string;
+  staff_name: string | null;
+  start_time: string | null;
+  end_time: string | null;
+  grace_minutes: number | null;
+  deduction_per_minute: number | null;
+  has_override: boolean;
+  updated_at: string | null;
+}
+
+interface ApiAttendanceRecord {
+  id: string;
+  user_id: string;
+  staff_name: string | null;
+  work_date: string;
+  check_in_at: string | null;
+  check_out_at: string | null;
+  expected_start_time: string;
+  expected_end_time: string;
+  grace_minutes: number;
+  late_minutes: number;
+  deduction_amount: number;
+  deduction_transaction_id: string | null;
+  verification_mode: StaffAttendanceRecord["verificationMode"];
+  network_ok: boolean;
+  location_ok: boolean;
+  verified: boolean;
+  check_in_ip: string | null;
+  check_out_ip: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  location_accuracy_meters: number | null;
+  distance_meters: number | null;
+  status: StaffAttendanceRecord["status"];
+  admin_note_ar: string | null;
+  overridden_by: string | null;
+  overridden_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function mapAttendanceSettings(r: ApiAttendanceSettings): StaffAttendanceSettings {
+  return {
+    startTime: r.start_time,
+    endTime: r.end_time,
+    graceMinutes: Number(r.grace_minutes),
+    deductionPerMinute: Number(r.deduction_per_minute),
+    verificationMode: r.verification_mode,
+    allowedIpRanges: r.allowed_ip_ranges || [],
+    shopLatitude: r.shop_latitude == null ? null : Number(r.shop_latitude),
+    shopLongitude: r.shop_longitude == null ? null : Number(r.shop_longitude),
+    shopRadiusMeters: Number(r.shop_radius_meters),
+    timezone: r.timezone,
+    updatedAt: r.updated_at ?? null,
+    isUserOverride: Boolean(r.is_user_override),
+  };
+}
+
+function mapAttendanceUserSetting(r: ApiAttendanceUserSetting): StaffAttendanceUserSetting {
+  return {
+    userId: r.user_id,
+    staffName: r.staff_name,
+    startTime: r.start_time,
+    endTime: r.end_time,
+    graceMinutes: r.grace_minutes == null ? null : Number(r.grace_minutes),
+    deductionPerMinute: r.deduction_per_minute == null ? null : Number(r.deduction_per_minute),
+    hasOverride: Boolean(r.has_override),
+    updatedAt: r.updated_at,
+  };
+}
+
+function mapAttendanceRecord(r: ApiAttendanceRecord): StaffAttendanceRecord {
+  return {
+    id: r.id,
+    userId: r.user_id,
+    staffName: r.staff_name,
+    workDate: r.work_date,
+    checkInAt: r.check_in_at,
+    checkOutAt: r.check_out_at,
+    expectedStartTime: r.expected_start_time,
+    expectedEndTime: r.expected_end_time,
+    graceMinutes: Number(r.grace_minutes),
+    lateMinutes: Number(r.late_minutes),
+    deductionAmount: Number(r.deduction_amount),
+    deductionTransactionId: r.deduction_transaction_id,
+    verificationMode: r.verification_mode,
+    networkOk: Boolean(r.network_ok),
+    locationOk: Boolean(r.location_ok),
+    verified: Boolean(r.verified),
+    checkInIp: r.check_in_ip,
+    checkOutIp: r.check_out_ip,
+    latitude: r.latitude == null ? null : Number(r.latitude),
+    longitude: r.longitude == null ? null : Number(r.longitude),
+    locationAccuracyMeters:
+      r.location_accuracy_meters == null ? null : Number(r.location_accuracy_meters),
+    distanceMeters: r.distance_meters == null ? null : Number(r.distance_meters),
+    status: r.status,
+    adminNoteAr: r.admin_note_ar,
+    overriddenBy: r.overridden_by,
+    overriddenAt: r.overridden_at,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+export async function getAttendanceSettings(): Promise<StaffAttendanceSettings> {
+  const { data } = await api.get<{ data: ApiAttendanceSettings }>("/admin/attendance/settings");
+  return mapAttendanceSettings(data.data);
+}
+
+export async function updateAttendanceSettings(
+  input: StaffAttendanceSettings
+): Promise<StaffAttendanceSettings> {
+  const { data } = await api.patch<{ data: ApiAttendanceSettings }>("/admin/attendance/settings", {
+    start_time: input.startTime,
+    end_time: input.endTime,
+    grace_minutes: input.graceMinutes,
+    deduction_per_minute: input.deductionPerMinute,
+    verification_mode: input.verificationMode,
+    allowed_ip_ranges: input.allowedIpRanges,
+    shop_latitude: input.shopLatitude,
+    shop_longitude: input.shopLongitude,
+    shop_radius_meters: input.shopRadiusMeters,
+  });
+  return mapAttendanceSettings(data.data);
+}
+
+export async function getAttendanceRecords(params?: {
+  date?: string;
+  userId?: string;
+}): Promise<StaffAttendanceRecord[]> {
+  const { data } = await api.get<{ data: ApiAttendanceRecord[] }>("/admin/attendance/records", {
+    params: { date: params?.date, user_id: params?.userId },
+  });
+  return (data.data || []).map(mapAttendanceRecord);
+}
+
+export async function overrideAttendanceRecord(
+  id: string,
+  input: { lateMinutes?: number; deductionAmount?: number; noteAr?: string }
+): Promise<StaffAttendanceRecord> {
+  const { data } = await api.patch<{ data: ApiAttendanceRecord }>(
+    `/admin/attendance/records/${id}/override`,
+    {
+      late_minutes: input.lateMinutes,
+      deduction_amount: input.deductionAmount,
+      note_ar: input.noteAr || undefined,
+    }
+  );
+  return mapAttendanceRecord(data.data);
+}
+
+export async function getAttendanceUserSettings(): Promise<StaffAttendanceUserSetting[]> {
+  const { data } = await api.get<{ data: ApiAttendanceUserSetting[] }>(
+    "/admin/attendance/staff-settings"
+  );
+  return (data.data || []).map(mapAttendanceUserSetting);
+}
+
+export async function setAttendanceUserSettings(
+  userId: string,
+  input: {
+    startTime: string;
+    endTime: string;
+    graceMinutes: number;
+    deductionPerMinute: number;
+  }
+): Promise<StaffAttendanceUserSetting> {
+  const { data } = await api.put<{ data: ApiAttendanceUserSetting }>(
+    `/admin/attendance/staff-settings/${userId}`,
+    {
+      start_time: input.startTime,
+      end_time: input.endTime,
+      grace_minutes: input.graceMinutes,
+      deduction_per_minute: input.deductionPerMinute,
+    }
+  );
+  return mapAttendanceUserSetting(data.data);
+}
+
+export async function deleteAttendanceUserSettings(userId: string): Promise<void> {
+  await api.delete(`/admin/attendance/staff-settings/${userId}`);
+}
+
+// ─── Admin Custom Orders ──────────────────────────────────────────────────────
+
+export interface AdminCustomOrderWholesaler {
+  id: string;
+  name: string;
+  universityName: string | null;
+  department: string | null;
+  pricing: FullSetPricing;
+}
+
+export interface AdminCustomOrderConfig {
+  packages: FullSetPackage[];
+  pricing: FullSetPricing | null;
+  wholesalers: AdminCustomOrderWholesaler[];
+}
+
+export interface AdminCustomOrderPayload extends CreateFullSetPayload {
+  student_name: string;
+  wholesaler_id?: string | null;
+}
+
+export async function getAdminCustomOrderConfig(): Promise<AdminCustomOrderConfig> {
+  const { data } = await api.get<{
+    data: {
+      packages: FullSetPackage[];
+      pricing: FullSetPricing | null;
+      wholesalers: {
+        id: string;
+        name: string;
+        university_name: string | null;
+        department: string | null;
+        pricing: FullSetPricing;
+      }[];
+    };
+  }>("/admin/custom-order/config");
+  return {
+    packages: data.data.packages || [],
+    pricing: data.data.pricing ?? null,
+    wholesalers: (data.data.wholesalers || []).map((w) => ({
+      id: w.id,
+      name: w.name,
+      universityName: w.university_name,
+      department: w.department,
+      pricing: w.pricing,
+    })),
+  };
+}
+
+export async function createAdminCustomOrder(
+  payload: AdminCustomOrderPayload
+): Promise<{ studentId: string; total: number; packageName: string }> {
+  const { data } = await api.post<{
+    data: { student_id: string; total: number; package_name: string };
+  }>("/admin/custom-order", payload);
+  return {
+    studentId: data.data.student_id,
+    total: data.data.total,
+    packageName: data.data.package_name,
+  };
+}
+
+export async function uploadAdminCustomOrderImage(file: File): Promise<string> {
+  const res = (await apiUploadFile("/admin/custom-order/uploads/image", file)) as {
+    data: { url: string };
+  };
+  return res.data.url;
 }
 
 // ─── Staff Activity ──────────────────────────────────────────────────────────

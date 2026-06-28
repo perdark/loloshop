@@ -239,7 +239,72 @@ export interface SalaryTransaction {
   type: SalaryTxnType;
   amount: number;
   reasonAr: string | null;
+  sourceType?: "manual" | "goal" | "attendance" | string;
   createdAt: string;
+}
+
+export type AttendanceVerificationMode =
+  | "none"
+  | "network"
+  | "location"
+  | "both"
+  | "network_or_location";
+
+export interface StaffAttendanceSettings {
+  startTime: string;
+  endTime: string;
+  graceMinutes: number;
+  deductionPerMinute: number;
+  verificationMode: AttendanceVerificationMode;
+  allowedIpRanges: string[];
+  shopLatitude: number | null;
+  shopLongitude: number | null;
+  shopRadiusMeters: number;
+  timezone: string;
+  updatedAt?: string | null;
+  isUserOverride?: boolean;
+}
+
+export interface StaffAttendanceUserSetting {
+  userId: string;
+  staffName: string | null;
+  startTime: string | null;
+  endTime: string | null;
+  graceMinutes: number | null;
+  deductionPerMinute: number | null;
+  hasOverride: boolean;
+  updatedAt: string | null;
+}
+
+export interface StaffAttendanceRecord {
+  id: string;
+  userId: string;
+  staffName: string | null;
+  workDate: string;
+  checkInAt: string | null;
+  checkOutAt: string | null;
+  expectedStartTime: string;
+  expectedEndTime: string;
+  graceMinutes: number;
+  lateMinutes: number;
+  deductionAmount: number;
+  deductionTransactionId: string | null;
+  verificationMode: AttendanceVerificationMode;
+  networkOk: boolean;
+  locationOk: boolean;
+  verified: boolean;
+  checkInIp: string | null;
+  checkOutIp: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  locationAccuracyMeters: number | null;
+  distanceMeters: number | null;
+  status: "present" | "late" | "missing_checkout" | "overridden";
+  adminNoteAr: string | null;
+  overriddenBy: string | null;
+  overriddenAt: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 /** Staff incentive goal (e.g. "complete 15 orders before tomorrow") + live progress. */

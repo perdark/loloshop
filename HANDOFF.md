@@ -6,6 +6,35 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
+## 2026-06-29 — Staff بصمة · payroll removal · admin custom order
+
+Uncommitted on **main**. Added migrations **052_staff_attendance.sql** + **053_staff_attendance_user_settings.sql**, mirrored them in
+`db/schema.sql`, and applied both to the configured DB. Gates green: BE `node --check` on touched controllers/routes · backend smoke
+script for attendance/salary-remove/admin-custom-order/per-staff override (temporary data cleaned up) · FE `npm run lint` · FE
+`npx tsc --noEmit`.
+
+**Built.**
+- Staff attendance / «بصمة الموظفين»: admin settings for shift start/end, 15-min-style grace window, per-minute deduction, verification
+  mode (`none/network/location/both/network_or_location`), allowed IP/CIDR ranges, shop GPS radius; staff can check in/out from
+  `/staff/me`; admin can review/override records from `/admin/attendance`.
+- Per-staff attendance overrides: `/admin/attendance` now lets admin set a custom schedule per employee (e.g. one starts 9:00, another
+  starts 10:00); check-in resolves employee override first, then falls back to the default shop schedule.
+- Late check-in creates a payroll `deduction` transaction with `source_type='attendance'`; admin overrides soft-delete that generated
+  deduction. Salary transactions now have `source_type/source_id/deleted_*` columns, and salary summaries ignore soft-deleted rows.
+- Admin can remove manual «حافز»/«خصم» rows from the staff team salary ledger; auto goal/attendance rows are protected from manual
+  deletion.
+- Admin custom orders: new `/admin/custom-order` page + backend endpoints reuse `persistFullSetOrder()`. Independent admin orders clear
+  `wholesaler_approval` so they show as direct production orders; optionally attaching a wholesaler inherits its pricing/university data
+  and auto-approves the bundle.
+
+### Open follow-ups
+- Browser smoke test pending: admin attendance settings, staff check-in/out from shop network/location, payroll removal, admin custom
+  order creation.
+- Configure the real LoloShop public IP/CIDR and/or GPS coordinates in `/admin/attendance`; browser apps cannot reliably read Wi-Fi
+  SSID, so the safe check is server IP allowlist plus optional geolocation.
+
+---
+
 ## 2026-06-27 (c) — OTP send: body-based success detection (catch silent ZentraMsg bans)
 
 Uncommitted on **main**. **No migration, no env change** (per user: do NOT rename env vars — kept `ZENTRAMSG_API_KEY`/

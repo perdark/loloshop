@@ -1,5 +1,13 @@
 import { api, apiUploadFile } from "./api";
-import type { OrderStatus, SalaryTxnType, StaffActivity, StaffGoal, StaffSalary } from "./types";
+import type {
+  OrderStatus,
+  SalaryTxnType,
+  StaffActivity,
+  StaffAttendanceRecord,
+  StaffAttendanceSettings,
+  StaffGoal,
+  StaffSalary,
+} from "./types";
 import {
   mapApiOrderRow,
   type MonitorData,
@@ -545,4 +553,161 @@ export async function getMyActivity(): Promise<MyActivityRow[]> {
     productName: r.product_name,
     studentName: r.student_name,
   }));
+}
+
+interface ApiAttendanceSettings {
+  start_time: string;
+  end_time: string;
+  grace_minutes: number;
+  deduction_per_minute: number;
+  verification_mode: StaffAttendanceSettings["verificationMode"];
+  allowed_ip_ranges: string[];
+  shop_latitude: number | null;
+  shop_longitude: number | null;
+  shop_radius_meters: number;
+  timezone: string;
+}
+
+interface ApiAttendanceRecord {
+  id: string;
+  user_id: string;
+  staff_name: string | null;
+  work_date: string;
+  check_in_at: string | null;
+  check_out_at: string | null;
+  expected_start_time: string;
+  expected_end_time: string;
+  grace_minutes: number;
+  late_minutes: number;
+  deduction_amount: number;
+  deduction_transaction_id: string | null;
+  verification_mode: StaffAttendanceRecord["verificationMode"];
+  network_ok: boolean;
+  location_ok: boolean;
+  verified: boolean;
+  check_in_ip: string | null;
+  check_out_ip: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  location_accuracy_meters: number | null;
+  distance_meters: number | null;
+  status: StaffAttendanceRecord["status"];
+  admin_note_ar: string | null;
+  overridden_by: string | null;
+  overridden_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function mapAttendanceSettings(r: ApiAttendanceSettings): StaffAttendanceSettings {
+  return {
+    startTime: r.start_time,
+    endTime: r.end_time,
+    graceMinutes: Number(r.grace_minutes),
+    deductionPerMinute: Number(r.deduction_per_minute),
+    verificationMode: r.verification_mode,
+    allowedIpRanges: r.allowed_ip_ranges || [],
+    shopLatitude: r.shop_latitude == null ? null : Number(r.shop_latitude),
+    shopLongitude: r.shop_longitude == null ? null : Number(r.shop_longitude),
+    shopRadiusMeters: Number(r.shop_radius_meters),
+    timezone: r.timezone,
+  };
+}
+
+function mapAttendanceRecord(r: ApiAttendanceRecord | null): StaffAttendanceRecord | null {
+  if (!r) return null;
+  return {
+    id: r.id,
+    userId: r.user_id,
+    staffName: r.staff_name,
+    workDate: r.work_date,
+    checkInAt: r.check_in_at,
+    checkOutAt: r.check_out_at,
+    expectedStartTime: r.expected_start_time,
+    expectedEndTime: r.expected_end_time,
+    graceMinutes: Number(r.grace_minutes),
+    lateMinutes: Number(r.late_minutes),
+    deductionAmount: Number(r.deduction_amount),
+    deductionTransactionId: r.deduction_transaction_id,
+    verificationMode: r.verification_mode,
+    networkOk: Boolean(r.network_ok),
+    locationOk: Boolean(r.location_ok),
+    verified: Boolean(r.verified),
+    checkInIp: r.check_in_ip,
+    checkOutIp: r.check_out_ip,
+    latitude: r.latitude == null ? null : Number(r.latitude),
+    longitude: r.longitude == null ? null : Number(r.longitude),
+    locationAccuracyMeters:
+      r.location_accuracy_meters == null ? null : Number(r.location_accuracy_meters),
+    distanceMeters: r.distance_meters == null ? null : Number(r.distance_meters),
+    status: r.status,
+    adminNoteAr: r.admin_note_ar,
+    overriddenBy: r.overridden_by,
+    overriddenAt: r.overridden_at,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+export interface MyAttendanceToday {
+  settings: StaffAttendanceSettings;
+  record: StaffAttendanceRecord | null;
+}
+
+export interface AttendanceLocationPayload {
+  latitude: number;
+  longitude: number;
+  accuracy?: number;
+}
+
+export function getBrowserAttendanceLocation(): Promise<AttendanceLocationPayload | null> {
+  if (typeof navigator === "undefined" || !navigator.geolocation) {
+    return Promise.resolve(null);
+  }
+  return new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      (pos) =>
+        resolve({
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+        }),
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }
+    );
+  });
+}
+
+export async function getMyAttendanceToday(): Promise<MyAttendanceToday> {
+  const { data } = await api.get<{
+    data: { settings: ApiAttendanceSettings; record: ApiAttendanceRecord | null };
+  }>("/payroll/me/attendance/today");
+  return {
+    settings: mapAttendanceSettings(data.data.settings),
+    record: mapAttendanceRecord(data.data.record),
+  };
+}
+
+export async function checkInAttendance(
+  location: AttendanceLocationPayload | null
+): Promise<MyAttendanceToday> {
+  const { data } = await api.post<{
+    data: { settings: ApiAttendanceSettings; record: ApiAttendanceRecord | null };
+  }>("/payroll/me/attendance/check-in", { location });
+  return {
+    settings: mapAttendanceSettings(data.data.settings),
+    record: mapAttendanceRecord(data.data.record),
+  };
+}
+
+export async function checkOutAttendance(
+  location: AttendanceLocationPayload | null
+): Promise<MyAttendanceToday> {
+  const { data } = await api.post<{
+    data: { settings: ApiAttendanceSettings; record: ApiAttendanceRecord | null };
+  }>("/payroll/me/attendance/check-out", { location });
+  return {
+    settings: mapAttendanceSettings(data.data.settings),
+    record: mapAttendanceRecord(data.data.record),
+  };
 }

@@ -4,12 +4,18 @@ const c = require('../controllers/adminController');
 const orders = require('../controllers/orderController');
 const salary = require('../controllers/salaryController');
 const staff = require('../controllers/staffController');
+const attendance = require('../controllers/attendanceController');
+const customOrders = require('../controllers/adminCustomOrderController');
+const { imageUpload } = require('../lib/upload');
 
 router.use(authRequired, requireRole('admin'));
 
 router.get('/analytics', c.analytics);
 router.get('/accounting', c.accounting);
 router.get('/orders', orders.listOrders);
+router.get('/custom-order/config', customOrders.customOrderConfig);
+router.post('/custom-order', customOrders.createCustomOrder);
+router.post('/custom-order/uploads/image', imageUpload.single('file'), customOrders.uploadImage);
 router.patch('/orders/:id/cost', c.updateOrderCost);
 router.patch('/checkout-groups/:id', c.updateCheckoutGroup);
 router.get('/reps-overview', c.repsOverview);
@@ -38,9 +44,19 @@ router.get('/staff/:id/salary', salary.getStaffSalary);
 router.post('/staff/:id/salary', salary.setStaffSalary);
 router.post('/staff/:id/salary/bonus', salary.addBonus);
 router.post('/staff/:id/salary/deduction', salary.addDeduction);
+router.delete('/staff/:id/salary/transactions/:txnId', salary.removeTransaction);
 router.get('/staff/:id/activity', salary.getStaffActivity);
 router.get('/staff/:id/goal', salary.getStaffGoal);
 router.post('/staff/:id/goal', salary.setStaffGoal);
+
+// Staff attendance / بصمة الموظفين (admin only)
+router.get('/attendance/settings', attendance.getSettings);
+router.patch('/attendance/settings', attendance.updateSettings);
+router.get('/attendance/staff-settings', attendance.listUserSettings);
+router.put('/attendance/staff-settings/:userId', attendance.setUserSettings);
+router.delete('/attendance/staff-settings/:userId', attendance.deleteUserSettings);
+router.get('/attendance/records', attendance.listRecords);
+router.patch('/attendance/records/:id/override', attendance.overrideRecord);
 
 // Site settings — discount popup promo config
 router.patch('/promo', c.updatePromo);
