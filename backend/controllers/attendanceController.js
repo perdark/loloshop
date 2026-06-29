@@ -61,6 +61,20 @@ function timeToMinutes(value) {
   return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
 }
 
+function scheduledMinutes(startTime, endTime) {
+  const start = timeToMinutes(startTime);
+  let end = timeToMinutes(endTime);
+  if (end <= start) end += 24 * 60;
+  return Math.max(0, end - start);
+}
+
+function diffMinutes(start, end) {
+  if (!start || !end) return 0;
+  const ms = new Date(end).getTime() - new Date(start).getTime();
+  if (!Number.isFinite(ms) || ms <= 0) return 0;
+  return Math.floor(ms / 60000);
+}
+
 function distanceMeters(aLat, aLng, bLat, bLng) {
   const toRad = (v) => (v * Math.PI) / 180;
   const r = 6371000;
@@ -97,7 +111,9 @@ async function loadEffectiveSettings(userId, client = null) {
   const base = await loadSettings(client);
   if (!userId) return { ...base, is_user_override: false };
   const { rows } = await db.query(
-    `SELECT start_time, end_time, grace_minutes, deduction_per_minute, updated_at
+    `SELECT start_time, end_time, grace_minutes, deduction_per_minute,
+            COALESCE(attendance_required, TRUE) AS attendance_required,
+            updated_at
        FROM staff_attendance_user_settings
       WHERE user_id = $1`,
     [userId]
@@ -109,6 +125,7 @@ async function loadEffectiveSettings(userId, client = null) {
     end_time: rows[0].end_time,
     grace_minutes: rows[0].grace_minutes,
     deduction_per_minute: rows[0].deduction_per_minute,
+    attendance_required: rows[0].attendance_required,
     updated_at: rows[0].updated_at,
     is_user_override: true,
   };
@@ -128,6 +145,7 @@ function serializeSettings(row) {
     timezone: row.timezone || DEFAULT_TZ,
     updated_at: row.updated_at,
     is_user_override: !!row.is_user_override,
+    attendance_required: row.attendance_required !== false,
   };
 }
 
@@ -139,13 +157,19 @@ function serializeUserSetting(row) {
     end_time: row.end_time ? String(row.end_time).slice(0, 5) : null,
     grace_minutes: row.grace_minutes == null ? null : Number(row.grace_minutes),
     deduction_per_minute: row.deduction_per_minute == null ? null : Number(row.deduction_per_minute),
+    attendance_required: row.attendance_required !== false,
     has_override: !!row.has_override,
     updated_at: row.updated_at || null,
   };
 }
 
-function serializeRecord(row) {
+function serializeRecord(row, now = new Date()) {
   if (!row) return null;
+  const worked = row.check_in_at ? diffMinutes(row.check_in_at, row.check_out_at || now) : 0;
+  const planned = scheduledMinutes(row.expected_start_time, row.expected_end_time);
+  const openTooLong = !!row.check_in_at && !row.check_out_at && worked >= 24 * 60;
+  const overtime = row.check_out_at ? Math.max(0, worked - planned) : 0;
+  const note = openTooLong ? 'الموظف لم يخرج من المعمل' : row.admin_note_ar;
   return {
     id: row.id,
     user_id: row.user_id,
@@ -172,11 +196,22 @@ function serializeRecord(row) {
     distance_meters: row.distance_meters == null ? null : Math.round(Number(row.distance_meters)),
     status: row.status,
     admin_note_ar: row.admin_note_ar,
+    note_ar: note,
+    worked_minutes: worked,
+    scheduled_minutes: planned,
+    overtime_minutes: overtime,
+    open_too_long: openTooLong,
     overridden_by: row.overridden_by,
     overridden_at: row.overridden_at,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
+}
+
+function dateKey(value) {
+  if (!value) return '';
+  if (typeof value === 'string') return value.slice(0, 10);
+  return new Date(value).toISOString().slice(0, 10);
 }
 
 function verificationEvidence(req, settings, location) {
@@ -278,6 +313,7 @@ async function listUserSettings(req, res) {
   const { rows } = await query(
     `SELECT u.id AS user_id, u.name AS staff_name,
             s.start_time, s.end_time, s.grace_minutes, s.deduction_per_minute,
+            COALESCE(s.attendance_required, TRUE) AS attendance_required,
             s.updated_at,
             (s.user_id IS NOT NULL) AS has_override
        FROM users u
@@ -300,23 +336,26 @@ async function setUserSettings(req, res) {
   }
   const grace = Number(req.body.grace_minutes);
   const perMinute = Number(req.body.deduction_per_minute);
+  const attendanceRequired = req.body.attendance_required !== false;
   if (!Number.isInteger(grace) || grace < 0 || !Number.isInteger(perMinute) || perMinute < 0) {
     return res.status(400).json({ error: 'إعدادات الخصم غير صالحة', code: 'ERR_VALIDATION' });
   }
 
   const { rows } = await query(
     `INSERT INTO staff_attendance_user_settings
-       (user_id, start_time, end_time, grace_minutes, deduction_per_minute, updated_by, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, NOW())
+       (user_id, start_time, end_time, grace_minutes, deduction_per_minute, attendance_required, updated_by, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
      ON CONFLICT (user_id) DO UPDATE
        SET start_time = EXCLUDED.start_time,
            end_time = EXCLUDED.end_time,
            grace_minutes = EXCLUDED.grace_minutes,
            deduction_per_minute = EXCLUDED.deduction_per_minute,
+           attendance_required = EXCLUDED.attendance_required,
            updated_by = EXCLUDED.updated_by,
            updated_at = NOW()
-     RETURNING user_id, start_time, end_time, grace_minutes, deduction_per_minute, updated_at, TRUE AS has_override`,
-    [userId, start, end, grace, perMinute, req.user.id]
+     RETURNING user_id, start_time, end_time, grace_minutes, deduction_per_minute,
+               attendance_required, updated_at, TRUE AS has_override`,
+    [userId, start, end, grace, perMinute, attendanceRequired, req.user.id]
   );
   const staff = await query(`SELECT name AS staff_name FROM users WHERE id = $1`, [userId]);
   res.json({ data: serializeUserSetting({ ...rows[0], staff_name: staff.rows[0]?.staff_name }) });
@@ -334,7 +373,19 @@ async function getToday(req, res) {
   const settings = await loadEffectiveSettings(req.user.id);
   const today = localParts(new Date(), settings.timezone || DEFAULT_TZ).date;
   const { rows } = await query(
-    `SELECT * FROM staff_attendance_records WHERE user_id = $1 AND work_date = $2`,
+    `(SELECT * FROM staff_attendance_records
+       WHERE user_id = $1 AND check_in_at IS NOT NULL AND check_out_at IS NULL
+       ORDER BY check_in_at DESC
+       LIMIT 1)
+     UNION ALL
+     (SELECT * FROM staff_attendance_records
+       WHERE user_id = $1 AND work_date = $2
+         AND NOT EXISTS (
+           SELECT 1 FROM staff_attendance_records
+            WHERE user_id = $1 AND check_in_at IS NOT NULL AND check_out_at IS NULL
+         )
+       LIMIT 1)
+     LIMIT 1`,
     [req.user.id, today]
   );
   res.json({ data: { settings: serializeSettings(settings), record: serializeRecord(rows[0]) } });
@@ -347,6 +398,13 @@ async function checkIn(req, res) {
   const now = new Date();
   const result = await tx(async (client) => {
     const settings = await loadEffectiveSettings(req.user.id, client);
+    if (settings.attendance_required === false) {
+      const e = new Error('هذا الموظف معفى من شرط البصمة');
+      e.status = 400;
+      e.expose = true;
+      e.code = 'ERR_ATTENDANCE_NOT_REQUIRED';
+      throw e;
+    }
     const evidence = verificationEvidence(req, settings, req.body?.location);
     if (!evidence.verified) {
       const e = new Error('لا يمكن تسجيل البصمة خارج نطاق المحل');
@@ -358,6 +416,20 @@ async function checkIn(req, res) {
     }
 
     const local = localParts(now, settings.timezone || DEFAULT_TZ);
+    const open = await client.query(
+      `SELECT id FROM staff_attendance_records
+        WHERE user_id = $1 AND check_in_at IS NOT NULL AND check_out_at IS NULL
+        ORDER BY check_in_at DESC
+        LIMIT 1`,
+      [req.user.id]
+    );
+    if (open.rows.length) {
+      const e = new Error('لديك بصمة دخول مفتوحة. سجّل الخروج أولاً');
+      e.status = 409;
+      e.expose = true;
+      e.code = 'ERR_OPEN_ATTENDANCE';
+      throw e;
+    }
     const startMinutes = timeToMinutes(settings.start_time);
     const lateMinutes = Math.max(0, local.minutes - startMinutes - Number(settings.grace_minutes));
     const deduction = lateMinutes * Number(settings.deduction_per_minute || 0);
@@ -400,25 +472,7 @@ async function checkIn(req, res) {
       throw e;
     }
 
-    let record = inserted.rows[0];
-    if (deduction > 0) {
-      const txn = await client.query(
-        `INSERT INTO staff_salary_transactions
-           (user_id, type, amount, reason_ar, source_type, source_id, created_by)
-         VALUES ($1, 'deduction', $2, $3, 'attendance', $4, $5)
-         RETURNING id`,
-        [req.user.id, deduction, `خصم تأخير: ${lateMinutes} دقيقة`, record.id, req.user.id]
-      );
-      const upd = await client.query(
-        `UPDATE staff_attendance_records
-            SET deduction_transaction_id = $1, updated_at = NOW()
-          WHERE id = $2
-          RETURNING *`,
-        [txn.rows[0].id, record.id]
-      );
-      record = upd.rows[0];
-    }
-    return { settings, record };
+    return { settings, record: inserted.rows[0] };
   });
 
   res.status(201).json({ data: { settings: serializeSettings(result.settings), record: serializeRecord(result.record) } });
@@ -429,6 +483,9 @@ async function checkOut(req, res) {
   if (err) return res.status(err.status).json(err.body);
 
   const settings = await loadEffectiveSettings(req.user.id);
+  if (settings.attendance_required === false) {
+    return res.status(400).json({ error: 'هذا الموظف معفى من شرط البصمة', code: 'ERR_ATTENDANCE_NOT_REQUIRED' });
+  }
   const evidence = verificationEvidence(req, settings, req.body?.location);
   if (!evidence.verified) {
     return res.status(403).json({
@@ -437,15 +494,19 @@ async function checkOut(req, res) {
       data: evidence,
     });
   }
-  const today = localParts(new Date(), settings.timezone || DEFAULT_TZ).date;
   const { rows } = await query(
     `UPDATE staff_attendance_records
         SET check_out_at = COALESCE(check_out_at, NOW()),
-            check_out_ip = $3,
+            check_out_ip = $2,
             updated_at = NOW()
-      WHERE user_id = $1 AND work_date = $2 AND check_in_at IS NOT NULL
+      WHERE id = (
+        SELECT id FROM staff_attendance_records
+         WHERE user_id = $1 AND check_in_at IS NOT NULL AND check_out_at IS NULL
+         ORDER BY check_in_at DESC
+         LIMIT 1
+      )
       RETURNING *`,
-    [req.user.id, today, evidence.ip]
+    [req.user.id, evidence.ip]
   );
   if (!rows.length) {
     return res.status(404).json({ error: 'لا توجد بصمة دخول لهذا اليوم', code: 'ERR_NOT_FOUND' });
@@ -472,6 +533,65 @@ async function listRecords(req, res) {
   res.json({ data: rows.map(serializeRecord) });
 }
 
+async function calendar(req, res) {
+  const from = String(req.query.from || '').slice(0, 10);
+  const to = String(req.query.to || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+    return res.status(400).json({ error: 'مدى التاريخ غير صالح', code: 'ERR_VALIDATION' });
+  }
+  if (from > to) {
+    return res.status(400).json({ error: 'تاريخ البداية يجب أن يسبق تاريخ النهاية', code: 'ERR_VALIDATION' });
+  }
+
+  const params = [from, to];
+  let userClause = '';
+  if (req.query.user_id) {
+    params.push(String(req.query.user_id));
+    userClause = `AND r.user_id = $${params.length}`;
+  }
+
+  const { rows } = await query(
+    `SELECT r.*, u.name AS staff_name
+       FROM staff_attendance_records r
+       JOIN users u ON u.id = r.user_id
+      WHERE r.work_date BETWEEN $1 AND $2 ${userClause}
+      ORDER BY r.work_date ASC, r.check_in_at ASC NULLS LAST, u.name ASC`,
+    params
+  );
+
+  const byDate = new Map();
+  for (const row of rows) {
+    const record = serializeRecord(row);
+    const key = dateKey(row.work_date);
+    if (!byDate.has(key)) {
+      byDate.set(key, {
+        date: key,
+        records: [],
+        totals: {
+          staff_count: 0,
+          present_count: 0,
+          late_count: 0,
+          open_count: 0,
+          open_too_long_count: 0,
+          worked_minutes: 0,
+          overtime_minutes: 0,
+        },
+      });
+    }
+    const day = byDate.get(key);
+    day.records.push(record);
+    day.totals.staff_count += 1;
+    if (record.check_in_at) day.totals.present_count += 1;
+    if (record.late_minutes > 0) day.totals.late_count += 1;
+    if (record.check_in_at && !record.check_out_at) day.totals.open_count += 1;
+    if (record.open_too_long) day.totals.open_too_long_count += 1;
+    day.totals.worked_minutes += record.worked_minutes || 0;
+    day.totals.overtime_minutes += record.overtime_minutes || 0;
+  }
+
+  res.json({ data: { from, to, days: Array.from(byDate.values()) } });
+}
+
 async function overrideRecord(req, res) {
   const { id } = req.params;
   const note = req.body.note_ar ? String(req.body.note_ar).trim() : null;
@@ -489,15 +609,6 @@ async function overrideRecord(req, res) {
       e.expose = true;
       e.code = 'ERR_NOT_FOUND';
       throw e;
-    }
-    const row = current.rows[0];
-    if (row.deduction_transaction_id) {
-      await client.query(
-        `UPDATE staff_salary_transactions
-            SET deleted_at = NOW(), deleted_by = $2, delete_reason_ar = $3
-          WHERE id = $1 AND source_type = 'attendance' AND deleted_at IS NULL`,
-        [row.deduction_transaction_id, req.user.id, note || 'تصحيح بصمة الموظف']
-      );
     }
     const updated = await client.query(
       `UPDATE staff_attendance_records
@@ -528,5 +639,6 @@ module.exports = {
   checkIn,
   checkOut,
   listRecords,
+  calendar,
   overrideRecord,
 };

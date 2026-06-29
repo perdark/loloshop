@@ -5,6 +5,9 @@
  * Final paths:
  *   GET /api/payroll/me/salary
  *   GET /api/payroll/me/activity
+ *
+ * Attendance now lives under /api/staff/attendance/*.
+ * The /payroll/me/attendance/* aliases remain for older frontend builds only.
  */
 
 const router = require('express').Router();

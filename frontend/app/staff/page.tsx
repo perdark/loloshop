@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { OrderCard } from "@/components/staff/OrderCard";
+import { StaffAttendancePanel } from "@/components/staff/StaffAttendancePanel";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { PageLoader } from "@/components/ui/Spinner";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -10,7 +11,12 @@ import { Button } from "@/components/ui/Button";
 import { StatCard } from "@/components/ui/StatCard";
 import { Modal } from "@/components/ui/Modal";
 import { Input } from "@/components/ui/Input";
-import { getQueue, getMonitor, getCompleted, revertOrder } from "@/lib/staff";
+import {
+  getQueue,
+  getMonitor,
+  getCompleted,
+  revertOrder,
+} from "@/lib/staff";
 import { addStaffBonus, addStaffDeduction } from "@/lib/admin";
 import { getApiErrorMessage } from "@/lib/api";
 import {
@@ -873,10 +879,13 @@ function StaffPageContent() {
 
   if (isManager) {
     return (
-      <MonitorDashboard
-        showSourceFilter={showSourceFilter}
-        isAdmin={user.role === "admin"}
-      />
+      <>
+        {user.role === "staff" && <StaffAttendancePanel compact className="mb-4" />}
+        <MonitorDashboard
+          showSourceFilter={showSourceFilter}
+          isAdmin={user.role === "admin"}
+        />
+      </>
     );
   }
 
@@ -885,16 +894,20 @@ function StaffPageContent() {
 
   if (staffType && staffType in QUEUE_META) {
     return (
-      <QueueView
-        staffType={staffType}
-        showSourceFilter={showSourceFilter}
-        orderScope={user.order_scope}
-      />
+      <>
+        <StaffAttendancePanel compact className="mb-4" />
+        <QueueView
+          staffType={staffType}
+          showSourceFilter={showSourceFilter}
+          orderScope={user.order_scope}
+        />
+      </>
     );
   }
 
   return (
     <div dir="rtl" lang="ar">
+      {user.role === "staff" && <StaffAttendancePanel compact className="mb-4" />}
       <PageHeader title="لوحة الطلبات" subtitle="الطلبات النشطة" />
       <EmptyState
         title="الدور غير محدد"

@@ -690,7 +690,9 @@ CREATE INDEX IF NOT EXISTS idx_staff_goals_user ON staff_goals(user_id, created_
 -- =====================================================
 -- STAFF ATTENDANCE — بصمة الموظفين
 -- Admin controls the required shift window, grace minutes, per-minute late
--- deduction, and shop verification requirements (network/GPS/both/none).
+-- penalty marker, and shop verification requirements (network/GPS/both/none).
+-- Attendance is intentionally separate from payroll; late markers do not create
+-- salary transactions.
 -- Times are stored UTC as timestamps on records and displayed in Asia/Baghdad.
 -- =====================================================
 CREATE TABLE IF NOT EXISTS staff_attendance_settings (
@@ -719,6 +721,7 @@ CREATE TABLE IF NOT EXISTS staff_attendance_user_settings (
   end_time                   TIME NOT NULL,
   grace_minutes              INTEGER NOT NULL DEFAULT 15 CHECK (grace_minutes >= 0),
   deduction_per_minute       BIGINT NOT NULL DEFAULT 0 CHECK (deduction_per_minute >= 0),
+  attendance_required        BOOLEAN NOT NULL DEFAULT TRUE,
   updated_by                 UUID REFERENCES users(id) ON DELETE SET NULL,
   updated_at                 TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

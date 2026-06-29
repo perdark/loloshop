@@ -42,7 +42,9 @@ async function buildSalarySummary(userId) {
   const txRows = await query(
     `SELECT id, type, amount, reason_ar, source_type, source_id, created_by, created_at
      FROM staff_salary_transactions
-     WHERE user_id = $1 AND deleted_at IS NULL
+     WHERE user_id = $1
+       AND deleted_at IS NULL
+       AND source_type <> 'attendance'
      ORDER BY created_at DESC`,
     [userId]
   );

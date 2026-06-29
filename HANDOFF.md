@@ -6,6 +6,28 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
+## 2026-06-29 — Staff بصمة separated from salary
+
+Uncommitted on **main**. Added migration **054_attendance_exemptions.sql**, mirrored it in `db/schema.sql`, and applied it to the
+configured DB. Gates green: BE `node --check` on touched controllers/routes · FE `npm run lint` · FE `npx tsc --noEmit` · DB column
+check for `staff_attendance_user_settings.attendance_required`.
+
+**Built.**
+- «بصمة الموظف» is now separate from salary: staff get `/staff/attendance` + a dedicated sidebar link; `/staff/me` is salary/activity
+  only. `/staff` still shows the attendance card for quick check-in.
+- Attendance check-in no longer creates `staff_salary_transactions`; salary summaries also ignore older transactions with
+  `source_type='attendance'`, so attendance markers do not affect salary balances.
+- Admin can mark each employee as attendance-required or exempt from `/admin/attendance`. Exempt staff see «غير مطلوب» and cannot
+  check in/out from the staff UI/API.
+- Self-service attendance APIs now live under `/api/staff/attendance/*`; old `/api/payroll/me/attendance/*` aliases remain for older
+  frontend builds only.
+
+### Open follow-ups
+- Browser smoke test still pending for admin exemption toggle and staff `/staff/attendance` at desktop/mobile widths.
+- Existing historical attendance salary rows remain in DB for audit but are ignored by salary summaries.
+
+---
+
 ## 2026-06-29 — Staff بصمة · payroll removal · admin custom order
 
 Uncommitted on **main**. Added migrations **052_staff_attendance.sql** + **053_staff_attendance_user_settings.sql**, mirrored them in
@@ -19,8 +41,8 @@ script for attendance/salary-remove/admin-custom-order/per-staff override (tempo
   `/staff/me`; admin can review/override records from `/admin/attendance`.
 - Per-staff attendance overrides: `/admin/attendance` now lets admin set a custom schedule per employee (e.g. one starts 9:00, another
   starts 10:00); check-in resolves employee override first, then falls back to the default shop schedule.
-- Late check-in creates a payroll `deduction` transaction with `source_type='attendance'`; admin overrides soft-delete that generated
-  deduction. Salary transactions now have `source_type/source_id/deleted_*` columns, and salary summaries ignore soft-deleted rows.
+- Original implementation connected late check-ins to payroll `deduction` transactions; this is superseded by the newer entry above
+  that separates attendance from salary.
 - Admin can remove manual «حافز»/«خصم» rows from the staff team salary ledger; auto goal/attendance rows are protected from manual
   deletion.
 - Admin custom orders: new `/admin/custom-order` page + backend endpoints reuse `persistFullSetOrder()`. Independent admin orders clear

@@ -1,5 +1,20 @@
 # Progress
 
+## 2026-06-29 — Staff attendance separated from salary
+
+- Separated «بصمة الموظف» from salary: staff now have an independent `/staff/attendance` page/link, while `/staff/me` is salary/activity only.
+- `/staff` now shows only the compact attendance button for all staff role dashboards; the full attendance card stays on `/staff/attendance`.
+- Attendance check-in no longer creates salary deduction transactions, and salary summaries ignore older attendance-sourced transactions.
+- Added admin-controlled per-staff exemption via `/admin/attendance`: each employee can be marked «مطلوبة» or «معفى» from attendance.
+- Applied migration `054_attendance_exemptions.sql` to the configured database.
+
+Verified:
+- Backend syntax checks for touched controllers/routes.
+- Frontend `npm run lint`.
+- Frontend `npx tsc --noEmit`.
+- Verified `staff_attendance_user_settings.attendance_required` exists in DB.
+- Browser-smoked `/staff` after clearing the PWA service worker cache: only the compact attendance button appears before «مراجعة التصاميم».
+
 ## 2026-06-29 — Google Play readiness pages + PWA shell
 
 - Added public Arabic policy pages for Google Play review: `/privacy`, `/terms`, and `/delete-account`.
@@ -22,7 +37,7 @@ Open:
 
 - Added staff attendance / «بصمة الموظفين» model and APIs: admin-controlled shift times, grace minutes, per-minute late deduction, network/location verification settings, staff check-in/check-out, attendance records, and override support.
 - Added per-staff attendance overrides so each employee can have a custom arrival/departure time, grace window, and per-minute deduction while others keep the default schedule.
-- Linked late attendance deductions to the existing payroll ledger with soft-delete/source tracking.
+- Initially connected late attendance markers to payroll ledger entries; superseded above by the attendance/salary separation.
 - Added admin removal for manual «حافز» and «خصم» transactions.
 - Added admin custom order creation using the existing full-set order form/persistence, with optional wholesaler attachment.
 - Added frontend pages/entry points for `/admin/attendance`, `/admin/custom-order`, and staff self-service attendance on `/staff/me`.

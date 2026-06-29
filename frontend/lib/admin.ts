@@ -803,6 +803,7 @@ interface ApiAttendanceSettings {
   timezone: string;
   updated_at?: string | null;
   is_user_override?: boolean;
+  attendance_required?: boolean;
 }
 
 interface ApiAttendanceUserSetting {
@@ -812,6 +813,7 @@ interface ApiAttendanceUserSetting {
   end_time: string | null;
   grace_minutes: number | null;
   deduction_per_minute: number | null;
+  attendance_required: boolean;
   has_override: boolean;
   updated_at: string | null;
 }
@@ -841,6 +843,11 @@ interface ApiAttendanceRecord {
   distance_meters: number | null;
   status: StaffAttendanceRecord["status"];
   admin_note_ar: string | null;
+  note_ar: string | null;
+  worked_minutes: number;
+  scheduled_minutes: number;
+  overtime_minutes: number;
+  open_too_long: boolean;
   overridden_by: string | null;
   overridden_at: string | null;
   created_at: string;
@@ -861,6 +868,7 @@ function mapAttendanceSettings(r: ApiAttendanceSettings): StaffAttendanceSetting
     timezone: r.timezone,
     updatedAt: r.updated_at ?? null,
     isUserOverride: Boolean(r.is_user_override),
+    attendanceRequired: r.attendance_required !== false,
   };
 }
 
@@ -872,6 +880,7 @@ function mapAttendanceUserSetting(r: ApiAttendanceUserSetting): StaffAttendanceU
     endTime: r.end_time,
     graceMinutes: r.grace_minutes == null ? null : Number(r.grace_minutes),
     deductionPerMinute: r.deduction_per_minute == null ? null : Number(r.deduction_per_minute),
+    attendanceRequired: r.attendance_required !== false,
     hasOverride: Boolean(r.has_override),
     updatedAt: r.updated_at,
   };
@@ -904,6 +913,11 @@ function mapAttendanceRecord(r: ApiAttendanceRecord): StaffAttendanceRecord {
     distanceMeters: r.distance_meters == null ? null : Number(r.distance_meters),
     status: r.status,
     adminNoteAr: r.admin_note_ar,
+    noteAr: r.note_ar,
+    workedMinutes: Number(r.worked_minutes) || 0,
+    scheduledMinutes: Number(r.scheduled_minutes) || 0,
+    overtimeMinutes: Number(r.overtime_minutes) || 0,
+    openTooLong: Boolean(r.open_too_long),
     overriddenBy: r.overridden_by,
     overriddenAt: r.overridden_at,
     createdAt: r.created_at,
@@ -943,6 +957,61 @@ export async function getAttendanceRecords(params?: {
   return (data.data || []).map(mapAttendanceRecord);
 }
 
+export interface AttendanceCalendarTotals {
+  staffCount: number;
+  presentCount: number;
+  lateCount: number;
+  openCount: number;
+  openTooLongCount: number;
+  workedMinutes: number;
+  overtimeMinutes: number;
+}
+
+export interface AttendanceCalendarDay {
+  date: string;
+  records: StaffAttendanceRecord[];
+  totals: AttendanceCalendarTotals;
+}
+
+interface ApiAttendanceCalendarDay {
+  date: string;
+  records: ApiAttendanceRecord[];
+  totals: {
+    staff_count: number;
+    present_count: number;
+    late_count: number;
+    open_count: number;
+    open_too_long_count: number;
+    worked_minutes: number;
+    overtime_minutes: number;
+  };
+}
+
+export async function getAttendanceCalendar(params: {
+  from: string;
+  to: string;
+  userId?: string;
+}): Promise<AttendanceCalendarDay[]> {
+  const { data } = await api.get<{
+    data: { from: string; to: string; days: ApiAttendanceCalendarDay[] };
+  }>("/admin/attendance/calendar", {
+    params: { from: params.from, to: params.to, user_id: params.userId },
+  });
+  return (data.data.days || []).map((day) => ({
+    date: day.date,
+    records: (day.records || []).map(mapAttendanceRecord),
+    totals: {
+      staffCount: Number(day.totals.staff_count) || 0,
+      presentCount: Number(day.totals.present_count) || 0,
+      lateCount: Number(day.totals.late_count) || 0,
+      openCount: Number(day.totals.open_count) || 0,
+      openTooLongCount: Number(day.totals.open_too_long_count) || 0,
+      workedMinutes: Number(day.totals.worked_minutes) || 0,
+      overtimeMinutes: Number(day.totals.overtime_minutes) || 0,
+    },
+  }));
+}
+
 export async function overrideAttendanceRecord(
   id: string,
   input: { lateMinutes?: number; deductionAmount?: number; noteAr?: string }
@@ -972,6 +1041,7 @@ export async function setAttendanceUserSettings(
     endTime: string;
     graceMinutes: number;
     deductionPerMinute: number;
+    attendanceRequired: boolean;
   }
 ): Promise<StaffAttendanceUserSetting> {
   const { data } = await api.put<{ data: ApiAttendanceUserSetting }>(
@@ -981,6 +1051,7 @@ export async function setAttendanceUserSettings(
       end_time: input.endTime,
       grace_minutes: input.graceMinutes,
       deduction_per_minute: input.deductionPerMinute,
+      attendance_required: input.attendanceRequired,
     }
   );
   return mapAttendanceUserSetting(data.data);

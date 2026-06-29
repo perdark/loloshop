@@ -55,6 +55,7 @@ router.patch('/attendance/settings', attendance.updateSettings);
 router.get('/attendance/staff-settings', attendance.listUserSettings);
 router.put('/attendance/staff-settings/:userId', attendance.setUserSettings);
 router.delete('/attendance/staff-settings/:userId', attendance.deleteUserSettings);
+router.get('/attendance/calendar', attendance.calendar);
 router.get('/attendance/records', attendance.listRecords);
 router.patch('/attendance/records/:id/override', attendance.overrideRecord);
 

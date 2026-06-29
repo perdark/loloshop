@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
+  getAttendanceCalendar,
   getAttendanceRecords,
   getAttendanceSettings,
   getAttendanceUserSettings,
@@ -10,6 +11,7 @@ import {
   overrideAttendanceRecord,
   setAttendanceUserSettings,
   updateAttendanceSettings,
+  type AttendanceCalendarDay,
 } from "@/lib/admin";
 import { getApiErrorMessage } from "@/lib/api";
 import { formatDateShort, formatIQD } from "@/lib/format";
@@ -44,6 +46,30 @@ function todayLocal() {
   return `${map.year}-${map.month}-${map.day}`;
 }
 
+function monthRange(month: string) {
+  const [year, monthIndex] = month.split("-").map(Number);
+  const first = new Date(Date.UTC(year, monthIndex - 1, 1));
+  const last = new Date(Date.UTC(year, monthIndex, 0));
+  return {
+    from: first.toISOString().slice(0, 10),
+    to: last.toISOString().slice(0, 10),
+  };
+}
+
+function monthGrid(month: string) {
+  const { from, to } = monthRange(month);
+  const days: (string | null)[] = [];
+  const first = new Date(`${from}T00:00:00Z`);
+  const lastDay = Number(to.slice(8, 10));
+  const leading = first.getUTCDay();
+  for (let i = 0; i < leading; i++) days.push(null);
+  for (let d = 1; d <= lastDay; d++) {
+    days.push(`${month}-${String(d).padStart(2, "0")}`);
+  }
+  while (days.length % 7 !== 0) days.push(null);
+  return days;
+}
+
 function timeOnly(v: string | null) {
   if (!v) return "—";
   return new Intl.DateTimeFormat("ar-IQ", {
@@ -53,11 +79,23 @@ function timeOnly(v: string | null) {
   }).format(new Date(v));
 }
 
+function durationLabel(minutes: number | null | undefined) {
+  const total = Math.max(0, Number(minutes) || 0);
+  if (!total) return "—";
+  const hours = Math.floor(total / 60);
+  const mins = total % 60;
+  if (hours && mins) return `${hours} س ${mins} د`;
+  if (hours) return `${hours} س`;
+  return `${mins} د`;
+}
+
 export default function AdminAttendancePage() {
   const [settings, setSettings] = useState<StaffAttendanceSettings | null>(null);
   const [userSettings, setUserSettings] = useState<StaffAttendanceUserSetting[]>([]);
   const [drafts, setDrafts] = useState<Record<string, StaffAttendanceUserSetting>>({});
   const [date, setDate] = useState(todayLocal());
+  const [calendarMonth, setCalendarMonth] = useState(todayLocal().slice(0, 7));
+  const [calendarDays, setCalendarDays] = useState<AttendanceCalendarDay[]>([]);
   const [records, setRecords] = useState<StaffAttendanceRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -65,21 +103,24 @@ export default function AdminAttendancePage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [s, u, r] = await Promise.all([
+      const range = monthRange(calendarMonth);
+      const [s, u, r, c] = await Promise.all([
         getAttendanceSettings(),
         getAttendanceUserSettings(),
         getAttendanceRecords({ date }),
+        getAttendanceCalendar(range),
       ]);
       setSettings(s);
       setUserSettings(u);
       setDrafts(Object.fromEntries(u.map((row) => [row.userId, row])));
       setRecords(r);
+      setCalendarDays(c);
     } catch (e) {
       toast.error(getApiErrorMessage(e, "تعذر تحميل بيانات البصمة"));
     } finally {
       setLoading(false);
     }
-  }, [date]);
+  }, [calendarMonth, date]);
 
   useEffect(() => {
     load();
@@ -100,12 +141,12 @@ export default function AdminAttendancePage() {
   }
 
   async function clearDeduction(record: StaffAttendanceRecord) {
-    if (!window.confirm("إلغاء خصم التأخير لهذا السجل؟")) return;
+    if (!window.confirm("إلغاء مبلغ التأخير لهذا السجل؟")) return;
     try {
       const next = await overrideAttendanceRecord(record.id, {
         lateMinutes: 0,
         deductionAmount: 0,
-        noteAr: "إلغاء خصم التأخير من الأدمن",
+        noteAr: "إلغاء مبلغ التأخير من الأدمن",
       });
       setRecords((prev) => prev.map((r) => (r.id === next.id ? next : r)));
       toast.success("تم تصحيح سجل البصمة");
@@ -128,6 +169,7 @@ export default function AdminAttendancePage() {
         endTime,
         graceMinutes: draft.graceMinutes ?? settings?.graceMinutes ?? 15,
         deductionPerMinute: draft.deductionPerMinute ?? settings?.deductionPerMinute ?? 0,
+        attendanceRequired: draft.attendanceRequired,
       });
       setUserSettings((prev) => prev.map((item) => (item.userId === next.userId ? next : item)));
       setDrafts((prev) => ({ ...prev, [next.userId]: next }));
@@ -141,7 +183,15 @@ export default function AdminAttendancePage() {
     if (!window.confirm("إرجاع هذا الموظف إلى الدوام الافتراضي؟")) return;
     try {
       await deleteAttendanceUserSettings(row.userId);
-      const next = { ...row, startTime: null, endTime: null, graceMinutes: null, deductionPerMinute: null, hasOverride: false };
+      const next = {
+        ...row,
+        startTime: null,
+        endTime: null,
+        graceMinutes: null,
+        deductionPerMinute: null,
+        attendanceRequired: true,
+        hasOverride: false,
+      };
       setUserSettings((prev) => prev.map((item) => (item.userId === row.userId ? next : item)));
       setDrafts((prev) => ({ ...prev, [row.userId]: next }));
       toast.success("تم إرجاع الموظف للدوام الافتراضي");
@@ -154,7 +204,7 @@ export default function AdminAttendancePage() {
     <div dir="rtl" lang="ar" className="space-y-6 animate-fade-page-in">
       <PageHeader
         title="بصمة الموظفين"
-        subtitle="إعداد وقت الحضور والانصراف وخصم التأخير"
+        subtitle="إعداد وقت الحضور والانصراف ومتابعة التأخير بمعزل عن الراتب"
         action={<Button onClick={load} variant="ghost" loading={loading}>تحديث</Button>}
       />
 
@@ -181,7 +231,7 @@ export default function AdminAttendancePage() {
               onChange={(e) => setSettings({ ...settings, graceMinutes: Number(e.target.value.replace(/[^\d]/g, "")) || 0 })}
             />
             <Input
-              label="خصم كل دقيقة (د.ع)"
+              label="مبلغ التأخير لكل دقيقة (د.ع)"
               inputMode="numeric"
               value={String(settings.deductionPerMinute)}
               onChange={(e) => setSettings({ ...settings, deductionPerMinute: Number(e.target.value.replace(/[^\d]/g, "")) || 0 })}
@@ -246,9 +296,9 @@ export default function AdminAttendancePage() {
       {settings && (
         <section className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
           <div className="mb-4">
-            <h2 className="font-display-ar text-base font-bold text-ink">دوام مخصص لكل موظف</h2>
+            <h2 className="font-display-ar text-base font-bold text-ink">إعدادات البصمة لكل موظف</h2>
             <p className="mt-1 text-sm text-ink-soft">
-              اترك الموظف بدون تخصيص ليتبع الدوام الافتراضي. مثال: موظف 9:00 وموظف 10:00.
+              حدد من تُطلب منه البصمة ومن يُعفى منها، مع إمكانية تخصيص وقت دوام كل موظف.
             </p>
           </div>
 
@@ -260,10 +310,11 @@ export default function AdminAttendancePage() {
                 <thead className="bg-surface-sink text-ink-soft">
                   <tr>
                     <th className="px-4 py-3 text-start">الموظف</th>
+                    <th className="px-4 py-3 text-start">شرط البصمة</th>
                     <th className="px-4 py-3 text-start">الحضور</th>
                     <th className="px-4 py-3 text-start">الخروج</th>
                     <th className="px-4 py-3 text-start">السماح</th>
-                    <th className="px-4 py-3 text-start">خصم الدقيقة</th>
+                    <th className="px-4 py-3 text-start">مبلغ الدقيقة</th>
                     <th className="px-4 py-3 text-start">الحالة</th>
                     <th className="px-4 py-3 text-start">إجراء</th>
                   </tr>
@@ -275,9 +326,23 @@ export default function AdminAttendancePage() {
                       <tr key={row.userId} className="border-t border-line">
                         <td className="px-4 py-3 font-semibold text-ink">{row.staffName || "—"}</td>
                         <td className="px-4 py-3">
+                          <label className="flex min-w-36 items-center gap-2 text-sm font-medium text-ink-soft">
+                            <input
+                              type="checkbox"
+                              checked={draft.attendanceRequired}
+                              onChange={(e) =>
+                                updateDraft(row.userId, { attendanceRequired: e.target.checked })
+                              }
+                              className="h-4 w-4 accent-orange-ink"
+                            />
+                            {draft.attendanceRequired ? "مطلوبة" : "معفى"}
+                          </label>
+                        </td>
+                        <td className="px-4 py-3">
                           <Input
                             type="time"
                             value={draft.startTime || settings.startTime}
+                            disabled={!draft.attendanceRequired}
                             onChange={(e) => updateDraft(row.userId, { startTime: e.target.value })}
                           />
                         </td>
@@ -285,6 +350,7 @@ export default function AdminAttendancePage() {
                           <Input
                             type="time"
                             value={draft.endTime || settings.endTime}
+                            disabled={!draft.attendanceRequired}
                             onChange={(e) => updateDraft(row.userId, { endTime: e.target.value })}
                           />
                         </td>
@@ -292,6 +358,7 @@ export default function AdminAttendancePage() {
                           <Input
                             inputMode="numeric"
                             value={String(draft.graceMinutes ?? settings.graceMinutes)}
+                            disabled={!draft.attendanceRequired}
                             onChange={(e) =>
                               updateDraft(row.userId, {
                                 graceMinutes: Number(e.target.value.replace(/[^\d]/g, "")) || 0,
@@ -303,6 +370,7 @@ export default function AdminAttendancePage() {
                           <Input
                             inputMode="numeric"
                             value={String(draft.deductionPerMinute ?? settings.deductionPerMinute)}
+                            disabled={!draft.attendanceRequired}
                             onChange={(e) =>
                               updateDraft(row.userId, {
                                 deductionPerMinute: Number(e.target.value.replace(/[^\d]/g, "")) || 0,
@@ -311,7 +379,11 @@ export default function AdminAttendancePage() {
                           />
                         </td>
                         <td className="px-4 py-3 text-xs text-ink-soft">
-                          {row.hasOverride ? "دوام مخصص" : "يتبع الافتراضي"}
+                          {!row.attendanceRequired
+                            ? "معفى من البصمة"
+                            : row.hasOverride
+                              ? "دوام مخصص"
+                              : "يتبع الافتراضي"}
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex gap-2">
@@ -338,8 +410,68 @@ export default function AdminAttendancePage() {
       <section className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
         <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h2 className="font-display-ar text-base font-bold text-ink">سجلات اليوم</h2>
-            <p className="mt-1 text-sm text-ink-soft">الوقت يعرض حسب توقيت العراق</p>
+            <h2 className="font-display-ar text-base font-bold text-ink">تقويم الحضور</h2>
+            <p className="mt-1 text-sm text-ink-soft">
+              اختر يوماً لرؤية الدخول والخروج ومدة العمل والوقت الإضافي.
+            </p>
+          </div>
+          <Input
+            label="الشهر"
+            type="month"
+            value={calendarMonth}
+            onChange={(e) => setCalendarMonth(e.target.value)}
+          />
+        </div>
+
+        <div className="grid grid-cols-7 gap-2 text-center text-xs font-bold text-muted">
+          {["أحد", "إثن", "ثلث", "أرب", "خمس", "جمع", "سبت"].map((d) => (
+            <span key={d}>{d}</span>
+          ))}
+        </div>
+        <div className="mt-2 grid grid-cols-7 gap-2">
+          {monthGrid(calendarMonth).map((day, i) => {
+            const item = day ? calendarDays.find((d) => d.date === day) : null;
+            const selected = day === date;
+            return (
+              <button
+                key={`${day || "empty"}-${i}`}
+                type="button"
+                disabled={!day}
+                onClick={() => day && setDate(day)}
+                className={`min-h-24 rounded-2xl border p-2 text-start transition-colors disabled:opacity-30 ${
+                  selected
+                    ? "border-orange-ink bg-orange-ink/10"
+                    : "border-line bg-surface-sink hover:border-orange-ink/30"
+                }`}
+              >
+                {day && (
+                  <>
+                    <span className="font-bold text-ink">{Number(day.slice(8, 10))}</span>
+                    {item ? (
+                      <div className="mt-2 space-y-1 text-[11px] text-ink-soft">
+                        <p>{item.totals.presentCount} حضور</p>
+                        {item.totals.lateCount > 0 && <p className="text-danger">{item.totals.lateCount} متأخر</p>}
+                        {item.totals.openCount > 0 && <p className="text-orange-ink">{item.totals.openCount} مفتوح</p>}
+                        {item.totals.overtimeMinutes > 0 && (
+                          <p>إضافي {durationLabel(item.totals.overtimeMinutes)}</p>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-[11px] text-muted">لا توجد بصمات</p>
+                    )}
+                  </>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="font-display-ar text-base font-bold text-ink">تفاصيل اليوم المحدد</h2>
+            <p className="mt-1 text-sm text-ink-soft">الوقت يعرض حسب توقيت العراق، والسجل يتبع يوم الدخول.</p>
           </div>
           <Input label="التاريخ" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         </div>
@@ -356,9 +488,12 @@ export default function AdminAttendancePage() {
                   <th className="px-4 py-3 text-start">الموظف</th>
                   <th className="px-4 py-3 text-start">الدخول</th>
                   <th className="px-4 py-3 text-start">الخروج</th>
+                  <th className="px-4 py-3 text-start">مدة العمل</th>
+                  <th className="px-4 py-3 text-start">وقت إضافي</th>
                   <th className="px-4 py-3 text-start">التأخير</th>
-                  <th className="px-4 py-3 text-start">الخصم</th>
+                  <th className="px-4 py-3 text-start">مبلغ التأخير</th>
                   <th className="px-4 py-3 text-start">التحقق</th>
+                  <th className="px-4 py-3 text-start">ملاحظة</th>
                   <th className="px-4 py-3 text-start">إجراء</th>
                 </tr>
               </thead>
@@ -368,6 +503,10 @@ export default function AdminAttendancePage() {
                     <td className="px-4 py-3 font-semibold text-ink">{r.staffName || "—"}</td>
                     <td className="px-4 py-3">{timeOnly(r.checkInAt)}</td>
                     <td className="px-4 py-3">{timeOnly(r.checkOutAt)}</td>
+                    <td className="px-4 py-3">{durationLabel(r.workedMinutes)}</td>
+                    <td className={r.overtimeMinutes > 0 ? "px-4 py-3 font-bold text-orange-ink" : "px-4 py-3"}>
+                      {durationLabel(r.overtimeMinutes)}
+                    </td>
                     <td className={r.lateMinutes > 0 ? "px-4 py-3 font-bold text-danger" : "px-4 py-3"}>
                       {r.lateMinutes} دقيقة
                     </td>
@@ -380,10 +519,13 @@ export default function AdminAttendancePage() {
                       <br />
                       {r.checkInIp || "بدون IP"}
                     </td>
+                    <td className={r.openTooLong ? "px-4 py-3 text-xs font-bold text-danger" : "px-4 py-3 text-xs text-ink-soft"}>
+                      {r.noteAr || "—"}
+                    </td>
                     <td className="px-4 py-3">
                       {r.deductionAmount > 0 ? (
                         <Button size="sm" variant="ghost" onClick={() => clearDeduction(r)}>
-                          إلغاء الخصم
+                          إلغاء المبلغ
                         </Button>
                       ) : r.overriddenAt ? (
                         <span className="text-xs text-muted">مصحح {formatDateShort(r.overriddenAt)}</span>

@@ -560,6 +560,7 @@ interface ApiAttendanceSettings {
   end_time: string;
   grace_minutes: number;
   deduction_per_minute: number;
+  attendance_required?: boolean;
   verification_mode: StaffAttendanceSettings["verificationMode"];
   allowed_ip_ranges: string[];
   shop_latitude: number | null;
@@ -593,6 +594,11 @@ interface ApiAttendanceRecord {
   distance_meters: number | null;
   status: StaffAttendanceRecord["status"];
   admin_note_ar: string | null;
+  note_ar: string | null;
+  worked_minutes: number;
+  scheduled_minutes: number;
+  overtime_minutes: number;
+  open_too_long: boolean;
   overridden_by: string | null;
   overridden_at: string | null;
   created_at: string;
@@ -605,6 +611,7 @@ function mapAttendanceSettings(r: ApiAttendanceSettings): StaffAttendanceSetting
     endTime: r.end_time,
     graceMinutes: Number(r.grace_minutes),
     deductionPerMinute: Number(r.deduction_per_minute),
+    attendanceRequired: r.attendance_required !== false,
     verificationMode: r.verification_mode,
     allowedIpRanges: r.allowed_ip_ranges || [],
     shopLatitude: r.shop_latitude == null ? null : Number(r.shop_latitude),
@@ -642,6 +649,11 @@ function mapAttendanceRecord(r: ApiAttendanceRecord | null): StaffAttendanceReco
     distanceMeters: r.distance_meters == null ? null : Number(r.distance_meters),
     status: r.status,
     adminNoteAr: r.admin_note_ar,
+    noteAr: r.note_ar,
+    workedMinutes: Number(r.worked_minutes) || 0,
+    scheduledMinutes: Number(r.scheduled_minutes) || 0,
+    overtimeMinutes: Number(r.overtime_minutes) || 0,
+    openTooLong: Boolean(r.open_too_long),
     overriddenBy: r.overridden_by,
     overriddenAt: r.overridden_at,
     createdAt: r.created_at,
@@ -681,7 +693,7 @@ export function getBrowserAttendanceLocation(): Promise<AttendanceLocationPayloa
 export async function getMyAttendanceToday(): Promise<MyAttendanceToday> {
   const { data } = await api.get<{
     data: { settings: ApiAttendanceSettings; record: ApiAttendanceRecord | null };
-  }>("/payroll/me/attendance/today");
+  }>("/staff/attendance/today");
   return {
     settings: mapAttendanceSettings(data.data.settings),
     record: mapAttendanceRecord(data.data.record),
@@ -693,7 +705,7 @@ export async function checkInAttendance(
 ): Promise<MyAttendanceToday> {
   const { data } = await api.post<{
     data: { settings: ApiAttendanceSettings; record: ApiAttendanceRecord | null };
-  }>("/payroll/me/attendance/check-in", { location });
+  }>("/staff/attendance/check-in", { location });
   return {
     settings: mapAttendanceSettings(data.data.settings),
     record: mapAttendanceRecord(data.data.record),
@@ -705,7 +717,7 @@ export async function checkOutAttendance(
 ): Promise<MyAttendanceToday> {
   const { data } = await api.post<{
     data: { settings: ApiAttendanceSettings; record: ApiAttendanceRecord | null };
-  }>("/payroll/me/attendance/check-out", { location });
+  }>("/staff/attendance/check-out", { location });
   return {
     settings: mapAttendanceSettings(data.data.settings),
     record: mapAttendanceRecord(data.data.record),

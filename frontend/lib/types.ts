@@ -263,6 +263,7 @@ export interface StaffAttendanceSettings {
   timezone: string;
   updatedAt?: string | null;
   isUserOverride?: boolean;
+  attendanceRequired?: boolean;
 }
 
 export interface StaffAttendanceUserSetting {
@@ -272,6 +273,7 @@ export interface StaffAttendanceUserSetting {
   endTime: string | null;
   graceMinutes: number | null;
   deductionPerMinute: number | null;
+  attendanceRequired: boolean;
   hasOverride: boolean;
   updatedAt: string | null;
 }
@@ -301,6 +303,11 @@ export interface StaffAttendanceRecord {
   distanceMeters: number | null;
   status: "present" | "late" | "missing_checkout" | "overridden";
   adminNoteAr: string | null;
+  noteAr: string | null;
+  workedMinutes: number;
+  scheduledMinutes: number;
+  overtimeMinutes: number;
+  openTooLong: boolean;
   overriddenBy: string | null;
   overriddenAt: string | null;
   createdAt: string;

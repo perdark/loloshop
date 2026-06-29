@@ -157,7 +157,11 @@ export function StaffSidebar({ user, open, onClose }: StaffSidebarProps) {
   // Staff (not pure admins) track their own salary + activity.
   const links =
     user.role === "staff"
-      ? [...baseLinks, { href: "/staff/me", label: "راتبي ونشاطي", icon: iconWallet(), prefix: true }]
+      ? [
+          ...baseLinks,
+          { href: "/staff/attendance", label: "بصمة الموظف", icon: iconClipboard(), prefix: true },
+          { href: "/staff/me", label: "راتبي ونشاطي", icon: iconWallet(), prefix: true },
+        ]
       : isAdmin
         ? [...baseLinks, { href: "/staff/team", label: "الموظفون", icon: iconUsers(), prefix: true }]
         : baseLinks;
