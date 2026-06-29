@@ -5,7 +5,10 @@
   "lang": "ar",
   "dir": "rtl",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "orientation": "portrait",
+  "categories": ["shopping", "lifestyle"],
   "background_color": "#faf4ea",
   "theme_color": "#c2410c",
   "icons": [

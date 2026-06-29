@@ -428,26 +428,6 @@ export default function StudentHomePage() {
       <div className="full-bleed h-px bg-line" aria-hidden />
       <StoreLocation />
 
-      {/* Quiet, human close — same cream canvas, a hairline rule sets it apart */}
-      <footer className="full-bleed mt-0 border-t border-line px-4 py-10 sm:px-6">
-        <div className="mx-auto max-w-2xl text-center">
-          <p className="font-script text-3xl leading-none text-orange-ink">lolo shop</p>
-          <p className="mt-4 max-w-[40ch] text-sm leading-relaxed text-ink-soft mx-auto">
-            افضل اللحظات تطرز من اصحاب الخبرة{" "}
-            <br></br>
-            <a
-              href="https://instagram.com/lolo_shop96"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-semibold text-orange-ink underline underline-offset-2"
-            >
-              @lolo_shop96
-            </a>
-            .
-          </p>
-          <p className="font-semibold text-ink-soft">© RevoArt</p>
-        </div>
-      </footer>
     </div>
   );
 }

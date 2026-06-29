@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>لولو شوب — غير متصل</title>
+    <meta name="theme-color" content="#faf4ea" />
+    <style>
+      :root {
+        color-scheme: light;
+        --paper: #faf4ea;
+        --card: #fffdfa;
+        --ink: #1a1a1a;
+        --soft: #33302b;
+        --line: #e3ddd0;
+        --orange: #c2410c;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background:
+          radial-gradient(circle at 85% 0%, rgba(255, 218, 185, 0.7), transparent 38rem),
+          var(--paper);
+        color: var(--ink);
+        font-family: Cairo, Tahoma, Arial, sans-serif;
+        padding: 1rem;
+      }
+      main {
+        width: min(100%, 34rem);
+        border: 1px solid var(--line);
+        border-radius: 2rem;
+        background: var(--card);
+        box-shadow: 0 18px 50px -28px rgba(26, 26, 26, 0.35);
+        padding: 2rem;
+        text-align: center;
+      }
+      img {
+        width: 5.5rem;
+        height: 5.5rem;
+        border-radius: 1.4rem;
+      }
+      h1 {
+        margin: 1.5rem 0 0.75rem;
+        font-size: clamp(1.7rem, 8vw, 2.5rem);
+        line-height: 1.2;
+      }
+      p {
+        margin: 0 auto;
+        max-width: 26rem;
+        color: var(--soft);
+        line-height: 1.9;
+      }
+      button {
+        margin-top: 1.5rem;
+        border: 0;
+        border-radius: 999px;
+        background: var(--orange);
+        color: white;
+        cursor: pointer;
+        font: inherit;
+        font-weight: 700;
+        padding: 0.8rem 1.5rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img src="/icons/icon-192.png" alt="لولو شوب" />
+      <h1>لا يوجد اتصال بالإنترنت</h1>
+      <p>
+        تعذر تحميل لولو شوب الآن. تأكد من اتصالك بالإنترنت ثم حاول مرة أخرى.
+      </p>
+      <button type="button" onclick="window.location.reload()">إعادة المحاولة</button>
+    </main>
+  </body>
+</html>

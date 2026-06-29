@@ -1,5 +1,23 @@
 # Progress
 
+## 2026-06-29 — Google Play readiness pages + PWA shell
+
+- Added public Arabic policy pages for Google Play review: `/privacy`, `/terms`, and `/delete-account`.
+- Linked `/privacy` and `/terms` from the shared public/student footer, with `/delete-account` linked from the privacy policy page for Google Play account-deletion access.
+- Added a reusable legal page layout and included the policy routes in the public sitemap.
+- Added PWA registration, `public/sw.js`, and `public/offline.html` so the app has an install/offline fallback shell.
+- Expanded `manifest.json` with `scope`, portrait orientation, and store categories.
+- Added `/.well-known/assetlinks.json` as an env-driven Next route for Trusted Web Activity verification.
+- Added `frontend/.env.example` entries for `NEXT_PUBLIC_API_URL`, `ANDROID_PACKAGE_NAME`, and `ANDROID_SHA256_CERT_FINGERPRINTS`; updated frontend `.gitignore` so the example file can be committed.
+
+Verified:
+- Frontend `npm run lint`.
+- Frontend `npm run build`.
+
+Open:
+- After creating/uploading the Android App Bundle in Play Console, copy the Play App Signing SHA-256 into `ANDROID_SHA256_CERT_FINGERPRINTS` and redeploy so `https://lolo-shop96.com/.well-known/assetlinks.json` returns the real Digital Asset Links JSON instead of 404.
+- Still need Android/TWA wrapper generation with Bubblewrap, Play Console store listing assets, Data safety form, reviewer test access, and closed testing if the account requires it.
+
 ## 2026-06-29 — Staff attendance, payroll removal, admin custom orders
 
 - Added staff attendance / «بصمة الموظفين» model and APIs: admin-controlled shift times, grace minutes, per-minute late deduction, network/location verification settings, staff check-in/check-out, attendance records, and override support.

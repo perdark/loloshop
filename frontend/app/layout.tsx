@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Amiri, Cairo, Great_Vibes, Playfair_Display } from "next/font/google";
+import { PwaRegistrar } from "@/components/PwaRegistrar";
 import { ToasterProvider } from "@/components/providers/ToasterProvider";
 import "./globals.css";
 
@@ -88,6 +89,7 @@ export default function RootLayout({
       className={`${amiri.variable} ${cairo.variable} ${playfair.variable} ${greatVibes.variable} h-full`}
     >
       <body className="min-h-full flex flex-col font-sans antialiased">
+        <PwaRegistrar />
         {children}
         <ToasterProvider />
       </body>
