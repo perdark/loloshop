@@ -2,7 +2,7 @@ const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const { query } = require('../lib/db');
 const { signToken } = require('../middleware/auth');
-const { createOtp, verifyOtp, isValidIqMobile } = require('../lib/otp');
+const { createOtp, verifyOtp, isValidIqMobile, isDemoLoginPhone } = require('../lib/otp');
 const { issueDeviceToken, isTrustedDevice, revokeUserDevices } = require('../lib/trustedDevice');
 const { sendPasswordReset } = require('../lib/email');
 
@@ -103,6 +103,18 @@ async function login(req, res) {
   // an OTP provides is redundant here. (Self-registered retail still OTPs — see register.)
   // Checked before the trusted-device branch so it covers first-ever logins too.
   if (user.role === 'retail' && user.is_wholesaler_student) {
+    const token = signToken(user);
+    return res.json({
+      token,
+      user: { id: user.id, name: user.name, role: user.role, phone_verified: user.phone_verified },
+    });
+  }
+  // App-store reviewer demo account → skip the WhatsApp OTP. A Google Play / App Store
+  // reviewer can't receive an OTP on an Iraqi number they don't own, which would block
+  // review and fail the submission. ONLY the specific phone(s) in DEMO_LOGIN_PHONES bypass,
+  // and only for role==='retail' — the password is still verified above, so this is an OTP
+  // skip for one known number, not a passwordless backdoor. Unset env → no bypass.
+  if (user.role === 'retail' && isDemoLoginPhone(user.phone)) {
     const token = signToken(user);
     return res.json({
       token,

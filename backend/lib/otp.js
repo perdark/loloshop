@@ -28,6 +28,19 @@ function isValidIqMobile(phone) {
   return typeof phone === 'string' && /^07\d{9}$/.test(phone);
 }
 
+// Demo-login allow-list: phones listed in DEMO_LOGIN_PHONES (comma-separated) skip the
+// WhatsApp OTP on login. This exists to give an app-store reviewer (Google Play / App Store)
+// a working sign-in without a real WhatsApp OTP they can't receive on an Iraqi number they
+// don't own. Empty/unset → NO phone bypasses (fail-safe). The login handler additionally
+// requires role==='retail', so a mistakenly-listed admin/staff number can never skip OTP.
+// The password is still bcrypt-verified, so this is an OTP skip, not a passwordless backdoor.
+function isDemoLoginPhone(phone) {
+  const raw = process.env.DEMO_LOGIN_PHONES;
+  if (!raw || !phone) return false;
+  const list = raw.split(',').map((p) => normalizeIqPhone(p.trim())).filter(Boolean);
+  return list.includes(normalizeIqPhone(phone));
+}
+
 // Express middleware: normalise `req.body.phone` on the way in so every downstream
 // handler (register/login/OTP/reset) sees the canonical form.
 function normalizePhoneBody(req, _res, next) {
@@ -238,4 +251,4 @@ async function sendViaZentramsg(phone, code) {
   }
 }
 
-module.exports = { createOtp, verifyOtp, toIntlDigits, normalizeIqPhone, normalizePhoneBody, isValidIqMobile };
+module.exports = { createOtp, verifyOtp, toIntlDigits, normalizeIqPhone, normalizePhoneBody, isValidIqMobile, isDemoLoginPhone };

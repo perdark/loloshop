@@ -6,6 +6,43 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
+## 2026-07-01 — App-store reviewer demo login (OTP-skip) for the Google Play «App access» form
+
+**Uncommitted on main.** No migration. Gates: BE `node --check` 0 (both touched files). Verified **live on the shared Neon DB**
+(9/9 controller e2e) + frontend login path traced. Built for the «تفاصيل تسجيل الدخول» / App access section of the Play submission.
+
+**Why.** Google Play reviewers must be given working login credentials, but retail login sends a **WhatsApp OTP** an overseas
+reviewer can't receive on an Iraqi number they don't own → the app would stall at the OTP screen and be **rejected**. Solution: a
+single fixed demo retail account that **skips the OTP** (password still required).
+
+**What shipped (2 backend files + 1 data row + 1 env var).**
+- `lib/otp.js` — new `isDemoLoginPhone(phone)`: phones in **`DEMO_LOGIN_PHONES`** (comma-separated env, normalized) skip login OTP.
+  Empty/unset → nothing bypasses (fail-safe). Exported.
+- `controllers/authController.js` `login()` — new branch (mirrors the wholesaler-student one, BEFORE `createOtp`):
+  `if (user.role === 'retail' && isDemoLoginPhone(user.phone)) return {token,user}`. **Guard = retail AND listed** (a mistakenly
+  listed admin/staff number can't skip OTP); password is still bcrypt-checked first → OTP skip, not a passwordless backdoor.
+- **Demo account** (in the shared Neon DB = prod): phone **`07700000000`** · password **`Lolo#Review2026`** · role `retail` ·
+  name «Google Review» · approved `students` row · `wholesaler_id=NULL` (so it uses the demo bypass, not the rep one).
+  user id `fd00c7e2-50f6-4cb9-89dc-e84a86f467f0`.
+- **Local `backend/.env`** got `DEMO_LOGIN_PHONES=07700000000`.
+
+**Verified.** e2e on live DB: correct pw → `{token}`, NO `otp_required`, **0 new otp_codes rows**; wrong pw → 401 (no OTP);
+allow-list logic incl. normalization. Frontend (`lib/auth-api.ts` + `app/login/page.tsx`): a `{token,user}` response logs the
+reviewer straight in — **no OTP screen shown**.
+
+### Open follow-ups (REQUIRED to work in prod — the app loads lolo-shop96.com)
+- **⚠️ Deploy the code:** commit `backend/controllers/authController.js` + `backend/lib/otp.js` and push to main (auto-deploys via
+  Actions). Until then the prod backend has no bypass. (Capacitor android/ + capacitor.config.ts + frontend package files stay
+  unstaged — unrelated mobile WIP.)
+- **⚠️ Set the env on the VPS:** add `DEMO_LOGIN_PHONES=07700000000` to the **prod `.env`** + `pm2 restart` (env isn't in git). The
+  account already exists in the shared DB, so no DB step needed in prod.
+- Google Play Console → App content → **App access** → "All or some functionality is restricted" → add instructions with
+  username `07700000000` / password `Lolo#Review2026` (full text given to the user this session).
+- To revoke after launch: remove the number from `DEMO_LOGIN_PHONES` + restart (reverts that account to normal OTP login), or delete
+  the account.
+
+---
+
 ## 2026-06-30 (b) — TV board: fullscreen new-graphs auto-takeover + live-visits counter
 
 **Committed + pushed to main** (`e9fe71a` → auto-deploys prod via Actions). Migration **056 applied to the shared Neon DB**
