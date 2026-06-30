@@ -6,6 +6,49 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
+## 2026-06-30 (b) — TV board: fullscreen new-graphs auto-takeover + live-visits counter
+
+**Committed + pushed to main** (`e9fe71a` → auto-deploys prod via Actions). Migration **056 applied to the shared Neon DB**
+(dev+prod = one DB) and mirrored in `db/schema.sql`. Gates green: FE `tsc` 0 · `eslint` 0 · BE `node --check` 0. Backend verified
+**live on Neon + over HTTP** (snapshot aggregates, visit dedup, audience count). Graphs page **rendered in-browser** (all 4 charts);
+the very last clean screenshot couldn't be retaken (chrome-devtools MCP crashed mid-capture) — browser glance after deploy still wise.
+
+**Context — a redesign was reverted.** This session first did a full "throne-room" scene-cinema redesign of `/tv/[key]` (obsidian/gold,
+ego scenes, etc.). **User rejected it: «back to old design, the iraq map old is better».** So the entire frontend redesign was
+`git checkout`-reverted to HEAD (`page.tsx`, `Panels.tsx`, `IraqMap.tsx`, `globals.css`, `lib/tv.ts`) and the new `Scenes.tsx` deleted.
+The **old board + old Iraq map + existing hero/source auto-rotation are 100% intact** (HERO_MS 13s cycle staff→graphs→map→spotlight,
+SOURCE_MS 22s). Only the **backend additions were kept** (they're invisible/additive).
+
+**What shipped (the focused ask).**
+- **Fullscreen new-graphs auto-takeover.** `components/tv/FullGraphs.tsx` — a dedicated «لوحة الأداء» page with **NEW** charts (NOT
+  the board's existing ones moved): pipeline-distribution **donut**, orders-by-**governorate** bar, **this-year-vs-last-year** area
+  (uses backend `growth.series`), **cumulative revenue** area. `page.tsx` toggles `showGraphs` (board 45s → graphs 20s → loop) and
+  cross-fades a `fixed inset-0 z-[40]` overlay (`opacity/scale/blur` transition) over the board, then back.
+  - **GOTCHA (hit twice this session):** `h-full`/`w-full` does NOT resolve against a `position:fixed` parent → height collapses,
+    recharts warns `width(-1) height(-1)`, page looks blank. Fix = the fullscreen child uses **`absolute inset-0`** (fills the fixed
+    parent definitely). Also Tailwind `bg-gradient-to-br ...` produced **no** background here (the old board only looks covered because
+    its outer wrapper has a solid `bg-[#FAEBD7]`) → FullGraphs uses an **inline-style** `linear-gradient` to be reliably opaque.
+- **Live-visits counter («الزيارات الآن»).** First-party, no third-party/cookies. `components/VisitBeacon.tsx` (in the `(student)`
+  layout) pings `POST /api/track/visit` on load + a 5-min heartbeat with a localStorage session id → `site_visits` table (migration
+  056). `trackController` inserts ≤1 row/session/5min; board counts **DISTINCT session_id in the last 30 min**. Surfaced on the graphs
+  page header («X يشاهدون متجرك الآن»). Verified: 3 pings/2 sessions → audience.now=2; junk ignored.
+- **Backend snapshot extras (additive, behind the same key gate, 60s cache via `buildLegend`):** `audience.now`, `rank`
+  (ladder تاجر→سيّد الأوشحة→مَلِك التخرّج→أسطورة on lifetime orders), `lifetime` (graduates/orders/universities/revenue + uni list),
+  `records` (best day/month, streak), `growth` (YoY + 12-mo series), `map.total=18`, `settings.owner_title`. **Only `growth` + `audience`
+  are currently CONSUMED by the frontend** (the rest are built/ready but unused after the revert).
+
+### Open follow-ups
+- **Browser glance after the deploy finishes** — confirm the board→graphs cross-fade + the 4 charts on the live TV; the auto-rotation
+  and old map are unchanged. (Final local screenshot was blocked by an MCP crash; charts were confirmed rendering just before.)
+- **Unused-but-built backend data:** `rank`/`lifetime`/`records` are in the snapshot but nothing displays them (the ego scenes that
+  used them were reverted). Wire into the board/graphs later if wanted, or leave dormant. Rank thresholds in `tvBoardController.RANKS`
+  are guesses — tune to real lifetime volume.
+- **Visits in PROD:** the beacon ships with the storefront; numbers will populate once real visitors load `lolo-shop96.com`. Seed not
+  updated for 056 (live shared DB has the table; schema.sql mirrored). Dev servers (BE :4000 / FE :3000) left up.
+- Capacitor/android working-tree files were **left unstaged** (unrelated in-progress mobile work).
+
+---
+
 ## 2026-06-29 — Staff بصمة separated from salary
 
 Uncommitted on **main**. Added migration **054_attendance_exemptions.sql**, mirrored it in `db/schema.sql`, and applied it to the
