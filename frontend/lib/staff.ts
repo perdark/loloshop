@@ -394,6 +394,21 @@ export async function revertOrder(id: string): Promise<{ id: string; status: str
 }
 
 /**
+ * POST /production/orders/:id/return-to-customer
+ * «إرجاع للطالب» — hand an early-stage RETAIL order back to the student to edit + resubmit.
+ * The order leaves the production queue/orders list until the student resubmits.
+ */
+export async function returnOrderToCustomer(
+  id: string,
+  reason?: string
+): Promise<{ id: string; status: string; returned_to_customer: boolean }> {
+  const { data } = await api.post<{
+    data: { id: string; status: string; returned_to_customer: boolean };
+  }>(`/production/orders/${id}/return-to-customer`, { reason: reason ?? "" });
+  return data.data;
+}
+
+/**
  * POST /production/orders/:id/claim
  * Mark the current staff member as actively working on this order (presence).
  */

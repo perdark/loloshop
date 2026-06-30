@@ -127,6 +127,10 @@ async function listOrders(req, res) {
   const canSeePrice = canSeeMoney || myTypes.includes('embroiderer');
   const params = [];
   const where = [];
+  // «إرجاع للطالب»: an order handed back to the student leaves the orders list until resubmitted
+  // (so it no longer clutters the production/admin queue). ?returned=1 surfaces them for review.
+  if (req.query.returned === '1') where.push('o.returned_to_customer = TRUE');
+  else where.push('o.returned_to_customer = FALSE');
   if (wholesaler_id) {
     params.push(wholesaler_id);
     where.push(`s.wholesaler_id = $${params.length}`);
@@ -567,7 +571,9 @@ async function configureOrder(req, res) {
       oid = existing.rows[0].id;
       await client.query(
         `UPDATE orders SET price = $1, batch_id = $2, status = $3,
-         has_embroidery = $4, needs_pressing = $5, measurements = $6
+         has_embroidery = $4, needs_pressing = $5, measurements = $6,
+         -- Resubmitting a returned order clears the flag so it re-enters the production queue.
+         returned_to_customer = FALSE, returned_reason = NULL
          WHERE id = $7`,
         [total, resolvedBatchId, initialStatus, has_embroidery, needs_pressing, measurementsJson, oid]
       );
@@ -1391,8 +1397,75 @@ async function myOrders(req, res) {
   res.json({ data: rows });
 }
 
+// ---------- GET /orders/returned — the student's orders sent back for editing ----------
+// Returns each returned order with its product + current spec lines + measurements, so the
+// student can edit the values and resubmit via POST /orders/configure (which clears the flag).
+async function returnedOrders(req, res) {
+  const stu = await query(`SELECT id FROM students WHERE user_id = $1`, [req.user.id]);
+  if (!stu.rows.length) {
+    return res.status(403).json({ error: 'هذه الخدمة للطلاب فقط', code: 'ERR_FORBIDDEN' });
+  }
+  const studentId = stu.rows[0].id;
+  const { rows: orders } = await query(
+    `SELECT o.id, o.product_id, o.design_id, o.status, o.returned_reason, o.returned_at,
+            o.measurements,
+            p.name_ar AS product_name, p.type AS product_type, p.image_url AS product_image_url
+     FROM orders o
+     JOIN products p ON p.id = o.product_id
+     WHERE o.student_id = $1 AND o.returned_to_customer = TRUE
+     ORDER BY o.returned_at DESC NULLS LAST, o.created_at DESC`,
+    [studentId]
+  );
+  if (!orders.length) return res.json({ data: [] });
+
+  const ids = orders.map((o) => o.id);
+  // Editable spec lines only (skip the base-price line, which has no group/option).
+  const { rows: items } = await query(
+    `SELECT oi.order_id, oi.group_id, oi.option_id, oi.label_snapshot, oi.qty,
+            oi.customer_text, oi.customer_image_url,
+            g.name_ar AS group_name, g.requires_customer_text AS group_requires_text,
+            g.requires_customer_image AS group_requires_image,
+            opt.requires_customer_text AS option_requires_text,
+            opt.requires_customer_image AS option_requires_image
+     FROM order_items oi
+     LEFT JOIN option_groups g ON g.id = oi.group_id
+     LEFT JOIN options opt ON opt.id = oi.option_id
+     WHERE oi.order_id = ANY($1) AND oi.group_id IS NOT NULL AND oi.option_id IS NOT NULL
+     ORDER BY oi.id`,
+    [ids]
+  );
+  const byOrder = new Map(orders.map((o) => [o.id, []]));
+  for (const it of items) {
+    byOrder.get(it.order_id)?.push({
+      group_id: it.group_id,
+      option_id: it.option_id,
+      label: it.label_snapshot,
+      group_name: it.group_name,
+      qty: it.qty,
+      customer_text: it.customer_text,
+      customer_image_url: it.customer_image_url,
+      requires_text: !!it.group_requires_text || !!it.option_requires_text,
+      requires_image: !!it.group_requires_image || !!it.option_requires_image,
+    });
+  }
+  const data = orders.map((o) => ({
+    id: o.id,
+    product_id: o.product_id,
+    design_id: o.design_id,
+    status: o.status,
+    returned_reason: o.returned_reason,
+    returned_at: o.returned_at,
+    measurements: o.measurements,
+    product_name: o.product_name,
+    product_type: o.product_type,
+    product_image_url: o.product_image_url,
+    selections: byOrder.get(o.id) || [],
+  }));
+  res.json({ data });
+}
+
 module.exports = {
-  listOrders, myOrders, updateStatus, configureOrder, configurePackage, configureFullSet, getOrderBreakdown,
+  listOrders, myOrders, returnedOrders, updateStatus, configureOrder, configurePackage, configureFullSet, getOrderBreakdown,
   vipUpgradeContext, upgradeToVip, repFullSetContext, configureRepFullSet,
   priceSelections, canStaffTransition, TRANSITIONS, STATUS_LABEL_AR, ALL_STATUSES,
   orderZoneClause,

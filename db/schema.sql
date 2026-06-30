@@ -607,6 +607,15 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS wholesaler_approved_by  UUID REFEREN
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS wholesaler_reject_reason TEXT;
 CREATE INDEX IF NOT EXISTS idx_orders_wholesaler_approval ON orders(wholesaler_approval);
 
+-- Migration 055: «إرجاع للطالب» — return a RETAIL order to the student for editing.
+-- Orthogonal flag: while TRUE the order leaves the production queue + orders list and the
+-- student edits it in /returned-orders; resubmitting via POST /orders/configure clears it.
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS returned_to_customer BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS returned_reason      TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS returned_at          TIMESTAMPTZ;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS returned_by          UUID REFERENCES users(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_orders_returned ON orders(returned_to_customer) WHERE returned_to_customer = TRUE;
+
 -- Staff presence: who is actively working on an order (admin monitor + soft lock).
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS working_staff_id UUID REFERENCES users(id) ON DELETE SET NULL;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS working_since TIMESTAMPTZ;

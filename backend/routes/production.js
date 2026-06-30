@@ -23,6 +23,8 @@ router.post('/orders/:id/embroidery-zone', c.markEmbroideryZone);
 router.post('/advance-bulk', c.advanceBulk);
 router.post('/orders/:id/deliver', c.deliver);
 router.post('/orders/:id/revert', c.revert);
+// «إرجاع للطالب» — hand an early-stage RETAIL order back to the student (admin + scoped staff).
+router.post('/orders/:id/return-to-customer', c.returnToCustomer);
 router.post('/orders/:id/claim', c.claim);
 router.post('/orders/:id/release', c.release);
 

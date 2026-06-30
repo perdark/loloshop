@@ -18,6 +18,7 @@ import {
   markEmbroideryZone,
   confirmDelivery,
   revertOrder,
+  returnOrderToCustomer,
   claimOrder,
   releaseOrder,
   uploadFinalDesign,
@@ -662,6 +663,11 @@ export default function ProductionOrderDetailPage() {
   const [revertOpen, setRevertOpen] = useState(false);
   const [revertSubmitting, setRevertSubmitting] = useState(false);
 
+  // «إرجاع للطالب» — return a retail order to the student to edit
+  const [returnOpen, setReturnOpen] = useState(false);
+  const [returnReason, setReturnReason] = useState("");
+  const [returnSubmitting, setReturnSubmitting] = useState(false);
+
   // Delivery confirmation modal (ready → delivered)
   const [deliverOpen, setDeliverOpen] = useState(false);
   const [deliverSubmitting, setDeliverSubmitting] = useState(false);
@@ -800,6 +806,23 @@ export default function ProductionOrderDetailPage() {
     }
   }
 
+  async function handleReturnToCustomer() {
+    if (!detail) return;
+    setReturnSubmitting(true);
+    try {
+      await returnOrderToCustomer(detail.order.id, returnReason.trim());
+      toast.success("تم إرجاع الطلب للطالب لتعديله");
+      setReturnOpen(false);
+      setReturnReason("");
+      router.refresh();
+      router.push("/staff");
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "تعذر إرجاع الطلب للطالب"));
+    } finally {
+      setReturnSubmitting(false);
+    }
+  }
+
   async function handleApprove() {
     if (!detail?.design) return;
     setActionLoading(true);
@@ -911,6 +934,7 @@ export default function ProductionOrderDetailPage() {
   const canReject = available_actions.can_reject;
   const showAdvance = !!available_actions.advance;
   const showRevert = !!available_actions.revert;
+  const showReturnToCustomer = !!available_actions.return_to_customer;
   const advanceLabel = available_actions.advance?.label ?? "تقدم للمرحلة التالية";
 
   // Approve and advance never apply to the same order, presented as ONE primary button.
@@ -1307,6 +1331,15 @@ export default function ProductionOrderDetailPage() {
               onClick={() => setRevertOpen(true)}
             >
               إرجاع للتعديل
+            </Button>
+          )}
+          {showReturnToCustomer && (
+            <Button
+              variant="ghost"
+              fullWidth
+              onClick={() => setReturnOpen(true)}
+            >
+              إرجاع للطالب لتعديله
             </Button>
           )}
         </div>
@@ -1832,6 +1865,15 @@ export default function ProductionOrderDetailPage() {
                     إرجاع للتعديل
                   </Button>
                 )}
+                {showReturnToCustomer && (
+                  <Button
+                    variant="ghost"
+                    fullWidth
+                    onClick={() => setReturnOpen(true)}
+                  >
+                    إرجاع للطالب لتعديله
+                  </Button>
+                )}
               </div>
             </article>
           )}
@@ -1897,6 +1939,47 @@ export default function ProductionOrderDetailPage() {
         <p className="text-sm text-ink-soft">
           سيتم إرجاع الطلب للمرحلة السابقة. هل أنت متأكد؟
         </p>
+      </Modal>
+
+      {/* ── «إرجاع للطالب» modal — hand a retail order back to the student to edit ── */}
+      <Modal
+        open={returnOpen}
+        onClose={() => {
+          setReturnOpen(false);
+          setReturnReason("");
+        }}
+        title="إرجاع الطلب للطالب"
+        footer={
+          <>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setReturnOpen(false);
+                setReturnReason("");
+              }}
+            >
+              إلغاء
+            </Button>
+            <Button variant="danger" loading={returnSubmitting} onClick={handleReturnToCustomer}>
+              تأكيد الإرجاع للطالب
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-ink-soft">
+            سيخرج الطلب من قائمة الإنتاج ويعود للطالب ليعدّله ويعيد إرساله. اكتب سبب الإرجاع
+            (اختياري) ليظهر له.
+          </p>
+          <textarea
+            value={returnReason}
+            onChange={(e) => setReturnReason(e.target.value)}
+            rows={4}
+            placeholder="مثال: يرجى تصحيح كتابة الاسم..."
+            className="min-h-[88px] w-full resize-none rounded-xl border border-line bg-beige px-4 py-3 text-sm text-ink outline-none transition-colors focus:border-orange-ink focus:ring-2 focus:ring-orange-ink/20"
+            dir="rtl"
+          />
+        </div>
       </Modal>
 
       {/* ── Delivery confirmation modal (ready → delivered) ── */}

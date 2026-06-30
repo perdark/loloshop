@@ -148,6 +148,18 @@ const REVERT_MAP = {
   design_complete: 'designing',
 };
 
+// «إرجاع للطالب» is only offered while the order is at its FIRST production stage — i.e. nothing
+// has been produced yet, so it is safe to hand back to the student for editing. A designed/
+// embroidered piece starts at design_complete (or designing); a plain piece starts at preparing.
+// has_embroidery distinguishes a plain order sitting at its first 'preparing' stage from an
+// embroidered order that REACHED 'preparing' after embroidery (the latter is NOT first-stage).
+function isFirstProductionStage(order) {
+  const designed = !!order.has_embroidery || !!order.design_id;
+  return designed
+    ? (order.status === 'designing' || order.status === 'design_complete')
+    : (order.status === 'preparing');
+}
+
 // ---------- Stage-scoped work queue for the requesting staff member ----------
 async function getQueue(req, res) {
   const u = req.user;
@@ -200,6 +212,8 @@ async function getQueue(req, res) {
        AND (o.status::text <> 'delivered' OR o.delivered_at IS NULL OR o.delivered_at > NOW() - INTERVAL '90 days')
        -- Wholesaler approval gate: only show approved (or retail, i.e. NULL) orders to staff.
        AND (o.wholesaler_approval IS NULL OR o.wholesaler_approval = 'approved')
+       -- «إرجاع للطالب»: an order returned to the student leaves the production queue until resubmitted.
+       AND o.returned_to_customer = FALSE
        ${designerPending
          ? "AND (o.status::text <> 'design_complete' OR ((o.design_id IS NOT NULL AND d.approval_status = 'pending') OR (o.design_id IS NULL AND o.has_embroidery = TRUE)))"
          : ''}
@@ -472,6 +486,13 @@ async function getOrder(req, res) {
       design.approval_status === 'pending' &&
       order.status === 'design_complete' &&
       (uTypes.includes('designer') || isManager(u)),
+    // «إرجاع للطالب» — hand an early-stage RETAIL order back to the student to edit + resubmit.
+    // RETAIL only for now (wholesaler orders go back via the rep approval flow); offered while
+    // the order is still at its first production stage and the staffer is scoped to it.
+    return_to_customer:
+      order.source === 'retail' &&
+      isFirstProductionStage(order) &&
+      (isManager(u) || staffScopeAllows(u, true)),
   };
 
   res.json({
@@ -804,6 +825,72 @@ async function revert(req, res) {
       `INSERT INTO notifications (user_id, type, title_ar, body_ar, link)
        VALUES ($1, 'status_change', $2, $3, '/')`,
       [order.user_id, 'تحديث حالة الطلب', `حالة طلبك الآن: ${STATUS_LABEL_AR[to]}`]
+    );
+    return rows[0];
+  });
+  emitOrderChanged(id, updated.status);
+  emitPresence(id, null, null);
+  res.json({ data: updated });
+}
+
+// ---------- «إرجاع للطالب» — return a RETAIL order to the student to edit + resubmit ----------
+// Admin or scoped staff can hand back an early-stage retail order. It is flagged
+// returned_to_customer = TRUE → leaves the production queue + orders list → the student edits it
+// in /returned-orders and resubmits (POST /orders/configure), which clears the flag.
+async function returnToCustomer(req, res) {
+  const { id } = req.params;
+  const reason = (req.body && typeof req.body.reason === 'string') ? req.body.reason.trim() : '';
+  const cur = await query(
+    `SELECT o.id, o.status, o.design_id, o.has_embroidery, o.returned_to_customer,
+            s.user_id, s.wholesaler_id
+     FROM orders o JOIN students s ON s.id = o.student_id WHERE o.id = $1`,
+    [id]
+  );
+  if (!cur.rows.length) return res.status(404).json({ error: 'الطلب غير موجود', code: 'ERR_NOT_FOUND' });
+  const order = cur.rows[0];
+
+  // RETAIL only for now — wholesaler orders return to the student via the rep approval flow.
+  if (order.wholesaler_id != null) {
+    return res.status(409).json({ error: 'هذه الميزة للطلبات المباشرة (التجزئة) فقط حالياً', code: 'ERR_NOT_RETAIL' });
+  }
+  // Scope guard (retail order → retail scope) — manager/admin bypass inside staffScopeAllows.
+  if (!staffScopeAllows(req.user, true)) {
+    return res.status(403).json({ error: 'هذا الطلب خارج نطاقك', code: 'ERR_FORBIDDEN' });
+  }
+  if (order.returned_to_customer) {
+    return res.status(409).json({ error: 'الطلب مُرجَع للطالب بالفعل', code: 'ERR_ALREADY_RETURNED' });
+  }
+  // Only while nothing has been produced yet — same gate the button reads from getOrder.
+  if (!isFirstProductionStage(order)) {
+    return res.status(409).json({ error: 'لا يمكن إرجاع طلب بدأ تنفيذه', code: 'ERR_NOT_FIRST_STAGE' });
+  }
+
+  const updated = await tx(async (client) => {
+    const { rows } = await client.query(
+      `UPDATE orders
+          SET returned_to_customer = TRUE,
+              returned_reason       = $2,
+              returned_at           = NOW(),
+              returned_by           = $3,
+              working_staff_id      = NULL,
+              working_since         = NULL
+        WHERE id = $1
+        RETURNING id, status, returned_to_customer`,
+      [id, reason || null, req.user.id]
+    );
+    await client.query(
+      `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
+       VALUES ($1, 'return_to_customer', 'order', $2, $3)`,
+      [req.user.id, id, JSON.stringify({ reason: reason || null, by: req.user.staff_type || req.user.role })]
+    );
+    await client.query(
+      `INSERT INTO notifications (user_id, type, title_ar, body_ar, link)
+       VALUES ($1, 'order_returned', $2, $3, '/returned-orders')`,
+      [
+        order.user_id,
+        'تم إرجاع طلبك للتعديل',
+        reason ? `يرجى تعديل الطلب وإعادة إرساله. السبب: ${reason}` : 'يرجى تعديل الطلب وإعادة إرساله.',
+      ]
     );
     return rows[0];
   });
@@ -1187,7 +1274,7 @@ async function monitor(req, res) {
 }
 
 module.exports = {
-  getQueue, getOrder, advance, advanceBulk, deliver, revert, claim, release, completed, uploadFinalDesign, monitor,
+  getQueue, getOrder, advance, advanceBulk, deliver, revert, returnToCustomer, claim, release, completed, uploadFinalDesign, monitor,
   streamEvents, nextStageFor, markEmbroideryZone,
   tailorQueue, tailorComplete, tailorReopen, tailorCompleteBulk, tailorSummary,
 };

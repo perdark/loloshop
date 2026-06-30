@@ -20,6 +20,41 @@ export interface ConfigureSelectionPayload {
   customer_text?: string;
 }
 
+// ─── «إرجاع للطالب» — orders sent back by admin/staff for the student to edit ───
+
+export interface ReturnedOrderSelection {
+  group_id: string;
+  option_id: string;
+  /** Snapshot label (e.g. «تطريز الوشاح من الأمام: نص»). */
+  label: string;
+  group_name: string | null;
+  qty: number;
+  customer_text: string | null;
+  customer_image_url: string | null;
+  requires_text: boolean;
+  requires_image: boolean;
+}
+
+export interface ReturnedOrder {
+  id: string;
+  product_id: string;
+  design_id: string | null;
+  status: OrderStatus;
+  returned_reason: string | null;
+  returned_at: string | null;
+  measurements: RobeMeasurements | null;
+  product_name: string;
+  product_type: ProductType;
+  product_image_url: string | null;
+  selections: ReturnedOrderSelection[];
+}
+
+/** GET /orders/returned — the retail student's orders awaiting their edit. */
+export async function getReturnedOrders(): Promise<ReturnedOrder[]> {
+  const { data } = await api.get<{ data: ReturnedOrder[] }>("/orders/returned");
+  return data.data;
+}
+
 export function buildConfigureSelections(
   product: CatalogProduct,
   selection: OptionSelection,

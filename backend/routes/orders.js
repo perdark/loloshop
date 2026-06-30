@@ -4,6 +4,8 @@ const c = require('../controllers/orderController');
 
 // Retail student: list MY own orders + their status (order tracking)
 router.get('/mine', authRequired, requireRole('retail'), c.myOrders);
+// Retail student: orders sent back by admin/staff for editing (with spec lines to re-edit)
+router.get('/returned', authRequired, requireRole('retail'), c.returnedOrders);
 
 // Staff/admin: list + status transitions
 router.get('/', authRequired, requireRole('admin', 'staff'), c.listOrders);
