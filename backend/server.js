@@ -83,6 +83,7 @@ app.use('/api/designs', require('./routes/designs'));
 app.use('/api/fonts', require('./routes/fonts'));
 app.use('/api/payroll', require('./routes/payroll'));
 app.use('/api/calligraphy', require('./routes/calligraphy'));
+app.use('/api/tv', require('./routes/tv'));
 
 // Ensure calligraphy upload dirs exist at boot
 ['calligraphy/sheets', 'calligraphy/plates', 'calligraphy/elements'].forEach((d) => {

@@ -1000,3 +1000,64 @@ html {
   .vip-float { animation: none !important; }
   .cta-pulse { animation: none !important; }
 }
+
+/* ── Admin TV command board (/tv/[key]) animations ── */
+@keyframes tvfall {
+  0%   { transform: translateY(-20px) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(105vh) rotate(720deg); opacity: 0.9; }
+}
+@keyframes tv-pulse-kf {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
+.tv-pulse { animation: tv-pulse-kf 1.4s ease-in-out infinite; }
+@keyframes tv-pulse-dot-kf {
+  0%, 100% { r: 2.2; opacity: 1; }
+  50%      { r: 4.2; opacity: 0.6; }
+}
+.tv-pulse-dot { animation: tv-pulse-dot-kf 1.6s ease-in-out infinite; }
+@keyframes tv-marquee-kf {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+.tv-marquee { display: inline-block; animation: tv-marquee-kf 40s linear infinite; }
+[dir="rtl"] .tv-marquee { animation-direction: reverse; }
+@keyframes tv-pop-kf {
+  0%   { transform: scale(0.6); opacity: 0; }
+  20%  { transform: scale(1.06); opacity: 1; }
+  85%  { transform: scale(1); opacity: 1; }
+  100% { transform: scale(0.96); opacity: 0; }
+}
+.tv-pop { animation: tv-pop-kf 4.2s ease-in-out forwards; }
+
+/* TV board — one elevation language (two levels, not nine).
+   Top-level zones are .tv-panel (single soft ink shadow); anything inside a
+   panel is a flat .tv-tile / .tv-well so we never stack card-on-card. */
+.tv-panel {
+  background: #FFFAF3;
+  border: 1px solid #ECD7BA;
+  border-radius: 24px;
+  box-shadow: 0 16px 40px -24px rgba(58, 32, 8, 0.30), 0 2px 6px -3px rgba(58, 32, 8, 0.08);
+}
+.tv-tile {                       /* discrete items within a panel (staff, ranks) */
+  background: #FFFCF7;
+  border: 1px solid #EFDCC0;
+  border-radius: 16px;
+}
+.tv-well {                       /* recessed slot (charts, map, spotlight stage) */
+  background: #F8EDDB;
+  border-radius: 18px;
+}
+.tv-kpi-cell { position: relative; }
+.tv-kpi-cell + .tv-kpi-cell::before {   /* hairline divider between scoreboard cells */
+  content: "";
+  position: absolute;
+  inset-block: 18px;
+  inset-inline-end: 0;
+  width: 1px;
+  background: #F2DFC6;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tv-pulse, .tv-pulse-dot, .tv-marquee, .tv-pop { animation: none !important; }
+}
