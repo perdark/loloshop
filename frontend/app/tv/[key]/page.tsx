@@ -14,6 +14,7 @@ import {
   type TvSnapshot,
 } from "@/lib/tv";
 import { IraqMap } from "@/components/tv/IraqMap";
+import { FullGraphs } from "@/components/tv/FullGraphs";
 import {
   Celebration,
   GoalRing,
@@ -47,6 +48,7 @@ export default function TvBoardPage() {
   const [pinnedView, setPinnedView] = useState<Exclude<HeroView, "auto"> | null>(null);
   const [range, setRange] = useState<Range>("today");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showGraphs, setShowGraphs] = useState(false);
   const [celebrate, setCelebrate] = useState<{ id: number; student: string; university?: string } | null>(null);
 
   const source: Source = pinnedSource ?? SOURCE_CYCLE[rotSrcIdx];
@@ -151,6 +153,14 @@ export default function TvBoardPage() {
     window.addEventListener("resize", fit);
     return () => window.removeEventListener("resize", fit);
   }, []);
+
+  // auto whole-page takeover: hold on the board, then fade to the fullscreen
+  // graphs page, hold, then fade back. Loops forever.
+  useEffect(() => {
+    const ms = showGraphs ? 20000 : 45000;
+    const t = setTimeout(() => setShowGraphs((s) => !s), ms);
+    return () => clearTimeout(t);
+  }, [showGraphs]);
 
   const onSettings = useCallback(
     async (patch: Partial<TvSnapshot["settings"]>) => {
@@ -261,6 +271,16 @@ export default function TvBoardPage() {
             <GoalRing done={data.goal.done_today} target={data.goal.target} />
           </div>
         </div>
+      </div>
+
+      {/* fullscreen graphs takeover — premium cross-fade over the board, then back */}
+      <div
+        className={`pointer-events-none fixed inset-0 z-[40] transition-all duration-700 ${
+          showGraphs ? "scale-100 opacity-100 blur-0" : "scale-[1.04] opacity-0 blur-sm"
+        }`}
+        aria-hidden={!showGraphs}
+      >
+        <FullGraphs data={data} />
       </div>
 
       {/* controls — NOT scaled; anchored to the real viewport */}

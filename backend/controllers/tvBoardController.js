@@ -19,6 +19,43 @@ const { addClient } = require('../lib/eventBus');
 const TZ = 'Asia/Baghdad';
 const MANAGER_STAGES = ['design_complete', 'converting', 'embroidery', 'pressing', 'preparing', 'ready'];
 const PRESENCE_TTL_SECONDS = 90;
+const TOTAL_PROVINCES = 18; // Iraq governorates — the conquest denominator
+const OWNER_TITLE_DEFAULT = 'صاحب لولو شوب';
+
+// Owner rank ladder (ego). Climbs on LIFETIME non-cancelled orders. Thresholds
+// are deliberately tunable — adjust to the real lifetime volume if they feel off.
+const RANKS = [
+  { key: 'merchant', label: 'تاجر', min: 0 },
+  { key: 'lord', label: 'سيّد الأوشحة', min: 200 },
+  { key: 'king', label: 'مَلِك التخرّج', min: 1000 },
+  { key: 'legend', label: 'أسطورة', min: 3000 },
+];
+function rankFor(total) {
+  let cur = RANKS[0];
+  let next = null;
+  for (let i = 0; i < RANKS.length; i++) {
+    if (total >= RANKS[i].min) { cur = RANKS[i]; next = RANKS[i + 1] || null; }
+  }
+  const floor = cur.min;
+  const ceil = next ? next.min : cur.min;
+  const progress = next ? Math.min(100, Math.max(0, Math.round(((total - floor) / (ceil - floor)) * 100))) : 100;
+  return {
+    key: cur.key,
+    label: cur.label,
+    next_label: next ? next.label : null,
+    next_at: next ? next.min : null,
+    to_next: next ? Math.max(0, next.min - total) : 0,
+    progress,
+    total,
+  };
+}
+
+const MONTHS_AR = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+function ymBefore(s) { // 'YYYY-MM-DD' → previous day, all in UTC string-space
+  const d = new Date(`${s}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
 
 // ---------- key gate ----------
 function tvKeyOk(provided) {
@@ -59,6 +96,148 @@ function govKey(text) {
   return null;
 }
 
+// ---------- legend aggregates (lifetime / records / growth / rank) ----------
+// These barely move minute-to-minute and are heavier (full-history scans), so
+// they get their OWN 60s cache — independent of the 2s live snapshot — to keep
+// Neon load low on an always-on board.
+const _legendCache = new Map(); // source → { at, data }
+const LEGEND_MS = 60000;
+
+async function buildLegend(source) {
+  const ck = source || 'all';
+  const hit = _legendCache.get(ck);
+  if (hit && Date.now() - hit.at < LEGEND_MS) return hit.data;
+  const src = srcClause(source);
+
+  const [lifeR, uniR, recDayR, recMonR, datesR, nowR, growR, growSeriesR] = await Promise.all([
+    // Lifetime totals.
+    query(
+      `SELECT
+         COUNT(DISTINCT o.student_id) FILTER (WHERE o.status::text<>'cancelled')::int AS graduates,
+         COUNT(*) FILTER (WHERE o.status::text<>'cancelled')::int AS total_orders,
+         COUNT(*) FILTER (WHERE o.status::text='delivered')::int AS delivered_total,
+         COALESCE(SUM(o.price) FILTER (WHERE o.status::text<>'cancelled'),0)::bigint AS revenue_total
+       FROM orders o JOIN students s ON s.id=o.student_id WHERE TRUE ${src}`
+    ),
+    // Universities served — list (trophy wall) + implicit count.
+    query(
+      `SELECT s.university_name AS name, COUNT(*)::int AS c
+       FROM orders o JOIN students s ON s.id=o.student_id
+       WHERE o.status::text<>'cancelled' AND s.university_name IS NOT NULL AND s.university_name<>'' ${src}
+       GROUP BY s.university_name ORDER BY c DESC LIMIT 40`
+    ),
+    // Best historical DAY (strictly before today) by order count → record to beat.
+    query(
+      `SELECT d::text AS d, cnt, rev FROM (
+         SELECT (o.created_at AT TIME ZONE '${TZ}')::date AS d, COUNT(*)::int AS cnt,
+                COALESCE(SUM(o.price),0)::bigint AS rev
+         FROM orders o JOIN students s ON s.id=o.student_id
+         WHERE o.status::text<>'cancelled'
+           AND (o.created_at AT TIME ZONE '${TZ}')::date < (NOW() AT TIME ZONE '${TZ}')::date ${src}
+         GROUP BY d
+       ) x ORDER BY cnt DESC, rev DESC LIMIT 1`
+    ),
+    // Best MONTH by order count.
+    query(
+      `SELECT to_char(m,'YYYY-MM') AS ym, cnt FROM (
+         SELECT date_trunc('month', o.created_at AT TIME ZONE '${TZ}') AS m, COUNT(*)::int AS cnt
+         FROM orders o JOIN students s ON s.id=o.student_id
+         WHERE o.status::text<>'cancelled' ${src}
+         GROUP BY m
+       ) x ORDER BY cnt DESC LIMIT 1`
+    ),
+    // Distinct order dates (for the streak), newest first.
+    query(
+      `SELECT DISTINCT (o.created_at AT TIME ZONE '${TZ}')::date::text AS d
+       FROM orders o JOIN students s ON s.id=o.student_id
+       WHERE o.status::text<>'cancelled' ${src}
+       ORDER BY d DESC LIMIT 240`
+    ),
+    // Today (Baghdad) as text — anchors the streak + current year.
+    query(`SELECT (NOW() AT TIME ZONE '${TZ}')::date::text AS today`),
+    // Year-over-year TO DATE (same day-of-year cutoff in both years).
+    query(
+      `WITH t AS (SELECT (NOW() AT TIME ZONE '${TZ}') AS now_local)
+       SELECT
+         COUNT(*) FILTER (WHERE z.yr = EXTRACT(YEAR FROM t.now_local))::int AS this_year,
+         COUNT(*) FILTER (WHERE z.yr = EXTRACT(YEAR FROM t.now_local) - 1)::int AS last_year,
+         COALESCE(SUM(z.price) FILTER (WHERE z.yr = EXTRACT(YEAR FROM t.now_local)),0)::bigint AS this_year_rev,
+         COALESCE(SUM(z.price) FILTER (WHERE z.yr = EXTRACT(YEAR FROM t.now_local) - 1),0)::bigint AS last_year_rev
+       FROM (
+         SELECT o.price, EXTRACT(YEAR FROM (o.created_at AT TIME ZONE '${TZ}'))::int AS yr,
+                EXTRACT(DOY FROM (o.created_at AT TIME ZONE '${TZ}'))::int AS doy
+         FROM orders o JOIN students s ON s.id=o.student_id
+         WHERE o.status::text<>'cancelled' ${src}
+       ) z CROSS JOIN t
+       WHERE z.doy <= EXTRACT(DOY FROM t.now_local)`
+    ),
+    // Monthly order counts for this year + last year (the climbing-graph series).
+    query(
+      `SELECT EXTRACT(YEAR FROM (o.created_at AT TIME ZONE '${TZ}'))::int AS yr,
+              EXTRACT(MONTH FROM (o.created_at AT TIME ZONE '${TZ}'))::int AS mon,
+              COUNT(*)::int AS cnt
+       FROM orders o JOIN students s ON s.id=o.student_id
+       WHERE o.status::text<>'cancelled' ${src}
+         AND o.created_at >= (date_trunc('year', NOW() AT TIME ZONE '${TZ}') - INTERVAL '1 year')
+       GROUP BY yr, mon`
+    ),
+  ]);
+
+  const lf = lifeR.rows[0] || {};
+  const universities = uniR.rows.map((r) => ({ name: r.name, count: r.c }));
+  const lifetime = {
+    graduates: lf.graduates || 0,
+    total_orders: lf.total_orders || 0,
+    delivered_total: lf.delivered_total || 0,
+    revenue_total: Number(lf.revenue_total || 0),
+    universities_count: universities.length,
+    universities, // trophy-wall list
+  };
+
+  // --- streak: consecutive days with ≥1 order, ending today or yesterday ---
+  const today = nowR.rows[0]?.today || null;
+  const dateSet = new Set(datesR.rows.map((r) => r.d));
+  let streak = 0;
+  if (today) {
+    let cursor = dateSet.has(today) ? today : (dateSet.has(ymBefore(today)) ? ymBefore(today) : null);
+    while (cursor && dateSet.has(cursor)) { streak++; cursor = ymBefore(cursor); }
+  }
+  const bd = recDayR.rows[0] || null;
+  const bm = recMonR.rows[0] || null;
+  const records = {
+    best_day_orders: bd ? bd.cnt : 0,
+    best_day_date: bd ? bd.d : null,
+    best_day_revenue: bd ? Number(bd.rev) : 0,
+    best_month_orders: bm ? bm.cnt : 0,
+    best_month: bm ? bm.ym : null,
+    streak,
+  };
+
+  // --- growth (YoY to date) + the monthly series ---
+  const gr = growR.rows[0] || {};
+  const thisYear = today ? Number(today.slice(0, 4)) : new Date().getFullYear();
+  const thisArr = Array(12).fill(0);
+  const lastArr = Array(12).fill(0);
+  growSeriesR.rows.forEach((r) => {
+    if (r.yr === thisYear) thisArr[r.mon - 1] = r.cnt;
+    else if (r.yr === thisYear - 1) lastArr[r.mon - 1] = r.cnt;
+  });
+  const lastY = gr.last_year || 0;
+  const thisY = gr.this_year || 0;
+  const growth = {
+    this_year: thisY,
+    last_year: lastY,
+    this_year_rev: Number(gr.this_year_rev || 0),
+    last_year_rev: Number(gr.last_year_rev || 0),
+    orders_pct: lastY > 0 ? Math.round(((thisY - lastY) / lastY) * 100) : null, // null = no last-year baseline ("جديد")
+    series: MONTHS_AR.map((m, i) => ({ label: m, this_year: thisArr[i], last_year: lastArr[i] })),
+  };
+
+  const data = { lifetime, records, growth, rank: rankFor(lifetime.total_orders) };
+  _legendCache.set(ck, { at: Date.now(), data });
+  return data;
+}
+
 // ---------- snapshot (the whole board in one cached payload) ----------
 const _cache = new Map(); // `${source}|${range}` → { at, data }
 const CACHE_MS = 2000;
@@ -68,7 +247,7 @@ async function buildSnapshot(source, range) {
   const days = range === '30' ? 30 : range === '7' ? 7 : 1; // 'today' → 1
   const byHour = days === 1;
 
-  const [kpiR, pipeR, tailorR, staffR, mapR, deadR, spotR, tickR, gIn, gMoney, gProd, gUni, settingsR] = await Promise.all([
+  const [kpiR, pipeR, tailorR, staffR, mapR, deadR, spotR, tickR, gIn, gMoney, gProd, gUni, settingsR, audienceR] = await Promise.all([
     // KPIs today vs yesterday (Baghdad-local), source-filtered.
     query(
       `WITH t AS (SELECT (NOW() AT TIME ZONE '${TZ}')::date AS d)
@@ -229,6 +408,10 @@ async function buildSnapshot(source, range) {
     ),
     // Board settings.
     query(`SELECT value FROM site_settings WHERE key = 'tv_board'`),
+    // Live audience — distinct storefront sessions in the last 30 min (NOT source-
+    // filtered; visits aren't tied to retail/wholesale). Labeled «الآن» on the board.
+    query(`SELECT COUNT(DISTINCT session_id)::int AS c
+            FROM site_visits WHERE created_at > now() - INTERVAL '30 minutes'`),
   ]);
 
   // --- shape KPIs + deltas ---
@@ -324,6 +507,10 @@ async function buildSnapshot(source, range) {
   // --- goal ---
   const dailyGoal = Number(settings.daily_goal) > 0 ? Number(settings.daily_goal) : null;
 
+  // --- legend (own 60s cache) + live audience ---
+  const legend = await buildLegend(source);
+  const audienceNow = audienceR.rows[0]?.c || 0;
+
   return {
     generated_at: new Date().toISOString(),
     source: source || 'all',
@@ -333,7 +520,12 @@ async function buildSnapshot(source, range) {
                 bottleneck, bottleneck_active: bottleneckActive, threshold },
     staff,
     leaderboard: [...staff].sort((a, b) => b.done_today - a.done_today).slice(0, 10),
-    map: { gov, home: 'diyala', target: 'baghdad', reached: Object.keys(gov).length },
+    map: { gov, home: 'diyala', target: 'baghdad', reached: Object.keys(gov).length, total: TOTAL_PROVINCES },
+    audience: { now: audienceNow },
+    lifetime: legend.lifetime,
+    records: legend.records,
+    growth: legend.growth,
+    rank: legend.rank,
     deadlines: deadR.rows.map((r) => ({
       id: r.id, name: r.name_ar, deadline: r.deadline, open_orders: r.open_orders,
     })),
@@ -350,6 +542,7 @@ async function buildSnapshot(source, range) {
       daily_goal: dailyGoal,
       bottleneck_threshold: threshold,
       sound: settings.sound !== false, // default on
+      owner_title: (typeof settings.owner_title === 'string' && settings.owner_title.trim()) || OWNER_TITLE_DEFAULT,
     },
   };
 }
@@ -399,6 +592,10 @@ async function updateSettings(req, res) {
     if (Number.isFinite(t) && t >= 1) next.bottleneck_threshold = t;
   }
   if (b.sound !== undefined) next.sound = !!b.sound;
+  if (b.owner_title !== undefined) {
+    const t = String(b.owner_title || '').trim().slice(0, 40);
+    next.owner_title = t || null; // null → snapshot falls back to the default
+  }
   await query(
     `INSERT INTO site_settings (key, value, updated_at) VALUES ('tv_board', $1::jsonb, now())
      ON CONFLICT (key) DO UPDATE SET value = $1::jsonb, updated_at = now()`,

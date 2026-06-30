@@ -848,6 +848,18 @@ CREATE TABLE IF NOT EXISTS site_settings (
   updated_at TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
+-- Migration 056: first-party storefront visit tracking (TV board «الزيارات الآن»).
+-- No third-party analytics / no cookies; ≤1 row per session per 5 min, board counts
+-- DISTINCT session_id in the last 30 min. See 056_site_visits.sql.
+CREATE TABLE IF NOT EXISTS site_visits (
+  id          BIGSERIAL PRIMARY KEY,
+  session_id  TEXT NOT NULL,
+  path        TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_site_visits_created_at ON site_visits (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_site_visits_session_created ON site_visits (session_id, created_at DESC);
+
 -- Migration 049: maintenance-mode flag — { active, message_ar }. active=true → home page "/" shows the message.
 INSERT INTO site_settings (key, value)
 VALUES (

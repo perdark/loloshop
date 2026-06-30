@@ -2,6 +2,7 @@ import Link from "next/link";
 import { StudentNav } from "@/components/StudentNav";
 import { SplashIntro } from "@/components/SplashIntro";
 import { DiscountPopup } from "@/components/DiscountPopup";
+import { VisitBeacon } from "@/components/VisitBeacon";
 
 export default function StudentLayout({
   children,
@@ -14,6 +15,7 @@ export default function StudentLayout({
           not to <main>'s transformed (animate-page-in) box. */}
       <SplashIntro />
       <DiscountPopup />
+      <VisitBeacon />
       <StudentNav />
       {/* Phone-first but no longer caged at 512px — editorial grids engage on
           tablet/desktop while mobile stays a single calm column. */}

@@ -68,6 +68,14 @@ export interface TvSnapshot {
   graphs: { byHour: boolean; series: TvSeriesPoint[]; universities: { name: string; count: number }[] };
   goal: { target: number | null; done_today: number };
   settings: { daily_goal: number | null; bottleneck_threshold: number; sound: boolean };
+  // Optional extras the backend also sends (used by the fullscreen graphs page).
+  audience?: { now: number };
+  growth?: {
+    this_year: number;
+    last_year: number;
+    orders_pct: number | null;
+    series: { label: string; this_year: number; last_year: number }[];
+  };
 }
 
 export function snapshotUrl(key: string, source: Source, range: Range): string {
