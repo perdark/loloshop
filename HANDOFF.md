@@ -6,6 +6,26 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
+## 2026-07-01 (b) — Capacitor Android project committed · Google Play submission in progress
+
+Committed the **Capacitor Android wrapper** to main (`frontend/android/`, `capacitor.config.ts`, `@capacitor/*` deps in `package.json`).
+**Secrets verified safe:** `.gitignore` ignores `*.jks`/`*.keystore`, `local.properties`, and all android build dirs + the `.aab`;
+signing passwords are read from gitignored `local.properties` (not hardcoded in `build.gradle`) — grep confirmed the keystore password
+is in **zero** committed files. The signed `~/Desktop/loloshop-v1.aab` (v1) is built and uploaded to Play **internal testing**.
+
+**Google Play submission status (2026-07-01):** Play developer account is **Personal** → must run a **Closed test with ≥20 testers
+opted in 14 continuous days** before applying for production access (internal testing does NOT count). **This 20-tester/14-day window
+is the only remaining gate.** Everything else is done: App access (reviewer demo login `07700000000`/`Lolo#Review2026` — live), Content
+rating (3+), Data safety (no Firebase/ads in v1 build), Financial features (none), Tags, Store contact `info@lolo-shop96.com` (Namecheap
+forwarding → user Gmail). Store assets + listing copy (AR+EN) in **`~/Desktop/loloshop-store-assets/`** (feature graphic 1024×500 generated,
+icon 512, 5 screenshots). See memory `project_play_publishing_status`, `project_play_reviewer_demo_login`, `project_domain_email_setup`.
+
+### Open follow-ups
+- Create the **Closed testing** track (same `.aab`), recruit 20 testers (students/staff/friends), start the 14-day clock, then apply for production.
+- Backend SMTP still empty → email password-reset dead in prod (phone OTP works). Firebase push deferred (v2) → re-declare Data safety then.
+
+---
+
 ## 2026-07-01 — App-store reviewer demo login (OTP-skip) for the Google Play «App access» form
 
 **Uncommitted on main.** No migration. Gates: BE `node --check` 0 (both touched files). Verified **live on the shared Neon DB**
