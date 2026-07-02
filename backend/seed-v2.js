@@ -55,7 +55,12 @@ const PRODUCTS = [
     type: 'shawl', name_ar: 'شال أمريكي (ملكي للممثلين)', description: 'شال أمريكي — للبنات فقط',
     base_price: 30000, customizable: false, gender_restriction: 'female',
     role_prices: [{ role: 'wholesaler', base_price: 20000 }],
-    groups: [],
+    groups: [
+      { name_ar: 'صورة الشال', input_type: 'single_select', required: false, has_image: false,
+        requires_customer_text: false, requires_customer_image: false,
+        customer_text_prompt_ar: 'ملاحظات', customer_text_placeholder_ar: 'أي تفاصيل إضافية للشال…',
+        options: [{ label_ar: 'شال', price_delta: 0 }] },
+    ],
   },
 ];
 
@@ -80,13 +85,15 @@ async function seedGroups(productId, groups) {
     const { rows } = await query(
       `INSERT INTO option_groups
          (product_id, name_ar, input_type, sort, required, has_image, hint_ar, max_select,
-          gender_restriction, requires_customer_text, requires_customer_image)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,COALESCE($10,FALSE),COALESCE($11,FALSE))
+          gender_restriction, requires_customer_text, requires_customer_image,
+          customer_text_prompt_ar, customer_text_placeholder_ar)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,COALESCE($10,FALSE),COALESCE($11,FALSE),$12,$13)
        RETURNING id`,
       [
         productId, g.name_ar, g.input_type, gi, !!g.required, !!g.has_image,
         g.hint_ar || null, g.max_select || 1, g.gender_restriction || null,
         g.requires_customer_text || false, g.requires_customer_image || false,
+        g.customer_text_prompt_ar || null, g.customer_text_placeholder_ar || null,
       ]
     );
     const gid = rows[0].id;

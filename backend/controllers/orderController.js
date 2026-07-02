@@ -498,19 +498,26 @@ async function configureOrder(req, res) {
   }
   const productType = prodTypeRes.rows[0].type;
 
-  // Robe requires measurements (قياسات الروب). The full measurements object — incl.
-  // محيط الصدر (chest_cm) and the optional ملاحظات لفصال الروب (tailor_notes) — is stored
-  // as-is in orders.measurements below, so no extra plumbing is needed for those fields.
+  // Robe requires measurements (قياسات الروب). محيط الصدر (chest_cm) is optional;
+  // shoulder / robe length / sleeve length are required.
   if (productType === 'robe') {
     const m = measurements || {};
     const { shoulder_cm, chest_cm, robe_length_cm, sleeve_length_cm } = m;
     if (
       !isFinite(Number(shoulder_cm)) || Number(shoulder_cm) <= 0 ||
-      !isFinite(Number(chest_cm)) || Number(chest_cm) <= 0 ||
       !isFinite(Number(robe_length_cm)) || Number(robe_length_cm) <= 0 ||
       !isFinite(Number(sleeve_length_cm)) || Number(sleeve_length_cm) <= 0
     ) {
       return res.status(400).json({ error: 'يرجى إدخال قياسات الروب', code: 'ERR_VALIDATION' });
+    }
+    const chestNum = Number(chest_cm);
+    if (chest_cm != null && chest_cm !== '' && isFinite(chestNum) && chestNum > 0) {
+      if (chestNum < 60 || chestNum > 180) {
+        return res.status(400).json({
+          error: 'قياسات الروب غير صالحة — محيط الصدر يجب أن يكون بين 60 و 180 سم',
+          code: 'ERR_VALIDATION',
+        });
+      }
     }
   }
 
@@ -865,22 +872,33 @@ async function configureFullSet(req, res) {
   }
   const groupNotes = cleanText(notes, 500);
 
-  // ── robe measurements (قياسات الروب) — same fields the DM form asks for, with typo guards ──
+  // ── robe measurements (قياسات الروب) — shoulder/length/sleeve required; chest optional ──
   const m = (robe && robe.measurements) || {};
+  const measNum = (v) => {
+    const n = Number(normalizeDigits(v));
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
   const meas = {
-    shoulder_cm: Number(normalizeDigits(m.shoulder_cm)),
-    chest_cm: Number(normalizeDigits(m.chest_cm)),
-    robe_length_cm: Number(normalizeDigits(m.robe_length_cm)),
-    sleeve_length_cm: Number(normalizeDigits(m.sleeve_length_cm)),
-    // ملاحظات لفصال الروب — optional free-text tailoring note, rides the measurements JSON.
+    shoulder_cm: measNum(m.shoulder_cm),
+    chest_cm: measNum(m.chest_cm),
+    robe_length_cm: measNum(m.robe_length_cm),
+    sleeve_length_cm: measNum(m.sleeve_length_cm),
     tailor_notes: cleanText(m.tailor_notes, 500),
-    // صورة الوصل — optional receipt/bill photo URL (retail only), rides the measurements JSON.
     receipt_image_url: cleanText(m.receipt_image_url, 500),
   };
   const MEAS_RANGE = { shoulder_cm: [25, 80], chest_cm: [60, 180], robe_length_cm: [70, 190], sleeve_length_cm: [30, 100] };
   const MEAS_LABEL = { shoulder_cm: 'عرض الكتف', chest_cm: 'محيط الصدر', robe_length_cm: 'طول الروب', sleeve_length_cm: 'طول الردن' };
+  const REQUIRED_MEAS = ['shoulder_cm', 'robe_length_cm', 'sleeve_length_cm'];
+  for (const k of REQUIRED_MEAS) {
+    if (meas[k] == null) {
+      return res.status(400).json({
+        error: `قياسات الروب غير صالحة — ${MEAS_LABEL[k]} مطلوب`,
+        code: 'ERR_VALIDATION',
+      });
+    }
+  }
   for (const [k, [lo, hi]] of Object.entries(MEAS_RANGE)) {
-    if (!isFinite(meas[k]) || meas[k] < lo || meas[k] > hi) {
+    if (meas[k] != null && (meas[k] < lo || meas[k] > hi)) {
       return res.status(400).json({
         error: `قياسات الروب غير صالحة — ${MEAS_LABEL[k]} يجب أن يكون بين ${lo} و ${hi} سم`,
         code: 'ERR_VALIDATION',

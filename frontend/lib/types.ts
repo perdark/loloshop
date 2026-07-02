@@ -216,8 +216,8 @@ export interface JoinPayload {
 /** Robe tailoring measurements (قياسات الروب) in cm — not priced. */
 export interface RobeMeasurements {
   shoulder_cm: number;
-  /** محيط الصدر */
-  chest_cm: number;
+  /** محيط الصدر — optional */
+  chest_cm?: number;
   robe_length_cm: number;
   sleeve_length_cm: number;
   /** ملاحظات لفصال الروب — optional free-text tailoring note. */

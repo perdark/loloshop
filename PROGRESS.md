@@ -1,5 +1,28 @@
 # Progress
 
+## 2026-07-02 — Wholesaler custom order + shawl notes
+
+- **Edit fix:** `persistFullSetOrder` now normalizes `student.phone ?? ''` so editing name-only custom orders no longer 500s on `checkout_groups.phone_primary NOT NULL`.
+- **Custom order confirmation:** removed auto-approve from `quickFullSetOrder` — custom orders stay `pending` until the rep confirms from «طلبات الطلاب». FE: updated copy, redirect to pending orders, «تعديل» link + «تأكيد وإرسال للإنتاج» on pending rows.
+- **Shawl notes:** migration `058_retail_shawl_notes.sql` adds optional «ملاحظات» prompts to top-level shawl products; retail product page renders notes textarea alongside optional photo for `type=shawl`; `seed-v2.js` updated for fresh installs.
+
+Verified:
+- Backend `node --check` on `fullSetOrder.js`, `wholesalerController.js`.
+- Migration 058 applied to Neon.
+- Frontend `npx tsc --noEmit` 0.
+
+## 2026-07-02 — Retail cap/robe form improvements
+
+- Removed generic retail cap photo group «صورة القبعة» (migration 050 superseded).
+- Cap «القبعة من الجانب» / «القبعة من الأعلى»: when student picks «بكتابة», text is required and reference photo is optional.
+- Robe «ردن الروب» single-select replaced with optional left/right sleeve toggles (+5,000 د.ع each) with required text + optional photo per checked sleeve.
+- محيط الصدر is now optional on retail product page and retail full-set wizard (range-checked when provided).
+- Migration `057_retail_cap_robe_form.sql` + `seed-full-set.js` updated for fresh installs.
+
+Verified:
+- Backend `node --check` on `orderController.js`, `seed-full-set.js`.
+- Frontend `npx tsc --noEmit` 0.
+
 ## 2026-06-29 — Staff attendance separated from salary
 
 - Separated «بصمة الموظف» from salary: staff now have an independent `/staff/attendance` page/link, while `/staff/me` is salary/activity only.

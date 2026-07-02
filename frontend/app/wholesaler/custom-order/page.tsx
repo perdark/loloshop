@@ -19,7 +19,7 @@ import { Input } from "@/components/ui/Input";
 /**
  * طلب مخصص لطالب — the rep adds a student BY NAME ONLY (no account) and places the
  * SAME full-set طقم order in one shot. The backend creates a pre-approved, un-loginable
- * student and skips the order approval, so it goes straight to staff + the dashboard.
+ * student; the order stays pending until the rep confirms it from «طلبات الطلاب».
  * Reuses the shared <FullSetOrderForm/> exactly like the per-student rep order page.
  */
 export default function WholesalerCustomOrderPage() {
@@ -57,8 +57,8 @@ export default function WholesalerCustomOrderPage() {
     setSubmitting(true);
     try {
       await createQuickFullSetOrder({ student_name: name, ...payload });
-      toast.success("تم إنشاء الطلب المخصص");
-      router.push("/wholesaler/students");
+      toast.success("تم حفظ الطلب — راجعه ثم أكّده");
+      router.push("/wholesaler/orders");
     } catch (err) {
       toast.error(getApiErrorMessage(err, "تعذر إنشاء الطلب"));
     } finally {
@@ -76,7 +76,7 @@ export default function WholesalerCustomOrderPage() {
             طلب مخصص لطالب
           </h1>
           <p className="mt-0.5 truncate text-sm text-ink-soft">
-            أدخل اسم الطالب واملأ الطلب — يُرسل مباشرة إلى الإنتاج
+            أدخل اسم الطالب واملأ الطلب — يحتاج تأكيدك قبل الإرسال للإنتاج
           </p>
         </div>
         <BackLink />
@@ -96,7 +96,7 @@ export default function WholesalerCustomOrderPage() {
           autoFocus
         />
         <p className="text-xs text-[var(--shop-muted)]">
-          لا يحتاج الطالب إلى حساب — يُسجَّل بالاسم فقط ويُرسل الطلب فوراً دون موافقة.
+          لا يحتاج الطالب إلى حساب — يُسجَّل بالاسم فقط. بعد الحفظ راجع الطلب من «طلبات الطلاب» ثم أكّده.
         </p>
       </section>
 

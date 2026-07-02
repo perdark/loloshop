@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { toast } from "sonner";
 import {
   getRepOrders,
@@ -315,21 +316,29 @@ export default function WholesalerOrdersPage() {
 
                   {/* Action buttons (pending only) */}
                   {row.approval === "pending" && (
-                    <div className="mt-3 flex gap-2 border-t border-line pt-3">
-                      <Button
-                        variant="primary"
-                        onClick={() => handleApprove(row.checkout_group_id)}
-                        className="flex-1"
+                    <div className="mt-3 flex flex-col gap-2 border-t border-line pt-3">
+                      <Link
+                        href={`/wholesaler/students/${row.student_id}/order`}
+                        className="inline-flex min-h-11 items-center justify-center rounded-xl border border-line bg-beige px-4 text-sm font-semibold text-ink transition-colors hover:border-orange/40 hover:text-orange-ink"
                       >
-                        موافقة
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        onClick={() => openReject(row.checkout_group_id)}
-                        className="flex-1 border border-danger/30 text-danger hover:bg-danger/5"
-                      >
-                        إرجاع
-                      </Button>
+                        تعديل
+                      </Link>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="primary"
+                          onClick={() => handleApprove(row.checkout_group_id)}
+                          className="flex-1"
+                        >
+                          تأكيد وإرسال للإنتاج
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          onClick={() => openReject(row.checkout_group_id)}
+                          className="flex-1 border border-danger/30 text-danger hover:bg-danger/5"
+                        >
+                          إرجاع
+                        </Button>
+                      </div>
                     </div>
                   )}
                 </div>

@@ -25,7 +25,7 @@ router.post('/orders/:checkoutGroupId/reject', c.rejectOrder);
 
 // Rep-entered full-set order (WhatsApp intake form → الطقم الكامل)
 router.get('/full-set-packages', c.fullSetPackages);
-// Quick custom order — name-only student, both approvals skipped (straight to production).
+// Quick custom order — name-only student; order pending until rep confirms.
 // Declared BEFORE the '/students/:studentId/...' param routes (distinct static path → no collision).
 router.post('/quick-full-set-order', c.quickFullSetOrder);
 router.get('/students/:studentId', c.getStudent);

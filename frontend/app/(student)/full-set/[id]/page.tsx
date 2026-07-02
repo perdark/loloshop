@@ -14,12 +14,14 @@ import {
 } from "@/lib/catalog";
 import { configureFullSet, uploadSashLogo } from "@/lib/orders";
 import { formatIQD } from "@/lib/format";
+import { resolveOptionPrice } from "@/lib/pricing";
 import { fetchMe } from "@/lib/auth-api";
 import type { CatalogProduct, CatalogOptionGroup, CatalogOption } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { ReceiptUpload } from "@/components/catalog/ReceiptUpload";
+import { CustomerImageUpload } from "@/components/catalog/CustomerImageUpload";
 import type { FullSetPackage } from "@/lib/catalog";
 import type {
   ConfigureFullSetPayload,
@@ -79,9 +81,11 @@ const SS_KEY = "full_set_wizard_state";
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
 
+type ProductSelectionValue = string | boolean;
+
 interface WizardSelections {
-  robe: Record<string, string>;
-  cap: Record<string, string>;
+  robe: Record<string, ProductSelectionValue>;
+  cap: Record<string, ProductSelectionValue>;
   sash: Record<string, string>;
   customerTexts: Record<string, string>;
   customerImageUrls: Record<string, string>;
@@ -327,21 +331,40 @@ function OptionChip({
 
 function OptionGroupSection({
   group,
-  selectedOptionId,
+  productType,
+  selectionValue,
   customerText,
+  customerImageUrl,
   onSelect,
+  onToggle,
   onTextChange,
+  onImageChange,
   errors,
+  showErrors,
 }: {
   group: CatalogOptionGroup;
-  selectedOptionId: string | undefined;
+  productType: "robe" | "cap" | "sash";
+  selectionValue: ProductSelectionValue | undefined;
   customerText: string | undefined;
+  customerImageUrl: string | undefined;
   onSelect: (optionId: string) => void;
-  onTextChange: (text: string) => void;
+  onToggle: (checked: boolean) => void;
+  onTextChange: (optionId: string, text: string) => void;
+  onImageChange: (optionId: string, url: string) => void;
   errors: Record<string, string>;
+  showErrors: boolean;
 }) {
   const activeOptions = group.options.filter((o) => o.active);
+  const selectedOptionId =
+    typeof selectionValue === "string" ? selectionValue : undefined;
   const selectedOpt = activeOptions.find((o) => o.id === selectedOptionId);
+  const isCapEmbroideryGroup =
+    productType === "cap" &&
+    (group.nameAr === "القبعة من الجانب" || group.nameAr === "القبعة من الأعلى");
+  const isRobeSleeveToggle =
+    productType === "robe" &&
+    group.inputType === "toggle" &&
+    group.nameAr.startsWith("تطريز ردن الروب");
 
   if (group.lockedOptionId) {
     const lockedOpt = activeOptions.find((o) => o.id === group.lockedOptionId);
@@ -354,6 +377,53 @@ function OptionGroupSection({
             محدد مسبقاً
           </span>
         </p>
+      </div>
+    );
+  }
+
+  if (group.inputType === "toggle") {
+    const opt = activeOptions[0];
+    const checked = selectionValue === true;
+    const optionId = opt?.id;
+    return (
+      <div className="space-y-3">
+        <label
+          className={`flex min-h-11 cursor-pointer items-center gap-3 rounded-xl border px-3.5 py-2.5 transition-all ${
+            checked
+              ? "border-orange bg-orange/5 ring-1 ring-orange/20"
+              : "border-line hover:border-orange/40"
+          }`}
+        >
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={(e) => onToggle(e.target.checked)}
+            className="h-5 w-5 accent-orange"
+          />
+          <span className="text-sm font-medium text-ink">
+            {group.nameAr}
+          </span>
+          {opt && opt.priceDelta > 0 && (
+            <span className="ms-auto text-xs font-semibold tabular-nums text-orange-ink" dir="ltr">
+              +{formatIQD(resolveOptionPrice(opt, "retail"))}
+            </span>
+          )}
+        </label>
+        {checked && optionId && (
+          <CustomerImageUpload
+            group={group}
+            optionId={optionId}
+            value={customerImageUrl}
+            onChange={(url) => onImageChange(optionId, url)}
+            textValue={customerText}
+            onTextChange={(text) => onTextChange(optionId, text)}
+            allowOptionalImage={isRobeSleeveToggle}
+            showErrors={showErrors}
+          />
+        )}
+        {showErrors && errors[`text_${group.id}`] && (
+          <p className="text-xs text-danger">{errors[`text_${group.id}`]}</p>
+        )}
       </div>
     );
   }
@@ -380,16 +450,20 @@ function OptionGroupSection({
           />
         ))}
       </div>
-      {selectedOpt?.requiresCustomerText && (
-        <div className="animate-fade-page-in">
-          <Input
-            label={`نص التطريز لـ "${selectedOpt.labelAr}"`}
-            value={customerText ?? ""}
-            onChange={(e) => onTextChange(e.target.value)}
-            placeholder="أدخل النص المراد تطريزه"
-            error={errors[`text_${group.id}`]}
-          />
-        </div>
+      {selectedOpt?.requiresCustomerText && selectedOptionId && (
+        <CustomerImageUpload
+          group={group}
+          optionId={selectedOptionId}
+          value={customerImageUrl}
+          onChange={(url) => onImageChange(selectedOptionId, url)}
+          textValue={customerText}
+          onTextChange={(text) => onTextChange(selectedOptionId, text)}
+          allowOptionalImage={isCapEmbroideryGroup}
+          showErrors={showErrors}
+        />
+      )}
+      {showErrors && errors[`text_${group.id}`] && !selectedOpt?.requiresCustomerText && (
+        <p className="text-xs text-danger">{errors[`text_${group.id}`]}</p>
       )}
     </div>
   );
@@ -507,7 +581,10 @@ export default function FullSetWizardPage() {
     if (robeProduct) {
       for (const group of robeProduct.optionGroups) {
         const sel = state.selections.robe[group.id];
-        if (sel) {
+        if (group.inputType === "toggle" && sel === true) {
+          const opt = group.options.find((o) => o.active) ?? group.options[0];
+          if (opt) total += opt.priceDelta;
+        } else if (typeof sel === "string" && sel) {
           const opt = group.options.find((o) => o.id === sel);
           if (opt) total += opt.priceDelta;
         }
@@ -516,7 +593,7 @@ export default function FullSetWizardPage() {
     if (capProduct) {
       for (const group of capProduct.optionGroups) {
         const sel = state.selections.cap[group.id];
-        if (sel) {
+        if (typeof sel === "string" && sel) {
           const opt = group.options.find((o) => o.id === sel);
           if (opt) total += opt.priceDelta;
         }
@@ -555,6 +632,40 @@ export default function FullSetWizardPage() {
     });
   }
 
+  function setToggle(
+    type: "robe" | "cap",
+    groupId: string,
+    checked: boolean
+  ) {
+    setState((prev) => {
+      const nextTexts = { ...prev.selections.customerTexts };
+      const nextImages = { ...prev.selections.customerImageUrls };
+      if (!checked) {
+        for (const k of Object.keys(nextTexts)) {
+          if (k.startsWith(`${groupId}__`)) delete nextTexts[k];
+        }
+        for (const k of Object.keys(nextImages)) {
+          if (k.startsWith(`${groupId}__`)) delete nextImages[k];
+        }
+      }
+      return {
+        ...prev,
+        selections: {
+          ...prev.selections,
+          [type]: { ...prev.selections[type], [groupId]: checked },
+          customerTexts: nextTexts,
+          customerImageUrls: nextImages,
+        },
+      };
+    });
+    setErrors((prev) => {
+      const next = { ...prev };
+      delete next[groupId];
+      delete next[`text_${groupId}`];
+      return next;
+    });
+  }
+
   function setCustomerText(groupId: string, optionId: string, text: string) {
     const key = `${groupId}__${optionId}`;
     setState((prev) => ({
@@ -571,6 +682,17 @@ export default function FullSetWizardPage() {
     });
   }
 
+  function setCustomerImage(groupId: string, optionId: string, url: string) {
+    const key = `${groupId}__${optionId}`;
+    setState((prev) => ({
+      ...prev,
+      selections: {
+        ...prev.selections,
+        customerImageUrls: { ...prev.selections.customerImageUrls, [key]: url },
+      },
+    }));
+  }
+
   // ─── Validation ─────────────────────────────────────────────────────────────
 
   function validateStep(s: number): Record<string, string> {
@@ -579,22 +701,36 @@ export default function FullSetWizardPage() {
     if (s === 1 && robeProduct) {
       for (const group of robeProduct.optionGroups) {
         if (group.lockedOptionId) continue;
-        if (group.required && !state.selections.robe[group.id]) {
+        const sel = state.selections.robe[group.id];
+        if (group.inputType === "toggle") {
+          if (sel === true) {
+            const opt = group.options.find((o) => o.active) ?? group.options[0];
+            if (opt?.requiresCustomerText) {
+              const key = `${group.id}__${opt.id}`;
+              if (!state.selections.customerTexts[key]?.trim()) {
+                errs[`text_${group.id}`] = "يرجى إدخال نص التطريز";
+              }
+            }
+          }
+          continue;
+        }
+        if (group.required && !sel) {
           errs[group.id] = `يرجى اختيار ${group.nameAr}`;
         }
-        const sel = state.selections.robe[group.id];
-        const opt = group.options.find((o) => o.id === sel);
-        if (opt?.requiresCustomerText) {
-          const key = `${group.id}__${sel}`;
-          if (!state.selections.customerTexts[key]?.trim()) {
-            errs[`text_${group.id}`] = "يرجى إدخال نص التطريز";
+        if (typeof sel === "string") {
+          const opt = group.options.find((o) => o.id === sel);
+          if (opt?.requiresCustomerText) {
+            const key = `${group.id}__${sel}`;
+            if (!state.selections.customerTexts[key]?.trim()) {
+              errs[`text_${group.id}`] = "يرجى إدخال نص التطريز";
+            }
           }
         }
       }
       const { shoulder_cm, chest_cm, robe_length_cm, sleeve_length_cm } = state.measurements;
       if (!shoulder_cm || shoulder_cm < 25 || shoulder_cm > 80)
         errs.shoulder_cm = "عرض الكتف يجب أن يكون بين ٢٥–٨٠ سم";
-      if (!chest_cm || chest_cm < 60 || chest_cm > 180)
+      if (chest_cm && (chest_cm < 60 || chest_cm > 180))
         errs.chest_cm = "محيط الصدر يجب أن يكون بين ٦٠–١٨٠ سم";
       if (!robe_length_cm || robe_length_cm < 70 || robe_length_cm > 190)
         errs.robe_length_cm = "طول الروب يجب أن يكون بين ٧٠–١٩٠ سم";
@@ -609,11 +745,13 @@ export default function FullSetWizardPage() {
           errs[group.id] = `يرجى اختيار ${group.nameAr}`;
         }
         const sel = state.selections.cap[group.id];
-        const opt = group.options.find((o) => o.id === sel);
-        if (opt?.requiresCustomerText) {
-          const key = `${group.id}__${sel}`;
-          if (!state.selections.customerTexts[key]?.trim()) {
-            errs[`text_${group.id}`] = "يرجى إدخال نص التطريز";
+        if (typeof sel === "string") {
+          const opt = group.options.find((o) => o.id === sel);
+          if (opt?.requiresCustomerText) {
+            const key = `${group.id}__${sel}`;
+            if (!state.selections.customerTexts[key]?.trim()) {
+              errs[`text_${group.id}`] = "يرجى إدخال نص التطريز";
+            }
           }
         }
       }
@@ -734,7 +872,14 @@ export default function FullSetWizardPage() {
         out.push({ group_id: group.id, option_id: group.lockedOptionId });
         continue;
       }
-      const optionId = state.selections[typeKey][group.id];
+      const sel = state.selections[typeKey][group.id];
+      let optionId: string | null = null;
+      if (group.inputType === "single_select" && typeof sel === "string") {
+        optionId = sel;
+      } else if (group.inputType === "toggle" && sel === true) {
+        optionId =
+          group.options.find((o) => o.active)?.id ?? group.options[0]?.id ?? null;
+      }
       if (!optionId) continue;
       const key = `${group.id}__${optionId}`;
       const row: FullSetSelectionPayload = { group_id: group.id, option_id: optionId };
@@ -846,10 +991,14 @@ export default function FullSetWizardPage() {
             product={robeProduct}
             selections={state.selections.robe}
             customerTexts={state.selections.customerTexts}
+            customerImageUrls={state.selections.customerImageUrls}
             measurements={state.measurements}
             errors={errors}
+            showErrors={Object.keys(errors).length > 0}
             onSelect={(gId, oId) => setSelection("robe", gId, oId)}
+            onToggle={(gId, checked) => setToggle("robe", gId, checked)}
             onTextChange={(gId, oId, t) => setCustomerText(gId, oId, t)}
+            onImageChange={(gId, oId, url) => setCustomerImage(gId, oId, url)}
             onMeasureChange={(field, val) =>
               setState((prev) => ({
                 ...prev,
@@ -883,9 +1032,12 @@ export default function FullSetWizardPage() {
             product={capProduct}
             selections={state.selections.cap}
             customerTexts={state.selections.customerTexts}
+            customerImageUrls={state.selections.customerImageUrls}
             errors={errors}
+            showErrors={Object.keys(errors).length > 0}
             onSelect={(gId, oId) => setSelection("cap", gId, oId)}
             onTextChange={(gId, oId, t) => setCustomerText(gId, oId, t)}
+            onImageChange={(gId, oId, url) => setCustomerImage(gId, oId, url)}
           />
         )}
 
@@ -975,54 +1127,80 @@ function StepRobe({
   product,
   selections,
   customerTexts,
+  customerImageUrls,
   measurements,
   errors,
+  showErrors,
   onSelect,
+  onToggle,
   onTextChange,
+  onImageChange,
   onMeasureChange,
   onNotesChange,
   onReceiptChange,
   onErrorClear,
 }: {
   product: CatalogProduct | null;
-  selections: Record<string, string>;
+  selections: Record<string, ProductSelectionValue>;
   customerTexts: Record<string, string>;
+  customerImageUrls: Record<string, string>;
   measurements: FullSetMeasurements;
   errors: Record<string, string>;
+  showErrors: boolean;
   onSelect: (groupId: string, optionId: string) => void;
+  onToggle: (groupId: string, checked: boolean) => void;
   onTextChange: (groupId: string, optionId: string, text: string) => void;
+  onImageChange: (groupId: string, optionId: string, url: string) => void;
   onMeasureChange: (field: keyof FullSetMeasurements, value: number) => void;
   onNotesChange: (value: string) => void;
   onReceiptChange: (url: string) => void;
   onErrorClear: (key: string) => void;
 }) {
+  function optionIdForGroup(group: CatalogOptionGroup): string | undefined {
+    const sel = selections[group.id];
+    if (group.inputType === "toggle" && sel === true) {
+      return group.options.find((o) => o.active)?.id ?? group.options[0]?.id;
+    }
+    return typeof sel === "string" ? sel : undefined;
+  }
+
   return (
     <div className="space-y-6">
       <StepHeader step={1} title="الروب" subtitle="اختر مواصفات روب التخرج ومقاساتك" />
 
       {product ? (
         <div className="space-y-5">
-          {product.optionGroups.map((group) => (
-            <div
-              key={group.id}
-              className="rounded-2xl bg-surface p-4 shadow-[var(--shadow-soft)] ring-1 ring-line"
-            >
-              <OptionGroupSection
-                group={group}
-                selectedOptionId={selections[group.id]}
-                customerText={
-                  selections[group.id]
-                    ? customerTexts[`${group.id}__${selections[group.id]}`]
-                    : undefined
-                }
-                onSelect={(oId) => onSelect(group.id, oId)}
-                onTextChange={(text) =>
-                  onTextChange(group.id, selections[group.id], text)
-                }
-                errors={errors}
-              />
-            </div>
-          ))}
+          {product.optionGroups.map((group) => {
+            const optionId = optionIdForGroup(group);
+            return (
+              <div
+                key={group.id}
+                className="rounded-2xl bg-surface p-4 shadow-[var(--shadow-soft)] ring-1 ring-line"
+              >
+                <OptionGroupSection
+                  group={group}
+                  productType="robe"
+                  selectionValue={selections[group.id]}
+                  customerText={
+                    optionId
+                      ? customerTexts[`${group.id}__${optionId}`]
+                      : undefined
+                  }
+                  customerImageUrl={
+                    optionId
+                      ? customerImageUrls[`${group.id}__${optionId}`]
+                      : undefined
+                  }
+                  onSelect={(oId) => onSelect(group.id, oId)}
+                  onToggle={(checked) => onToggle(group.id, checked)}
+                  onTextChange={(oId, text) => onTextChange(group.id, oId, text)}
+                  onImageChange={(oId, url) => onImageChange(group.id, oId, url)}
+                  errors={errors}
+                  showErrors={showErrors}
+                />
+              </div>
+            );
+          })}
         </div>
       ) : (
         <p className="text-sm text-muted">لا توجد خيارات متاحة للروب</p>
@@ -1048,9 +1226,9 @@ function StepRobe({
           />
           <MeasurementInput
             id="field_chest_cm"
-            label="محيط الصدر"
+            label="محيط الصدر (اختياري)"
             hint="قس حول أعرض جزء من الصدر"
-            value={measurements.chest_cm}
+            value={measurements.chest_cm ?? 0}
             min={60}
             max={180}
             error={errors.chest_cm}
@@ -1119,16 +1297,22 @@ function StepCap({
   product,
   selections,
   customerTexts,
+  customerImageUrls,
   errors,
+  showErrors,
   onSelect,
   onTextChange,
+  onImageChange,
 }: {
   product: CatalogProduct | null;
-  selections: Record<string, string>;
+  selections: Record<string, ProductSelectionValue>;
   customerTexts: Record<string, string>;
+  customerImageUrls: Record<string, string>;
   errors: Record<string, string>;
+  showErrors: boolean;
   onSelect: (groupId: string, optionId: string) => void;
   onTextChange: (groupId: string, optionId: string, text: string) => void;
+  onImageChange: (groupId: string, optionId: string, url: string) => void;
 }) {
   return (
     <div className="space-y-6">
@@ -1136,27 +1320,38 @@ function StepCap({
 
       {product ? (
         <div className="space-y-5">
-          {product.optionGroups.map((group) => (
-            <div
-              key={group.id}
-              className="rounded-2xl bg-surface p-4 shadow-[var(--shadow-soft)] ring-1 ring-line"
-            >
-              <OptionGroupSection
-                group={group}
-                selectedOptionId={selections[group.id]}
-                customerText={
-                  selections[group.id]
-                    ? customerTexts[`${group.id}__${selections[group.id]}`]
-                    : undefined
-                }
-                onSelect={(oId) => onSelect(group.id, oId)}
-                onTextChange={(text) =>
-                  onTextChange(group.id, selections[group.id], text)
-                }
-                errors={errors}
-              />
-            </div>
-          ))}
+          {product.optionGroups.map((group) => {
+            const sel = selections[group.id];
+            const optionId = typeof sel === "string" ? sel : undefined;
+            return (
+              <div
+                key={group.id}
+                className="rounded-2xl bg-surface p-4 shadow-[var(--shadow-soft)] ring-1 ring-line"
+              >
+                <OptionGroupSection
+                  group={group}
+                  productType="cap"
+                  selectionValue={sel}
+                  customerText={
+                    optionId
+                      ? customerTexts[`${group.id}__${optionId}`]
+                      : undefined
+                  }
+                  customerImageUrl={
+                    optionId
+                      ? customerImageUrls[`${group.id}__${optionId}`]
+                      : undefined
+                  }
+                  onSelect={(oId) => onSelect(group.id, oId)}
+                  onToggle={() => {}}
+                  onTextChange={(oId, text) => onTextChange(group.id, oId, text)}
+                  onImageChange={(oId, url) => onImageChange(group.id, oId, url)}
+                  errors={errors}
+                  showErrors={showErrors}
+                />
+              </div>
+            );
+          })}
         </div>
       ) : (
         <p className="text-sm text-muted">لا توجد خيارات متاحة للقبعة</p>
@@ -1215,17 +1410,20 @@ function StepSash({
             >
               <OptionGroupSection
                 group={group}
-                selectedOptionId={selections[group.id]}
+                productType="sash"
+                selectionValue={selections[group.id]}
                 customerText={
                   selections[group.id]
                     ? customerTexts[`${group.id}__${selections[group.id]}`]
                     : undefined
                 }
+                customerImageUrl={undefined}
                 onSelect={(oId) => onSelect(group.id, oId)}
-                onTextChange={(text) =>
-                  onTextChange(group.id, selections[group.id], text)
-                }
+                onToggle={() => {}}
+                onTextChange={(oId, text) => onTextChange(group.id, oId, text)}
+                onImageChange={() => {}}
                 errors={errors}
+                showErrors={Object.keys(errors).length > 0}
               />
             </div>
           ))}
@@ -1587,16 +1785,45 @@ function StepReview({
   function getLabel(
     product: CatalogProduct | null,
     groupId: string,
-    optionId: string
+    selection: ProductSelectionValue | string | undefined
   ): string {
-    if (!product) return "—";
+    if (!product || selection == null || selection === false) return "—";
     for (const g of product.optionGroups) {
-      if (g.id === groupId) {
-        const opt = g.options.find((o) => o.id === optionId);
+      if (g.id !== groupId) continue;
+      if (g.inputType === "toggle" && selection === true) {
+        return g.options.find((o) => o.active)?.labelAr ?? "نعم";
+      }
+      if (typeof selection === "string") {
+        const opt = g.options.find((o) => o.id === selection);
         return opt?.labelAr ?? "—";
       }
     }
     return "—";
+  }
+
+  function getEmbroideryDetail(
+    product: CatalogProduct | null,
+    groupId: string,
+    selection: ProductSelectionValue | string | undefined,
+    texts: Record<string, string>,
+    images: Record<string, string>
+  ): string | null {
+    if (!product) return null;
+    const g = product.optionGroups.find((og) => og.id === groupId);
+    if (!g) return null;
+    let optionId: string | undefined;
+    if (g.inputType === "toggle" && selection === true) {
+      optionId = g.options.find((o) => o.active)?.id ?? g.options[0]?.id;
+    } else if (typeof selection === "string") {
+      optionId = selection;
+    }
+    if (!optionId) return null;
+    const key = `${groupId}__${optionId}`;
+    const text = texts[key]?.trim();
+    const img = images[key];
+    if (!text && !img) return null;
+    const parts = [text, img ? "صورة مرفقة" : null].filter(Boolean);
+    return parts.join(" · ");
   }
 
   const leftModeLabels: Record<FullSetSashZones["left_mode"], string> = {
@@ -1621,18 +1848,29 @@ function StepReview({
 
       <ReviewSection title="الروب">
         {robeProduct?.optionGroups.map((g) => {
-          const sel = state.selections.robe[g.id] || g.lockedOptionId;
-          if (!sel) return null;
+          const raw = state.selections.robe[g.id];
+          if (raw === false || (raw == null && !g.lockedOptionId)) return null;
+          const sel = raw ?? g.lockedOptionId;
+          if (sel == null) return null;
+          const emb = getEmbroideryDetail(
+            robeProduct,
+            g.id,
+            sel,
+            state.selections.customerTexts,
+            state.selections.customerImageUrls
+          );
           return (
             <ReviewRow
               key={g.id}
               label={g.nameAr}
-              value={getLabel(robeProduct, g.id, sel)}
+              value={emb ? `${getLabel(robeProduct, g.id, sel)} — ${emb}` : getLabel(robeProduct, g.id, sel)}
             />
           );
         })}
         <ReviewRow label="عرض الكتف" value={`${state.measurements.shoulder_cm} سم`} />
-        <ReviewRow label="محيط الصدر" value={`${state.measurements.chest_cm} سم`} />
+        {(state.measurements.chest_cm ?? 0) > 0 && (
+          <ReviewRow label="محيط الصدر" value={`${state.measurements.chest_cm} سم`} />
+        )}
         <ReviewRow label="طول الروب" value={`${state.measurements.robe_length_cm} سم`} />
         <ReviewRow label="طول الكُم" value={`${state.measurements.sleeve_length_cm} سم`} />
         {state.measurements.tailor_notes?.trim() && (
@@ -1645,10 +1883,23 @@ function StepReview({
 
       <ReviewSection title="القبعة">
         {capProduct?.optionGroups.map((g) => {
-          const sel = state.selections.cap[g.id] || g.lockedOptionId;
-          if (!sel) return null;
+          const raw = state.selections.cap[g.id];
+          if (raw == null && !g.lockedOptionId) return null;
+          const sel = raw ?? g.lockedOptionId;
+          if (sel == null || typeof sel === "boolean") return null;
+          const emb = getEmbroideryDetail(
+            capProduct,
+            g.id,
+            sel,
+            state.selections.customerTexts,
+            state.selections.customerImageUrls
+          );
           return (
-            <ReviewRow key={g.id} label={g.nameAr} value={getLabel(capProduct, g.id, sel)} />
+            <ReviewRow
+              key={g.id}
+              label={g.nameAr}
+              value={emb ? `${getLabel(capProduct, g.id, sel)} — ${emb}` : getLabel(capProduct, g.id, sel)}
+            />
           );
         })}
         {(!capProduct || capProduct.optionGroups.length === 0) && (

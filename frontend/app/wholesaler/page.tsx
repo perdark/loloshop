@@ -162,7 +162,7 @@ export default function WholesalerDashboardPage() {
         <StatCard label="تصاميم مكتملة" value={String(dashboard.completedDesigns)} accent="profit" />
       </div>
 
-      {/* Quick custom order — name-only student, both approvals skipped */}
+      {/* Quick custom order — name-only student; rep confirms before staff */}
       <Link
         href="/wholesaler/custom-order"
         className="flex min-h-12 w-full items-center justify-center gap-1 rounded-2xl bg-orange-ink px-4 text-sm font-semibold text-white shadow-[var(--shadow-soft)] transition-transform hover:-translate-y-0.5 active:scale-[0.99]"

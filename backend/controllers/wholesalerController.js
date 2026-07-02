@@ -281,11 +281,11 @@ async function createFullSetOrder(req, res) {
   res.status(status).json(json);
 }
 
-// ── Quick custom order (name-only student, BOTH approvals skipped) ──
+// ── Quick custom order (name-only student, student approval skipped) ──
 // The rep adds a student BY NAME ONLY (no login account) and places the SAME full-set
 // طقم order for them in one shot. Skips the student approval (the student is created
-// pre-'approved') AND the order approval (the new bundle is flipped to 'approved'
-// immediately) → it goes straight to staff + the dashboard. The created users row is
+// pre-'approved') but the ORDER stays pending until the rep confirms from «طلبات الطلاب»
+// → then it surfaces to staff + the dashboard. The created users row is
 // intentionally UN-LOGINABLE: no phone/email (so no OTP path) + a random, unrecoverable
 // bcrypt hash (so no password works).
 async function quickFullSetOrder(req, res) {
@@ -360,24 +360,6 @@ async function quickFullSetOrder(req, res) {
   if (result.status !== 201) {
     await cleanupUser('persistFullSetOrder rejected');
     return res.status(result.status).json(result.json);
-  }
-
-  // Skip the ORDER approval too → flip the new bundle straight to 'approved' so it
-  // surfaces to staff + the dashboard without the rep approving it separately. If this
-  // flip fails the order is NOT lost — it stays 'pending' and shows in the rep's
-  // approval list (recoverable), so log loudly instead of 500-ing away a created order.
-  try {
-    await setBundleApproval({
-      checkoutGroupId: result.json.data.checkout_group_id,
-      decision: 'approved',
-      actorUserId: req.user.id,
-      repWholesalerId: wId,
-    });
-  } catch (e) {
-    console.error(
-      `quickFullSetOrder: auto-approve failed for checkout_group ${result.json.data.checkout_group_id} — order left pending, rep can approve manually:`,
-      e.message
-    );
   }
 
   res.status(201).json({

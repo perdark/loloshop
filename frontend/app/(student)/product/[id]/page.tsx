@@ -172,11 +172,14 @@ export default function StudentProductPage() {
     if (!product || product.type !== "robe") return null;
     if (
       measurements.shoulder_cm <= 0 ||
-      measurements.chest_cm <= 0 ||
       measurements.robe_length_cm <= 0 ||
       measurements.sleeve_length_cm <= 0
     ) {
-      return "يرجى إدخال جميع مقاسات الروب";
+      return "يرجى إدخال مقاسات الروب المطلوبة";
+    }
+    const chest = measurements.chest_cm ?? 0;
+    if (chest > 0 && (chest < 60 || chest > 180)) {
+      return "محيط الصدر يجب أن يكون بين ٦٠–١٨٠ سم";
     }
     return null;
   }, [product, measurements]);
@@ -357,19 +360,26 @@ export default function StudentProductPage() {
           const needsText =
             optionId != null &&
             customerTextRequired(group, optionId);
-          // Sash typed spec fields. Embroidery zones (تطريز يسار/يمين/من الخلف) get an OPTIONAL
-          // reference photo; «لون التطريز» (thread color) is text-only. Both render even when
-          // optional so the student can fill them — required vs optional is driven by needsText.
           const isSashEmbroideryZone =
             product.type === "sash" && group.nameAr.startsWith("تطريز");
           const isSashThreadColor =
             product.type === "sash" && group.nameAr === "لون التطريز";
           const isSashTypedField = isSashEmbroideryZone || isSashThreadColor;
-          // Retail cap photo (migration 050): an OPTIONAL reference photo the student uploads
-          // for the cap — rendered photo-only, like a sash embroidery zone's optional image.
-          const isCapPhoto =
-            product.type === "cap" && group.nameAr === "صورة القبعة";
-          const showUploadBlock = needsImage || needsText || isSashTypedField || isCapPhoto;
+          const isCapEmbroideryGroup =
+            product.type === "cap" &&
+            (group.nameAr === "القبعة من الجانب" || group.nameAr === "القبعة من الأعلى");
+          const isRobeSleeveToggle =
+            product.type === "robe" &&
+            group.inputType === "toggle" &&
+            group.nameAr.startsWith("تطريز ردن الروب");
+          const isShawlGroup = product.type === "shawl";
+          const showUploadBlock =
+            needsImage ||
+            needsText ||
+            isSashTypedField ||
+            (isCapEmbroideryGroup && needsText) ||
+            isRobeSleeveToggle ||
+            isShawlGroup;
           const key =
             optionId != null ? selectionKey(group.id, optionId) : null;
 
@@ -396,8 +406,13 @@ export default function StudentProductPage() {
                     setCustomerTexts((prev) => ({ ...prev, [key]: text }));
                     setConfirmed(null);
                   }}
-                  allowOptionalText={isSashTypedField && !needsText}
-                  allowOptionalImage={isSashEmbroideryZone || isCapPhoto}
+                  allowOptionalText={isShawlGroup || (isSashTypedField && !needsText)}
+                  allowOptionalImage={
+                    isShawlGroup ||
+                    isSashEmbroideryZone ||
+                    isRobeSleeveToggle ||
+                    (isCapEmbroideryGroup && needsText)
+                  }
                   showErrors={showErrors}
                 />
               )}
@@ -418,14 +433,22 @@ export default function StudentProductPage() {
             <div className="mt-3 space-y-3">
               {(
                 [
-                  { key: "shoulder_cm", label: "كتف" },
-                  { key: "chest_cm", label: "محيط الصدر" },
-                  { key: "robe_length_cm", label: "طول الروب" },
-                  { key: "sleeve_length_cm", label: "طول الردن" },
-                ] as { key: "shoulder_cm" | "chest_cm" | "robe_length_cm" | "sleeve_length_cm"; label: string }[]
-              ).map(({ key: mKey, label }) => {
-                const val = measurements[mKey];
-                const hasError = showErrors && val <= 0;
+                  { key: "shoulder_cm", label: "كتف", optional: false },
+                  { key: "chest_cm", label: "محيط الصدر", optional: true },
+                  { key: "robe_length_cm", label: "طول الروب", optional: false },
+                  { key: "sleeve_length_cm", label: "طول الردن", optional: false },
+                ] as {
+                  key: "shoulder_cm" | "chest_cm" | "robe_length_cm" | "sleeve_length_cm";
+                  label: string;
+                  optional: boolean;
+                }[]
+              ).map(({ key: mKey, label, optional }) => {
+                const val = measurements[mKey] ?? 0;
+                const hasError =
+                  showErrors &&
+                  (optional
+                    ? val > 0 && (val < 60 || val > 180)
+                    : val <= 0);
                 return (
                   <div key={mKey} className="flex items-center gap-3">
                     <label
@@ -433,6 +456,11 @@ export default function StudentProductPage() {
                       className="w-28 shrink-0 text-sm font-semibold text-ink"
                     >
                       {label}
+                      {optional && (
+                        <span className="block text-[10px] font-normal text-ink-soft">
+                          (اختياري)
+                        </span>
+                      )}
                     </label>
                     <div className="relative flex-1">
                       <input

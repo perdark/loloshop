@@ -328,7 +328,7 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
       [student.id]
     );
     let cgId;
-    const cgParams = [student.name, student.phone, groupNotes];
+    const cgParams = [student.name, student.phone ?? '', groupNotes];
     if (prevGroup.rows.length) {
       cgId = prevGroup.rows[0].id;
       await client.query(

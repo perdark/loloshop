@@ -2,7 +2,7 @@
 // option groups on robe / cap / sash, plus a sample full-set package (طقم التخرج الكامل).
 //
 // Source of truth: the actual order form used on @lolo_shop96 DMs —
-//   الروب: اللون، القماش (كوبرا اندنوسي)، الفصال (ملكي)، الردن سادة/بكتابة + القياسات
+//   الروب: اللون، القماش (كوبرا اندنوسي)، الفصال (ملكي)، تطريز الردن (أيمن/أيسر اختياري) + القياسات
 //   القبعة: اللون، الشكل (عادية/مثلثة)، الجانب سادة/بكتابة، الأعلى سادة/بكتابة
 //   الوشاح: اللون، النوع، العرض (يفضل ١٤-١٥ سم)، لون التطريز
 //   (نصوص الوشاح يمين/يسار/خلف تُجمع في معالج الطلب وتُخزن كأسطر order_items — ليست خيارات)
@@ -16,19 +16,17 @@ const { query, pool } = require('./lib/db');
 // Per product type: groups to ensure + legacy groups to deactivate.
 const FORM_GROUPS = {
   robe: {
-    deactivate: ['تطريز الأكمام (ردان)'], // replaced by the explicit ردن الروب question below
+    deactivate: ['تطريز الأكمام (ردان)', 'ردن الروب'], // replaced by optional left/right sleeve toggles
     groups: [
       { name_ar: 'لون الروب', input_type: 'single_select', required: true, has_image: true,
         options: ['أسود', 'كحلي', 'أبيض', 'عنابي', 'أخضر داكن', 'رمادي'].map((l) => ({ label_ar: l })) },
       { name_ar: 'فصال الروب', input_type: 'single_select', required: true, has_image: true,
         hint_ar: 'الفصال الملكي أوسع وأفخم',
         options: [{ label_ar: 'ملكي' }, { label_ar: 'عادي' }] },
-      { name_ar: 'ردن الروب', input_type: 'single_select', required: true, has_image: false,
-        hint_ar: 'كتابة مطرزة على الردن أو سادة',
-        options: [
-          { label_ar: 'سادة' },
-          { label_ar: 'بكتابة', price_delta: 5000, requires_customer_text: true },
-        ] },
+      { name_ar: 'تطريز ردن الروب الأيمن', input_type: 'toggle', required: false, has_image: false,
+        options: [{ label_ar: 'تطريز الردن الأيمن', price_delta: 5000, requires_customer_text: true }] },
+      { name_ar: 'تطريز ردن الروب الأيسر', input_type: 'toggle', required: false, has_image: false,
+        options: [{ label_ar: 'تطريز الردن الأيسر', price_delta: 5000, requires_customer_text: true }] },
     ],
     // real fabrics → appended to نوع القماش when it exists (seed-v2 DBs), otherwise a
     // fresh قماش الروب group is created (see fallbackGroups handling below).
@@ -42,7 +40,7 @@ const FORM_GROUPS = {
     }],
   },
   cap: {
-    deactivate: ['تطريز القبعة'], // replaced by the two explicit side/top questions below
+    deactivate: ['تطريز القبعة', 'صورة القبعة'], // side/top groups carry optional photos; no generic cap photo
     groups: [
       { name_ar: 'لون القبعة', input_type: 'single_select', required: true, has_image: true,
         options: ['أسود', 'كحلي', 'أبيض', 'عنابي'].map((l) => ({ label_ar: l })) },
