@@ -1,5 +1,9 @@
 # Progress
 
+## 2026-07-02 — ردن الروب grouped UI (retail)
+
+- Retail robe + full-set wizard: sleeve embroidery toggles grouped under a visible **«ردن الروب»** card with larger checkboxes (الردن الأيمن / الأيسر) instead of buried per-group fieldsets.
+
 ## 2026-07-02 — Wholesaler custom order + shawl notes
 
 - **Edit fix:** `persistFullSetOrder` now normalizes `student.phone ?? ''` so editing name-only custom orders no longer 500s on `checkout_groups.phone_primary NOT NULL`.

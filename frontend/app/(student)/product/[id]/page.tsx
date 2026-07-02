@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { CustomerImageUpload } from "@/components/catalog/CustomerImageUpload";
 import { ReceiptUpload } from "@/components/catalog/ReceiptUpload";
 import { OptionGroupField } from "@/components/catalog/OptionGroupField";
+import { RobeSleeveSection } from "@/components/catalog/RobeSleeveSection";
 import { OrderBreakdownCard } from "@/components/catalog/OrderBreakdownCard";
 import { ProductMediaGallery } from "@/components/catalog/ProductMediaGallery";
 import { PriceBreakdown } from "@/components/catalog/PriceBreakdown";
@@ -20,6 +21,7 @@ import {
   validateCustomerImages,
   validateCustomerTexts,
 } from "@/lib/customerImage";
+import { partitionRobeSleeveGroups } from "@/lib/robeSleeve";
 import { buildConfigureSelections, configureOrder } from "@/lib/orders";
 import {
   computePriceBreakdown,
@@ -279,6 +281,10 @@ export default function StudentProductPage() {
   const groups = product.optionGroups
     .filter((g) => groupVisibleForGender(g, gender))
     .sort((a, b) => a.sort - b.sort);
+  const { sleeveGroups, otherGroups } =
+    product.type === "robe"
+      ? partitionRobeSleeveGroups(groups)
+      : { sleeveGroups: [], otherGroups: groups };
 
   // Old-price markdown: strike compareAtPrice over the base price only when it's strictly higher.
   const hasDiscount =
@@ -352,7 +358,7 @@ export default function StudentProductPage() {
           </div>
         )}
 
-        {groups.map((group) => {
+        {otherGroups.map((group) => {
           const optionId = getSelectedOptionId(group, selection);
           const needsImage =
             optionId != null &&
@@ -368,18 +374,12 @@ export default function StudentProductPage() {
           const isCapEmbroideryGroup =
             product.type === "cap" &&
             (group.nameAr === "القبعة من الجانب" || group.nameAr === "القبعة من الأعلى");
-          const isRobeSleeveToggle =
-            product.type === "robe" &&
-            group.inputType === "toggle" &&
-            group.nameAr.startsWith("تطريز ردن الروب");
           const isShawlGroup = product.type === "shawl";
           const showUploadBlock =
             needsImage ||
             needsText ||
             isSashTypedField ||
-            (isCapEmbroideryGroup && needsText) ||
-            isRobeSleeveToggle ||
-            isShawlGroup;
+            (isCapEmbroideryGroup && needsText);
           const key =
             optionId != null ? selectionKey(group.id, optionId) : null;
 
@@ -410,7 +410,6 @@ export default function StudentProductPage() {
                   allowOptionalImage={
                     isShawlGroup ||
                     isSashEmbroideryZone ||
-                    isRobeSleeveToggle ||
                     (isCapEmbroideryGroup && needsText)
                   }
                   showErrors={showErrors}
@@ -419,6 +418,29 @@ export default function StudentProductPage() {
             </div>
           );
         })}
+
+        {sleeveGroups.length > 0 && (
+          <RobeSleeveSection
+            groups={sleeveGroups}
+            role={role}
+            selection={selection}
+            customerTexts={customerTexts}
+            customerImages={customerImages}
+            onToggle={(groupId, checked) => setGroupValue(groupId, checked)}
+            onTextChange={(groupId, optionId, text) => {
+              const k = selectionKey(groupId, optionId);
+              setCustomerTexts((prev) => ({ ...prev, [k]: text }));
+              setConfirmed(null);
+            }}
+            onImageChange={(groupId, optionId, url) => {
+              const k = selectionKey(groupId, optionId);
+              setCustomerImages((prev) => ({ ...prev, [k]: url }));
+              setConfirmed(null);
+            }}
+            fieldKey={selectionKey}
+            showErrors={showErrors}
+          />
+        )}
 
         {/* قياسات الروب — mandatory measurements for robe products */}
         {product.type === "robe" && (

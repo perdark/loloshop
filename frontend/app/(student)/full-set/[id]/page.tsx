@@ -15,6 +15,7 @@ import {
 import { configureFullSet, uploadSashLogo } from "@/lib/orders";
 import { formatIQD } from "@/lib/format";
 import { resolveOptionPrice } from "@/lib/pricing";
+import { partitionRobeSleeveGroups } from "@/lib/robeSleeve";
 import { fetchMe } from "@/lib/auth-api";
 import type { CatalogProduct, CatalogOptionGroup, CatalogOption } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
@@ -22,6 +23,7 @@ import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { ReceiptUpload } from "@/components/catalog/ReceiptUpload";
 import { CustomerImageUpload } from "@/components/catalog/CustomerImageUpload";
+import { RobeSleeveSection } from "@/components/catalog/RobeSleeveSection";
 import type { FullSetPackage } from "@/lib/catalog";
 import type {
   ConfigureFullSetPayload,
@@ -1170,37 +1172,67 @@ function StepRobe({
 
       {product ? (
         <div className="space-y-5">
-          {product.optionGroups.map((group) => {
-            const optionId = optionIdForGroup(group);
-            return (
-              <div
-                key={group.id}
-                className="rounded-2xl bg-surface p-4 shadow-[var(--shadow-soft)] ring-1 ring-line"
-              >
-                <OptionGroupSection
-                  group={group}
-                  productType="robe"
-                  selectionValue={selections[group.id]}
-                  customerText={
-                    optionId
-                      ? customerTexts[`${group.id}__${optionId}`]
-                      : undefined
-                  }
-                  customerImageUrl={
-                    optionId
-                      ? customerImageUrls[`${group.id}__${optionId}`]
-                      : undefined
-                  }
-                  onSelect={(oId) => onSelect(group.id, oId)}
-                  onToggle={(checked) => onToggle(group.id, checked)}
-                  onTextChange={(oId, text) => onTextChange(group.id, oId, text)}
-                  onImageChange={(oId, url) => onImageChange(group.id, oId, url)}
-                  errors={errors}
-                  showErrors={showErrors}
-                />
-              </div>
+          {(() => {
+            const { sleeveGroups, otherGroups } = partitionRobeSleeveGroups(
+              product.optionGroups
             );
-          })}
+            return (
+              <>
+                {otherGroups.map((group) => {
+                  const optionId = optionIdForGroup(group);
+                  return (
+                    <div
+                      key={group.id}
+                      className="rounded-2xl bg-surface p-4 shadow-[var(--shadow-soft)] ring-1 ring-line"
+                    >
+                      <OptionGroupSection
+                        group={group}
+                        productType="robe"
+                        selectionValue={selections[group.id]}
+                        customerText={
+                          optionId
+                            ? customerTexts[`${group.id}__${optionId}`]
+                            : undefined
+                        }
+                        customerImageUrl={
+                          optionId
+                            ? customerImageUrls[`${group.id}__${optionId}`]
+                            : undefined
+                        }
+                        onSelect={(oId) => onSelect(group.id, oId)}
+                        onToggle={(checked) => onToggle(group.id, checked)}
+                        onTextChange={(oId, text) =>
+                          onTextChange(group.id, oId, text)
+                        }
+                        onImageChange={(oId, url) =>
+                          onImageChange(group.id, oId, url)
+                        }
+                        errors={errors}
+                        showErrors={showErrors}
+                      />
+                    </div>
+                  );
+                })}
+                {sleeveGroups.length > 0 && (
+                  <RobeSleeveSection
+                    groups={sleeveGroups}
+                    role="retail"
+                    selection={selections}
+                    customerTexts={customerTexts}
+                    customerImages={customerImageUrls}
+                    onToggle={onToggle}
+                    onTextChange={onTextChange}
+                    onImageChange={onImageChange}
+                    fieldKey={(groupId, optionId) =>
+                      `${groupId}__${optionId}`
+                    }
+                    showErrors={showErrors}
+                    errors={errors}
+                  />
+                )}
+              </>
+            );
+          })()}
         </div>
       ) : (
         <p className="text-sm text-muted">لا توجد خيارات متاحة للروب</p>
