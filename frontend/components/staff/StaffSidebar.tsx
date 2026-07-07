@@ -70,6 +70,17 @@ function iconWallet() {
   );
 }
 
+function iconPen() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M12 19l7-7 3 3-7 7-3-3z" />
+      <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" />
+      <path d="M2 2l7.586 7.586" />
+      <circle cx="11" cy="11" r="2" />
+    </svg>
+  );
+}
+
 function getNavLinks(
   staffType: StaffType | null | undefined,
   isAdmin: boolean,
@@ -154,17 +165,36 @@ export function StaffSidebar({ user, open, onClose }: StaffSidebarProps) {
 
   const isAdmin = user.role === "admin";
   const baseLinks = getNavLinks(user.staff_type, isAdmin);
+
+  // Calligraphy tool: admin + manager/designer staff (matches the backend guard
+  // requireStaffType('designer')). Use the multi-role staff_types union so a
+  // designer who ALSO holds another role still sees it; fall back to the primary type.
+  const myTypes: StaffType[] =
+    user.staff_types && user.staff_types.length
+      ? user.staff_types
+      : user.staff_type
+        ? [user.staff_type]
+        : [];
+  const canCalligraphy =
+    isAdmin || myTypes.includes("manager") || myTypes.includes("designer");
+  const productionLinks = canCalligraphy
+    ? [
+        ...baseLinks,
+        { href: "/staff/calligraphy", label: "الخط العربي", icon: iconPen(), prefix: true },
+      ]
+    : baseLinks;
+
   // Staff (not pure admins) track their own salary + activity.
   const links =
     user.role === "staff"
       ? [
-          ...baseLinks,
+          ...productionLinks,
           { href: "/staff/attendance", label: "بصمة الموظف", icon: iconClipboard(), prefix: true },
           { href: "/staff/me", label: "راتبي ونشاطي", icon: iconWallet(), prefix: true },
         ]
       : isAdmin
-        ? [...baseLinks, { href: "/staff/team", label: "الموظفون", icon: iconUsers(), prefix: true }]
-        : baseLinks;
+        ? [...productionLinks, { href: "/staff/team", label: "الموظفون", icon: iconUsers(), prefix: true }]
+        : productionLinks;
   // Admins viewing production show "مدير (إنتاج)" so it's clear they're not
   // looking at their usual admin panel.
   const typeLabel = isAdmin

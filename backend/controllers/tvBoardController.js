@@ -13,6 +13,7 @@
 // 3s polling fallback + SSE-triggered refetches never hammer Neon. Live push uses
 // the shared eventBus (same stream the production console already emits to).
 // ───────────────────────────────────────────────────────────────────────────
+const crypto = require('crypto');
 const { query } = require('../lib/db');
 const { addClient } = require('../lib/eventBus');
 
@@ -67,6 +68,86 @@ function keyGate(req, res, next) {
     return res.status(404).json({ error: 'غير موجود', code: 'ERR_NOT_FOUND' });
   }
   next();
+}
+
+// ---------- money gate ----------
+// Money (revenue/profit/any IQD amount) is HIDDEN by default on the board and via
+// admin endpoints. It's revealed ONLY by a secret passphrase. Single source of truth
+// for the site_settings row + the compare logic lives here (admin controller requires it).
+const MONEY_GATE_KEY = 'money_gate';
+
+function sha256Hex(s) {
+  return crypto.createHash('sha256').update(String(s)).digest('hex');
+}
+
+// The configured secret hash (sha256 hex), or null when nothing is configured.
+// Source of truth: site_settings 'money_gate' → value.secret_hash. Fallback: env
+// MONEY_GATE_SECRET (hashed on the fly) — only when the DB row is unset. Fail-safe: null.
+async function moneyGateHash() {
+  const row = (await query(`SELECT value FROM site_settings WHERE key = '${MONEY_GATE_KEY}'`)).rows[0];
+  const stored = row && row.value && typeof row.value.secret_hash === 'string' ? row.value.secret_hash.trim() : '';
+  if (stored) return stored;
+  const envSecret = process.env.MONEY_GATE_SECRET;
+  if (envSecret && String(envSecret).length) return sha256Hex(envSecret);
+  return null;
+}
+
+// True when `provided` matches the configured passphrase. Fail-safe: false when the
+// argument isn't a non-empty string OR no secret is configured anywhere.
+async function moneyRevealOk(provided) {
+  if (typeof provided !== 'string' || provided.length === 0) return false;
+  const hash = await moneyGateHash();
+  if (!hash) return false;
+  let a, b;
+  try {
+    a = Buffer.from(sha256Hex(provided), 'hex');
+    b = Buffer.from(hash, 'hex');
+  } catch { return false; }
+  if (a.length === 0 || a.length !== b.length) return false;
+  try { return crypto.timingSafeEqual(a, b); } catch { return false; }
+}
+
+// Is any money-gate secret configured (DB row or env fallback)?
+async function moneyGateConfigured() {
+  return (await moneyGateHash()) !== null;
+}
+
+// Hash + UPSERT the passphrase into site_settings. Caller validates length.
+async function setMoneyGate(secret) {
+  await query(
+    `INSERT INTO site_settings (key, value, updated_at)
+     VALUES ('${MONEY_GATE_KEY}', $1::jsonb, now())
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+    [JSON.stringify({ secret_hash: sha256Hex(secret) })]
+  );
+}
+
+// Every monetary field on the snapshot (documented for the frontend agents — do NOT
+// render any of these when money_visible === false; they arrive as null).
+const MONEY_FIELDS = [
+  'kpis.revenue_today', 'kpis.revenue_delta', 'kpis.profit_today',
+  'graphs.series[].revenue', 'graphs.series[].profit',
+  'lifetime.revenue_total', 'records.best_day_revenue',
+  'growth.this_year_rev', 'growth.last_year_rev',
+];
+
+// Return a shallow-cloned snapshot with every monetary field nulled. NEVER mutates
+// `data` (the shared 2s cache holds the full, unstripped object).
+function stripMoney(data) {
+  const out = { ...data, money_visible: false };
+  if (data.kpis) out.kpis = { ...data.kpis, revenue_today: null, revenue_delta: null, profit_today: null };
+  if (data.lifetime) out.lifetime = { ...data.lifetime, revenue_total: null };
+  if (data.records) out.records = { ...data.records, best_day_revenue: null };
+  if (data.growth) out.growth = { ...data.growth, this_year_rev: null, last_year_rev: null };
+  if (data.graphs) {
+    out.graphs = {
+      ...data.graphs,
+      series: Array.isArray(data.graphs.series)
+        ? data.graphs.series.map((p) => ({ ...p, revenue: null, profit: null }))
+        : data.graphs.series,
+    };
+  }
+  return out;
 }
 
 // تجزئة = retail (no wholesaler), جملة = wholesaler. Returns a SQL fragment on `s` (students).
@@ -550,15 +631,23 @@ async function buildSnapshot(source, range) {
 async function snapshot(req, res) {
   const source = normSource(req.query.source);
   const range = ['today', '7', '30'].includes(req.query.range) ? req.query.range : 'today';
+  // Money is hidden unless a correct passphrase rides in. It is sent as the
+  // `x-tv-reveal` header (preferred — keeps it out of access logs); the `?reveal=`
+  // query is still accepted for back-compat (e.g. admin curl). The 2s cache holds
+  // the FULL (unstripped) snapshot; we derive the response per-request so a
+  // money-revealed payload is never served to a non-revealed request (or vice-versa).
+  const reveal = req.headers['x-tv-reveal'] || req.query.reveal;
+  const revealed = await moneyRevealOk(reveal);
+  const shape = (full) => (revealed ? { ...full, money_visible: true } : stripMoney(full));
   const ckey = `${source || 'all'}|${range}`;
   const hit = _cache.get(ckey);
   if (hit && Date.now() - hit.at < CACHE_MS) {
-    return res.json({ data: hit.data, cached: true });
+    return res.json({ data: shape(hit.data), cached: true });
   }
   try {
     const data = await buildSnapshot(source, range);
     _cache.set(ckey, { at: Date.now(), data });
-    res.json({ data });
+    res.json({ data: shape(data) });
   } catch (err) {
     console.error('TV snapshot failed:', err.message);
     res.status(500).json({ error: 'تعذّر تحميل اللوحة', code: 'ERR_SERVER' });
@@ -605,4 +694,8 @@ async function updateSettings(req, res) {
   res.json({ data: next });
 }
 
-module.exports = { keyGate, snapshot, events, updateSettings };
+module.exports = {
+  keyGate, snapshot, events, updateSettings,
+  // money-gate helpers (shared with adminController; do NOT expose money themselves)
+  moneyRevealOk, moneyGateConfigured, setMoneyGate, MONEY_GATE_KEY,
+};

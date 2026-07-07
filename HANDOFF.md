@@ -6,6 +6,96 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
+## 2026-07-08 — شال امريكي optional notes · TV 🎓 reveal now shows money + menu button · home reverted to old cover · **whole 2026-07-07 session COMMITTED + PUSHED (live redeploy)**
+
+**Committed + pushed to main → auto-deploys prod.** This shipped the entire previously-uncommitted 2026-07-07 session (money-gate,
+TV cinema, calligraphy, order back-nav) plus the 3 changes below. No new migration (money-gate reuses `site_settings`; شال adds no
+schema). Gates: FE `tsc` 0 · `eslint` 0 errors · BE `node --check` OK (6 files). Built via 2 parallel subagents (شال ∥ TV) + direct edits.
+
+**Three asks this session:**
+1. **شال امريكي optional notes.** The wholesaler/student full-set form (`FullSetOrderForm.tsx`) شال امريكي section gained an optional
+   «ملاحظات» textarea below the (already optional) photo. Note rides the sash's «شال امريكي» spec line: `customer_text = note || 'نعم'`
+   (staff see the note directly). Readback returns `american_shawl.notes` (empty when the line's text is just the 'نعم' marker).
+   Backend `lib/fullSetOrder.js` + types in `lib/wholesaler.ts`.
+2. **TV 🎓 reveal fixed + menu button.** Root cause: on reveal the money scene was only slotted into the 8-scene auto-rotation, so it
+   often never appeared within the 90s reveal window → "graphs don't show". Fix (`app/tv/[key]/page.tsx`): on a correct passphrase it now
+   **jumps straight to the money scene** (`setPinnedView("money")`); on hide/auto-hide it un-pins back to `auto`. Added «الأرباح والإيرادات»
+   button to the ☰ sidebar «المشهد» menu (`components/tv/Panels.tsx`), shown only once revealed.
+3. **Home page reverted to the old design.** `app/(student)/page.tsx` + `components/vip/VipHomeBand.tsx` `git checkout`-reverted to HEAD
+   (restores `ShopCover → AtelierStory → VipHomeBand → MilestoneStory → DesignProcess`); the unused `components/shop/HomeTrustStory.tsx`
+   was deleted. Both were used only by the home page.
+
+**Env / disk gotchas hit this session:**
+- Local `/` 500'd after the revert — NOT a code bug. Two Next servers (`next start` + `next dev`) were running against the same
+  `frontend/.next`, compounded by **disk at 98% (1.5 GB free)** blocking recompiles. Fixed by killing both, `rm -rf frontend/.next`,
+  and starting a single `next dev` on :3000 → `/` = 200. **Disk is still 98% — clear space soon (dev builds will keep ENOSPC-ing).**
+- ⚠️ Deploy prerequisites carried over from 2026-07-07: money-gate passphrase is `lolo2026` on the shared DB (change it via /admin →
+  🎓 → «تعيين الرمز»); calligraphy needs `OPENROUTER_API_KEY` in prod `.env` or it returns a clean Arabic error.
+
+### Open follow-ups
+- After deploy: browser-glance live `/admin` (money masked, reveal via lolo2026), `/tv` 🎓 reveal jumps to money + menu button, and a
+  wholesaler طقم form saves the شال note.
+- `design-mockups/` left untracked/uncommitted (reference junk).
+
+---
+
+## 2026-07-07 — Order back-nav fix · calligraphy preview-close + designer access · money-gate (hide by default + 🎓 reveal) · freestyle TV cinema
+
+**Uncommitted on main. NOT deployed.** No new migration (money-gate reuses `site_settings`). Gates green: FE `tsc` 0 · `eslint` 0
+(2 unused-var warnings cleaned) · BE `node --check` OK. Built via a multi-agent Workflow (F1 backend money-gate ∥ F2 reveal
+primitives → 4 parallel build slices → critic → fixer). **Verified live in-browser** (TV + dashboard driven with chrome-devtools;
+admin JWT minted via `signToken`) + backend curl e2e. Spec: `docs/superpowers/specs/2026-07-07-nav-calligraphy-money-gate-tv-design.md`.
+
+**Four asks, all done:**
+1. **Order back button (admin/staff) returned to the dashboard, not where you came from.** New `orderBackTarget(from, role)` in
+   `lib/back.ts` (same-origin-validated; rejects `//` **and** `/\` backslash open-redirect + control/whitespace). All 6 entry points
+   (`staff/page`×2, `staff/queue`×2, `staff/tailor`, `staff/wholesalers/[id]/students`, `admin/orders`) now pass `?from=<path>`; the
+   order page (`app/staff/orders/[orderId]/page.tsx`) uses `?from` → else same-origin `document.referrer` → else role home, for BOTH
+   the «العودة» link and the PageHeader back, with a label derived from the target.
+2. **Calligraphy AI preview couldn't be closed** — root cause was a stacking/containment trap (inline `fixed inset-0` overlay under
+   the admin layout). Fixed by rendering the full-size plate preview via `createPortal(document.body)` (like `Modal`); ✕/backdrop/Esc
+   all close. Extracted the tool into `components/calligraphy/CalligraphyTool.tsx` (admin page = thin wrapper, byte-identical).
+3. **Calligraphy AI opened to designers.** `routes/calligraphy.js` now `requireStaffType('designer')` (admin/manager auto-pass) instead
+   of `requireRole('admin')`. New `app/staff/calligraphy/page.tsx` + «الخط العربي» link in `StaffSidebar` for designers. The staff page
+   guards to designer/manager/admin (non-designer staff see «غير مصرّح», API would 403 anyway).
+4. **Money hidden by default on BOTH `/admin` and `/tv`; revealed by a disguised 🎓 + secret text; TV freestyle-redesigned.**
+   - **Server-side money-gate** (`tvBoardController.js`): the TV snapshot **strips every monetary field** (revenue/profit/cost across
+     kpis, graphs.series, lifetime, records, growth) unless a correct secret is supplied via the **`x-tv-reveal` header** (moved OFF the
+     URL so it can't land in access logs; `?reveal=` still accepted for curl). Adds `money_visible:boolean`. Per-request `stripMoney`
+     clone — the 2s cache is never mutated (verified both directions). `crypto.timingSafeEqual` compare; secret never logged.
+   - **Passphrase**: hashed (sha256) in `site_settings` key `money_gate.secret_hash`, admin-set via `PUT /admin/money-gate` (min **8**
+     chars). Env `MONEY_GATE_SECRET` is a fallback used ONLY when the DB hash is unset. `GET /admin/money-gate`→`{configured}` (never the
+     hash), `POST /admin/money-gate/verify`. Snapshot route rate-limited (400/5min — headroom over 3s polling).
+   - **Reveal UI** (new shared primitives): `components/MoneyRevealTrigger.tsx` (discreet 🎓 chip → password popover, neutral label
+     «خيارات العرض», portals when fixed), `hooks/useMoneyGate.ts` (dashboard reveal + 5-min idle auto-relock), `components/MoneyMask.tsx`
+     (••• placeholder), `lib/money-gate.ts`. In-memory only (refresh re-locks).
+   - **TV** (`app/tv/[key]/page.tsx` + NEW `components/tv/Scenes.tsx` + `FullGraphs.MoneyScene`): full-screen **scene cinema**, warm
+     brand, **old `IraqMap` kept**. 6 money-free scenes rotate (Pulse · Pipeline funnel+bottleneck · Orders-trend · Conquest map+gov
+     bars · Lifetime reach/rank/records brag · Deadlines+staff) + Spotlight. Money scene joins the rotation ONLY while revealed, then
+     auto-hides after **90s** (and client-strips `data` on hide so the fade-out frame can't flash numbers). 🎓 top corner.
+   - **Dashboard** (`app/admin/page.tsx` + `components/admin/DashboardCharts.tsx`): the 3 headline figures + accounting receipt + margin
+     are `MoneyMask`-wrapped (order counts stay visible); new non-money charts (orders-trend from `daily[].orders`, pipeline from
+     `ordersByStatus`); 🎓 reveal + a «تعيين الرمز» set-code affordance when unconfigured.
+
+**Root-cause caught this session:** the TV first rendered collapsed/empty because `page.tsx` referenced `.tv-scene-layer`/`.tv-scene-in`/
+`.tv-scene-out` CSS classes that were **never defined** (only the panel/pulse classes were) — so scenes had no `position:absolute;inset:0`
+and every `h-full` collapsed. Added the classes + cross-fade keyframes to `globals.css` → full-frame cinema. (Also: browser was caching
+stale CSS through several reloads — needed a hard reload to see it.)
+
+### Open follow-ups
+- **⚠️ Money-gate passphrase is `lolo2026`** — set on the shared Neon DB (`site_settings.money_gate`) AND in local `backend/.env`
+  (`MONEY_GATE_SECRET`) for testing. **dev+prod share one DB**, so CHANGE it before/after deploy via `/admin` → 🎓 → «تعيين الرمز».
+  Prod `.env` has no `MONEY_GATE_SECRET` (fine — the DB hash is the source of truth once set).
+- **Minor:** `GET /admin/money-gate` reports `configured:false` when ONLY the env secret is set (env isn't counted for `configured`) —
+  so the dashboard shows «set code» even though the TV can reveal via env. Harmless (dashboard-set is the intended path). Wire env into
+  `configured` if you want them consistent.
+- Digit-system mix on the TV: map «أشعلنا ٢ من ١٨» is Arabic-Indic but recharts axes render Latin (0/45/90…). Cosmetic.
+- **Not committed / not deployed.** Run `next build` before deploy (dev servers BE :4000 / FE :3000 left up). `PROGRESS.md` updated.
+- Pre-existing uncommitted working-tree files (PROGRESS.md prior state, android build.gradle, `(student)/page.tsx`, VipHomeBand,
+  HomeTrustStory, design-mockups/) were left as-is — not part of this session.
+
+---
+
 ## 2026-07-01 (b) — Capacitor Android project committed · Google Play submission in progress
 
 Committed the **Capacitor Android wrapper** to main (`frontend/android/`, `capacitor.config.ts`, `@capacitor/*` deps in `package.json`).

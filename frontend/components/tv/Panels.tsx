@@ -39,17 +39,22 @@ function Delta({ v }: { v: number }) {
     </span>
   );
 }
-export function KpiStrip({ k }: { k: TvSnapshot["kpis"] }) {
+export function KpiStrip({ k, moneyVisible = false }: { k: TvSnapshot["kpis"]; moneyVisible?: boolean }) {
   const cells = [
     { label: "طلبات اليوم", value: fmtNum(k.orders_today), delta: k.orders_delta, money: false },
     { label: "تم التسليم اليوم", value: fmtNum(k.delivered_today), delta: k.delivered_delta, money: false },
-    { label: "إيراد اليوم", value: fmtIQD(k.revenue_today), delta: k.revenue_delta, money: true },
-    { label: "ربح اليوم", value: fmtIQD(k.profit_today), delta: null, money: true },
+    // Money cells appear ONLY when revealed — otherwise the board shows zero money.
+    ...(moneyVisible
+      ? [
+          { label: "إيراد اليوم", value: fmtIQD(k.revenue_today ?? 0), delta: k.revenue_delta, money: true },
+          { label: "ربح اليوم", value: fmtIQD(k.profit_today ?? 0), delta: null, money: true },
+        ]
+      : []),
   ];
   // One flat scoreboard band split by hairlines — reads as a summary bar, not
   // four competing cards. Money values take the accent; counts stay ink.
   return (
-    <div className="tv-panel grid grid-cols-4">
+    <div className="tv-panel grid" style={{ gridTemplateColumns: `repeat(${cells.length}, minmax(0,1fr))` }}>
       {cells.map((c) => (
         <div key={c.label} className="tv-kpi-cell px-7 py-5">
           <div className="flex items-center justify-between gap-2">
@@ -518,36 +523,107 @@ const GREG = new Intl.DateTimeFormat("ar-IQ", {
   day: "numeric",
   month: "long",
 });
-export function Header({ source }: { source: Source }) {
+// A rotating NON-money KPI. One chip is spotlighted at a time so the persistent
+// header feels alive over a 6-hour watch without ever showing an IQD amount.
+function HeaderKpis({
+  kpis,
+  audienceNow,
+  activeBatches,
+}: {
+  kpis: TvSnapshot["kpis"];
+  audienceNow: number;
+  activeBatches: number;
+}) {
+  const chips = [
+    { label: "طلبات اليوم", value: fmtNum(kpis.orders_today), delta: kpis.orders_delta, icon: "🧾" },
+    { label: "تم التسليم اليوم", value: fmtNum(kpis.delivered_today), delta: kpis.delivered_delta, icon: "✅" },
+    { label: "يشاهدون الآن", value: fmtNum(audienceNow), delta: null, icon: "👁", live: true },
+    { label: "دفعات نشطة", value: fmtNum(activeBatches), delta: null, icon: "🎓" },
+  ];
+  const [hi, setHi] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setHi((i) => (i + 1) % chips.length), 3200);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return (
+    <div className="flex items-center gap-2.5">
+      {chips.map((c, i) => {
+        const on = i === hi;
+        return (
+          <div
+            key={c.label}
+            className={`flex items-center gap-2 rounded-full px-3.5 py-1.5 transition-all duration-500 ${
+              on
+                ? "scale-[1.06] bg-[#FFE7CE] shadow-[0_4px_14px_-6px_rgba(244,123,66,.5)] ring-1 ring-[#F0C99A]"
+                : "bg-[#FBF1E1]/70 ring-1 ring-[#F0DCC4]"
+            }`}
+          >
+            <span className={`text-base leading-none ${c.live ? "tv-pulse" : ""}`}>{c.icon}</span>
+            <span className="text-sm font-semibold text-[#9a6a3a]">{c.label}</span>
+            <span className="font-[Cairo] text-xl font-extrabold tabular-nums text-[#5a3210]">{c.value}</span>
+            {c.delta != null && c.delta !== 0 && <Delta v={c.delta} />}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+export function Header({
+  source,
+  kpis,
+  audienceNow,
+  activeBatches,
+  ownerTitle,
+  trigger,
+}: {
+  source: Source;
+  kpis: TvSnapshot["kpis"];
+  audienceNow: number;
+  activeBatches: number;
+  ownerTitle?: string;
+  trigger?: React.ReactNode;
+}) {
   const [now, setNow] = useState<Date | null>(null);
   useEffect(() => {
     setNow(new Date());
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
   }, []);
-  const srcLabel = source === "wholesaler" ? "جملة" : source === "retail" ? "تجزئة" : "الكل";
+  const srcLabel = source === "wholesaler" ? "جملة" : source === "retail" ? "تجزئة" : "كل القنوات";
   return (
-    <header className="flex items-center justify-between">
+    <header className="flex items-center justify-between gap-6">
       <div className="flex items-center gap-3">
-        <span className="text-3xl">◈</span>
+        <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-[#FFB100] to-[#F47B42] text-2xl text-white shadow-[0_6px_18px_-8px_rgba(244,123,66,.8)]">
+          ◈
+        </span>
         <div>
-          <h1 className="font-[Amiri] text-3xl font-extrabold text-[#5a3210] xl:text-4xl">
-            لوحة المتابعة
-          </h1>
-          <div className="flex items-center gap-2 text-[#9a6a3a]">
-            <span className="rounded-full bg-[#FFE4C4] px-3 py-0.5 font-bold text-[#7a4e22]">
-              {srcLabel}
-            </span>
+          <div className="flex items-baseline gap-2.5">
+            <h1 className="font-[Amiri] text-3xl font-extrabold leading-none text-[#5a3210]">لوحة المتابعة</h1>
+            <span className="rounded-full bg-[#FFE4C4] px-2.5 py-0.5 text-sm font-bold text-[#7a4e22]">{srcLabel}</span>
+          </div>
+          <div className="mt-1 flex items-center gap-1.5 text-sm text-[#9a6a3a]">
+            <i className="tv-pulse h-2 w-2 rounded-full bg-green-500" />
+            <span className="font-semibold">مباشر</span>
+            {ownerTitle && <span className="text-[#c39a6a]">·</span>}
+            {ownerTitle && <span className="font-[Amiri] font-bold text-[#b5793c]">{ownerTitle}</span>}
           </div>
         </div>
       </div>
-      <div className="text-end">
-        <div className="font-[Cairo] text-4xl font-black tabular-nums text-[#F47B42] xl:text-5xl">
-          {now ? now.toLocaleTimeString("ar-IQ", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"}
+
+      <HeaderKpis kpis={kpis} audienceNow={audienceNow} activeBatches={activeBatches} />
+
+      <div className="flex items-center gap-3">
+        <div className="text-end">
+          <div className="font-[Cairo] text-4xl font-black leading-none tabular-nums text-[#F47B42]">
+            {now ? now.toLocaleTimeString("ar-IQ", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"}
+          </div>
+          <div className="mt-1 text-sm text-[#7a4e22]">
+            {now ? GREG.format(now) : ""} · {now ? HIJRI.format(now) : ""} هـ
+          </div>
         </div>
-        <div className="text-base text-[#7a4e22]">
-          {now ? GREG.format(now) : ""} · {now ? HIJRI.format(now) : ""} هـ
-        </div>
+        {trigger}
       </div>
     </header>
   );
@@ -576,7 +652,16 @@ export function Celebration({ event }: { event: { id: number; student: string; u
 }
 
 // ─────────────────────────── Control sidebar ─────────────────────────────────
-export type HeroView = "auto" | "staff" | "graphs" | "map" | "spotlight";
+export type SceneKey =
+  | "pulse"
+  | "pipeline"
+  | "trend"
+  | "map"
+  | "reach"
+  | "deadlines"
+  | "spotlight"
+  | "money";
+export type HeroView = "auto" | SceneKey;
 function SbBtn({ active, children, onClick }: { active: boolean; children: React.ReactNode; onClick: () => void }) {
   return (
     <button
@@ -601,6 +686,7 @@ export function Sidebar({
   settings,
   onSettings,
   onFullscreen,
+  revealed = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -613,6 +699,7 @@ export function Sidebar({
   settings: TvSnapshot["settings"];
   onSettings: (patch: Partial<TvSnapshot["settings"]>) => void;
   onFullscreen: () => void;
+  revealed?: boolean;
 }) {
   return (
     <>
@@ -640,13 +727,19 @@ export function Sidebar({
         </div>
 
         <div className="mb-5">
-          <div className="mb-2 text-sm font-bold text-[#9a6a3a]">العرض</div>
+          <div className="mb-2 text-sm font-bold text-[#9a6a3a]">المشهد</div>
           <div className="grid grid-cols-2 gap-2">
             <SbBtn active={view === "auto"} onClick={() => onView("auto")}>تلقائي ↻</SbBtn>
-            <SbBtn active={view === "staff"} onClick={() => onView("staff")}>الموظفون</SbBtn>
-            <SbBtn active={view === "graphs"} onClick={() => onView("graphs")}>الرسوم</SbBtn>
+            <SbBtn active={view === "pulse"} onClick={() => onView("pulse")}>نبض اليوم</SbBtn>
+            <SbBtn active={view === "pipeline"} onClick={() => onView("pipeline")}>خط الإنتاج</SbBtn>
+            <SbBtn active={view === "trend"} onClick={() => onView("trend")}>التدفّق</SbBtn>
             <SbBtn active={view === "map"} onClick={() => onView("map")}>خريطة العراق</SbBtn>
+            <SbBtn active={view === "reach"} onClick={() => onView("reach")}>بصمتنا</SbBtn>
+            <SbBtn active={view === "deadlines"} onClick={() => onView("deadlines")}>المواعيد والفريق</SbBtn>
             <SbBtn active={view === "spotlight"} onClick={() => onView("spotlight")}>التصاميم</SbBtn>
+            {revealed && (
+              <SbBtn active={view === "money"} onClick={() => onView("money")}>الأرباح والإيرادات</SbBtn>
+            )}
           </div>
         </div>
 

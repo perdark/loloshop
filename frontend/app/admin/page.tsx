@@ -7,17 +7,28 @@ import { getAdminAnalytics, getAdminAccounting, getPendingApprovalCount } from "
 import { PromoControl } from "@/components/admin/PromoControl";
 import { MaintenanceControl } from "@/components/admin/MaintenanceControl";
 import { getTailorSummary, type TailorSummary } from "@/lib/staff";
-import { ORDER_STATUS_LABELS } from "@/lib/constants";
 import Link from "next/link";
 import { formatIQD } from "@/lib/format";
 import type { AdminAccounting, AdminAnalytics } from "@/lib/types";
 import { usePolling } from "@/lib/hooks/usePolling";
 import { useProductionEvents } from "@/hooks/useProductionEvents";
+import { useMoneyGate } from "@/hooks/useMoneyGate";
+import { MoneyMask } from "@/components/MoneyMask";
+import { MoneyRevealTrigger } from "@/components/MoneyRevealTrigger";
+import { setMoneyGate } from "@/lib/money-gate";
 
-const DailyOrdersChart = dynamic(
+const DashboardCharts = dynamic(
   () =>
-    import("@/components/admin/DailyOrdersChart").then((m) => m.DailyOrdersChart),
-  { ssr: false, loading: () => <div className="h-64 animate-pulse rounded-2xl bg-ink/5" /> }
+    import("@/components/admin/DashboardCharts").then((m) => m.DashboardCharts),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="grid gap-5 lg:grid-cols-2">
+        <div className="h-72 animate-pulse rounded-2xl bg-ink/5" />
+        <div className="h-72 animate-pulse rounded-2xl bg-ink/5" />
+      </div>
+    ),
+  }
 );
 
 /* Latin → Arabic-Indic digits, for counts rendered outside formatIQD. */
@@ -118,6 +129,91 @@ function DashboardSkeleton() {
   );
 }
 
+/* Discreet, admin-only affordance to SET the money-gate secret the first time
+   (shown only when the server reports no gate configured). Kept quiet — the
+   whole page is admin-only, so this is a one-time setup nudge, not a warning. */
+function MoneyGateSetup({ onSaved }: { onSaved: (secret: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [secret, setSecret] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const save = useCallback(async () => {
+    const value = secret.trim();
+    if (value.length < 4) {
+      toast.error("الرمز قصير جداً (٤ أحرف على الأقل)");
+      return;
+    }
+    setSaving(true);
+    try {
+      await setMoneyGate(value);
+      toast.success("تم تعيين رمز إخفاء المبالغ");
+      setSecret("");
+      setOpen(false);
+      onSaved(value);
+    } catch {
+      toast.error("تعذر حفظ الرمز");
+    } finally {
+      setSaving(false);
+    }
+  }, [secret, onSaved]);
+
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-[var(--shop-muted)]">
+      <span className="inline-flex items-center gap-1.5">
+        <svg
+          aria-hidden
+          viewBox="0 0 24 24"
+          className="h-3.5 w-3.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.9"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <rect x="4" y="11" width="16" height="9" rx="2" />
+          <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+        </svg>
+        المبالغ مخفية — عيّن رمزاً لكشفها عند الحاجة
+      </span>
+      {open ? (
+        <span className="inline-flex items-center gap-1.5">
+          <input
+            type="password"
+            autoComplete="new-password"
+            value={secret}
+            onChange={(e) => setSecret(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void save();
+              }
+            }}
+            placeholder="الرمز"
+            aria-label="رمز إخفاء المبالغ"
+            className="h-9 w-28 rounded-lg border border-line bg-white px-2.5 text-center text-sm tracking-widest text-ink outline-none focus:border-orange-ink"
+          />
+          <button
+            type="button"
+            onClick={() => void save()}
+            disabled={saving || secret.trim().length < 4}
+            className="inline-flex h-9 items-center rounded-lg bg-orange-ink px-3 text-xs font-bold text-white transition-all hover:brightness-110 active:scale-95 disabled:opacity-40"
+          >
+            {saving ? "…" : "حفظ"}
+          </button>
+        </span>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="font-semibold text-orange-ink underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-ink"
+        >
+          تعيين الرمز
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function AdminDashboardPage() {
   const [data, setData] = useState<AdminAnalytics | null>(null);
   const [accounting, setAccounting] = useState<AdminAccounting | null>(null);
@@ -125,6 +221,24 @@ export default function AdminDashboardPage() {
   const [pendingApproval, setPendingApproval] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Money-gate: sensitive figures stay masked until the admin opens the gate
+  // with the shared secret (auto-hides after idle). `configuredLocal` flips
+  // true the instant a secret is set this session, so the setup nudge hides
+  // without waiting for a remount.
+  const gate = useMoneyGate();
+  const [configuredLocal, setConfiguredLocal] = useState(false);
+  const moneyConfigured = gate.configured || configuredLocal;
+  const showMoney = gate.revealed;
+  const onGateSaved = useCallback(
+    (secret: string) => {
+      setConfiguredLocal(true);
+      // Verify + reveal immediately so the admin sees the figures they just
+      // unlocked (fails safe — if verify somehow rejects, they stay masked).
+      void gate.reveal(secret);
+    },
+    [gate]
+  );
 
   const load = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
@@ -236,18 +350,41 @@ export default function AdminDashboardPage() {
         </button>
       </header>
 
-      {/* Headline ledger — the four figures that define the business */}
+      {/* Headline ledger — the four figures that define the business.
+          The three money figures mask behind the gate; the order count is
+          never sensitive and always shows. */}
       <dl className="grid grid-cols-2 divide-x divide-y divide-ink/10 border-y border-ink/10 [&>*]:border-ink/10 lg:grid-cols-4 lg:divide-y-0">
-        <Figure label="إجمالي الإيرادات" value={<Money amount={data.totalRevenue} />} />
-        <Figure label="إجمالي التكلفة" value={<Money amount={data.totalCost} />} />
+        <Figure
+          label="إجمالي الإيرادات"
+          value={
+            <MoneyMask show={showMoney}>
+              <Money amount={data.totalRevenue} />
+            </MoneyMask>
+          }
+        />
+        <Figure
+          label="إجمالي التكلفة"
+          value={
+            <MoneyMask show={showMoney}>
+              <Money amount={data.totalCost} />
+            </MoneyMask>
+          }
+        />
         <Figure
           label="إجمالي الربح"
-          value={<Money amount={data.totalProfit} />}
+          value={
+            <MoneyMask show={showMoney}>
+              <Money amount={data.totalProfit} />
+            </MoneyMask>
+          }
           accent
-          hint={margin}
+          hint={showMoney ? margin : undefined}
         />
         <Figure label="عدد الطلبات" value={String(data.orderCount)} />
       </dl>
+
+      {/* First-run nudge to set the gate secret (only when none configured). */}
+      {!moneyConfigured && <MoneyGateSetup onSaved={onGateSaved} />}
 
       {/* Pending approval count — shown only when > 0 */}
       {pendingApproval !== null && pendingApproval > 0 && (
@@ -272,30 +409,15 @@ export default function AdminDashboardPage() {
         </section>
       )}
 
-      {/* Daily orders */}
+      {/* Analytics — order-only charts. Derived purely from counts, so they
+          stay informative even while the money figures are masked. Replaces
+          the old daily-orders bar + status figure-grid with richer visuals. */}
       <section className="mt-14">
-        <SectionHead title="الطلبات اليومية" />
-        <div className="rounded-2xl bg-beige p-5 shadow-[var(--shadow-soft)]">
-          <DailyOrdersChart data={data.dailyOrders} />
-        </div>
-      </section>
-
-      {/* Orders by status — compact ledger row */}
-      <section className="mt-16">
-        <SectionHead title="الطلبات حسب الحالة" />
-        <dl className="grid grid-cols-2 divide-x divide-y divide-ink/10 border-y border-ink/10 [&>*]:border-ink/10 sm:grid-cols-4 lg:divide-y-0">
-          {Object.entries(data.ordersByStatus).map(([status, count]) => (
-            <Figure
-              key={status}
-              size="sm"
-              label={
-                ORDER_STATUS_LABELS[status as keyof typeof ORDER_STATUS_LABELS] ??
-                status
-              }
-              value={String(count)}
-            />
-          ))}
-        </dl>
+        <SectionHead title="نظرة تحليلية" meta="بيانات الطلبات" />
+        <DashboardCharts
+          daily={data.dailyOrders}
+          ordersByStatus={data.ordersByStatus}
+        />
       </section>
 
       {/* Promo / Discount Popup control */}
@@ -362,13 +484,17 @@ export default function AdminDashboardPage() {
             <li className="flex items-baseline justify-between gap-4 py-1.5">
               <span className="text-[0.92rem] text-ink-soft">الإيراد</span>
               <span className="text-[0.95rem] font-bold tabular-nums text-ink" dir="ltr">
-                {formatIQD(accounting.totals.revenue)}
+                <MoneyMask show={showMoney} placeholder="••••">
+                  {formatIQD(accounting.totals.revenue)}
+                </MoneyMask>
               </span>
             </li>
             <li className="flex items-baseline justify-between gap-4 py-1.5">
               <span className="text-[0.92rem] text-ink-soft">التكلفة</span>
               <span className="text-[0.95rem] font-bold tabular-nums text-ink" dir="ltr">
-                {formatIQD(accounting.totals.cost)}
+                <MoneyMask show={showMoney} placeholder="••••">
+                  {formatIQD(accounting.totals.cost)}
+                </MoneyMask>
               </span>
             </li>
             <li className="flex items-baseline justify-between gap-4 py-1.5">
@@ -398,7 +524,9 @@ export default function AdminDashboardPage() {
                       className="text-[0.95rem] font-bold tabular-nums text-ink"
                       dir="ltr"
                     >
-                      {formatIQD(row.profit)}
+                      <MoneyMask show={showMoney} placeholder="••••">
+                        {formatIQD(row.profit)}
+                      </MoneyMask>
                     </span>
                   </li>
                 ))}
@@ -412,7 +540,9 @@ export default function AdminDashboardPage() {
               dir="ltr"
               style={{ fontFamily: "var(--font-amiri)" }}
             >
-              {formatIQD(accounting.totals.profit)}
+              <MoneyMask show={showMoney} placeholder="••••">
+                {formatIQD(accounting.totals.profit)}
+              </MoneyMask>
             </span>
           </div>
         </div>
@@ -456,6 +586,17 @@ export default function AdminDashboardPage() {
           </p>
         )}
       </section>
+
+      {/* Disguised reveal control (🎓). Only offered once a gate secret exists;
+          before that the inline MoneyGateSetup nudge handles configuration. */}
+      {moneyConfigured && (
+        <MoneyRevealTrigger
+          position="fixed"
+          revealed={gate.revealed}
+          onSubmit={gate.reveal}
+          onHide={gate.hide}
+        />
+      )}
     </div>
   );
 }

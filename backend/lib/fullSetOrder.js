@@ -185,6 +185,7 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
     selectedSet.has('sash') && (shawlIn.enabled === true || shawlIn.enabled === 'true' || shawlIn.enabled === 'نعم');
   // شال امريكي photo is OPTIONAL now (was required when enabled). Stored when present.
   const shawlImage = clean(shawlIn.image_url, 500);
+  const shawlNote = clean(shawlIn.notes, 500);
 
   // لون الوشاح (sash color) — optional typed free-text color + optional reference photo.
   // Captured as a sash spec line only when non-empty (frontend no longer sends it; kept
@@ -288,7 +289,7 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
         ? [{ label: 'لون التطريز', customer_text: embroideryColor }] : []),
       ...(sashType ? [{ label: 'نوع الوشاح', customer_text: sashType }] : []),
       ...(shawlEnabled
-        ? [{ label: 'شال امريكي', customer_text: 'نعم', customer_image_url: shawlImage }] : []),
+        ? [{ label: 'شال امريكي', customer_text: shawlNote || 'نعم', customer_image_url: shawlImage }] : []),
       ...(emb.sash_front.text || emb.sash_front.image_url
         ? [{ label: 'تطريز الوشاح من الأمام', customer_text: emb.sash_front.text, customer_image_url: emb.sash_front.image_url }] : []),
       ...(emb.sash_back.text || emb.sash_back.image_url
@@ -488,7 +489,7 @@ async function readFullSetOrder(studentId) {
     sash_type: sashId ? lineFor(sashId, 'نوع الوشاح')?.customer_text || null : null,
     cap_type: capId ? lineFor(capId, 'نوع القبعة')?.customer_text || null : null,
     shoulder_pleat: robeId ? lineFor(robeId, 'كسرة الكتف')?.customer_text === 'نعم' : false,
-    american_shawl: { enabled: !!shawlLine, image_url: shawlLine?.customer_image_url || '' },
+    american_shawl: { enabled: !!shawlLine, image_url: shawlLine?.customer_image_url || '', notes: shawlLine && shawlLine.customer_text && shawlLine.customer_text !== 'نعم' ? shawlLine.customer_text : '' },
     embroidery: {
       sash_front: z(sashId, 'تطريز الوشاح من الأمام'),
       sash_back: z(sashId, 'تطريز الوشاح من الخلف'),

@@ -304,7 +304,7 @@ function TailorRow({
 
       {/* Body — tap opens the full (tailor read-only) order */}
       <Link
-        href={`/staff/orders/${order.id}`}
+        href={`/staff/orders/${order.id}?from=${encodeURIComponent("/staff/tailor")}`}
         className={`flex min-w-0 flex-1 items-center justify-between gap-3 py-3 pe-4 ${
           selectable ? "ps-1" : "ps-4 rounded-s-2xl"
         }`}

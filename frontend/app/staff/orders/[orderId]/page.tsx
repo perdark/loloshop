@@ -1,15 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { DesignViewer } from "@/components/staff/DesignViewer";
 import { ExportPngButton } from "@/components/staff/ExportPngButton";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { PageLoader } from "@/components/ui/Spinner";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
+import { orderBackTarget } from "@/lib/back";
 import { ORDER_SOURCE_LABELS, ORDER_STATUS_LABELS, PRODUCT_TYPE_LABELS } from "@/lib/constants";
 import { formatDateIQ } from "@/lib/format";
 import {
@@ -39,6 +41,27 @@ function resolveImageUrl(url: string | null | undefined): string | null {
     process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ||
     "http://localhost:4000";
   return `${base}${url.startsWith("/") ? "" : "/"}${url}`;
+}
+
+/**
+ * Fallback origin when the page was opened WITHOUT a `?from=` param — derive it
+ * from `document.referrer`, but only when it is same-origin and not this same
+ * order page (so back doesn't loop). Module-scope so reading `document`/`window`
+ * during render doesn't trip the React purity rule (same pattern as Date.now()
+ * helpers elsewhere). Returns an internal path or null.
+ */
+function referrerPath(orderId: string): string | null {
+  if (typeof window === "undefined") return null;
+  const ref = document.referrer;
+  if (!ref) return null;
+  try {
+    const url = new URL(ref);
+    if (url.origin !== window.location.origin) return null;
+    if (url.pathname === `/staff/orders/${orderId}`) return null;
+    return url.pathname + url.search;
+  } catch {
+    return null;
+  }
 }
 
 // ─── Catalog product photo card (shown to ALL staff roles) ────────────────────
@@ -642,10 +665,12 @@ function EmbroideryZonesCard({
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function ProductionOrderDetailPage() {
+function ProductionOrderDetailContent() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const orderId = params.orderId as string;
+  const fromParam = searchParams.get("from");
 
   const { user } = useRequireAuth(["staff", "admin"]);
 
@@ -867,6 +892,10 @@ export default function ProductionOrderDetailPage() {
     });
   }
 
+  // Where the back button returns to. Prefer the explicit `?from=` the entry
+  // point appended; else derive it from the referrer; else the role's home.
+  const back = orderBackTarget(fromParam ?? referrerPath(orderId), user?.role ?? "staff");
+
   // ── Loading skeleton ──
   if (loading) {
     return (
@@ -889,10 +918,10 @@ export default function ProductionOrderDetailPage() {
     return (
       <div dir="rtl" lang="ar" className="space-y-4">
         <Link
-          href="/staff"
+          href={back.href}
           className="inline-flex min-h-[44px] items-center gap-1 text-sm font-medium text-orange-ink transition-colors hover:text-orange-ink"
         >
-          <span aria-hidden>→</span> العودة
+          <span aria-hidden>→</span> {back.label}
         </Link>
         <div className="rounded-2xl border border-[var(--color-danger)]/25 bg-[var(--shop-sink)] px-6 py-10 text-center">
           <p className="text-base font-semibold text-ink">تعذر تحميل تفاصيل الطلب</p>
@@ -906,7 +935,6 @@ export default function ProductionOrderDetailPage() {
   const { order, design, items, package_orders, bundle, can_see_design, available_actions, embroidery_zones } = detail;
   const intake = order.intake ?? null;
   const productLabel = PRODUCT_TYPE_LABELS[order.product_type as keyof typeof PRODUCT_TYPE_LABELS] ?? "المنتج";
-  const isAdmin = user?.role === "admin";
 
   // Presence banner — someone else is working on this order. `conflictOwner` is
   // the live heartbeat signal (updates without a reload); the order snapshot is
@@ -1003,10 +1031,10 @@ export default function ProductionOrderDetailPage() {
       <div dir="rtl" lang="ar">
         <div className="mb-4">
           <Link
-            href="/staff"
+            href={back.href}
             className="inline-flex min-h-[44px] items-center gap-1 text-sm font-medium text-orange-ink hover:underline"
           >
-            <span aria-hidden>→</span> العودة
+            <span aria-hidden>→</span> {back.label}
           </Link>
         </div>
         <PageHeader title={order.student_name} subtitle={order.product_name} />
@@ -1149,10 +1177,10 @@ export default function ProductionOrderDetailPage() {
       <div dir="rtl" lang="ar">
         <div className="mb-4">
           <Link
-            href="/staff"
+            href={back.href}
             className="inline-flex min-h-[44px] items-center gap-1 text-sm font-medium text-orange-ink hover:underline"
           >
-            <span aria-hidden>→</span> العودة
+            <span aria-hidden>→</span> {back.label}
           </Link>
         </div>
         <PageHeader
@@ -1264,17 +1292,18 @@ export default function ProductionOrderDetailPage() {
       {/* Back link */}
       <div className="mb-4">
         <Link
-          href="/staff"
+          href={back.href}
           className="inline-flex min-h-[44px] items-center gap-1 text-sm font-medium text-orange-ink transition-colors hover:text-orange-ink"
         >
-          <span aria-hidden>→</span> العودة
+          <span aria-hidden>→</span> {back.label}
         </Link>
       </div>
 
       <PageHeader
         title={order.student_name}
         subtitle={`${ORDER_STATUS_LABELS[order.status] ?? order.status} · ${order.product_name}`}
-        {...(isAdmin ? { backHref: "/admin", backLabel: "العودة للوحة التحكم" } : {})}
+        backHref={back.href}
+        backLabel={back.label}
       />
 
       {/* Presence banner — admin/staff see which employee is working on this order */}
@@ -2081,5 +2110,14 @@ export default function ProductionOrderDetailPage() {
         </div>
       </Modal>
     </div>
+  );
+}
+
+// Suspense boundary required because the content reads `useSearchParams` (?from).
+export default function ProductionOrderDetailPage() {
+  return (
+    <Suspense fallback={<PageLoader />}>
+      <ProductionOrderDetailContent />
+    </Suspense>
   );
 }

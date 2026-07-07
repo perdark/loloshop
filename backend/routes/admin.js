@@ -65,6 +65,11 @@ router.patch('/promo', c.updatePromo);
 // Site settings — maintenance mode flag
 router.patch('/maintenance', c.updateMaintenance);
 
+// Money gate — reveal secret for TV/dashboard IQD amounts (hidden by default).
+router.get('/money-gate', c.getMoneyGate);
+router.post('/money-gate/verify', c.verifyMoneyGate);
+router.put('/money-gate', c.setMoneyGateSecret);
+
 // Order-approval override (T5) — admin can approve/reject any bundle regardless of rep ownership.
 // POST verb, suffix /approve|/reject — does NOT shadow PATCH /orders/:id/cost (different verb + suffix).
 router.post('/orders/:checkoutGroupId/approve', c.approveOrderAdmin);

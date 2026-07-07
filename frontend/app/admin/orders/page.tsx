@@ -447,7 +447,7 @@ function BundleCard({
           >
             <div className="flex min-w-0 flex-1 items-center gap-2">
               <Link
-                href={`/staff/orders/${item.order_id}`}
+                href={`/staff/orders/${item.order_id}?from=${encodeURIComponent("/admin/orders")}`}
                 className="font-medium text-orange-ink hover:underline"
               >
                 {item.product_name}

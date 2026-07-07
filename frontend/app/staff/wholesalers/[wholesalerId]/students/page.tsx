@@ -213,6 +213,9 @@ function OrdersTab({
     [orders]
   );
 
+  // Opening an order should return to THIS rep's page (not the generic /staff home).
+  const backFrom = `/staff/wholesalers/${wholesalerId}/students`;
+
   return (
     <div className="space-y-4">
       {/* Zone chips — horizontal scroll on mobile */}
@@ -304,6 +307,7 @@ function OrdersTab({
                 checked={selected.has(o.id)}
                 onToggle={() => toggleOne(o.id)}
                 pill={statusPill(o.status)}
+                backFrom={backFrom}
               />
             ))}
           </ul>
@@ -361,11 +365,13 @@ function OrderRow({
   checked,
   onToggle,
   pill,
+  backFrom,
 }: {
   order: WholesalerOrderRow;
   checked: boolean;
   onToggle: () => void;
   pill: string;
+  backFrom: string;
 }) {
   const overdue = isOverdueOrder(order);
 
@@ -398,7 +404,7 @@ function OrderRow({
 
       {/* Body — tap opens the full order */}
       <Link
-        href={`/staff/orders/${order.id}`}
+        href={`/staff/orders/${order.id}?from=${encodeURIComponent(backFrom)}`}
         className="flex min-w-0 flex-1 items-center justify-between gap-3 py-3 pe-4 ps-1"
       >
         <div className="min-w-0">

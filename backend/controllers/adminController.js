@@ -3,6 +3,10 @@ const { query, tx } = require('../lib/db');
 const { DEFAULT_ADDONS, sanitizeAddons } = require('../lib/fullSetOrder');
 const { normalizeIqPhone } = require('../lib/otp');
 const { setBundleApproval, notifyUser } = require('../lib/orderApproval');
+// Money-gate reveal logic lives in tvBoardController (single source of truth for the
+// 'money_gate' site_settings row + the sha256 compare). No circular dep: tvBoardController
+// requires only lib/*, never adminController.
+const { moneyRevealOk, moneyGateConfigured, setMoneyGate } = require('./tvBoardController');
 
 const SALT_ROUNDS = 10;
 
@@ -761,6 +765,30 @@ async function pendingApprovalCount(req, res) {
   res.json({ data: { pending_bundles: rows[0].n } });
 }
 
+// ---------- Admin: money gate (reveal secret for TV/dashboard IQD amounts) ----------
+
+// GET /api/admin/money-gate → { configured } — whether a reveal passphrase is set
+// (site_settings row OR env MONEY_GATE_SECRET fallback).
+async function getMoneyGate(req, res) {
+  res.json({ data: { configured: await moneyGateConfigured() } });
+}
+
+// POST /api/admin/money-gate/verify { secret } → { ok } — same compare the TV uses.
+async function verifyMoneyGate(req, res) {
+  const secret = req.body && typeof req.body.secret === 'string' ? req.body.secret : '';
+  res.json({ data: { ok: await moneyRevealOk(secret) } });
+}
+
+// PUT /api/admin/money-gate { secret } — hash (sha256) + UPSERT the passphrase.
+async function setMoneyGateSecret(req, res) {
+  const secret = req.body && typeof req.body.secret === 'string' ? req.body.secret.trim() : '';
+  if (!secret || secret.length < 8) {
+    return res.status(400).json({ error: 'كلمة السر قصيرة جداً (٨ أحرف على الأقل)', code: 'ERR_WEAK_SECRET' });
+  }
+  await setMoneyGate(secret);
+  res.json({ data: { ok: true } });
+}
+
 module.exports = {
   analytics, accounting, updateOrderCost, updateCheckoutGroup,
   listWholesalers, createWholesaler, updateWholesaler, updateDeadline, updatePricing, deleteWholesaler,
@@ -769,4 +797,5 @@ module.exports = {
   listStaff, createStaff, updateStaffType, updateStaffScope, updateStaffPassword, deleteStaff,
   repsOverview, updatePromo, updateMaintenance,
   approveOrderAdmin, rejectOrderAdmin, pendingApprovalCount,
+  getMoneyGate, verifyMoneyGate, setMoneyGateSecret,
 };

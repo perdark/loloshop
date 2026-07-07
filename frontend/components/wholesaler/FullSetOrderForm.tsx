@@ -88,6 +88,7 @@ export function FullSetOrderForm({
     initial?.american_shawl?.enabled ?? false
   );
   const [shawlImage, setShawlImage] = useState(initial?.american_shawl?.image_url || "");
+  const [shawlNote, setShawlNote] = useState(initial?.american_shawl?.notes || "");
   const [shawlUploading, setShawlUploading] = useState(false);
   const hasPiece = (piece: ProductPiece) => selectedPieces.includes(piece);
   const hasAnyPiece = selectedPieces.length > 0;
@@ -161,6 +162,7 @@ export function FullSetOrderForm({
       american_shawl: {
         enabled: selectedSash && shawlEnabled,
         image_url: selectedSash && shawlEnabled ? shawlImage : undefined,
+        notes: selectedSash && shawlEnabled ? shawlNote.trim() || undefined : undefined,
       },
       embroidery: {
         sash_front: zone(zones.sashFront),
@@ -387,6 +389,22 @@ export function FullSetOrderForm({
                   </label>
                 )}
               </div>
+            </div>
+          )}
+          {shawlEnabled && (
+            <div className="space-y-1.5">
+              <p className="text-sm font-medium text-ink">
+                ملاحظات{" "}
+                <span className="text-xs font-normal text-ink-soft">(اختياري)</span>
+              </p>
+              <textarea
+                value={shawlNote}
+                onChange={(e) => setShawlNote(e.target.value)}
+                rows={2}
+                maxLength={500}
+                placeholder="أي تفاصيل عن الشال الأمريكي…"
+                className="min-h-11 w-full rounded-xl border border-line bg-beige px-3.5 py-2.5 text-ink shadow-[var(--shadow-soft)] outline-none transition-colors duration-200 placeholder:text-ink/55 hover:border-ink/30 focus:border-orange-ink focus:ring-2 focus:ring-orange-ink/20"
+              />
             </div>
           )}
         </div>

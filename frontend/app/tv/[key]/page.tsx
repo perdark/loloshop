@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import {
   chime,
@@ -13,26 +13,77 @@ import {
   type Source,
   type TvSnapshot,
 } from "@/lib/tv";
-import { IraqMap } from "@/components/tv/IraqMap";
-import { FullGraphs } from "@/components/tv/FullGraphs";
 import {
   Celebration,
-  GoalRing,
-  Graphs,
   Header,
-  KpiStrip,
-  RevenueOdometer,
   Sidebar,
-  Spotlight,
-  StaffWatch,
+  Ticker,
   type HeroView,
+  type SceneKey,
 } from "@/components/tv/Panels";
+import {
+  DeadlineStaffScene,
+  MapScene,
+  PipelineScene,
+  PulseScene,
+  ReachScene,
+  SpotlightScene,
+  TrendScene,
+} from "@/components/tv/Scenes";
+import { MoneyScene } from "@/components/tv/FullGraphs";
+import { MoneyRevealTrigger } from "@/components/MoneyRevealTrigger";
 
 const SOURCE_CYCLE: Source[] = ["all", "wholesaler", "retail"];
-const HERO_CYCLE: Exclude<HeroView, "auto">[] = ["staff", "graphs", "map", "spotlight"];
 const SOURCE_MS = 22000;
-const HERO_MS = 13000;
+const SCENE_MS = 17000;
 const POLL_MS = 3000;
+const REVEAL_MS = 90000; // money auto-hides 90s after reveal
+
+// The default (money-free) scene order for the cinema.
+const BASE_ORDER: SceneKey[] = ["pulse", "pipeline", "trend", "map", "reach", "deadlines", "spotlight"];
+
+// Client-side money strip — mirrors the backend's stripMoney. When the reveal is
+// dropped we still cross-fade the outgoing money scene over ~760ms; without this the
+// stale `data` (money_visible:true, real figures) could flash for that window. Nulling
+// the monetary fields locally guarantees no frame renders numbers after hide.
+function stripMoneyClient(d: TvSnapshot): TvSnapshot {
+  return {
+    ...d,
+    money_visible: false,
+    kpis: { ...d.kpis, revenue_today: null, revenue_delta: null, profit_today: null },
+    graphs: {
+      ...d.graphs,
+      series: d.graphs.series.map((p) => ({ ...p, revenue: null, profit: null })),
+    },
+    ...(d.lifetime ? { lifetime: { ...d.lifetime, revenue_total: null } } : {}),
+    ...(d.records ? { records: { ...d.records, best_day_revenue: null } } : {}),
+    ...(d.growth ? { growth: { ...d.growth, this_year_rev: null, last_year_rev: null } } : {}),
+  };
+}
+
+function renderScene(k: SceneKey, d: TvSnapshot) {
+  switch (k) {
+    case "pulse":
+      return <PulseScene data={d} />;
+    case "pipeline":
+      return <PipelineScene data={d} />;
+    case "trend":
+      return <TrendScene data={d} />;
+    case "map":
+      return <MapScene data={d} />;
+    case "reach":
+      return <ReachScene data={d} />;
+    case "deadlines":
+      return <DeadlineStaffScene data={d} />;
+    case "spotlight":
+      return <SpotlightScene data={d} />;
+    case "money":
+      // Never leak money if the reveal expired mid-transition.
+      return d.money_visible ? <MoneyScene data={d} /> : <PulseScene data={d} />;
+    default:
+      return <PulseScene data={d} />;
+  }
+}
 
 export default function TvBoardPage() {
   const params = useParams();
@@ -43,16 +94,19 @@ export default function TvBoardPage() {
 
   // rotation + manual pins
   const [rotSrcIdx, setRotSrcIdx] = useState(0);
-  const [rotViewIdx, setRotViewIdx] = useState(0);
+  const [autoIdx, setAutoIdx] = useState(0);
   const [pinnedSource, setPinnedSource] = useState<Source | null>(null);
-  const [pinnedView, setPinnedView] = useState<Exclude<HeroView, "auto"> | null>(null);
+  const [pinnedView, setPinnedView] = useState<HeroView>("auto");
   const [range, setRange] = useState<Range>("today");
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [showGraphs, setShowGraphs] = useState(false);
   const [celebrate, setCelebrate] = useState<{ id: number; student: string; university?: string } | null>(null);
 
+  // money reveal (kept in memory only; re-locks on refresh)
+  const [revealSecret, setRevealSecret] = useState<string | null>(null);
+  const revealed = !!revealSecret;
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const source: Source = pinnedSource ?? SOURCE_CYCLE[rotSrcIdx];
-  const view: Exclude<HeroView, "auto"> = pinnedView ?? HERO_CYCLE[rotViewIdx];
 
   const lastDeliveredRef = useRef<string | null>(null);
   const soundRef = useRef(true);
@@ -60,11 +114,10 @@ export default function TvBoardPage() {
   // ---- load ----
   const load = useCallback(async () => {
     try {
-      const snap = await fetchSnapshot(key, source, range);
+      const snap = await fetchSnapshot(key, source, range, revealSecret ?? undefined);
       setData(snap);
       setStatus("ok");
       soundRef.current = snap.settings.sound;
-      // celebration: detect a new delivered event in the ticker
       const delivered = snap.ticker.find((t) => t.status === "delivered");
       if (delivered) {
         if (lastDeliveredRef.current === null) {
@@ -80,16 +133,15 @@ export default function TvBoardPage() {
       const msg = String((e as Error).message || "");
       setStatus(msg.includes("404") ? "denied" : "error");
     }
-  }, [key, source, range]);
+  }, [key, source, range, revealSecret]);
 
-  // refetch on source/range change + 3s heartbeat poll
   useEffect(() => {
     load();
     const t = setInterval(load, POLL_MS);
     return () => clearInterval(t);
   }, [load]);
 
-  // SSE live push → immediate (debounced) refetch
+  // SSE live push → debounced refetch
   useEffect(() => {
     if (status === "denied" || !key) return;
     let es: EventSource | null = null;
@@ -101,7 +153,7 @@ export default function TvBoardPage() {
         deb = setTimeout(load, 500);
       };
     } catch {
-      /* TV without SSE → the 3s poll keeps it live */
+      /* no SSE → the 3s poll keeps it live */
     }
     return () => {
       if (deb) clearTimeout(deb);
@@ -109,19 +161,21 @@ export default function TvBoardPage() {
     };
   }, [key, status, load]);
 
-  // source / hero auto-rotation (skips when pinned)
+  // source auto-rotation (skips when pinned)
   useEffect(() => {
     if (pinnedSource) return;
     const t = setInterval(() => setRotSrcIdx((i) => (i + 1) % SOURCE_CYCLE.length), SOURCE_MS);
     return () => clearInterval(t);
   }, [pinnedSource]);
+
+  // scene auto-advance (skips when a scene is pinned)
   useEffect(() => {
-    if (pinnedView) return;
-    const t = setInterval(() => setRotViewIdx((i) => (i + 1) % HERO_CYCLE.length), HERO_MS);
+    if (pinnedView !== "auto") return;
+    const t = setInterval(() => setAutoIdx((i) => i + 1), SCENE_MS);
     return () => clearInterval(t);
   }, [pinnedView]);
 
-  // unlock WebAudio on first interaction (TV autoplay rule)
+  // unlock WebAudio on first interaction
   useEffect(() => {
     const unlock = () => unlockAudio();
     window.addEventListener("pointerdown", unlock, { once: true });
@@ -144,8 +198,7 @@ export default function TvBoardPage() {
     return () => clearInterval(t);
   }, []);
 
-  // scale-to-fit: the board is authored at a fixed 1920×1080 and scaled to the
-  // real screen, so it looks identical and never clips on any TV/panel size.
+  // scale-to-fit: authored at 1920×1080, scaled to the real screen.
   const [scale, setScale] = useState(1);
   useEffect(() => {
     const fit = () => setScale(Math.min(window.innerWidth / 1920, window.innerHeight / 1080));
@@ -154,13 +207,82 @@ export default function TvBoardPage() {
     return () => window.removeEventListener("resize", fit);
   }, []);
 
-  // auto whole-page takeover: hold on the board, then fade to the fullscreen
-  // graphs page, hold, then fade back. Loops forever.
+  // ---- scene rotation list (money scene slotted in only when revealed) ----
+  const scenes = useMemo<SceneKey[]>(() => {
+    if (!data) return BASE_ORDER;
+    const list = BASE_ORDER.filter((k) => {
+      if (k === "spotlight") return data.spotlight.length > 0;
+      if (k === "reach") return !!data.lifetime;
+      return true;
+    });
+    if (revealed && data.money_visible) {
+      const out: SceneKey[] = [];
+      for (const k of list) {
+        out.push(k);
+        if (k === "trend") out.push("money");
+      }
+      if (!out.includes("money")) out.push("money");
+      return out;
+    }
+    return list;
+  }, [data, revealed]);
+
+  const activeKey: SceneKey =
+    pinnedView !== "auto" ? (pinnedView as SceneKey) : scenes[autoIdx % scenes.length] ?? "pulse";
+
+  // ---- cross-fade between scenes ----
+  const [displayKey, setDisplayKey] = useState<SceneKey>("pulse");
+  const [prevKey, setPrevKey] = useState<SceneKey | null>(null);
   useEffect(() => {
-    const ms = showGraphs ? 20000 : 45000;
-    const t = setTimeout(() => setShowGraphs((s) => !s), ms);
+    if (activeKey === displayKey) return;
+    setPrevKey(displayKey);
+    setDisplayKey(activeKey);
+    const t = setTimeout(() => setPrevKey(null), 760);
     return () => clearTimeout(t);
-  }, [showGraphs]);
+  }, [activeKey, displayKey]);
+
+  // ---- money reveal handlers ----
+  const armHide = useCallback(() => {
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    hideTimerRef.current = setTimeout(() => {
+      setRevealSecret(null);
+      // Strip money from the current data too, so no frame shows numbers during the fade.
+      setData((d) => (d ? stripMoneyClient(d) : d));
+      setPinnedView("auto");
+      hideTimerRef.current = null;
+    }, REVEAL_MS);
+  }, []);
+  const hideMoney = useCallback(() => {
+    if (hideTimerRef.current) {
+      clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = null;
+    }
+    setRevealSecret(null);
+    // Strip money from the current data too, so no frame shows numbers during the fade.
+    setData((d) => (d ? stripMoneyClient(d) : d));
+    setPinnedView("auto");
+  }, []);
+  const onRevealSubmit = useCallback(
+    async (secret: string): Promise<boolean> => {
+      try {
+        const snap = await fetchSnapshot(key, source, range, secret);
+        if (snap.money_visible) {
+          setRevealSecret(secret);
+          setData(snap);
+          setPinnedView("money");
+          armHide();
+          return true;
+        }
+      } catch {
+        /* fall through → stays locked */
+      }
+      return false;
+    },
+    [key, source, range, armHide]
+  );
+  useEffect(() => () => {
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+  }, []);
 
   const onSettings = useCallback(
     async (patch: Partial<TvSnapshot["settings"]>) => {
@@ -198,89 +320,41 @@ export default function TvBoardPage() {
     );
   }
 
-  const heroEl =
-    view === "graphs" ? (
-      <Graphs g={data.graphs} />
-    ) : view === "map" ? (
-      <IraqMap gov={data.map.gov} home={data.map.home} target={data.map.target} />
-    ) : view === "spotlight" ? (
-      <Spotlight items={data.spotlight} />
-    ) : (
-      <StaffWatch staff={data.staff} leaderboard={data.leaderboard} />
-    );
-
   return (
     <div
       dir="rtl"
-      className="fixed inset-0 flex items-center justify-center overflow-hidden bg-[#FAEBD7] font-[Cairo]"
+      className="fixed inset-0 flex items-center justify-center overflow-hidden bg-[#EFDABE] font-[Cairo]"
       style={{ filter: night ? "brightness(0.85)" : "none", transition: "filter 1s" }}
     >
-      {/* board authored at a fixed 1920×1080, scaled to fit the real screen.
-          Spacing rhythm is deliberate: generous breaks BETWEEN zones
-          (header → scoreboard → work grid), tighter gaps WITHIN. */}
+      {/* board authored at a fixed 1920×1080, scaled to fit the real screen. */}
       <div
-        className="flex flex-col bg-gradient-to-br from-[#F4E6CF] via-[#FAEEDB] to-[#EFDABE] px-10 py-8"
+        className="flex flex-col bg-gradient-to-br from-[#F4E6CF] via-[#FAEEDB] to-[#EFDABE] px-10 py-7"
         style={{ width: 1920, height: 1080, transform: `scale(${scale})`, transformOrigin: "center center" }}
       >
-        <Header source={source} />
+        <Header
+          source={source}
+          kpis={data.kpis}
+          audienceNow={data.audience?.now ?? 0}
+          activeBatches={data.deadlines.length}
+          ownerTitle={data.settings.owner_title}
+        />
 
-        <div className="mt-7">
-          <KpiStrip k={data.kpis} />
-        </div>
-
-        <div className="mt-8 grid min-h-0 flex-1 grid-cols-[1fr_404px] grid-rows-[minmax(0,1fr)] gap-6">
-          <div className="flex min-h-0 flex-col gap-5">
-            <div className="tv-panel p-6" style={{ background: "#f6f5f3", borderColor: "#e4e2dd" }}>
-              {(() => {
-                const P = data.pipeline;
-                const LABELS: Record<string, string> = { design_complete: "التصميم", converting: "التحويل", embroidery: "التطريز", pressing: "الكوي", preparing: "التجهيز", ready: "جاهز" };
-                const rows = [...P.stages.map((s) => ({ key: s, label: LABELS[s] ?? s, v: P.wip[s] || 0, bottle: P.bottleneck === s && P.bottleneck_active })), { key: "tailor", label: "الفصال", v: P.tailor_pending, bottle: false }];
-                const max = Math.max(1, ...rows.map((r) => r.v));
-                return (
-                  <div className="flex flex-col gap-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-baseline gap-2.5">
-                        <h3 className="font-[Amiri] text-2xl font-bold text-[#2b2b30]">خط الإنتاج</h3>
-                        <span className="text-sm font-semibold text-[#8a8694]">قيد التنفيذ الآن</span>
-                      </div>
-                      {P.bottleneck_active && P.bottleneck && (
-                        <div className="rounded-full bg-[#fff1ec] px-4 py-1.5 text-sm font-bold text-[#d4541e] ring-1 ring-[#f4c4ad]">⚠ اختناق: {LABELS[P.bottleneck] ?? P.bottleneck} · {P.wip[P.bottleneck]} عالق</div>
-                      )}
-                    </div>
-                    <div className="flex flex-col gap-[11px]">
-                      {rows.map((r) => (
-                        <div key={r.key} className="flex items-center gap-3">
-                          <span className="w-14 shrink-0 text-sm font-semibold text-[#56555e]">{r.label}</span>
-                          <div className="relative h-6 flex-1 overflow-hidden rounded-lg bg-[#e7e4dd]">
-                            <div className="absolute inset-y-0 right-0 rounded-lg transition-all" style={{ width: `${Math.max(3, (r.v / max) * 100)}%`, background: r.bottle ? "linear-gradient(90deg,#f0531d,#d4541e)" : "#3a3a42" }} />
-                          </div>
-                          <span className="w-10 shrink-0 text-end font-[Cairo] text-lg font-extrabold tabular-nums" style={{ color: r.bottle ? "#d4541e" : "#2b2b30" }}>{r.v}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })()}
+        {/* the cinema stage — scenes cross-fade here */}
+        <div className="relative mt-6 min-h-0 flex-1">
+          {prevKey && prevKey !== displayKey && (
+            <div key={`p-${prevKey}`} className="tv-scene-layer tv-scene-out">
+              {renderScene(prevKey, data)}
             </div>
-            <div className="tv-panel min-h-0 flex-1 overflow-hidden p-6">
-              {heroEl}
-            </div>
-          </div>
-          <div className="flex min-h-0 flex-col gap-5">
-            <RevenueOdometer value={data.kpis.revenue_today} />
-            <GoalRing done={data.goal.done_today} target={data.goal.target} />
+          )}
+          <div key={`c-${displayKey}`} className="tv-scene-layer tv-scene-in">
+            {renderScene(displayKey, data)}
           </div>
         </div>
-      </div>
 
-      {/* fullscreen graphs takeover — premium cross-fade over the board, then back */}
-      <div
-        className={`pointer-events-none fixed inset-0 z-[40] transition-all duration-700 ${
-          showGraphs ? "scale-100 opacity-100 blur-0" : "scale-[1.04] opacity-0 blur-sm"
-        }`}
-        aria-hidden={!showGraphs}
-      >
-        <FullGraphs data={data} />
+        {/* footer — live event ticker */}
+        <div className="mt-5">
+          <Ticker items={data.ticker} />
+        </div>
       </div>
 
       {/* controls — NOT scaled; anchored to the real viewport */}
@@ -292,15 +366,27 @@ export default function TvBoardPage() {
         ☰
       </button>
 
+      {/* disguised money reveal — a discreet 🎓 chip in the top corner */}
+      <div className="fixed left-4 top-4 z-[9985]">
+        <MoneyRevealTrigger
+          position="inline"
+          revealed={revealed}
+          onSubmit={onRevealSubmit}
+          onRevealed={armHide}
+          onHide={hideMoney}
+        />
+      </div>
+
       <Sidebar
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
+        revealed={revealed}
         source={source}
         onSource={(s) => setPinnedSource(s)}
-        view={pinnedView ?? "auto"}
+        view={pinnedView}
         onView={(v) => {
           if (v === "auto") {
-            setPinnedView(null);
+            setPinnedView("auto");
             setPinnedSource(null);
           } else {
             setPinnedView(v);

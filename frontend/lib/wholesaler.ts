@@ -303,7 +303,7 @@ export interface CreateFullSetPayload {
   /** فصال الروب: كسرة الكتف (yes/no). */
   shoulder_pleat?: boolean;
   /** شال امريكي (yes/no) — photo optional. */
-  american_shawl?: { enabled: boolean; image_url?: string };
+  american_shawl?: { enabled: boolean; image_url?: string; notes?: string };
   embroidery: {
     cap_side?: EmbroideryZone;
     cap_top?: EmbroideryZone;
@@ -370,7 +370,7 @@ export interface FullSetExistingOrder {
   /** Legacy — may be absent from orders created after the color field was removed. */
   sash_color?: { text: string; image_url: string };
   shoulder_pleat: boolean;
-  american_shawl: { enabled: boolean; image_url: string };
+  american_shawl: { enabled: boolean; image_url: string; notes: string };
   embroidery: {
     sash_front: EmbroideryZone;
     sash_back: EmbroideryZone;

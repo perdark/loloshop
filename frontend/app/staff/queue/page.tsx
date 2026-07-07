@@ -382,7 +382,7 @@ function OrderMobileCard({ item }: { item: ProductionQueueItem }) {
 
   return (
     <Link
-      href={`/staff/orders/${item.id}`}
+      href={`/staff/orders/${item.id}?from=${encodeURIComponent("/staff/queue")}`}
       className={[
         "block rounded-xl border p-3 transition-colors hover:bg-surface-sink",
         overdue ? "border-danger/50 bg-danger/5" : "border-line bg-surface",
@@ -451,7 +451,7 @@ function OrderTableRow({
   const overdue = isOverdue(item);
   const missing = isMissingDesign(item);
   const dl      = deadlineLabel(item);
-  const href    = `/staff/orders/${item.id}`;
+  const href    = `/staff/orders/${item.id}?from=${encodeURIComponent("/staff/queue")}`;
 
   return (
     // Whole row is the click target (not just the name link), so tapping anywhere

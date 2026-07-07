@@ -596,7 +596,7 @@ function MonitorDashboard({
                     {data.working.map((w) => (
                       <li key={`${w.staff_id}-${w.order_id}`}>
                         <Link
-                          href={`/staff/orders/${w.order_id}`}
+                          href={`/staff/orders/${w.order_id}?from=${encodeURIComponent("/staff")}`}
                           className="flex items-center justify-between gap-3 rounded-xl border border-line bg-surface px-4 py-3 text-sm transition-colors hover:border-orange-ink/30 hover:bg-surface-sink/50"
                         >
                           <span className="font-medium text-ink">
@@ -747,7 +747,7 @@ function MonitorDashboard({
                     {data.overdue.map((o) => (
                       <li key={o.id}>
                         <Link
-                          href={`/staff/orders/${o.id}`}
+                          href={`/staff/orders/${o.id}?from=${encodeURIComponent("/staff")}`}
                           className="flex items-center justify-between gap-3 rounded-xl border border-danger/20 bg-danger/5 px-4 py-3 transition-colors hover:bg-danger/10"
                         >
                           <div className="min-w-0">

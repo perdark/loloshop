@@ -2,12 +2,14 @@
 const router = require('express').Router();
 const rateLimit = require('express-rate-limit');
 const multer = require('multer');
-const { authRequired, requireRole } = require('../middleware/auth');
+const { authRequired, requireStaffType } = require('../middleware/auth');
 const c = require('../controllers/calligraphyController');
 
 const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
-router.use(authRequired, requireRole('admin'));
+// admin role + manager/designer staff can use the calligraphy tool.
+// requireStaffType auto-passes admin role and manager staff_type; designer is added explicitly.
+router.use(authRequired, requireStaffType('designer'));
 
 // generation is the expensive path — cap it
 const genLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 120 });
