@@ -38,7 +38,8 @@ export function OptionGroupField({
   const isTypedField =
     (isColorGroup && group.requiresCustomerText) || // sash «اللون» (typed); robe/cap «اللون» = swatches
     group.nameAr === "لون التطريز" || // thread color — typed even when optional (sash-only by name)
-    group.nameAr.startsWith("تطريز"); // embroidery zones (sash-only by name prefix)
+    group.nameAr.startsWith("تطريز") || // embroidery zones (sash-only by name prefix)
+    group.nameAr === "صورة الشال"; // shawl photo+note — auto-select its sole option, render as upload+note
   const soleActiveId =
     group.options.find((o) => o.active)?.id ?? group.options[0]?.id ?? null;
 

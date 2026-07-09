@@ -351,12 +351,6 @@ export default function StudentProductPage() {
 
         {/* Right — options, price, action */}
         <div className="mt-6 space-y-6 lg:mt-0">
-        {!gender && (
-          <div className="flex items-start gap-2.5 rounded-2xl border border-line bg-[var(--shop-sink)] p-3.5 text-sm leading-relaxed text-ink-soft">
-            <span aria-hidden className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-orange-ink" />
-            اختر جنسك من صفحة المنتجات لتفعيل الفلترة (مثلاً الشال للإناث).
-          </div>
-        )}
 
         {otherGroups.map((group) => {
           const optionId = getSelectedOptionId(group, selection);
@@ -374,11 +368,16 @@ export default function StudentProductPage() {
           const isCapEmbroideryGroup =
             product.type === "cap" &&
             (group.nameAr === "القبعة من الجانب" || group.nameAr === "القبعة من الأعلى");
-          const isShawlGroup = product.type === "shawl";
+          // Shawl «صورة الشال»: one group carrying an OPTIONAL reference photo + OPTIONAL note
+          // (migration 058/059). Its sole option is auto-selected in OptionGroupField, so it
+          // always has an optionId to hang the upload/note on.
+          const isShawlGroup =
+            product.type === "shawl" && group.nameAr === "صورة الشال";
           const showUploadBlock =
             needsImage ||
             needsText ||
             isSashTypedField ||
+            isShawlGroup ||
             (isCapEmbroideryGroup && needsText);
           const key =
             optionId != null ? selectionKey(group.id, optionId) : null;
