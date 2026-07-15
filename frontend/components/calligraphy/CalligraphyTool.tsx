@@ -368,6 +368,10 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
   const [grabRows, setGrabRows] = useState<CalGrabRow[]>([]);
   const [grabLoading, setGrabLoading] = useState(false);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+  // زون filter for the wholesaler grab list — امامي / خلف / قبعة (cap+cap_side grouped)
+  const [zoneFilter, setZoneFilter] = useState<Set<"front" | "back" | "cap">>(
+    new Set(["front", "back", "cap"]),
+  );
   // element_text per order_item_id — only used for cap rows in wholesaler mode
   const [capElements, setCapElements] = useState<Record<string, string>>({});
 
@@ -450,6 +454,7 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
     setGrabLoading(true);
     setGrabRows([]);
     setCheckedIds(new Set());
+    setZoneFilter(new Set(["front", "back", "cap"]));
     try {
       const rows = await getCalNames(wid);
       setGrabRows(rows);
@@ -890,6 +895,32 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
     (r) => checkedIds.has(r.order_item_id) && r.plate_status !== "done"
   ).length;
 
+  // ── زون filter for the grab list — cap + cap_side both map to «قبعة» ──────────
+  const zoneGroupOf = (v: CalVariant): "front" | "back" | "cap" =>
+    v === "front" ? "front" : v === "back" ? "back" : "cap";
+  const visibleGrabRows = grabRows.filter((r) => zoneFilter.has(zoneGroupOf(r.variant)));
+  const toggleZone = (z: "front" | "back" | "cap") => {
+    const turningOff = zoneFilter.has(z) && zoneFilter.size > 1;
+    setZoneFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(z)) next.delete(z);
+      else next.add(z);
+      // never leave the list fully hidden — re-select the one just removed
+      if (next.size === 0) next.add(z);
+      return next;
+    });
+    // keep the selection in sync with the visible zones so «توليد المتبقي» matches
+    setCheckedIds((prev) => {
+      const next = new Set(prev);
+      grabRows.forEach((r) => {
+        if (zoneGroupOf(r.variant) !== z) return;
+        if (turningOff) next.delete(r.order_item_id);
+        else if (r.plate_status !== "done") next.add(r.order_item_id);
+      });
+      return next;
+    });
+  };
+
   // ── progress ─────────────────────────────────────────────────────────────────
   const progress = total > 0 ? Math.round((done / total) * 100) : 0;
 
@@ -1202,6 +1233,29 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
 
             {!grabLoading && grabRows.length > 0 && (
               <div>
+                <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                  {([
+                    { z: "front" as const, label: "امامي" },
+                    { z: "back" as const, label: "خلف" },
+                    { z: "cap" as const, label: "قبعة" },
+                  ]).map(({ z, label }) => {
+                    const on = zoneFilter.has(z);
+                    return (
+                      <button
+                        key={z}
+                        type="button"
+                        onClick={() => toggleZone(z)}
+                        className={`inline-flex min-h-11 items-center rounded-full border px-3 text-xs font-semibold transition ${
+                          on
+                            ? "border-orange-ink bg-orange-ink text-white"
+                            : "border-line bg-beige text-ink-soft hover:border-orange-ink/40"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                   <p className="text-xs font-semibold text-ink-soft">
                     أسماء التطريز (اختر المطلوب توليده)
@@ -1211,7 +1265,11 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
                       type="button"
                       className="inline-flex min-h-11 items-center px-2 text-xs font-semibold text-orange-ink underline-offset-2 hover:underline"
                       onClick={() =>
-                        setCheckedIds(new Set(grabRows.map((r) => r.order_item_id)))
+                        setCheckedIds((prev) => {
+                          const next = new Set(prev);
+                          visibleGrabRows.forEach((r) => next.add(r.order_item_id));
+                          return next;
+                        })
                       }
                     >
                       تحديد الكل
@@ -1219,14 +1277,20 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
                     <button
                       type="button"
                       className="inline-flex min-h-11 items-center px-2 text-xs font-semibold text-ink-soft underline-offset-2 hover:underline"
-                      onClick={() => setCheckedIds(new Set())}
+                      onClick={() =>
+                        setCheckedIds((prev) => {
+                          const next = new Set(prev);
+                          visibleGrabRows.forEach((r) => next.delete(r.order_item_id));
+                          return next;
+                        })
+                      }
                     >
                       إلغاء الكل
                     </button>
                   </div>
                 </div>
                 <ul className="max-h-72 divide-y divide-line overflow-x-hidden overflow-y-auto rounded-xl border border-line bg-beige">
-                  {grabRows.map((r) => (
+                  {visibleGrabRows.map((r) => (
                     <li key={r.order_item_id} className="flex min-w-0 flex-wrap items-center gap-2 px-3 py-2.5 sm:gap-3">
                       <input
                         type="checkbox"
