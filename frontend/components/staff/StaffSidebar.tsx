@@ -177,12 +177,18 @@ export function StaffSidebar({ user, open, onClose }: StaffSidebarProps) {
         : [];
   const canCalligraphy =
     isAdmin || myTypes.includes("manager") || myTypes.includes("designer");
-  const productionAndToolLinks = canCalligraphy
-    ? [
-        ...baseLinks,
-        { href: "/staff/calligraphy", label: "الخط العربي", icon: iconPen(), prefix: true },
-      ]
-    : baseLinks;
+  // أيادي التصميم desk — محمد هيثم (manager) leads it from his staff account
+  // (2026-07-15). Backend membership gates the data; the link shows for managers.
+  const canDesignSupport = myTypes.includes("manager");
+  const productionAndToolLinks = [
+    ...baseLinks,
+    ...(canCalligraphy
+      ? [{ href: "/staff/calligraphy", label: "الخط العربي", icon: iconPen(), prefix: true }]
+      : []),
+    ...(canDesignSupport
+      ? [{ href: "/design-support", label: "أيادي التصميم", icon: iconPen(), prefix: true }]
+      : []),
+  ];
   const canSeeWholesalers =
     user.role === "staff" &&
     (myTypes.includes("manager") || user.order_scope === "wholesaler" || user.order_scope === "both");

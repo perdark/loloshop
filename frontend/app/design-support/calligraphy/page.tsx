@@ -10,7 +10,7 @@ import { useRequireAuth } from "@/hooks/useRequireAuth";
 // role='design_helper' (active member) in allowCalligraphyUser, so محمد هيثم and
 // his team can generate name plates here without a staff account.
 export default function DesignSupportCalligraphyPage() {
-  const { user, loading } = useRequireAuth(["design_helper", "admin"]);
+  const { user, loading } = useRequireAuth(["design_helper", "admin", "staff"]);
 
   if (loading || !user) return <PageLoader />;
 

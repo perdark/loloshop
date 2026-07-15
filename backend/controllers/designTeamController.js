@@ -64,7 +64,11 @@ function portalKeyOk(provided) {
 }
 
 function isActiveMember(req) {
-  return req.user?.role === 'design_helper' && !!req.designTeamMember?.active;
+  // The ACTIVE membership row IS the authorization — role-agnostic (2026-07-15):
+  // محمد هيثم runs the desk from his normal STAFF (manager) account, while his helpers
+  // stay role='design_helper'. Membership rows are only ever created by admin/lead
+  // (createOrSetLead/createHelper), so this widens nothing beyond the roster.
+  return !!req.designTeamMember?.active;
 }
 
 function isLead(req) {

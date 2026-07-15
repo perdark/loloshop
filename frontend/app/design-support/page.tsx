@@ -627,7 +627,9 @@ function TeamTab({
 
 export default function DesignSupportPage() {
   const router = useRouter();
-  const { user, loading: authLoading } = useRequireAuth(["design_helper", "admin"]);
+  // staff allowed too: محمد هيثم leads the desk from his normal staff (manager) account
+  // (2026-07-15). Non-member staff get a clean error — the backend 403s them.
+  const { user, loading: authLoading } = useRequireAuth(["design_helper", "admin", "staff"]);
   const [session, setSession] = useState<DesignTeamSession | null>(null);
   const [jobs, setJobs] = useState<DesignTeamJob[]>([]);
   const [loading, setLoading] = useState(true);
