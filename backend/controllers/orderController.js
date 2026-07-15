@@ -65,7 +65,7 @@ function canStaffTransition(user, from, to) {
 const STATUS_LABEL_AR = {
   pending_approval: 'بانتظار الموافقة',
   designing: 'قيد التصميم',
-  design_complete: 'اكتمل التصميم',
+  design_complete: 'بانتظار التصميم',
   converting: 'تحويل التصميم لتطريز',
   staff_review: 'قيد المراجعة',
   printing: 'قيد الطباعة',

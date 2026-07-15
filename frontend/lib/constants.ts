@@ -3,7 +3,7 @@ import type { OrderStatus, ProductType, StaffOrderScope, StaffType, UserRole } f
 export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
   pending_approval: "بانتظار الموافقة",
   designing: "قيد التصميم",
-  design_complete: "اكتمل التصميم",
+  design_complete: "بانتظار التصميم",
   converting: "تحويل التصميم لتطريز",
   staff_review: "مراجعة الموظف",
   printing: "قيد الطباعة",
