@@ -89,6 +89,8 @@ export interface ProductionQueueItem {
   final_design_url?: string | null;
   /** Whether this piece carries embroidery work (drives the missing-design alert). */
   has_embroidery?: boolean;
+  /** TRUE when any spec line carries an image (auto-attached calligraphy plate / photo). */
+  has_design_images?: boolean;
 }
 
 /** One item in the `items[]` array on the production order detail */

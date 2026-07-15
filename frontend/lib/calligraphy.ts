@@ -1,12 +1,13 @@
 import { api } from "@/lib/api";
 
 export type CalSource = "typed" | "wholesaler" | "txt";
-export type CalVariant = "front" | "back" | "cap";
+export type CalVariant = "front" | "back" | "cap" | "cap_side";
 
 export const VARIANT_LABEL: Record<CalVariant, string> = {
   front: "أمامي",
   back: "خلفي",
-  cap: "قبعة",
+  cap: "قبعة — أعلى",
+  cap_side: "قبعة — جانب",
 };
 
 export interface CalPlate {
@@ -22,6 +23,15 @@ export interface CalPlate {
   error: string | null;
   variant: CalVariant;
   element_text: string | null;
+  /** Order context (attached server-side when the plate belongs to an order line). */
+  order_id?: string | null;
+  order_status?: string | null;
+  zone_label?: string | null;
+  student_name?: string | null;
+  product_name?: string | null;
+  product_type?: string | null;
+  wholesaler_id?: string | null;
+  wholesaler_name?: string | null;
 }
 
 export interface CalJob {
@@ -140,11 +150,52 @@ export async function rerollPlate(id: string): Promise<CalPlate> {
   return data.data;
 }
 
-export async function linkPlate(id: string): Promise<{ ok: boolean }> {
-  const { data } = await api.post<{ data: { ok: boolean } }>(
-    `/calligraphy/plates/${id}/link`
+// ─── Order send («تحويل للتطريز») + zone status ─────────────────────────────
+// «ربط بالطلب» is gone — plates auto-attach on generation. The only manual action
+// is pushing the whole ORDER out of بانتظار التصميم; label comes from the backend.
+
+export interface CalZone {
+  key: string;
+  label: string;
+  has_image: boolean;
+}
+
+export interface CalOrderZones {
+  order_id: string;
+  order_status: string;
+  zones: CalZone[];
+  can_send: boolean;
+  next_stage: string | null;
+  send_label: string | null;
+}
+
+export async function getOrdersZones(ids: string[]): Promise<CalOrderZones[]> {
+  if (!ids.length) return [];
+  const out: CalOrderZones[] = [];
+  // Backend caps 100 ids per call — chunk defensively.
+  for (let i = 0; i < ids.length; i += 100) {
+    const chunk = ids.slice(i, i + 100);
+    const { data } = await api.get<{ data: CalOrderZones[] }>(
+      `/calligraphy/orders-zones?ids=${chunk.join(",")}`
+    );
+    out.push(...data.data);
+  }
+  return out;
+}
+
+export async function sendCalOrder(
+  orderId: string
+): Promise<{ ok: boolean; order_id: string; status: string }> {
+  const { data } = await api.post<{ data: { ok: boolean; order_id: string; status: string } }>(
+    `/calligraphy/orders/${orderId}/send`
   );
   return data.data;
+}
+
+/** ZIP fallback for browsers without the File System Access folder picker. */
+export async function platesZipBlob(ids: string[]): Promise<Blob> {
+  const { data } = await api.post(`/calligraphy/plates/zip`, { ids }, { responseType: "blob" });
+  return data as Blob;
 }
 
 export function calDownloadUrl(jobId: string, sheets = false): string {
@@ -170,15 +221,25 @@ export interface CalQueue {
   front: CalQueueZone;
   back: CalQueueZone;
   cap: CalQueueZone;
+  cap_side: CalQueueZone;
 }
 
-export async function getCalQueue(): Promise<CalQueue> {
-  const { data } = await api.get<{ data: CalQueue }>("/calligraphy/queue");
+export async function getCalQueue(wholesalerId?: string | null): Promise<CalQueue> {
+  const qs = wholesalerId ? `?wholesaler_id=${wholesalerId}` : "";
+  const { data } = await api.get<{ data: CalQueue }>(`/calligraphy/queue${qs}`);
   return data.data;
 }
 
-export async function generateFromQueue(variant: CalVariant, mode: "full" | "all"): Promise<CalJob> {
-  const { data } = await api.post<{ data: CalJob }>("/calligraphy/queue/generate", { variant, mode });
+export async function generateFromQueue(
+  variant: CalVariant,
+  mode: "full" | "all",
+  wholesalerId?: string | null
+): Promise<CalJob> {
+  const { data } = await api.post<{ data: CalJob }>("/calligraphy/queue/generate", {
+    variant,
+    mode,
+    wholesaler_id: wholesalerId || null,
+  });
   return data.data;
 }
 

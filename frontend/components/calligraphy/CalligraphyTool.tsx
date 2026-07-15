@@ -1,13 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { getApiErrorMessage } from "@/lib/api";
-import { isAuthenticated } from "@/lib/auth";
+import { isAuthenticated, getUser } from "@/lib/auth";
 import {
   absUrl,
   calDownloadUrl,
@@ -17,14 +19,17 @@ import {
   getCalNames,
   getCalQueue,
   getCalWholesalers,
+  getOrdersZones,
   getRecentPlates,
   isRealName,
-  linkPlate,
   MIN_BATCH,
+  platesZipBlob,
   processCalJob,
   rerollPlate,
+  sendCalOrder,
   VARIANT_LABEL,
   type CalJob,
+  type CalOrderZones,
   type CalQueue,
   type CalQueueZone,
   type CalGrabRow,
@@ -68,19 +73,15 @@ function StatusPill({ status }: { status: CalPlate["status"] | string }) {
 function PlateCard({
   plate,
   onReroll,
-  onLink,
   onPreview,
   onEdit,
   rerolling,
-  linking,
 }: {
   plate: CalPlate;
   onReroll: (id: string) => Promise<void>;
-  onLink: (id: string) => Promise<void>;
   onPreview: (plate: CalPlate) => void;
   onEdit: (plate: CalPlate) => void;
   rerolling: boolean;
-  linking: boolean;
 }) {
   const imgUrl = absUrl(plate.plate_path);
 
@@ -165,28 +166,35 @@ function PlateCard({
             </Button>
           </>
         )}
-
-        {plate.order_item_id && (
-          plate.linked ? (
-            <span className="inline-flex min-h-11 items-center rounded-full bg-green-50 px-3.5 py-1.5 text-xs font-semibold text-green-700">
-              مرتبط ✓
-            </span>
-          ) : (
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={linking || plate.status !== "done"}
-              loading={linking}
-              onClick={() => onLink(plate.id)}
-            >
-              ربط بالطلب
-            </Button>
-          )
-        )}
       </div>
     </article>
   );
 }
+
+// ─── Order group (plates grouped by student/order) ───────────────────────────
+// «ربط بالطلب» is gone: plates auto-attach on generation. The group header carries
+// the student (clickable → the order), zone ✓/✗ chips and the one send button.
+
+interface PlateGroup {
+  key: string;
+  orderId: string | null;
+  studentName: string | null;
+  productName: string | null;
+  wholesalerId: string | null;
+  wholesalerName: string | null;
+  plates: CalPlate[];
+}
+
+const ORDER_STATUS_AR: Record<string, string> = {
+  design_complete: "بانتظار التصميم",
+  converting: "قيد التحويل",
+  embroidery: "قيد التطريز",
+  pressing: "قيد الكوي",
+  preparing: "قيد التجهيز",
+  ready: "جاهز للاستلام",
+  delivered: "تم التسليم",
+  cancelled: "ملغي",
+};
 
 // ─── Name-count hint (valid / junk / under-minimum) ──────────────────────────
 
@@ -319,10 +327,27 @@ function QueueZoneCard({
 // /calligraphy/* via the JWT axios instance in lib/calligraphy.ts, so it works for
 // any allowed role (admin + manager/designer staff — see routes/calligraphy.js).
 
-export function CalligraphyTool() {
+export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
   // ── portal mount guard (createPortal needs document.body, client-only) ────────
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
+
+  // Current path — appended as ?from= so the order page's back button returns HERE.
+  const pathname = usePathname();
+
+  // Role gating (send + order links). The tool is shared by admin, staff
+  // designer/manager AND design_helper — helpers generate plates but never push
+  // orders (their desk flow goes through محمد هيثم) and can't open /staff routes.
+  const me = getUser();
+  const myStaffTypes: string[] =
+    (me as unknown as { staff_types?: string[] })?.staff_types ??
+    ((me as unknown as { staff_type?: string })?.staff_type
+      ? [(me as unknown as { staff_type?: string }).staff_type as string]
+      : []);
+  const canSendOrders =
+    me?.role === "admin" ||
+    (me?.role === "staff" && myStaffTypes.some((t) => t === "designer" || t === "manager"));
+  const canOpenOrders = me?.role === "admin" || me?.role === "staff";
 
   // ── mode + model ────────────────────────────────────────────────────────────
   const [mode, setMode] = useState<InputMode>("queue");
@@ -350,6 +375,8 @@ export function CalligraphyTool() {
   const [queue, setQueue] = useState<CalQueue | null>(null);
   const [queueLoading, setQueueLoading] = useState(false);
   const [queueError, setQueueError] = useState(false);
+  // ممثل filter for the automatic queue (counts + generation scope). "" = الكل.
+  const [queueWid, setQueueWid] = useState("");
 
   // ── job state ───────────────────────────────────────────────────────────────
   const [running, setRunning] = useState(false);
@@ -360,7 +387,21 @@ export function CalligraphyTool() {
 
   // ── per-plate action states ─────────────────────────────────────────────────
   const [rerollingId, setRerollingId] = useState<string | null>(null);
-  const [linkingId, setLinkingId] = useState<string | null>(null);
+
+  // ── order zones + send («تحويل للتطريز») ─────────────────────────────────────
+  const [orderZones, setOrderZones] = useState<Record<string, CalOrderZones>>({});
+  const [sendingOrderId, setSendingOrderId] = useState<string | null>(null);
+  // Confirm dialog when sending an order whose zones still miss images.
+  const [sendConfirm, setSendConfirm] = useState<{ orderId: string; missing: string[] } | null>(null);
+
+  // ── grid filters (sticky bar) ────────────────────────────────────────────────
+  type GridFilter = "all" | "awaiting" | "sent" | "no_order";
+  const [gridFilter, setGridFilter] = useState<GridFilter>("all");
+  const [gridWid, setGridWid] = useState("");
+  const [searchText, setSearchText] = useState("");
+  // Generation controls collapse behind the sticky bar once results exist.
+  const [controlsOpen, setControlsOpen] = useState(true);
+  const [folderSaving, setFolderSaving] = useState(false);
 
   // ── confirm gate (junk names / small batch / under-filled zone) ───────────────
   const [confirm, setConfirm] = useState<{
@@ -430,12 +471,12 @@ export function CalligraphyTool() {
     if (selectedWid) loadGrab(selectedWid);
   }, [selectedWid, loadGrab]);
 
-  // ── load queue ───────────────────────────────────────────────────────────────
+  // ── load queue (scoped to the selected ممثل when set) ────────────────────────
   const refreshQueue = useCallback(async () => {
     setQueueLoading(true);
     setQueueError(false);
     try {
-      const q = await getCalQueue();
+      const q = await getCalQueue(queueWid || null);
       setQueue(q);
     } catch (e) {
       setQueueError(true);
@@ -443,13 +484,39 @@ export function CalligraphyTool() {
     } finally {
       setQueueLoading(false);
     }
-  }, []);
+  }, [queueWid]);
 
   useEffect(() => {
     if (mode === "queue") {
       refreshQueue();
     }
   }, [mode, refreshQueue]);
+
+  // ── order zone/send status for every order that has plates on screen ─────────
+  const orderIdsKey = useMemo(() => {
+    const ids = [...new Set(plates.map((p) => p.order_id).filter(Boolean))] as string[];
+    ids.sort();
+    return ids.join(",");
+  }, [plates]);
+
+  const refreshZones = useCallback(async () => {
+    const ids = orderIdsKey ? orderIdsKey.split(",") : [];
+    if (!ids.length) return;
+    try {
+      const rows = await getOrdersZones(ids);
+      setOrderZones((prev) => {
+        const next = { ...prev };
+        for (const r of rows) next[r.order_id] = r;
+        return next;
+      });
+    } catch {
+      // zone chips are best-effort — the send button still validates server-side
+    }
+  }, [orderIdsKey]);
+
+  useEffect(() => {
+    refreshZones();
+  }, [refreshZones]);
 
   // ── persistence: mount effect (restore last job + recent plates) ─────────────
   const mountedRef = useRef(false);
@@ -486,6 +553,8 @@ export function CalligraphyTool() {
           // silent — recent plates are best-effort
         }
       }
+      // Results restored → tuck the generation controls behind the sticky bar.
+      setControlsOpen(false);
     }
 
     restore();
@@ -530,6 +599,8 @@ export function CalligraphyTool() {
     const full = await getCalJob(job.job_id);
     setPlates(full.plates);
     setDone(full.done);
+    // Generation finished → collapse the controls so results lead the page.
+    setControlsOpen(false);
   }
 
   // ── generate loop ────────────────────────────────────────────────────────────
@@ -549,11 +620,11 @@ export function CalligraphyTool() {
     }
   }
 
-  // ── queue generate ───────────────────────────────────────────────────────────
+  // ── queue generate (scoped to the selected ممثل when set) ────────────────────
   async function runQueue(variant: CalVariant, mode: "full" | "all") {
     setRunning(true);
     try {
-      const job = await generateFromQueue(variant, mode);
+      const job = await generateFromQueue(variant, mode, queueWid || null);
       localStorage.setItem("cal_last_job", job.job_id);
       await runCreatedJob(job);
       await refreshQueue();
@@ -570,6 +641,8 @@ export function CalligraphyTool() {
     let allItems: CreateJobBody["items"] = [];
     let base: Omit<CreateJobBody, "items">;
 
+    const isCapLike = (v: CalVariant) => v === "cap" || v === "cap_side";
+
     if (mode === "typed") {
       const lines = typedText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
       if (!lines.length) {
@@ -577,12 +650,12 @@ export function CalligraphyTool() {
         return null;
       }
       base = { source: "typed", model, variant: typedVariant };
-      if (typedVariant === "cap") {
+      if (isCapLike(typedVariant)) {
         allItems = lines.map((line) => {
           const [namePart, ...rest] = line.split("|");
           const text = namePart.trim();
           const element = rest.join("|").trim();
-          return { render_text: text, variant: "cap" as CalVariant, ...(element ? { element_text: element } : {}) };
+          return { render_text: text, variant: typedVariant, ...(element ? { element_text: element } : {}) };
         });
       } else {
         allItems = lines.map((t) => ({ render_text: t, variant: typedVariant }));
@@ -593,12 +666,12 @@ export function CalligraphyTool() {
         return null;
       }
       base = { source: "txt", model, variant: typedVariant };
-      if (typedVariant === "cap") {
+      if (isCapLike(typedVariant)) {
         allItems = txtLines.map((line) => {
           const [namePart, ...rest] = line.split("|");
           const text = namePart.trim();
           const element = rest.join("|").trim();
-          return { render_text: text, variant: "cap" as CalVariant, ...(element ? { element_text: element } : {}) };
+          return { render_text: text, variant: typedVariant, ...(element ? { element_text: element } : {}) };
         });
       } else {
         allItems = txtLines.map((t) => ({ render_text: t, variant: typedVariant }));
@@ -616,7 +689,7 @@ export function CalligraphyTool() {
       }
       base = { source: "wholesaler", model, wholesaler_id: selectedWid };
       allItems = selected.map((r) => {
-        const isCap = r.variant === "cap";
+        const isCap = isCapLike(r.variant);
         const element = isCap ? (capElements[r.order_item_id] ?? "").trim() : "";
         return {
           render_text: r.render_text,
@@ -674,19 +747,141 @@ export function CalligraphyTool() {
     }
   }
 
-  // ── link ─────────────────────────────────────────────────────────────────────
-  async function handleLink(id: string) {
-    setLinkingId(id);
+  // ── «تحويل للتطريز» — push the order out of بانتظار التصميم ───────────────────
+  async function doSendOrder(orderId: string) {
+    setSendingOrderId(orderId);
     try {
-      await linkPlate(id);
+      const r = await sendCalOrder(orderId);
+      toast.success("تم تحويل الطلب للتطريز");
+      // Flip the group's status locally + re-pull the authoritative zone state.
       setPlates((prev) =>
-        prev.map((p) => (p.id === id ? { ...p, linked: true } : p))
+        prev.map((p) => (p.order_id === orderId ? { ...p, order_status: r.status } : p))
       );
-      toast.success("تم ربط الصورة بالطلب");
+      setOrderZones((prev) => {
+        const cur = prev[orderId];
+        return cur
+          ? { ...prev, [orderId]: { ...cur, order_status: r.status, can_send: false, send_label: null } }
+          : prev;
+      });
     } catch (e) {
-      toast.error(getApiErrorMessage(e, "فشل الربط بالطلب"));
+      toast.error(getApiErrorMessage(e, "تعذر تحويل الطلب"));
     } finally {
-      setLinkingId(null);
+      setSendingOrderId(null);
+    }
+  }
+
+  function handleSendClick(orderId: string) {
+    const z = orderZones[orderId];
+    const missing = (z?.zones ?? []).filter((x) => !x.has_image).map((x) => x.label);
+    if (missing.length > 0) {
+      setSendConfirm({ orderId, missing });
+      return;
+    }
+    doSendOrder(orderId);
+  }
+
+  // ── grouping (by order) + sticky-bar filters ─────────────────────────────────
+  const groups = useMemo<PlateGroup[]>(() => {
+    const map = new Map<string, PlateGroup>();
+    for (const p of plates) {
+      const key = p.order_id ?? "__none__";
+      let g = map.get(key);
+      if (!g) {
+        g = {
+          key,
+          orderId: p.order_id ?? null,
+          studentName: p.student_name ?? null,
+          productName: p.product_name ?? null,
+          wholesalerId: p.wholesaler_id ?? null,
+          wholesalerName: p.wholesaler_name ?? null,
+          plates: [],
+        };
+        map.set(key, g);
+      }
+      g.plates.push(p);
+    }
+    const list = [...map.values()];
+    // «بدون طلب» group always last; the rest keep the plates' (newest-first) order.
+    list.sort((a, b) => (a.orderId === null ? 1 : 0) - (b.orderId === null ? 1 : 0));
+    return list;
+  }, [plates]);
+
+  const visibleGroups = useMemo(() => {
+    const q = searchText.trim();
+    return groups.filter((g) => {
+      const z = g.orderId ? orderZones[g.orderId] : null;
+      if (gridFilter === "awaiting" && !(z?.can_send)) return false;
+      if (gridFilter === "sent" && !(g.orderId && z && !z.can_send && z.order_status !== "design_complete")) return false;
+      if (gridFilter === "no_order" && g.orderId !== null) return false;
+      if (gridWid && g.wholesalerId !== gridWid) return false;
+      if (q) {
+        const hay = `${g.studentName ?? ""} ${g.plates.map((p) => p.render_text).join(" ")}`;
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [groups, gridFilter, gridWid, searchText, orderZones]);
+
+  const visiblePlates = useMemo(
+    () => visibleGroups.flatMap((g) => g.plates),
+    [visibleGroups]
+  );
+
+  // ── «تنزيل إلى مجلد…» — write every visible done plate into a user-picked folder
+  //    (File System Access API, Chrome/Edge desktop). Fallback: ZIP of the same set.
+  async function downloadToFolder() {
+    const target = visiblePlates.filter((p) => p.status === "done" && p.plate_path);
+    if (!target.length) {
+      toast.error("لا توجد صور جاهزة ضمن الفلترة الحالية");
+      return;
+    }
+    setFolderSaving(true);
+    try {
+      const w = window as unknown as {
+        showDirectoryPicker?: (opts?: { mode?: string }) => Promise<FileSystemDirectoryHandle>;
+      };
+      if (w.showDirectoryPicker) {
+        const dir = await w.showDirectoryPicker({ mode: "readwrite" });
+        const used = new Set<string>();
+        let ok = 0;
+        for (const p of target) {
+          const res = await fetch(absUrl(p.plate_path));
+          if (!res.ok) continue;
+          const blob = await res.blob();
+          const base = (p.student_name || p.render_text || "name")
+            .replace(/[\/\\:*?"<>|]+/g, "_")
+            .slice(0, 40);
+          const zone = VARIANT_LABEL[p.variant] ? `-${p.variant}` : "";
+          let name = `${base}${zone}.png`;
+          let n = 2;
+          while (used.has(name)) name = `${base}${zone}-${n++}.png`;
+          used.add(name);
+          const fh = await dir.getFileHandle(name, { create: true });
+          const ws = await fh.createWritable();
+          await ws.write(blob);
+          await ws.close();
+          ok++;
+        }
+        toast.success(`تم حفظ ${ok} صورة في المجلد`);
+      } else {
+        // ZIP fallback (phones / Safari / Firefox)
+        const blob = await platesZipBlob(target.map((p) => p.id));
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `calligraphy-${target.length}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        toast.success("تم تنزيل ملف ZIP بالصور");
+      }
+    } catch (e) {
+      if ((e as Error)?.name !== "AbortError") {
+        toast.error(getApiErrorMessage(e, "تعذر حفظ الصور"));
+      }
+    } finally {
+      setFolderSaving(false);
     }
   }
 
@@ -713,13 +908,96 @@ export function CalligraphyTool() {
 
   return (
     <div dir="rtl" lang="ar">
+      {backHref && (
+        <div className="mb-4">
+          <Link
+            href={backHref}
+            className="inline-flex min-h-[44px] items-center gap-1 text-sm font-medium text-orange-ink hover:underline"
+          >
+            <span aria-hidden>→</span> رجوع
+          </Link>
+        </div>
+      )}
       <PageHeader
         title="الخط العربي"
         subtitle="ابدأ بالطابور التلقائي، واستخدم الإدخال اليدوي للحالات الاستثنائية"
       />
 
+      {/* ── Sticky workbench bar — filters + bulk download + controls toggle ── */}
+      {plates.length > 0 && (
+        <div className="sticky top-0 z-30 -mx-1 mb-4 rounded-2xl border border-line bg-[var(--shop-paper,#FAEBD7)]/95 px-3 py-2.5 shadow-[var(--shadow-soft)] backdrop-blur">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant={controlsOpen ? "secondary" : "primary"}
+              onClick={() => setControlsOpen((v) => !v)}
+            >
+              {controlsOpen ? "إخفاء التوليد ▴" : "توليد المزيد ▾"}
+            </Button>
+
+            {/* status filter chips */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              {(
+                [
+                  { id: "all" as const, label: "الكل" },
+                  { id: "awaiting" as const, label: "بانتظار الإرسال" },
+                  { id: "sent" as const, label: "مُرسلة" },
+                  { id: "no_order" as const, label: "بدون طلب" },
+                ]
+              ).map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => setGridFilter(f.id)}
+                  className={`min-h-9 rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                    gridFilter === f.id
+                      ? "bg-orange-ink text-white"
+                      : "border border-line bg-surface text-ink-soft hover:border-orange-ink/40 hover:text-ink"
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+
+            {/* wholesaler filter */}
+            <select
+              value={gridWid}
+              onChange={(e) => setGridWid(e.target.value)}
+              className="min-h-9 rounded-full border border-line bg-surface px-3 py-1 text-xs font-semibold text-ink-soft focus:border-orange-ink focus:outline-none"
+              aria-label="فلترة حسب الممثل"
+            >
+              <option value="">كل الممثلين</option>
+              {wholesalers.map((w) => (
+                <option key={w.id} value={w.id}>{w.name}</option>
+              ))}
+            </select>
+
+            {/* name search */}
+            <input
+              type="search"
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              dir="rtl"
+              placeholder="ابحث باسم الطالب…"
+              className="min-h-9 w-40 grow rounded-full border border-line bg-surface px-3.5 py-1 text-xs text-ink placeholder:text-ink/40 focus:border-orange-ink focus:outline-none sm:w-48 sm:grow-0"
+            />
+
+            <Button
+              size="sm"
+              variant="secondary"
+              loading={folderSaving}
+              disabled={folderSaving}
+              onClick={downloadToFolder}
+            >
+              تنزيل إلى مجلد…
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* ── Controls card ─────────────────────────────────────────────────── */}
-      <section className="surface-card rounded-2xl p-4 lg:p-6 mb-6">
+      <section className={`surface-card rounded-2xl p-4 lg:p-6 mb-6 ${controlsOpen ? "" : "hidden"}`}>
         {/* The daily path is deliberately dominant; manual methods are secondary. */}
         <div className="mb-5 space-y-3" aria-label="طريقة الإدخال">
           <button
@@ -772,19 +1050,34 @@ export function CalligraphyTool() {
               <p className="text-sm font-semibold text-ink-soft">
                 الطلبات المعلّقة مرتّبة حسب النوع — يمكنك توليدها دفعةً واحدة
               </p>
-              <button
-                type="button"
-                onClick={refreshQueue}
-                disabled={queueLoading || running}
-                className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border border-line bg-beige px-4 py-2 text-xs font-semibold text-ink-soft transition-colors hover:border-orange/40 hover:text-orange-ink disabled:opacity-50"
-              >
-                {queueLoading ? (
-                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                ) : (
-                  <span>↻</span>
-                )}
-                تحديث
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                {/* ممثل filter — scopes the counts AND what «ولّد» generates */}
+                <select
+                  value={queueWid}
+                  onChange={(e) => setQueueWid(e.target.value)}
+                  disabled={running}
+                  className="min-h-11 rounded-full border border-line bg-beige px-3.5 py-2 text-xs font-semibold text-ink-soft focus:border-orange-ink focus:outline-none disabled:opacity-50"
+                  aria-label="فلترة الطابور حسب الممثل"
+                >
+                  <option value="">كل الممثلين</option>
+                  {wholesalers.map((w) => (
+                    <option key={w.id} value={w.id}>{w.name}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={refreshQueue}
+                  disabled={queueLoading || running}
+                  className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border border-line bg-beige px-4 py-2 text-xs font-semibold text-ink-soft transition-colors hover:border-orange/40 hover:text-orange-ink disabled:opacity-50"
+                >
+                  {queueLoading ? (
+                    <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                  ) : (
+                    <span>↻</span>
+                  )}
+                  تحديث
+                </button>
+              </div>
             </div>
 
             {queueLoading && !queue ? (
@@ -799,8 +1092,8 @@ export function CalligraphyTool() {
                 <Button className="mt-4" variant="ghost" onClick={refreshQueue}>إعادة المحاولة</Button>
               </div>
             ) : queue ? (
-              <div className="grid gap-4 sm:grid-cols-3">
-                {(["front", "back", "cap"] as CalVariant[]).map((v) => (
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                {(["front", "back", "cap", "cap_side"] as CalVariant[]).map((v) => (
                   <QueueZoneCard
                     key={v}
                     variant={v}
@@ -823,7 +1116,8 @@ export function CalligraphyTool() {
                 [
                   { id: "front" as CalVariant, label: "الوجه الأمامي (زخرفة كاملة)" },
                   { id: "back" as CalVariant, label: "الوجه الخلفي (زخرفة أقل)" },
-                  { id: "cap" as CalVariant, label: "القبعة (اسم + عنصر)" },
+                  { id: "cap" as CalVariant, label: "القبعة — أعلى (اسم + عنصر)" },
+                  { id: "cap_side" as CalVariant, label: "القبعة — جانب (اسم + عنصر)" },
                 ]
               ).map((opt) => (
                 <button
@@ -857,13 +1151,13 @@ export function CalligraphyTool() {
               rows={8}
               dir="rtl"
               placeholder={
-                typedVariant === "cap"
+                typedVariant === "cap" || typedVariant === "cap_side"
                   ? "لمار | فراشة\nيوسف | شجرة\nعبدالله"
                   : "محمد علي\nفاطمة حسن\nأحمد كريم"
               }
               className="w-full rounded-xl border border-line bg-beige px-3 py-2.5 text-sm text-ink placeholder:text-ink/30 focus:border-orange-ink focus:outline-none focus:ring-2 focus:ring-orange-ink/15 disabled:opacity-60"
             />
-            {typedVariant === "cap" && (
+            {(typedVariant === "cap" || typedVariant === "cap_side") && (
               <p className="mt-1.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                 للقبعة: اكتب الاسم ثم | ثم العنصر، مثال: <span className="font-semibold">لمار | فراشة</span> (العنصر اختياري)
               </p>
@@ -871,7 +1165,7 @@ export function CalligraphyTool() {
             <NameCountHint
               lines={typedText
                 .split(/\r?\n/)
-                .map((l) => (typedVariant === "cap" ? l.split("|")[0] : l).trim())
+                .map((l) => ((typedVariant === "cap" || typedVariant === "cap_side") ? l.split("|")[0] : l).trim())
                 .filter(Boolean)}
             />
           </div>
@@ -957,7 +1251,7 @@ export function CalligraphyTool() {
                         </span>
                         <StatusPill status={r.plate_status ?? "pending"} />
                       </label>
-                      {r.variant === "cap" && (
+                      {(r.variant === "cap" || r.variant === "cap_side") && (
                         <input
                           type="text"
                           dir="rtl"
@@ -1081,28 +1375,167 @@ export function CalligraphyTool() {
         </section>
       )}
 
-      {/* ── Proof grid ────────────────────────────────────────────────────── */}
+      {/* ── Workbench — plates grouped by student/order ───────────────────── */}
       {plates.length > 0 && (
         <section>
           <h2 className="mb-4 font-display text-lg font-bold text-ink">
-            اللوحات ({plates.length})
+            اللوحات ({visiblePlates.length}
+            {visiblePlates.length !== plates.length ? ` من ${plates.length}` : ""})
           </h2>
-          <div className="grid min-w-0 grid-cols-1 gap-3 min-[420px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-            {plates.map((plate) => (
-              <PlateCard
-                key={plate.id}
-                plate={plate}
-                onReroll={handleReroll}
-                onLink={handleLink}
-                onPreview={setPreview}
-                onEdit={setCompositorPlate}
-                rerolling={rerollingId === plate.id}
-                linking={linkingId === plate.id}
-              />
-            ))}
+
+          {visibleGroups.length === 0 && (
+            <div className="rounded-2xl border border-dashed border-line bg-surface-sink p-8 text-center text-sm text-ink-soft">
+              لا توجد نتائج ضمن الفلترة الحالية.
+            </div>
+          )}
+
+          <div className="space-y-4">
+            {visibleGroups.map((g) => {
+              const z = g.orderId ? orderZones[g.orderId] : null;
+              const statusKey = z?.order_status ?? g.plates[0]?.order_status ?? null;
+              const sent = !!(g.orderId && statusKey && statusKey !== "design_complete");
+              return (
+                <article
+                  key={g.key}
+                  className="rounded-2xl border border-line bg-surface p-3 shadow-[var(--shadow-soft)] sm:p-4"
+                >
+                  {/* group header: student → order · product · status · zones · send */}
+                  <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+                    {g.orderId ? (
+                      <>
+                        {canOpenOrders ? (
+                          <Link
+                            href={`/staff/orders/${g.orderId}?from=${encodeURIComponent(pathname)}`}
+                            className="min-w-0 truncate font-display text-base font-bold text-orange-ink underline-offset-4 hover:underline"
+                          >
+                            {g.studentName ?? "طالب"}
+                          </Link>
+                        ) : (
+                          <span className="min-w-0 truncate font-display text-base font-bold text-ink">
+                            {g.studentName ?? "طالب"}
+                          </span>
+                        )}
+                        {g.productName && (
+                          <span className="text-xs font-semibold text-ink-soft">{g.productName}</span>
+                        )}
+                        {statusKey && (
+                          <span
+                            className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
+                              sent
+                                ? "bg-green-100 text-green-800"
+                                : "bg-peach/70 text-orange-ink"
+                            }`}
+                          >
+                            {ORDER_STATUS_AR[statusKey] ?? statusKey}
+                          </span>
+                        )}
+                        {g.wholesalerName && (
+                          <span className="rounded-full border border-line bg-beige px-2 py-0.5 text-[11px] text-ink-soft">
+                            ممثل: {g.wholesalerName}
+                          </span>
+                        )}
+
+                        {/* zone ✓/✗ chips */}
+                        {z && z.zones.length > 0 && (
+                          <span className="flex flex-wrap items-center gap-1">
+                            {z.zones.map((zone) => (
+                              <span
+                                key={zone.key}
+                                className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                                  zone.has_image
+                                    ? "bg-green-50 text-green-700 border border-green-200"
+                                    : "bg-amber-50 text-amber-700 border border-amber-200"
+                                }`}
+                                title={zone.has_image ? "الصورة جاهزة" : "بلا صورة بعد"}
+                              >
+                                {zone.label} {zone.has_image ? "✓" : "✗"}
+                              </span>
+                            ))}
+                          </span>
+                        )}
+
+                        {/* the one action: تحويل للتطريز */}
+                        {canSendOrders && z?.can_send && (
+                          <Button
+                            size="sm"
+                            variant="primary"
+                            className="ms-auto"
+                            loading={sendingOrderId === g.orderId}
+                            disabled={sendingOrderId !== null}
+                            onClick={() => handleSendClick(g.orderId as string)}
+                          >
+                            {z.send_label ?? "تحويل للتطريز"}
+                          </Button>
+                        )}
+                        {sent && (
+                          <span className="ms-auto rounded-full bg-green-50 px-3 py-1 text-xs font-bold text-green-700">
+                            ✓ أُرسل
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      <span className="font-display text-base font-bold text-ink">
+                        لوحات بدون طلب
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="grid min-w-0 grid-cols-1 gap-3 min-[420px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                    {g.plates.map((plate) => (
+                      <PlateCard
+                        key={plate.id}
+                        plate={plate}
+                        onReroll={handleReroll}
+                        onPreview={setPreview}
+                        onEdit={setCompositorPlate}
+                        rerolling={rerollingId === plate.id}
+                      />
+                    ))}
+                  </div>
+                </article>
+              );
+            })}
           </div>
         </section>
       )}
+
+      {/* ── Send confirm — zones still missing artwork ─────────────────────── */}
+      <Modal
+        open={!!sendConfirm}
+        onClose={() => setSendConfirm(null)}
+        title="مواضع بلا صورة"
+        footer={
+          <>
+            <Button variant="ghost" fullWidth onClick={() => setSendConfirm(null)}>
+              إلغاء
+            </Button>
+            <Button
+              variant="primary"
+              fullWidth
+              onClick={() => {
+                if (sendConfirm) doSendOrder(sendConfirm.orderId);
+                setSendConfirm(null);
+              }}
+            >
+              تحويل على أي حال
+            </Button>
+          </>
+        }
+      >
+        {sendConfirm && (
+          <div className="space-y-2 text-sm text-ink">
+            <p>هذا الطلب يحتوي مواضع تطريز بلا صورة حتى الآن:</p>
+            <ul className="list-inside list-disc text-amber-700">
+              {sendConfirm.missing.map((m) => (
+                <li key={m}>{m}</li>
+              ))}
+            </ul>
+            <p className="text-xs text-ink-soft">
+              يمكنك توليد لوحاتها أولاً، أو تحويل الطلب كما هو وسيتولى المطرز الناقص.
+            </p>
+          </div>
+        )}
+      </Modal>
 
       {/* ── Full-size plate preview ───────────────────────────────────────────── */}
       {/* Portaled to <body> so the overlay escapes the admin layout's `.shop-paper`

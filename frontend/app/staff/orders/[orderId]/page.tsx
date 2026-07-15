@@ -6,13 +6,14 @@ import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { DesignViewer } from "@/components/staff/DesignViewer";
+import { DesignGallery } from "@/components/staff/DesignGallery";
 import { ExportPngButton } from "@/components/staff/ExportPngButton";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { PageLoader } from "@/components/ui/Spinner";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { orderBackTarget } from "@/lib/back";
-import { ORDER_SOURCE_LABELS, ORDER_STATUS_LABELS, PRODUCT_TYPE_LABELS } from "@/lib/constants";
+import { ORDER_SOURCE_LABELS, ORDER_STATUS_LABELS } from "@/lib/constants";
 import { formatDateIQ } from "@/lib/format";
 import {
   getProductionOrder,
@@ -24,7 +25,6 @@ import {
   deleteProductionOrder,
   claimOrder,
   releaseOrder,
-  uploadFinalDesign,
   approveDesign,
   rejectDesign,
 } from "@/lib/staff";
@@ -106,118 +106,6 @@ function ProductPhotoCard({
         </div>
       )}
     </section>
-  );
-}
-
-// ─── Final design upload widget ───────────────────────────────────────────────
-
-function FinalDesignUpload({
-  orderId,
-  currentUrl,
-  onUploaded,
-}: {
-  orderId: string;
-  currentUrl: string | null | undefined;
-  onUploaded: (url: string) => void;
-}) {
-  const [uploading, setUploading] = useState(false);
-  const [dragOver, setDragOver] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  async function handleFile(file: File) {
-    setUploading(true);
-    try {
-      const result = await uploadFinalDesign(orderId, file);
-      onUploaded(result.url);
-      toast.success("تم رفع التصميم النهائي");
-    } catch (err) {
-      toast.error(getApiErrorMessage(err, "تعذر رفع الملف"));
-    } finally {
-      setUploading(false);
-    }
-  }
-
-  function handleDrop(e: React.DragEvent) {
-    e.preventDefault();
-    setDragOver(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file) handleFile(file);
-  }
-
-  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (file) handleFile(file);
-    e.target.value = "";
-  }
-
-  const resolvedUrl = resolveImageUrl(currentUrl);
-
-  return (
-    <article className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
-      <h3 className="mb-3 text-sm font-semibold text-ink">معاينة التصميم النهائي</h3>
-
-      {resolvedUrl && (
-        <div className="mb-4">
-          <a href={resolvedUrl} target="_blank" rel="noopener noreferrer">
-            <div className="relative h-48 w-full overflow-hidden rounded-xl border border-line bg-surface-sink">
-              <Image
-                src={resolvedUrl}
-                alt="التصميم النهائي"
-                fill
-                sizes="(max-width: 768px) 100vw, 50vw"
-                className="object-contain"
-                loading="eager"
-                unoptimized
-              />
-            </div>
-          </a>
-          <a
-            href={resolvedUrl}
-            download
-            className="mt-2 inline-flex min-h-[44px] w-full items-center justify-center rounded-xl border border-orange-ink/30 bg-surface-sink px-4 py-2 text-sm font-medium text-orange-ink transition-colors hover:bg-orange-ink/10"
-          >
-            تنزيل التصميم النهائي
-          </a>
-        </div>
-      )}
-
-      <div
-        role="button"
-        tabIndex={0}
-        aria-label="اسحب وأفلت الصورة أو اختر ملف"
-        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={handleDrop}
-        onClick={() => inputRef.current?.click()}
-        onKeyDown={(e) => e.key === "Enter" && inputRef.current?.click()}
-        className={[
-          "flex min-h-[88px] cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-4 text-center transition-colors",
-          dragOver
-            ? "border-orange-ink bg-orange-ink/8"
-            : "border-line bg-surface-sink hover:border-orange-ink/40 hover:bg-orange-ink/5",
-          uploading ? "pointer-events-none opacity-60" : "",
-        ].join(" ")}
-      >
-        {uploading ? (
-          <span className="text-sm text-ink-soft">جارٍ الرفع...</span>
-        ) : (
-          <>
-            <span className="text-2xl" aria-hidden>⬆</span>
-            <span className="text-sm font-medium text-ink-soft">
-              {currentUrl ? "استبدال الملف" : "اسحب وأفلت الصورة أو اختر ملف"}
-            </span>
-            <span className="text-xs text-muted">PNG / JPG / WebP</span>
-          </>
-        )}
-      </div>
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/*"
-        className="sr-only"
-        onChange={handleChange}
-      />
-    </article>
   );
 }
 
@@ -903,14 +791,6 @@ function ProductionOrderDetailContent() {
     }
   }
 
-  function handleFinalDesignUploaded(url: string) {
-    if (!detail) return;
-    setDetail({
-      ...detail,
-      order: { ...detail.order, final_design_url: url },
-    });
-  }
-
   // Where the back button returns to. Prefer the explicit `?from=` the entry
   // point appended; else derive it from the referrer; else the role's home.
   const back = orderBackTarget(fromParam ?? referrerPath(orderId), user?.role ?? "staff");
@@ -953,7 +833,6 @@ function ProductionOrderDetailContent() {
 
   const { order, design, items, package_orders, bundle, can_see_design, available_actions, embroidery_zones } = detail;
   const intake = order.intake ?? null;
-  const productLabel = PRODUCT_TYPE_LABELS[order.product_type as keyof typeof PRODUCT_TYPE_LABELS] ?? "المنتج";
 
   // Presence banner — someone else is working on this order. `conflictOwner` is
   // the live heartbeat signal (updates without a reload); the order snapshot is
@@ -1007,9 +886,6 @@ function ProductionOrderDetailContent() {
         }
       : null;
 
-  // Exact mirror of POST /final-design's role guard, supplied by the backend.
-  const showFinalDesignUpload = !!available_actions.can_upload_final_design;
-
   // Show price only when backend returns it (admin + embroiderer)
   const showPrice = typeof order.price === "number" && order.price > 0;
 
@@ -1020,18 +896,13 @@ function ProductionOrderDetailContent() {
   const layout = detail.view?.layout ?? "full";
   const isTailorOnly = layout === "tailor";
   const isEmbroideryOnly = layout === "embroidery";
+  const isPresserOnly = layout === "presser";
 
   // Embroidery-zone checklist (FEATURE 1): visible to the embroiderer + manager/admin
   // when the backend supplies zones (only at the embroidery stage).
   const canMarkEmbroideryZones =
     user?.role === "admin" || myRoles.some((r) => r === "embroiderer" || r === "manager");
   const showEmbroideryZones = canMarkEmbroideryZones && embroidery_zones.length > 0;
-
-  // Missing final-design alert: order reached a stage where a final design should exist
-  // (it has embroidery/a design) but none was uploaded.
-  const designExpected = !!order.has_embroidery || !!design || !!order.design_id;
-  const designStageReached = ["embroidery", "pressing", "preparing", "ready", "delivered"].includes(order.status);
-  const missingFinalDesign = designExpected && designStageReached && !order.final_design_url;
 
   // ── مفصل (tailor / ابو عبدو): full فصال read-only view ──────────────────────────
   // Backend now sends full فصال detail (catalog photo, measurements, university/dept,
@@ -1328,6 +1199,179 @@ function ProductionOrderDetailContent() {
     );
   }
 
+  // ── كوي (presser / المكوجي): minimal station ────────────────────────────────
+  // Name + product photo + design images + sizes/قياسات + the one advance button.
+  // Contact/money/bio are stripped server-side and deliberately never rendered here.
+  if (isPresserOnly) {
+    const m = order.measurements;
+    const measureRows: { label: string; value: number }[] = m
+      ? [
+          ...(m.shoulder_cm != null ? [{ label: "الكتف", value: m.shoulder_cm }] : []),
+          ...(m.chest_cm != null ? [{ label: "محيط الصدر", value: m.chest_cm }] : []),
+          ...(m.robe_length_cm != null ? [{ label: "طول الروب", value: m.robe_length_cm }] : []),
+          ...(m.sleeve_length_cm != null ? [{ label: "طول الردن", value: m.sleeve_length_cm }] : []),
+        ]
+      : [];
+    const specItems = items.filter(
+      (i) => i.label_snapshot && (i.group_id !== null || !!i.customer_text)
+    );
+
+    return (
+      <div dir="rtl" lang="ar">
+        <div className="mb-4">
+          <Link
+            href={back.href}
+            className="inline-flex min-h-[44px] items-center gap-1 text-sm font-medium text-orange-ink hover:underline"
+          >
+            <span aria-hidden>→</span> {back.label}
+          </Link>
+        </div>
+        <PageHeader
+          title={order.student_name}
+          subtitle={`${ORDER_STATUS_LABELS[order.status] ?? order.status} · ${order.product_name}`}
+        />
+
+        <div className="mx-auto max-w-xl space-y-4">
+          {presenceOwner && (
+            <div
+              role="alert"
+              className="flex items-center gap-2 rounded-xl border border-orange-ink/25 bg-orange-ink/8 px-4 py-3 text-sm font-medium text-orange-ink"
+            >
+              <span aria-hidden>⚠</span>
+              الموظف {presenceOwner} يعمل على هذا الطلب
+            </div>
+          )}
+
+          {/* Catalog product photo */}
+          <ProductPhotoCard imageUrl={order.product_image_url} productName={order.product_name} />
+
+          {/* The design — zone plates / reference photos / legacy final design */}
+          <DesignGallery items={items} finalDesignUrl={order.final_design_url} />
+
+          {/* Sash colour (colour-only design payload for this role) */}
+          {design?.sash_color && (
+            <div className="flex items-center gap-4 rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
+              <span
+                className="h-12 w-12 shrink-0 rounded-xl border border-line shadow-[var(--shadow-soft)]"
+                style={{ backgroundColor: design.sash_color }}
+                aria-hidden
+              />
+              <div>
+                <p className="text-xs font-medium text-muted">لون الوشاح</p>
+                <p className="mt-0.5 font-bold text-ink" dir="ltr">{design.sash_color}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Sizes + spec lines (text only — the images live in the gallery above) */}
+          {specItems.length > 0 && (
+            <article className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
+              <h3 className="mb-3 text-sm font-semibold text-ink">تفاصيل الطلب والمقاسات</h3>
+              <ul className="space-y-2.5">
+                {specItems.map((item, idx) => (
+                  <li
+                    key={idx}
+                    className={`flex items-center justify-between gap-2 text-sm ${
+                      idx < specItems.length - 1 ? "border-b border-line pb-2.5" : ""
+                    }`}
+                  >
+                    <span className="text-ink-soft">{item.label_snapshot}</span>
+                    {item.customer_text && (
+                      <span className="font-semibold text-ink">{item.customer_text}</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </article>
+          )}
+
+          {/* Robe measurements */}
+          {measureRows.length > 0 && (
+            <article className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
+              <h3 className="mb-3 text-sm font-semibold text-ink">قياسات الروب</h3>
+              <dl className="space-y-2 text-sm">
+                {measureRows.map((row, idx) => (
+                  <div
+                    key={row.label}
+                    className={`flex justify-between gap-4 ${
+                      idx < measureRows.length - 1 ? "border-b border-line pb-2" : ""
+                    }`}
+                  >
+                    <dt className="text-muted">{row.label}</dt>
+                    <dd className="font-medium text-ink" dir="ltr">{row.value} cm</dd>
+                  </div>
+                ))}
+              </dl>
+            </article>
+          )}
+
+          {/* Actions — the one advance button (+ guarded extras) */}
+          {(showPrimaryAction || showRevert || showReturnToCustomer) && (
+            <div className="flex flex-col gap-2">
+              {showPrimaryAction && (
+                <Button fullWidth loading={actionLoading} onClick={onPrimaryAction}>
+                  {primaryLabel}
+                </Button>
+              )}
+              {showRevert && (
+                <Button variant="ghost" fullWidth onClick={() => setRevertOpen(true)}>
+                  إرجاع للمرحلة السابقة
+                </Button>
+              )}
+              {showReturnToCustomer && (
+                <Button variant="ghost" fullWidth onClick={() => setReturnOpen(true)}>
+                  إرجاع للزبون لتعديله
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
+
+        <Modal
+          open={revertOpen}
+          onClose={() => setRevertOpen(false)}
+          title="إرجاع الطلب للمرحلة السابقة"
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setRevertOpen(false)}>إلغاء</Button>
+              <Button variant="danger" loading={revertSubmitting} onClick={handleRevert}>تأكيد الإرجاع</Button>
+            </>
+          }
+        >
+          <p className="text-sm text-ink-soft">سيعود الطلب إلى مرحلة الإنتاج السابقة ليُعدّل ثم يُستكمل.</p>
+        </Modal>
+
+        <Modal
+          open={returnOpen}
+          onClose={() => setReturnOpen(false)}
+          title="إرجاع الطلب للزبون لتعديله"
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setReturnOpen(false)}>إلغاء</Button>
+              <Button variant="danger" loading={returnSubmitting} onClick={handleReturnToCustomer}>
+                تأكيد الإرجاع للزبون
+              </Button>
+            </>
+          }
+        >
+          <div className="space-y-3">
+            <p className="text-sm text-ink-soft">
+              سيُعاد الطلب للزبون ليعدّله ويعيد إرساله، ويختفي من قائمة الإنتاج حتى يُرسل من جديد.
+            </p>
+            <textarea
+              value={returnReason}
+              onChange={(e) => setReturnReason(e.target.value)}
+              rows={3}
+              dir="rtl"
+              placeholder="سبب الإرجاع (اختياري)"
+              className="w-full rounded-xl border border-line bg-surface px-3 py-2.5 text-sm text-ink focus:border-orange-ink focus:outline-none"
+            />
+          </div>
+        </Modal>
+      </div>
+    );
+  }
+
   return (
     <div dir="rtl" lang="ar">
       {/* Back link */}
@@ -1355,20 +1399,6 @@ function ProductionOrderDetailContent() {
         >
           <span aria-hidden>⚠</span>
           الموظف {presenceOwner} يعمل على هذا الطلب ({order.product_name})
-        </div>
-      )}
-
-      {/* Missing final-design alert — finished embroidery/design but no final image uploaded */}
-      {missingFinalDesign && (
-        <div
-          role="alert"
-          className="mb-4 flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm font-medium text-danger"
-        >
-          <span aria-hidden>⚠</span>
-          <span>
-            تنبيه: لم تُرفع صورة التصميم النهائي رغم وصول الطلب إلى مرحلة «
-            {ORDER_STATUS_LABELS[order.status] ?? order.status}». يرجى رفع التصميم النهائي للطلب.
-          </span>
         </div>
       )}
 
@@ -1410,17 +1440,6 @@ function ProductionOrderDetailContent() {
           </Button>
         )}
       </div>
-      )}
-
-      {/* Final design upload — single instance, visible at all breakpoints */}
-      {showFinalDesignUpload && (
-        <div className="mb-4">
-          <FinalDesignUpload
-            orderId={orderId}
-            currentUrl={order.final_design_url}
-            onUploaded={handleFinalDesignUploaded}
-          />
-        </div>
       )}
 
       {/* ── Delivery details — shown once the order is delivered ── */}
@@ -1488,14 +1507,16 @@ function ProductionOrderDetailContent() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2 lg:gap-8">
-        {/* ── Design / sash preview panel ── */}
-        <section className="rounded-3xl border border-line bg-surface p-4 shadow-[var(--shadow-card)] lg:p-6">
-          <h2 className="mb-4 font-display-ar text-lg font-bold text-ink">
-            {can_see_design ? "معاينة التصميم" : `بيانات ${productLabel}`}
-          </h2>
+        {/* ── Design column: the zone/design images (auto-attached calligraphy plates +
+            reference photos + legacy final design), plus the legacy canvas viewer when a
+            Fabric design exists. The old final-design upload/preview widget is gone —
+            the plates ARE the design (2026-07-15). ── */}
+        <div className="space-y-4">
+          <DesignGallery items={items} finalDesignUrl={order.final_design_url} />
 
-          {can_see_design && showCanvas && design ? (
-            <>
+          {can_see_design && showCanvas && design && (
+            <section className="rounded-3xl border border-line bg-surface p-4 shadow-[var(--shadow-card)] lg:p-6">
+              <h2 className="mb-4 font-display-ar text-lg font-bold text-ink">معاينة التصميم</h2>
               <DesignViewer
                 sashColor={design.sash_color}
                 leftCanvas={design.left_canvas ?? null}
@@ -1510,36 +1531,9 @@ function ProductionOrderDetailContent() {
                   />
                 </div>
               )}
-            </>
-          ) : can_see_design && !showCanvas ? (
-            <div className="flex min-h-48 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-line bg-surface-sink p-6 text-center">
-              <p className="text-sm font-medium text-ink-soft">لا يوجد تصميم محفوظ بعد</p>
-              <p className="text-xs text-muted">{`لم يكمل الطالب تصميم ${productLabel} حتى الآن`}</p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {design?.sash_color ? (
-                <div className="flex items-center gap-4 rounded-2xl border border-line bg-surface-sink p-5">
-                  <span
-                    className="h-12 w-12 shrink-0 rounded-xl border border-line shadow-[var(--shadow-soft)]"
-                    style={{ backgroundColor: design.sash_color }}
-                    aria-hidden
-                  />
-                  <div>
-                    <p className="text-xs font-medium text-muted">لون الوشاح</p>
-                    <p className="mt-0.5 font-bold text-ink" dir="ltr">{design.sash_color}</p>
-                  </div>
-                </div>
-              ) : (
-                <p className="text-sm text-ink-soft">لا تتوفر بيانات تصميم لهذا الدور</p>
-              )}
-              <p className="rounded-xl border border-line bg-[var(--shop-sink)] px-3 py-2 text-xs text-ink-soft">
-                لا تتوفر بيانات التصميم لدور الكوي — فقط اللون معروض.
-              </p>
-            </div>
+            </section>
           )}
-
-        </section>
+        </div>
 
         {/* ── Side panel ── */}
         <section className="space-y-4">

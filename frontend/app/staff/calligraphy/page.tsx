@@ -39,5 +39,5 @@ export default function StaffCalligraphyPage() {
     );
   }
 
-  return <CalligraphyTool />;
+  return <CalligraphyTool backHref="/staff" />;
 }

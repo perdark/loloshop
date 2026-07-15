@@ -7,5 +7,5 @@ import { CalligraphyTool } from "@/components/calligraphy/CalligraphyTool";
 // the admin layout. Auth is enforced by the admin layout (useRequireAuth("admin"))
 // plus the backend guard on /calligraphy/*.
 export default function CalligraphyPage() {
-  return <CalligraphyTool />;
+  return <CalligraphyTool backHref="/admin" />;
 }

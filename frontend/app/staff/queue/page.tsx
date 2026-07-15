@@ -84,7 +84,9 @@ function isMissingDesign(item: ProductionQueueItem): boolean {
   const postDesignStages: OrderStatus[] = ["embroidery", "pressing", "preparing", "ready"];
   if (!postDesignStages.includes(item.status)) return false;
   if (!item.has_embroidery && !item.design_id) return false;
-  return !item.final_design_url;
+  // The design lives on the order's spec-line images (auto-attached calligraphy plates /
+  // reference photos); final_design_url is the legacy upload. Either one counts.
+  return !item.final_design_url && !item.has_design_images;
 }
 
 /** "التسليم بعد N يوم" / "متأخر" / "منذ …" */
