@@ -486,13 +486,15 @@ async function getOrder(req, res) {
       design.approval_status === 'pending' &&
       order.status === 'design_complete' &&
       (uTypes.includes('designer') || isManager(u)),
-    // «إرجاع للطالب» — hand an early-stage RETAIL order back to the student to edit + resubmit.
-    // RETAIL only for now (wholesaler orders go back via the rep approval flow); offered while
-    // the order is still at its first production stage and the staffer is scoped to it.
+    // «إرجاع للزبون لتعديله» — hand an early-stage order back to the student to edit + resubmit.
+    // Retail AND wholesaler; offered only while the order is still at its first production stage
+    // and the staffer is scoped to it (manager/admin bypass inside staffScopeAllows).
     return_to_customer:
-      order.source === 'retail' &&
       isFirstProductionStage(order) &&
-      (isManager(u) || staffScopeAllows(u, true)),
+      (isManager(u) || staffScopeAllows(u, order.source === 'retail')),
+    can_upload_final_design:
+      isManager(u) || uTypes.some((type) => ['designer', 'digitizer', 'embroiderer'].includes(type)),
+    can_delete: isManager(u),
   };
 
   res.json({
@@ -841,7 +843,7 @@ async function returnToCustomer(req, res) {
   const { id } = req.params;
   const reason = (req.body && typeof req.body.reason === 'string') ? req.body.reason.trim() : '';
   const cur = await query(
-    `SELECT o.id, o.status, o.design_id, o.has_embroidery, o.returned_to_customer,
+    `SELECT o.id, o.status, o.design_id, o.has_embroidery, o.returned_to_customer, o.checkout_group_id,
             s.user_id, s.wholesaler_id
      FROM orders o JOIN students s ON s.id = o.student_id WHERE o.id = $1`,
     [id]
@@ -849,12 +851,9 @@ async function returnToCustomer(req, res) {
   if (!cur.rows.length) return res.status(404).json({ error: 'الطلب غير موجود', code: 'ERR_NOT_FOUND' });
   const order = cur.rows[0];
 
-  // RETAIL only for now — wholesaler orders return to the student via the rep approval flow.
-  if (order.wholesaler_id != null) {
-    return res.status(409).json({ error: 'هذه الميزة للطلبات المباشرة (التجزئة) فقط حالياً', code: 'ERR_NOT_RETAIL' });
-  }
-  // Scope guard (retail order → retail scope) — manager/admin bypass inside staffScopeAllows.
-  if (!staffScopeAllows(req.user, true)) {
+  // Scope guard — manager/admin bypass inside staffScopeAllows. Retail AND wholesaler orders can
+  // be returned to the student to edit + resubmit (wholesaler resubmit re-enters rep approval).
+  if (!staffScopeAllows(req.user, order.wholesaler_id == null)) {
     return res.status(403).json({ error: 'هذا الطلب خارج نطاقك', code: 'ERR_FORBIDDEN' });
   }
   if (order.returned_to_customer) {
@@ -878,6 +877,18 @@ async function returnToCustomer(req, res) {
         RETURNING id, status, returned_to_customer`,
       [id, reason || null, req.user.id]
     );
+    // Wholesaler طقم: return the WHOLE bundle to the student and re-open rep approval, so the
+    // student can edit at /my-order — an 'approved' order would otherwise be locked from edits.
+    if (order.wholesaler_id != null && order.checkout_group_id) {
+      await client.query(
+        `UPDATE orders
+            SET returned_to_customer = TRUE, returned_reason = $2, returned_at = NOW(),
+                returned_by = $3, working_staff_id = NULL, working_since = NULL,
+                wholesaler_approval = 'pending', wholesaler_reject_reason = NULL
+          WHERE checkout_group_id = $1`,
+        [order.checkout_group_id, reason || null, req.user.id]
+      );
+    }
     await client.query(
       `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
        VALUES ($1, 'return_to_customer', 'order', $2, $3)`,
@@ -885,11 +896,12 @@ async function returnToCustomer(req, res) {
     );
     await client.query(
       `INSERT INTO notifications (user_id, type, title_ar, body_ar, link)
-       VALUES ($1, 'order_returned', $2, $3, '/returned-orders')`,
+       VALUES ($1, 'order_returned', $2, $3, $4)`,
       [
         order.user_id,
         'تم إرجاع طلبك للتعديل',
         reason ? `يرجى تعديل الطلب وإعادة إرساله. السبب: ${reason}` : 'يرجى تعديل الطلب وإعادة إرساله.',
+        order.wholesaler_id != null ? '/my-order' : '/returned-orders',
       ]
     );
     return rows[0];
@@ -1273,8 +1285,37 @@ async function monitor(req, res) {
   });
 }
 
+// Permanent grouped-order deletion from the staff workspace. Managers/admin only.
+async function deleteOrder(req, res) {
+  // The route applies requireStaffType() (manager/admin only). Keep the audit record as a
+  // second line of accountability because this removes the whole checkout-group bundle.
+  const id = String(req.params.id || '');
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return res.status(400).json({ error: 'طلب غير صحيح', code: 'ERR_VALIDATION' });
+  const result = await tx(async (client) => {
+    const found = await client.query(`SELECT id,checkout_group_id,student_id FROM orders WHERE id=$1 FOR UPDATE`, [id]);
+    if (!found.rows.length) return null;
+    const order = found.rows[0];
+    const target = order.checkout_group_id
+      ? await client.query(`SELECT id FROM orders WHERE checkout_group_id=$1`, [order.checkout_group_id])
+      : { rows: [{ id: order.id }] };
+    const ids = target.rows.map((row) => row.id);
+    await client.query(`DELETE FROM staff_activity_log WHERE order_id=ANY($1::uuid[])`, [ids]);
+    await client.query(`DELETE FROM orders WHERE id=ANY($1::uuid[])`, [ids]);
+    if (order.checkout_group_id) await client.query(`DELETE FROM checkout_groups WHERE id=$1`, [order.checkout_group_id]);
+    await client.query(
+      `INSERT INTO audit_log(actor_id,action,entity,entity_id,details) VALUES($1,'delete_order','order',$2,$3)`,
+      [req.user.id, order.id, JSON.stringify({ deleted_order_ids: ids, checkout_group_id: order.checkout_group_id, student_id: order.student_id, source: 'staff_workspace' })]
+    );
+    return ids;
+  });
+  if (!result) return res.status(404).json({ error: 'الطلب غير موجود', code: 'ERR_NOT_FOUND' });
+  for (const orderId of result) publish({ type: 'order_deleted', orderId });
+  res.json({ data: { deleted: result.length } });
+}
+
 module.exports = {
   getQueue, getOrder, advance, advanceBulk, deliver, revert, returnToCustomer, claim, release, completed, uploadFinalDesign, monitor,
   streamEvents, nextStageFor, markEmbroideryZone,
   tailorQueue, tailorComplete, tailorReopen, tailorCompleteBulk, tailorSummary,
+  deleteOrder,
 };

@@ -16,6 +16,7 @@
 const crypto = require('crypto');
 const { query } = require('../lib/db');
 const { addClient } = require('../lib/eventBus');
+const { secretMatches } = require('../lib/secretCompare');
 
 const TZ = 'Asia/Baghdad';
 const MANAGER_STAGES = ['design_complete', 'converting', 'embroidery', 'pressing', 'preparing', 'ready'];
@@ -60,8 +61,7 @@ function ymBefore(s) { // 'YYYY-MM-DD' → previous day, all in UTC string-space
 
 // ---------- key gate ----------
 function tvKeyOk(provided) {
-  const key = process.env.TV_BOARD_KEY;
-  return !!key && typeof provided === 'string' && provided === key; // fail closed
+  return secretMatches(provided, process.env.TV_BOARD_KEY); // fail closed
 }
 function keyGate(req, res, next) {
   if (!tvKeyOk(req.query.key)) {

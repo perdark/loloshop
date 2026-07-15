@@ -83,6 +83,23 @@ export async function deleteHeroSlide(id: string): Promise<void> {
   await api.delete(`/catalog/hero/${id}`);
 }
 
+/** Permanently delete the complete linked order/package containing this order. */
+export async function deleteAdminOrder(id: string): Promise<number> {
+  const { data } = await api.delete<{ data: { deleted: number } }>(`/admin/orders/${id}`);
+  return data.data.deleted;
+}
+
+/** Live storefront visitors — distinct sessions now (30 min) / today / all-time. */
+export interface VisitorStats {
+  now: number;
+  today: number;
+  total: number;
+}
+export async function getVisitorStats(): Promise<VisitorStats> {
+  const { data } = await api.get<{ data: VisitorStats }>("/admin/visitors");
+  return data.data;
+}
+
 interface ApiAnalytics {
   totals: {
     revenue: number;
@@ -137,35 +154,31 @@ interface ApiWholesalerRow {
 
 /** Defaults mirror migration 032 — used when the server omits a key. */
 export const DEFAULT_PRICING_ADDONS: WholesalerPricingAddons = {
-  royal_sash: 10000,
-  royal_cap_when_normal_sash: 3000,
-  extra_cap_embroidery: 3000,
-  robe_sleeve_each: 5000,
-  american_shawl: 25000,
-  piece_sash_normal: 20000,
-  piece_sash_royal: 25000,
-  piece_cap_normal: 15000,
-  piece_cap_royal: 20000,
-  piece_robe_normal: 25000,
-  piece_robe_royal: 25000,
+  royal_sash: { admin: 15000, selling: 15000 },
+  royal_cap_when_normal_sash: { admin: 3000, selling: 3000 },
+  extra_cap_embroidery: { admin: 3000, selling: 3000 },
+  robe_sleeve_each: { admin: 5000, selling: 5000 },
+  american_shawl: { admin: 20000, selling: 25000 },
+  piece_sash_normal: { admin: 20000, selling: 20000 },
+  piece_sash_royal: { admin: 25000, selling: 25000 },
+  piece_cap_normal: { admin: 15000, selling: 15000 },
+  piece_cap_royal: { admin: 20000, selling: 20000 },
+  piece_robe_normal: { admin: 25000, selling: 25000 },
+  piece_robe_royal: { admin: 25000, selling: 25000 },
 };
 
 function mapAddons(raw?: Partial<WholesalerPricingAddons> | null): WholesalerPricingAddons {
-  return {
-    royal_sash: Number(raw?.royal_sash ?? DEFAULT_PRICING_ADDONS.royal_sash),
-    royal_cap_when_normal_sash: Number(
-      raw?.royal_cap_when_normal_sash ?? DEFAULT_PRICING_ADDONS.royal_cap_when_normal_sash
-    ),
-    extra_cap_embroidery: Number(raw?.extra_cap_embroidery ?? DEFAULT_PRICING_ADDONS.extra_cap_embroidery),
-    robe_sleeve_each: Number(raw?.robe_sleeve_each ?? DEFAULT_PRICING_ADDONS.robe_sleeve_each),
-    american_shawl: Number(raw?.american_shawl ?? DEFAULT_PRICING_ADDONS.american_shawl),
-    piece_sash_normal: Number(raw?.piece_sash_normal ?? DEFAULT_PRICING_ADDONS.piece_sash_normal),
-    piece_sash_royal: Number(raw?.piece_sash_royal ?? DEFAULT_PRICING_ADDONS.piece_sash_royal),
-    piece_cap_normal: Number(raw?.piece_cap_normal ?? DEFAULT_PRICING_ADDONS.piece_cap_normal),
-    piece_cap_royal: Number(raw?.piece_cap_royal ?? DEFAULT_PRICING_ADDONS.piece_cap_royal),
-    piece_robe_normal: Number(raw?.piece_robe_normal ?? DEFAULT_PRICING_ADDONS.piece_robe_normal),
-    piece_robe_royal: Number(raw?.piece_robe_royal ?? DEFAULT_PRICING_ADDONS.piece_robe_royal),
-  };
+  const result = {} as WholesalerPricingAddons;
+  for (const key of Object.keys(DEFAULT_PRICING_ADDONS) as (keyof WholesalerPricingAddons)[]) {
+    const value = raw?.[key] as unknown;
+    const legacy = Number(value);
+    const pair = value && typeof value === "object" ? value as { admin?: number; selling?: number } : null;
+    result[key] = {
+      admin: Number(pair?.admin ?? (Number.isFinite(legacy) ? legacy : DEFAULT_PRICING_ADDONS[key].admin)),
+      selling: Number(pair?.selling ?? (Number.isFinite(legacy) ? legacy : DEFAULT_PRICING_ADDONS[key].selling)),
+    };
+  }
+  return result;
 }
 
 /** AdminOrder extended with approval state (present only for wholesaler orders). */

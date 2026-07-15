@@ -37,7 +37,7 @@ export default function StaffWholesalersPage() {
     setLoading(true);
     setFetchError(false);
     api
-      .get<{ data: Row[] }>("/admin/wholesalers")
+      .get<{ data: Row[] }>("/staff/wholesalers")
       .then(({ data }) => setRows(data.data || []))
       .catch((err) => {
         toast.error(getApiErrorMessage(err, "تعذر تحميل الممثلين"));
@@ -48,8 +48,7 @@ export default function StaffWholesalersPage() {
 
   useEffect(() => {
     load();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [load]);
 
   return (
     <div dir="rtl" lang="ar" className="space-y-6">

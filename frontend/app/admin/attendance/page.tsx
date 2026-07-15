@@ -26,6 +26,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { Modal } from "@/components/ui/Modal";
 
 const MODE_OPTIONS: { value: AttendanceVerificationMode; label: string }[] = [
   { value: "none", label: "بدون تحقق" },
@@ -89,6 +90,10 @@ function durationLabel(minutes: number | null | undefined) {
   return `${mins} د`;
 }
 
+type AttendanceConfirm =
+  | { kind: "clear-deduction"; record: StaffAttendanceRecord }
+  | { kind: "reset-schedule"; row: StaffAttendanceUserSetting };
+
 export default function AdminAttendancePage() {
   const [settings, setSettings] = useState<StaffAttendanceSettings | null>(null);
   const [userSettings, setUserSettings] = useState<StaffAttendanceUserSetting[]>([]);
@@ -98,10 +103,14 @@ export default function AdminAttendancePage() {
   const [calendarDays, setCalendarDays] = useState<AttendanceCalendarDay[]>([]);
   const [records, setRecords] = useState<StaffAttendanceRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<AttendanceConfirm | null>(null);
+  const [confirming, setConfirming] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(false);
     try {
       const range = monthRange(calendarMonth);
       const [s, u, r, c] = await Promise.all([
@@ -116,6 +125,7 @@ export default function AdminAttendancePage() {
       setRecords(r);
       setCalendarDays(c);
     } catch (e) {
+      setLoadError(true);
       toast.error(getApiErrorMessage(e, "تعذر تحميل بيانات البصمة"));
     } finally {
       setLoading(false);
@@ -141,7 +151,7 @@ export default function AdminAttendancePage() {
   }
 
   async function clearDeduction(record: StaffAttendanceRecord) {
-    if (!window.confirm("إلغاء مبلغ التأخير لهذا السجل؟")) return;
+    setConfirming(true);
     try {
       const next = await overrideAttendanceRecord(record.id, {
         lateMinutes: 0,
@@ -150,8 +160,11 @@ export default function AdminAttendancePage() {
       });
       setRecords((prev) => prev.map((r) => (r.id === next.id ? next : r)));
       toast.success("تم تصحيح سجل البصمة");
+      setConfirmAction(null);
     } catch (e) {
       toast.error(getApiErrorMessage(e, "تعذر تصحيح السجل"));
+    } finally {
+      setConfirming(false);
     }
   }
 
@@ -180,7 +193,7 @@ export default function AdminAttendancePage() {
   }
 
   async function resetUserSetting(row: StaffAttendanceUserSetting) {
-    if (!window.confirm("إرجاع هذا الموظف إلى الدوام الافتراضي؟")) return;
+    setConfirming(true);
     try {
       await deleteAttendanceUserSettings(row.userId);
       const next = {
@@ -195,8 +208,11 @@ export default function AdminAttendancePage() {
       setUserSettings((prev) => prev.map((item) => (item.userId === row.userId ? next : item)));
       setDrafts((prev) => ({ ...prev, [row.userId]: next }));
       toast.success("تم إرجاع الموظف للدوام الافتراضي");
+      setConfirmAction(null);
     } catch (e) {
       toast.error(getApiErrorMessage(e, "تعذر حذف الدوام المخصص"));
+    } finally {
+      setConfirming(false);
     }
   }
 
@@ -207,6 +223,16 @@ export default function AdminAttendancePage() {
         subtitle="إعداد وقت الحضور والانصراف ومتابعة التأخير بمعزل عن الراتب"
         action={<Button onClick={load} variant="ghost" loading={loading}>تحديث</Button>}
       />
+
+      {loadError && (
+        <div className="rounded-2xl border border-danger/25 bg-surface px-6 py-8 text-center" role="alert">
+          <p className="font-bold text-ink">تعذّر تحميل بيانات البصمة</p>
+          <p className="mt-1 text-sm text-ink-soft">لم تُخفَ الإعدادات؛ أعد المحاولة بعد التحقق من الاتصال.</p>
+          <Button className="mt-4" variant="ghost" onClick={load} loading={loading}>
+            إعادة المحاولة
+          </Button>
+        </div>
+      )}
 
       {settings && (
         <section className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
@@ -391,7 +417,7 @@ export default function AdminAttendancePage() {
                               حفظ
                             </Button>
                             {row.hasOverride && (
-                              <Button size="sm" variant="ghost" onClick={() => resetUserSetting(row)}>
+                              <Button size="sm" variant="ghost" onClick={() => setConfirmAction({ kind: "reset-schedule", row })}>
                                 افتراضي
                               </Button>
                             )}
@@ -524,7 +550,7 @@ export default function AdminAttendancePage() {
                     </td>
                     <td className="px-4 py-3">
                       {r.deductionAmount > 0 ? (
-                        <Button size="sm" variant="ghost" onClick={() => clearDeduction(r)}>
+                        <Button size="sm" variant="ghost" onClick={() => setConfirmAction({ kind: "clear-deduction", record: r })}>
                           إلغاء المبلغ
                         </Button>
                       ) : r.overriddenAt ? (
@@ -540,6 +566,35 @@ export default function AdminAttendancePage() {
           </div>
         )}
       </section>
+
+      <Modal
+        open={confirmAction !== null}
+        onClose={() => { if (!confirming) setConfirmAction(null); }}
+        title={confirmAction?.kind === "reset-schedule" ? "إرجاع الدوام الافتراضي" : "إلغاء مبلغ التأخير"}
+        footer={
+          <>
+            <Button variant="ghost" disabled={confirming} onClick={() => setConfirmAction(null)}>
+              إلغاء
+            </Button>
+            <Button
+              variant="danger"
+              loading={confirming}
+              onClick={() => {
+                if (confirmAction?.kind === "reset-schedule") void resetUserSetting(confirmAction.row);
+                if (confirmAction?.kind === "clear-deduction") void clearDeduction(confirmAction.record);
+              }}
+            >
+              تأكيد
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-ink-soft">
+          {confirmAction?.kind === "reset-schedule"
+            ? `سيعود ${confirmAction.row.staffName || "الموظف"} إلى إعدادات الدوام العامة.`
+            : "سيُلغى مبلغ التأخير لهذا السجل مع إبقاء سجل الحضور محفوظاً."}
+        </p>
+      </Modal>
     </div>
   );
 }

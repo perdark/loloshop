@@ -5,6 +5,7 @@ const { signToken } = require('../middleware/auth');
 const { createOtp, verifyOtp, isValidIqMobile, isDemoLoginPhone } = require('../lib/otp');
 const { issueDeviceToken, isTrustedDevice, revokeUserDevices } = require('../lib/trustedDevice');
 const { sendPasswordReset } = require('../lib/email');
+const { secretMatches } = require('../lib/secretCompare');
 
 const SALT_ROUNDS = 10;
 
@@ -166,9 +167,8 @@ async function loginVerifyOtp(req, res) {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function portalKeyOk(provided) {
-  const key = process.env.STAFF_PORTAL_KEY;
   // Fail closed: no key configured → portal is off.
-  return !!key && typeof provided === 'string' && provided === key;
+  return secretMatches(provided, process.env.STAFF_PORTAL_KEY);
 }
 
 // GET /auth/staff-portal/members?key=… → [{ id, name }] for staff only. Key-gated.

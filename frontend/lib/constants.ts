@@ -61,6 +61,8 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   staff: "موظف",
   wholesaler: "ممثل جامعة",
   retail: "طالب",
+  worker: "عامل ورشة",
+  design_helper: "أيادي التصميم",
 };
 
 export const ORDER_SCOPE_LABELS: Record<StaffOrderScope, string> = {

@@ -17,7 +17,11 @@ import { verifyMoneyGate, getMoneyGateStatus } from "@/lib/money-gate";
  *
  * @param idleMs auto-hide timeout in ms after the last activity (default 5min)
  */
-export function useMoneyGate(idleMs = 300000) {
+// Per-tab session flag: a reveal survives refresh / in-tab navigation, and clears when the
+// tab closes (sessionStorage, never localStorage — a new tab/window still starts locked).
+const STORAGE_KEY = "loloshop_money_revealed";
+
+export function useMoneyGate(idleMs = 1800000) {
   const [revealed, setRevealed] = useState(false);
   const [configured, setConfigured] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -32,6 +36,7 @@ export function useMoneyGate(idleMs = 300000) {
   const hide = useCallback(() => {
     clearTimer();
     setRevealed(false);
+    try { sessionStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
   }, [clearTimer]);
 
   // (Re)start the idle countdown. Called on reveal and on every activity tick.
@@ -39,6 +44,7 @@ export function useMoneyGate(idleMs = 300000) {
     clearTimer();
     timerRef.current = setTimeout(() => {
       setRevealed(false);
+      try { sessionStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
       timerRef.current = null;
     }, idleMs);
   }, [clearTimer, idleMs]);
@@ -48,6 +54,7 @@ export function useMoneyGate(idleMs = 300000) {
       const ok = await verifyMoneyGate(secret);
       if (ok) {
         setRevealed(true);
+        try { sessionStorage.setItem(STORAGE_KEY, "1"); } catch { /* ignore */ }
         armTimer();
       }
       return ok;
@@ -68,6 +75,17 @@ export function useMoneyGate(idleMs = 300000) {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // Restore a reveal still active for this browser-tab session (survives refresh / in-tab nav).
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem(STORAGE_KEY) === "1") {
+        setRevealed(true);
+        armTimer();
+      }
+    } catch { /* ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // While revealed, any window activity refreshes the idle timer.

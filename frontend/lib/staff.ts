@@ -122,6 +122,11 @@ export async function getProductionOrder(id: string): Promise<ProductionOrderDet
   return data.data;
 }
 
+export async function deleteProductionOrder(id: string): Promise<number> {
+  const { data } = await api.delete<{ data: { deleted: number } }>(`/production/orders/${id}`);
+  return data.data.deleted;
+}
+
 /**
  * POST /production/orders/:id/advance
  * Advances the order to the next pipeline stage.
@@ -167,6 +172,16 @@ export interface WholesalerOrderRow {
   canAdvance: boolean;
   nextStatus: OrderStatus | null;
   nextLabel: string | null;
+  adminAmount: number | null;
+  wholesalerAmount: number | null;
+  /** Money-line breakdown (money-eligible roles only; 0 otherwise). Lets the admin page
+   *  explain the admin/rep totals: packages + شال + other add-ons + single pieces. */
+  pkgCount: number;
+  pkgStudent: number;
+  shawlCount: number;
+  shawlStudent: number;
+  otherStudent: number;
+  pieceStudent: number;
 }
 
 interface WholesalerOrderApiRow {
@@ -183,6 +198,14 @@ interface WholesalerOrderApiRow {
   can_advance: boolean;
   next_status: OrderStatus | null;
   next_label: string | null;
+  admin_amount: number | null;
+  wholesaler_amount: number | null;
+  pkg_count?: number;
+  pkg_student?: number;
+  shawl_count?: number;
+  shawl_student?: number;
+  other_student?: number;
+  piece_student?: number;
 }
 
 /**
@@ -213,6 +236,14 @@ export async function getWholesalerOrders(
     canAdvance: Boolean(r.can_advance),
     nextStatus: r.next_status,
     nextLabel: r.next_label,
+    adminAmount: r.admin_amount == null ? null : Number(r.admin_amount),
+    wholesalerAmount: r.wholesaler_amount == null ? null : Number(r.wholesaler_amount),
+    pkgCount: Number(r.pkg_count || 0),
+    pkgStudent: Number(r.pkg_student || 0),
+    shawlCount: Number(r.shawl_count || 0),
+    shawlStudent: Number(r.shawl_student || 0),
+    otherStudent: Number(r.other_student || 0),
+    pieceStudent: Number(r.piece_student || 0),
   }));
 }
 

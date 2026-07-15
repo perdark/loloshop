@@ -1,11 +1,29 @@
 const { query } = require('../lib/db');
-const { staffScopeAllows } = require('../middleware/auth');
+const { staffScopeAllows, staffTypesOf } = require('../middleware/auth');
 const { canStaffTransition, STATUS_LABEL_AR, orderZoneClause } = require('./orderController');
 const { nextStageFor } = require('./productionController');
 
 const COMPLETED_STATUSES = ['design_complete', 'staff_review', 'printing', 'embroidery', 'pressing', 'preparing', 'ready', 'delivered'];
 // "Done" for the orders console = handed over or ready to hand over.
 const DONE_STATUSES = new Set(['ready', 'delivered']);
+
+// Safe staff-facing representative index. This intentionally excludes referral codes,
+// pricing, commission and email fields returned by the admin-only endpoint.
+async function listWholesalers(req, res) {
+  if (!staffScopeAllows(req.user, false)) {
+    return res.status(403).json({ error: 'هذا خارج نطاقك', code: 'ERR_FORBIDDEN' });
+  }
+  const { rows } = await query(
+    `SELECT w.id, u.name, u.phone, w.deadline,
+       (SELECT COUNT(*)::int FROM students s WHERE s.wholesaler_id = w.id) AS student_count,
+       (SELECT COUNT(*)::int FROM students s
+         WHERE s.wholesaler_id = w.id AND s.status = 'pending_approval') AS pending_count
+     FROM wholesalers w
+     JOIN users u ON u.id = w.user_id
+     ORDER BY u.name ASC`
+  );
+  res.json({ data: rows });
+}
 
 async function wholesalerStudents(req, res) {
   const { id } = req.params; // wholesaler id
@@ -38,6 +56,7 @@ async function wholesalerOrders(req, res) {
   if (!staffScopeAllows(req.user, false)) {
     return res.status(403).json({ error: 'هذا خارج نطاقك', code: 'ERR_FORBIDDEN' });
   }
+  const canSeeMoney = req.user.role === 'admin' || staffTypesOf(req.user).includes('manager');
   // Validate the zone key up front: an unknown key would otherwise be silently dropped
   // (orderZoneClause → null) and the console would look like "filter broken" by returning all.
   let zoneClause = null;
@@ -51,6 +70,7 @@ async function wholesalerOrders(req, res) {
   const { rows } = await query(
     `SELECT o.id, o.status, o.created_at, o.design_id, o.has_embroidery, o.needs_pressing,
             o.checkout_group_id,
+            o.price, o.cost,
             s.id AS student_id, u.name AS student_name,
             p.name_ar AS product_name, p.type AS product_type,
             b.name_ar AS batch_name, b.deadline,
@@ -88,9 +108,43 @@ async function wholesalerOrders(req, res) {
       can_advance: canAdvance,
       next_status: canAdvance ? to : null,
       next_label: canAdvance ? (STATUS_LABEL_AR[to] || to) : null,
+      admin_amount: canSeeMoney ? Number(r.cost || 0) : null,
+      wholesaler_amount: canSeeMoney ? Number(r.price || 0) : null,
     };
   });
+
+  // Per-order money breakdown (only for money-eligible roles) so the admin page can show
+  // WHY the admin/rep totals are what they are: packages (rep keeps the base spread),
+  // شال امريكي (admin fixed 20,000 → rep keeps the rest), other add-ons + single pieces
+  // (100% to admin). pkg_admin is derived on the client from admin_amount, so no admin_price
+  // round-trip is needed and the split always reconciles to orders.cost/price.
+  if (canSeeMoney && data.length) {
+    const ids = rows.map((r) => r.id);
+    const { rows: bd } = await query(
+      `SELECT oi.order_id,
+              COUNT(*) FILTER (WHERE oi.label_snapshot = 'طقم كامل')::int AS pkg_count,
+              COALESCE(SUM(oi.price_snapshot) FILTER (WHERE oi.label_snapshot = 'طقم كامل'),0)::bigint AS pkg_student,
+              COUNT(*) FILTER (WHERE oi.label_snapshot ILIKE 'إضافة%شال%')::int AS shawl_count,
+              COALESCE(SUM(oi.price_snapshot) FILTER (WHERE oi.label_snapshot ILIKE 'إضافة%شال%'),0)::bigint AS shawl_student,
+              COALESCE(SUM(oi.price_snapshot) FILTER (WHERE oi.label_snapshot ILIKE 'إضافة%' AND oi.label_snapshot NOT ILIKE '%شال%'),0)::bigint AS other_student,
+              COALESCE(SUM(oi.price_snapshot) FILTER (WHERE oi.label_snapshot ILIKE 'قطعة:%'),0)::bigint AS piece_student
+         FROM order_items oi
+        WHERE oi.order_id = ANY($1::uuid[])
+        GROUP BY oi.order_id`,
+      [ids]
+    );
+    const byId = new Map(bd.map((b) => [b.order_id, b]));
+    for (const d of data) {
+      const b = byId.get(d.id);
+      d.pkg_count = b ? Number(b.pkg_count) : 0;
+      d.pkg_student = b ? Number(b.pkg_student) : 0;
+      d.shawl_count = b ? Number(b.shawl_count) : 0;
+      d.shawl_student = b ? Number(b.shawl_student) : 0;
+      d.other_student = b ? Number(b.other_student) : 0;
+      d.piece_student = b ? Number(b.piece_student) : 0;
+    }
+  }
   res.json({ data });
 }
 
-module.exports = { wholesalerStudents, wholesalerOrders };
+module.exports = { listWholesalers, wholesalerStudents, wholesalerOrders };

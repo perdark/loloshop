@@ -1,4 +1,10 @@
-export type UserRole = "admin" | "staff" | "wholesaler" | "retail";
+export type UserRole =
+  | "admin"
+  | "staff"
+  | "wholesaler"
+  | "retail"
+  | "worker"
+  | "design_helper";
 export type StaffOrderScope = "retail" | "wholesaler" | "both";
 
 export type OrderStatus =
@@ -117,19 +123,24 @@ export interface AdminOrder {
   workingStaffName?: string | null;
 }
 
-/** «اضافات على السعر» — per-wholesaler add-on surcharges (IQD), added to the student price. */
+export interface WholesalerPricePair {
+  admin: number;
+  selling: number;
+}
+
+/** Per-wholesaler admin due and student selling amount for every pricing line. */
 export interface WholesalerPricingAddons {
-  royal_sash: number;
-  royal_cap_when_normal_sash: number;
-  extra_cap_embroidery: number;
-  robe_sleeve_each: number;
-  american_shawl: number;
-  piece_sash_normal: number;
-  piece_sash_royal: number;
-  piece_cap_normal: number;
-  piece_cap_royal: number;
-  piece_robe_normal: number;
-  piece_robe_royal: number;
+  royal_sash: WholesalerPricePair;
+  royal_cap_when_normal_sash: WholesalerPricePair;
+  extra_cap_embroidery: WholesalerPricePair;
+  robe_sleeve_each: WholesalerPricePair;
+  american_shawl: WholesalerPricePair;
+  piece_sash_normal: WholesalerPricePair;
+  piece_sash_royal: WholesalerPricePair;
+  piece_cap_normal: WholesalerPricePair;
+  piece_cap_royal: WholesalerPricePair;
+  piece_robe_normal: WholesalerPricePair;
+  piece_robe_royal: WholesalerPricePair;
 }
 
 export interface AdminWholesaler {
@@ -185,6 +196,12 @@ export interface WholesalerDashboard {
   referralCode: string;
   commissionRate?: number;
   earnedCommission?: number;
+  adminDue?: number;
+  pricing?: {
+    adminBase: number;
+    sellingBase: number;
+    addons: WholesalerPricingAddons;
+  };
   embroideryColor?: string | null;
 }
 

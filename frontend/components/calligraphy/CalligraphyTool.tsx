@@ -85,7 +85,7 @@ function PlateCard({
   const imgUrl = absUrl(plate.plate_path);
 
   return (
-    <article className="flex flex-col gap-2 rounded-2xl border border-line bg-white p-3 shadow-sm">
+    <article className="flex min-w-0 flex-col gap-2 overflow-hidden rounded-2xl border border-line bg-white p-3 shadow-sm">
       {/* image — click to preview full size */}
       {plate.status === "done" && imgUrl ? (
         <button
@@ -118,8 +118,8 @@ function PlateCard({
       )}
 
       {/* name + status */}
-      <div className="flex items-center justify-between gap-2">
-        <p className="font-display text-sm font-semibold text-ink leading-snug">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+        <p className="min-w-0 break-words font-display text-sm font-semibold leading-snug text-ink">
           {plate.render_text}
         </p>
         <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
@@ -349,6 +349,7 @@ export function CalligraphyTool() {
   // ── queue ────────────────────────────────────────────────────────────────────
   const [queue, setQueue] = useState<CalQueue | null>(null);
   const [queueLoading, setQueueLoading] = useState(false);
+  const [queueError, setQueueError] = useState(false);
 
   // ── job state ───────────────────────────────────────────────────────────────
   const [running, setRunning] = useState(false);
@@ -432,10 +433,12 @@ export function CalligraphyTool() {
   // ── load queue ───────────────────────────────────────────────────────────────
   const refreshQueue = useCallback(async () => {
     setQueueLoading(true);
+    setQueueError(false);
     try {
       const q = await getCalQueue();
       setQueue(q);
     } catch (e) {
+      setQueueError(true);
       toast.error(getApiErrorMessage(e, "تعذر تحميل الطابور"));
     } finally {
       setQueueLoading(false);
@@ -695,47 +698,77 @@ export function CalligraphyTool() {
   // ── progress ─────────────────────────────────────────────────────────────────
   const progress = total > 0 ? Math.round((done / total) * 100) : 0;
 
-  // ── tabs config ──────────────────────────────────────────────────────────────
-  const tabs = [
-    { id: "queue" as InputMode, label: "الطابور (تلقائي)" },
-    { id: "typed" as InputMode, label: "كتابة / لصق" },
-    { id: "wholesaler" as InputMode, label: "حسب الممثل" },
-    { id: "txt" as InputMode, label: "رفع ملف .txt" },
+  // Manual inputs stay available, but the automatic queue is the daily primary flow.
+  const manualModes = [
+    { id: "typed" as InputMode, label: "لصق أسماء" },
+    { id: "wholesaler" as InputMode, label: "طلبات ممثل" },
+    { id: "txt" as InputMode, label: "ملف TXT" },
   ] as const;
+  const queuePendingTotal = queue
+    ? (["front", "back", "cap"] as CalVariant[]).reduce(
+        (sum, variant) => sum + queue[variant].pending,
+        0
+      )
+    : null;
 
   return (
     <div dir="rtl" lang="ar">
       <PageHeader
         title="الخط العربي"
-        subtitle="توليد لوحات الأسماء بالخط العربي وربطها بالطلبات"
+        subtitle="ابدأ بالطابور التلقائي، واستخدم الإدخال اليدوي للحالات الاستثنائية"
       />
 
       {/* ── Controls card ─────────────────────────────────────────────────── */}
       <section className="surface-card rounded-2xl p-4 lg:p-6 mb-6">
-        {/* mode tabs */}
-        <div className="mb-5 flex flex-wrap gap-2" role="tablist" aria-label="طريقة الإدخال">
-          {tabs.map((tab) => (
+        {/* The daily path is deliberately dominant; manual methods are secondary. */}
+        <div className="mb-5 space-y-3" aria-label="طريقة الإدخال">
+          <button
+            type="button"
+            aria-pressed={mode === "queue"}
+            onClick={() => setMode("queue")}
+            className={`flex min-h-16 w-full items-center justify-between gap-4 rounded-xl px-4 py-3 text-start transition-colors ${
+              mode === "queue"
+                ? "bg-orange-ink text-white"
+                : "border border-orange-ink/30 bg-surface text-ink hover:border-orange-ink"
+            }`}
+          >
+            <span className="min-w-0">
+              <span className="block text-base font-bold">الطابور التلقائي</span>
+              <span className={`mt-0.5 block text-xs ${mode === "queue" ? "text-white/85" : "text-ink-soft"}`}>
+                الطلبات الجاهزة مرتبة حسب مكان التطريز
+              </span>
+            </span>
+            <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold ${mode === "queue" ? "bg-white/20 text-white" : "bg-orange-ink/10 text-orange-ink"}`}>
+              {queuePendingTotal == null ? "الأساسي" : `${queuePendingTotal} بانتظار`}
+            </span>
+          </button>
+
+          <div className="border-t border-line pt-3">
+            <p className="mb-2 text-xs font-semibold text-ink-soft">إدخال يدوي للحالات الخاصة</p>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            {manualModes.map((tab) => (
             <button
               key={tab.id}
               type="button"
-              role="tab"
-              aria-selected={mode === tab.id}
+              aria-pressed={mode === tab.id}
               onClick={() => setMode(tab.id)}
-              className={`min-h-11 rounded-full px-5 py-2 text-sm font-semibold transition-all duration-200 ${
+              className={`min-h-11 rounded-xl border px-4 py-2 text-sm font-semibold transition-colors ${
                 mode === tab.id
-                  ? "bg-orange-ink text-white shadow-sm"
-                  : "border border-line bg-beige text-ink hover:border-orange/40 hover:text-orange-ink"
+                  ? "border-orange-ink bg-orange-ink/10 text-orange-ink"
+                  : "border-line bg-surface text-ink-soft hover:border-orange-ink/40 hover:text-ink"
               }`}
             >
               {tab.label}
             </button>
-          ))}
+            ))}
+            </div>
+          </div>
         </div>
 
         {/* ── Queue panel ──────────────────────────────────────────────────── */}
         {mode === "queue" && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-sm font-semibold text-ink-soft">
                 الطلبات المعلّقة مرتّبة حسب النوع — يمكنك توليدها دفعةً واحدة
               </p>
@@ -743,7 +776,7 @@ export function CalligraphyTool() {
                 type="button"
                 onClick={refreshQueue}
                 disabled={queueLoading || running}
-                className="flex items-center gap-1.5 rounded-full border border-line bg-beige px-3 py-1.5 text-xs font-semibold text-ink-soft transition hover:border-orange/40 hover:text-orange-ink disabled:opacity-50"
+                className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border border-line bg-beige px-4 py-2 text-xs font-semibold text-ink-soft transition-colors hover:border-orange/40 hover:text-orange-ink disabled:opacity-50"
               >
                 {queueLoading ? (
                   <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
@@ -758,6 +791,12 @@ export function CalligraphyTool() {
               <div className="flex items-center gap-2 text-sm text-ink-soft py-4">
                 <span className="h-4 w-4 animate-spin rounded-full border-2 border-orange border-t-transparent" />
                 جارٍ التحميل…
+              </div>
+            ) : queueError ? (
+              <div className="rounded-xl border border-danger/25 bg-surface px-5 py-8 text-center" role="alert">
+                <p className="font-bold text-ink">تعذر تحميل الطابور</p>
+                <p className="mt-1 text-sm text-ink-soft">تحقق من الاتصال ثم أعد المحاولة.</p>
+                <Button className="mt-4" variant="ghost" onClick={refreshQueue}>إعادة المحاولة</Button>
               </div>
             ) : queue ? (
               <div className="grid gap-4 sm:grid-cols-3">
@@ -869,14 +908,14 @@ export function CalligraphyTool() {
 
             {!grabLoading && grabRows.length > 0 && (
               <div>
-                <div className="mb-2 flex items-center justify-between gap-3">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                   <p className="text-xs font-semibold text-ink-soft">
                     أسماء التطريز (اختر المطلوب توليده)
                   </p>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-1">
                     <button
                       type="button"
-                      className="text-xs text-orange-ink underline-offset-2 hover:underline"
+                      className="inline-flex min-h-11 items-center px-2 text-xs font-semibold text-orange-ink underline-offset-2 hover:underline"
                       onClick={() =>
                         setCheckedIds(new Set(grabRows.map((r) => r.order_item_id)))
                       }
@@ -885,16 +924,16 @@ export function CalligraphyTool() {
                     </button>
                     <button
                       type="button"
-                      className="text-xs text-ink-soft underline-offset-2 hover:underline"
+                      className="inline-flex min-h-11 items-center px-2 text-xs font-semibold text-ink-soft underline-offset-2 hover:underline"
                       onClick={() => setCheckedIds(new Set())}
                     >
                       إلغاء الكل
                     </button>
                   </div>
                 </div>
-                <ul className="max-h-72 overflow-y-auto rounded-xl border border-line bg-beige divide-y divide-line">
+                <ul className="max-h-72 divide-y divide-line overflow-x-hidden overflow-y-auto rounded-xl border border-line bg-beige">
                   {grabRows.map((r) => (
-                    <li key={r.order_item_id} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
+                    <li key={r.order_item_id} className="flex min-w-0 flex-wrap items-center gap-2 px-3 py-2.5 sm:gap-3">
                       <input
                         type="checkbox"
                         id={`grab-${r.order_item_id}`}
@@ -905,14 +944,14 @@ export function CalligraphyTool() {
                           else next.delete(r.order_item_id);
                           setCheckedIds(next);
                         }}
-                        className="h-4 w-4 accent-orange-ink"
+                        className="h-5 w-5 shrink-0 accent-orange-ink"
                       />
                       <label
                         htmlFor={`grab-${r.order_item_id}`}
-                        className="flex flex-1 cursor-pointer items-center justify-between gap-2"
+                        className="flex min-h-11 min-w-0 flex-1 cursor-pointer flex-wrap items-center gap-x-2 gap-y-1 sm:flex-nowrap"
                       >
-                        <span className="text-sm text-ink">{r.render_text}</span>
-                        <span className="text-xs text-ink-soft">{r.student_name}</span>
+                        <span className="min-w-0 break-words text-sm text-ink">{r.render_text}</span>
+                        <span className="min-w-0 break-words text-xs text-ink-soft">{r.student_name}</span>
                         <span className="rounded-full bg-beige px-2 py-0.5 text-[11px] text-ink-soft border border-line shrink-0">
                           {VARIANT_LABEL[r.variant] ?? r.variant}
                         </span>
@@ -930,7 +969,7 @@ export function CalligraphyTool() {
                               [r.order_item_id]: e.target.value,
                             }))
                           }
-                          className="min-h-9 w-28 rounded-lg border border-line bg-white px-2 py-1 text-xs text-ink placeholder:text-ink/30 focus:border-orange-ink focus:outline-none focus:ring-2 focus:ring-orange-ink/15"
+                          className="min-h-11 w-full min-w-0 rounded-lg border border-line bg-white px-3 py-2 text-xs text-ink placeholder:text-ink/50 focus:border-orange-ink focus:outline-none focus:ring-2 focus:ring-orange-ink/15 sm:w-32"
                         />
                       )}
                     </li>
@@ -962,7 +1001,7 @@ export function CalligraphyTool() {
               accept=".txt,text/plain"
               disabled={running}
               onChange={handleFileChange}
-              className="block w-full text-sm text-ink file:me-3 file:min-h-[36px] file:cursor-pointer file:rounded-full file:border-0 file:bg-orange-ink file:px-4 file:text-xs file:font-semibold file:text-white hover:file:opacity-90 disabled:opacity-60"
+              className="block min-h-11 w-full text-sm text-ink file:me-3 file:min-h-11 file:cursor-pointer file:rounded-full file:border-0 file:bg-orange-ink file:px-4 file:text-xs file:font-semibold file:text-white hover:file:opacity-90 disabled:opacity-60"
             />
             {txtLines.length > 0 && (
               <>
@@ -1048,7 +1087,7 @@ export function CalligraphyTool() {
           <h2 className="mb-4 font-display text-lg font-bold text-ink">
             اللوحات ({plates.length})
           </h2>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+          <div className="grid min-w-0 grid-cols-1 gap-3 min-[420px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
             {plates.map((plate) => (
               <PlateCard
                 key={plate.id}

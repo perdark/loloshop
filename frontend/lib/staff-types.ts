@@ -247,6 +247,10 @@ export interface ProductionOrderDetail {
     can_reject: boolean;
     /** «إرجاع للطالب» — retail order at its first stage may be handed back to the student. */
     return_to_customer?: boolean;
+    /** Matches the final-design upload route guard. */
+    can_upload_final_design?: boolean;
+    /** Permanent grouped deletion is manager/admin-only. */
+    can_delete?: boolean;
   };
   /** Backend-driven render layout (single source of truth — the UI never re-derives
    *  role→visibility). 'tailor' = الفصال read-only · 'embroidery' = embroiderer minimal

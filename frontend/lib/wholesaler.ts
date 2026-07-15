@@ -5,6 +5,7 @@ import type {
   PendingStudent,
   WholesalerDashboard,
   WholesalerStudentRow,
+  WholesalerPricingAddons,
 } from "./types";
 
 interface ApiDashboard {
@@ -17,6 +18,12 @@ interface ApiDashboard {
   referral_url: string;
   referral_code: string;
   embroidery_color?: string | null;
+  admin_due?: number;
+  pricing?: {
+    admin_base: number;
+    selling_base: number;
+    addons: WholesalerPricingAddons;
+  };
 }
 
 interface ApiPendingStudent {
@@ -38,6 +45,12 @@ export async function getWholesalerDashboard(): Promise<WholesalerDashboard> {
     completedDesigns: data.completed_designs,
     commissionRate: data.commission_rate ?? 0,
     earnedCommission: data.earned_commission ?? 0,
+    adminDue: data.admin_due ?? 0,
+    pricing: data.pricing ? {
+      adminBase: data.pricing.admin_base,
+      sellingBase: data.pricing.selling_base,
+      addons: data.pricing.addons,
+    } : undefined,
     referralUrl: data.referral_url,
     referralCode: data.referral_code,
     embroideryColor: data.embroidery_color ?? null,
@@ -437,7 +450,8 @@ export interface RepOrderRow {
   student_id: string;
   student_name: string;
   product_summary: string;
-  total_price: number;
+  admin_amount: number;
+  wholesaler_amount: number;
   submitted_at: string;
   approval: "pending" | "approved" | "rejected";
   reject_reason: string | null;

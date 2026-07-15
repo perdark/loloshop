@@ -16,8 +16,8 @@ import {
 } from "@/lib/admin";
 import { SashSideLockEditor } from "@/components/designer/SashSideLockEditor";
 import { getApiErrorMessage } from "@/lib/api";
-import { formatDateIQ, formatIQD, getJoinUrl } from "@/lib/format";
-import type { AdminWholesaler } from "@/lib/types";
+import { formatDateIQ, getJoinUrl } from "@/lib/format";
+import type { AdminWholesaler, WholesalerPricingAddons } from "@/lib/types";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { CopyButton } from "@/components/ui/CopyButton";
@@ -28,6 +28,16 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import Link from "next/link";
 
 const SLUG_RE = /^[a-z0-9-]+$/;
+const PRICING_LABELS: Record<keyof WholesalerPricingAddons, string> = {
+  royal_sash: "وشاح ملكي", royal_cap_when_normal_sash: "وشاح عادي + قبعة ملكية",
+  extra_cap_embroidery: "تطريز القبعة الثاني", robe_sleeve_each: "تطريز ردن الروب (للردن)",
+  american_shawl: "شال امريكي", piece_sash_normal: "وشاح عادي", piece_sash_royal: "وشاح ملكي منفرد",
+  piece_cap_normal: "قبعة عادية", piece_cap_royal: "قبعة ملكية", piece_robe_normal: "روب عادي", piece_robe_royal: "روب ملكي",
+};
+type PricingDraft = Record<keyof WholesalerPricingAddons, { admin: string; selling: string }>;
+const draftFrom = (addons: WholesalerPricingAddons): PricingDraft => Object.fromEntries(
+  (Object.keys(addons) as (keyof WholesalerPricingAddons)[]).map((key) => [key, { admin: String(addons[key].admin), selling: String(addons[key].selling) }])
+) as PricingDraft;
 
 export default function AdminWholesalersPage() {
   const [wholesalers, setWholesalers] = useState<AdminWholesaler[]>([]);
@@ -60,23 +70,13 @@ export default function AdminWholesalersPage() {
   const [editEmbroideryColor, setEditEmbroideryColor] = useState("");
   const [createEmbroideryColor, setCreateEmbroideryColor] = useState("");
   // «التسعيرة» — create modal base prices (add-ons default server-side, tweak later).
-  const [adminPrice, setAdminPrice] = useState("0");
+  const [adminPrice, setAdminPrice] = useState("40000");
   const [wholesalerPrice, setWholesalerPrice] = useState("50000");
   // «التسعيرة» edit modal: two base prices + the 5 editable add-on surcharges.
   const emptyPricing = {
-    adminPrice: "0",
+    adminPrice: "40000",
     wholesalerPrice: "50000",
-    royal_sash: String(DEFAULT_PRICING_ADDONS.royal_sash),
-    royal_cap_when_normal_sash: String(DEFAULT_PRICING_ADDONS.royal_cap_when_normal_sash),
-    extra_cap_embroidery: String(DEFAULT_PRICING_ADDONS.extra_cap_embroidery),
-    robe_sleeve_each: String(DEFAULT_PRICING_ADDONS.robe_sleeve_each),
-    american_shawl: String(DEFAULT_PRICING_ADDONS.american_shawl),
-    piece_sash_normal: String(DEFAULT_PRICING_ADDONS.piece_sash_normal),
-    piece_sash_royal: String(DEFAULT_PRICING_ADDONS.piece_sash_royal),
-    piece_cap_normal: String(DEFAULT_PRICING_ADDONS.piece_cap_normal),
-    piece_cap_royal: String(DEFAULT_PRICING_ADDONS.piece_cap_royal),
-    piece_robe_normal: String(DEFAULT_PRICING_ADDONS.piece_robe_normal),
-    piece_robe_royal: String(DEFAULT_PRICING_ADDONS.piece_robe_royal),
+    addons: draftFrom(DEFAULT_PRICING_ADDONS),
   };
   const [pricingForm, setPricingForm] = useState(emptyPricing);
 
@@ -140,7 +140,7 @@ export default function AdminWholesalersPage() {
       setPassword("");
       setReferralCode("");
       setDeadline("");
-      setAdminPrice("0");
+      setAdminPrice("40000");
       setWholesalerPrice("50000");
       setUniversity("");
       setDepartment("");
@@ -180,8 +180,17 @@ export default function AdminWholesalersPage() {
   async function handlePricing() {
     if (!selected) return;
     const num = (v: string) => Math.max(0, Math.round(Number(v) || 0));
-    if ([pricingForm.adminPrice, pricingForm.wholesalerPrice].some((v) => Number(v) < 0)) {
-      toast.error("السعر يجب أن يكون رقماً موجباً");
+    // Each add-on's single field = the student price. Add-ons go 100% to admin (admin === selling)
+    // EXCEPT شال امريكي, where الإدارة always takes 20,000 and the rep keeps the rest.
+    const pricingAddons = Object.fromEntries(
+      (Object.keys(pricingForm.addons) as (keyof WholesalerPricingAddons)[]).map((key) => {
+        const price = num(pricingForm.addons[key].selling);
+        const admin = key === "american_shawl" ? Math.min(20000, price) : price;
+        return [key, { admin, selling: price }];
+      })
+    ) as unknown as WholesalerPricingAddons;
+    if (num(pricingForm.wholesalerPrice) < num(pricingForm.adminPrice)) {
+      toast.error("سعر الطالب يجب أن يساوي أو يتجاوز مبلغ الإدارة");
       return;
     }
     setSubmitting(true);
@@ -189,19 +198,7 @@ export default function AdminWholesalersPage() {
       await updateWholesalerPricing(selected.id, {
         adminPrice: num(pricingForm.adminPrice),
         wholesalerPrice: num(pricingForm.wholesalerPrice),
-        pricingAddons: {
-          royal_sash: num(pricingForm.royal_sash),
-          royal_cap_when_normal_sash: num(pricingForm.royal_cap_when_normal_sash),
-          extra_cap_embroidery: num(pricingForm.extra_cap_embroidery),
-          robe_sleeve_each: num(pricingForm.robe_sleeve_each),
-          american_shawl: num(pricingForm.american_shawl),
-          piece_sash_normal: num(pricingForm.piece_sash_normal),
-          piece_sash_royal: num(pricingForm.piece_sash_royal),
-          piece_cap_normal: num(pricingForm.piece_cap_normal),
-          piece_cap_royal: num(pricingForm.piece_cap_royal),
-          piece_robe_normal: num(pricingForm.piece_robe_normal),
-          piece_robe_royal: num(pricingForm.piece_robe_royal),
-        },
+        pricingAddons,
       });
       toast.success("تم تحديث التسعيرة");
       setPricingOpen(false);
@@ -314,19 +311,6 @@ export default function AdminWholesalersPage() {
                     <span className="text-[var(--shop-muted)]">الموعد: </span>
                     {formatDateIQ(w.deadline)}
                   </p>
-                  <p className="mt-1 text-sm">
-                    <span className="text-[var(--shop-muted)]">سعر المدير: </span>
-                    <span className="tabular-nums" dir="ltr">{formatIQD(w.adminPrice)}</span>
-                    <span className="mx-2 text-ink/30">|</span>
-                    <span className="text-[var(--shop-muted)]">سعر الممثل والطلاب: </span>
-                    <span className="tabular-nums" dir="ltr">{formatIQD(w.wholesalerPrice)}</span>
-                  </p>
-                  <p className="mt-1 text-sm">
-                    <span className="text-[var(--shop-muted)]">المستحق (الفرق): </span>
-                    <span className="font-semibold tabular-nums text-orange-ink" dir="ltr">
-                      {formatIQD(w.earnedCommission ?? 0)}
-                    </span>
-                  </p>
                   <p className="mt-2 break-all rounded-lg bg-ink/[0.04] px-2.5 py-1.5 text-xs text-ink-soft" dir="ltr">
                     {w.referralUrl || getJoinUrl(w.referralCode)}
                   </p>
@@ -336,10 +320,10 @@ export default function AdminWholesalersPage() {
                     text={w.referralUrl || getJoinUrl(w.referralCode)}
                   />
                   <Link
-                    href={`/admin/wholesalers/${w.id}/students`}
+                    href={`/staff/wholesalers/${w.id}/students`}
                     className="inline-flex min-h-11 items-center justify-center rounded-full border border-ink/15 bg-white/60 px-5 text-sm font-semibold text-ink transition-all duration-200 hover:border-orange/40 hover:bg-white hover:text-orange-ink"
                   >
-                    عرض الطلاب
+                    الطلبات والحساب
                   </Link>
                   <Button
                     variant="ghost"
@@ -374,17 +358,7 @@ export default function AdminWholesalersPage() {
                       setPricingForm({
                         adminPrice: String(w.adminPrice ?? 0),
                         wholesalerPrice: String(w.wholesalerPrice || 50000),
-                        royal_sash: String(w.pricingAddons.royal_sash),
-                        royal_cap_when_normal_sash: String(w.pricingAddons.royal_cap_when_normal_sash),
-                        extra_cap_embroidery: String(w.pricingAddons.extra_cap_embroidery),
-                        robe_sleeve_each: String(w.pricingAddons.robe_sleeve_each),
-                        american_shawl: String(w.pricingAddons.american_shawl),
-                        piece_sash_normal: String(w.pricingAddons.piece_sash_normal),
-                        piece_sash_royal: String(w.pricingAddons.piece_sash_royal),
-                        piece_cap_normal: String(w.pricingAddons.piece_cap_normal),
-                        piece_cap_royal: String(w.pricingAddons.piece_cap_royal),
-                        piece_robe_normal: String(w.pricingAddons.piece_robe_normal),
-                        piece_robe_royal: String(w.pricingAddons.piece_robe_royal),
+                        addons: draftFrom(w.pricingAddons),
                       });
                       setPricingOpen(true);
                     }}
@@ -499,7 +473,7 @@ export default function AdminWholesalersPage() {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <Input
-              label="سعر خاص بالمدير (د.ع)"
+              label="مبلغ الإدارة (د.ع)"
               type="number"
               min={0}
               step={1000}
@@ -509,7 +483,7 @@ export default function AdminWholesalersPage() {
               dir="ltr"
             />
             <Input
-              label="سعر الممثل والطلاب (د.ع)"
+              label="سعر الطالب (د.ع)"
               type="number"
               min={0}
               step={1000}
@@ -545,7 +519,7 @@ export default function AdminWholesalersPage() {
             <h4 className="mb-2 text-sm font-bold text-ink">السعر الأساسي للطقم</h4>
             <div className="grid grid-cols-2 gap-3">
               <Input
-                label="سعر خاص بالمدير (د.ع)"
+                label="مبلغ الإدارة (د.ع)"
                 type="number"
                 min={0}
                 step={1000}
@@ -556,7 +530,7 @@ export default function AdminWholesalersPage() {
                 }
               />
               <Input
-                label="سعر الممثل والطلاب (د.ع)"
+                label="سعر الطالب (د.ع)"
                 type="number"
                 min={0}
                 step={1000}
@@ -568,83 +542,24 @@ export default function AdminWholesalersPage() {
               />
             </div>
             <p className="mt-1.5 text-xs text-ink-soft">
-              سعر المدير خاص لا يراه الممثل أو الطالب · سعر الممثل والطلاب هو السعر الظاهر في طلب
-              الطقم. الفرق بينهما = ربح الممثل المستحق.
+              الممثل يجمع «سعر الطالب» من الطلاب ويسلّم «مبلغ الإدارة» للإدارة؛ الفرق ربح الممثل.
+              (مثال: طالب ٥٠٬٠٠٠ / إدارة ٤٠٬٠٠٠ ← ربح الممثل ١٠٬٠٠٠.)
             </p>
           </div>
 
           <div>
-            <h4 className="mb-2 text-sm font-bold text-ink">اضافات على السعر (للممثل والطلاب)</h4>
-            <div className="space-y-2.5">
-              <PricingAddonRow
-                label="وشاح ملكي"
-                value={pricingForm.royal_sash}
-                onChange={(v) => setPricingForm((f) => ({ ...f, royal_sash: v }))}
-              />
-              <PricingAddonRow
-                label="وشاح عادي + قبعة ملكية"
-                value={pricingForm.royal_cap_when_normal_sash}
-                onChange={(v) =>
-                  setPricingForm((f) => ({ ...f, royal_cap_when_normal_sash: v }))
-                }
-              />
-              <PricingAddonRow
-                label="تطريز القبعة الثاني (الأول مجاني)"
-                value={pricingForm.extra_cap_embroidery}
-                onChange={(v) =>
-                  setPricingForm((f) => ({ ...f, extra_cap_embroidery: v }))
-                }
-              />
-              <PricingAddonRow
-                label="تطريز ردن الروب (لكل ردن · ردنان)"
-                value={pricingForm.robe_sleeve_each}
-                onChange={(v) => setPricingForm((f) => ({ ...f, robe_sleeve_each: v }))}
-              />
-              <PricingAddonRow
-                label="شال امريكي"
-                value={pricingForm.american_shawl}
-                onChange={(v) => setPricingForm((f) => ({ ...f, american_shawl: v }))}
-              />
-            </div>
-          </div>
-
-          <div>
-            <h4 className="mb-2 text-sm font-bold text-ink">أسعار القطع عند الطلب الجزئي</h4>
-            <div className="space-y-2.5">
-              <PricingAddonRow
-                label="وشاح عادي"
-                value={pricingForm.piece_sash_normal}
-                onChange={(v) => setPricingForm((f) => ({ ...f, piece_sash_normal: v }))}
-              />
-              <PricingAddonRow
-                label="وشاح ملكي"
-                value={pricingForm.piece_sash_royal}
-                onChange={(v) => setPricingForm((f) => ({ ...f, piece_sash_royal: v }))}
-              />
-              <PricingAddonRow
-                label="قبعة عادية"
-                value={pricingForm.piece_cap_normal}
-                onChange={(v) => setPricingForm((f) => ({ ...f, piece_cap_normal: v }))}
-              />
-              <PricingAddonRow
-                label="قبعة ملكية"
-                value={pricingForm.piece_cap_royal}
-                onChange={(v) => setPricingForm((f) => ({ ...f, piece_cap_royal: v }))}
-              />
-              <PricingAddonRow
-                label="روب عادي"
-                value={pricingForm.piece_robe_normal}
-                onChange={(v) => setPricingForm((f) => ({ ...f, piece_robe_normal: v }))}
-              />
-              <PricingAddonRow
-                label="روب ملكي"
-                value={pricingForm.piece_robe_royal}
-                onChange={(v) => setPricingForm((f) => ({ ...f, piece_robe_royal: v }))}
-              />
-            </div>
-            <p className="mt-1.5 text-xs text-ink-soft">
-              تُستخدم هذه الأسعار فقط إذا لم يختر الطالب الطقم الكامل.
+            <h4 className="mb-1 text-sm font-bold text-ink">الإضافات الاختيارية</h4>
+            <p className="mb-2 text-xs text-ink-soft">
+              اكتب سعر الطالب لكل بند. كل إضافة (مثل ردن الروب) سعرها كامل يذهب للإدارة فلا يتغيّر ربح الممثل —
+              ما عدا «شال امريكي»: الإدارة تأخذ منه ٢٠٬٠٠٠ فقط والباقي ربح للممثل.
             </p>
+            <div className="mb-2 grid grid-cols-[1fr_130px] gap-2 text-xs font-semibold text-ink-soft"><span>البند</span><span>سعر الطالب</span></div>
+            <div className="space-y-2">
+              {(Object.keys(PRICING_LABELS) as (keyof WholesalerPricingAddons)[]).map((key) => (
+                <SinglePricingRow key={key} label={PRICING_LABELS[key]} value={pricingForm.addons[key].selling}
+                  onChange={(value) => setPricingForm((form) => ({ ...form, addons: { ...form.addons, [key]: { admin: value, selling: value } } }))} />
+              ))}
+            </div>
           </div>
         </div>
       </Modal>
@@ -773,31 +688,14 @@ export default function AdminWholesalersPage() {
   );
 }
 
-/** One «اضافات على السعر» row: an Arabic label + a compact د.ع amount field. */
-function PricingAddonRow({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
+function SinglePricingRow({ label, value, onChange }: {
+  label: string; value: string;
+  onChange: (value: string) => void;
 }) {
   return (
-    <label className="flex items-center justify-between gap-3 rounded-xl border border-line bg-beige px-3 py-2">
+    <div className="grid grid-cols-[1fr_130px] items-center gap-2 rounded-xl border border-line bg-beige px-3 py-2">
       <span className="text-sm text-ink">{label}</span>
-      <span className="flex items-center gap-1.5">
-        <input
-          type="number"
-          min={0}
-          step={1000}
-          dir="ltr"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="w-28 rounded-lg border border-line bg-white px-2.5 py-1.5 text-end text-sm tabular-nums text-ink focus:border-orange-ink focus:outline-none focus:ring-2 focus:ring-orange-ink/15"
-        />
-        <span className="text-xs text-ink-soft">د.ع</span>
-      </span>
-    </label>
+      <input type="number" min={0} step={1000} dir="ltr" value={value} onChange={(e) => onChange(e.target.value)} className="w-full rounded-lg border border-line bg-white px-2 py-1.5 text-end text-sm tabular-nums text-ink focus:border-orange-ink focus:outline-none" />
+    </div>
   );
 }

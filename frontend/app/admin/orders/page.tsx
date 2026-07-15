@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { getApiErrorMessage } from "@/lib/api";
 import {
@@ -50,6 +51,8 @@ const SOURCE_TABS: { value: OrderSource; label: string; subtitle: string }[] = [
   { value: "retail", label: "طلبات التجزئة", subtitle: "طلبات الطلاب المستقلين" },
   { value: "wholesaler", label: "طلبات الممثلين", subtitle: "طلبات عبر ممثلي الجامعات" },
 ];
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -805,12 +808,18 @@ function OrdersSection({
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function AdminOrdersPage() {
+function AdminOrdersContent() {
+  const searchParams = useSearchParams();
+  const requestedWholesaler = searchParams.get("wholesaler") || "";
+  const initialWholesaler = UUID_RE.test(requestedWholesaler) ? requestedWholesaler : "";
+
   // Source tab
-  const [activeSource, setActiveSource] = useState<OrderSource>("retail");
+  const [activeSource, setActiveSource] = useState<OrderSource>(
+    initialWholesaler ? "wholesaler" : "retail"
+  );
 
   // Shared filters (per-source)
-  const [wholesalerId, setWholesalerId] = useState("");
+  const [wholesalerId, setWholesalerId] = useState(initialWholesaler);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
@@ -917,9 +926,17 @@ export default function AdminOrdersPage() {
   }, [viewMode, wholesalerId, batchId, status, dateFrom, dateTo, typeFilter, zoneFilter, approvalFilter]);
 
   useEffect(() => {
-     
     load();
   }, [load]);
+
+  // Internal links from a representative's student list land directly on the
+  // representative-orders tab and keep working on client-side navigation.
+  useEffect(() => {
+    if (!UUID_RE.test(requestedWholesaler)) return;
+    setActiveSource("wholesaler");
+    setWholesalerId(requestedWholesaler);
+    setBatchId("");
+  }, [requestedWholesaler]);
 
   // Live polling — refresh every 12 s silently
   usePolling(() => load(true), 12000);
@@ -970,6 +987,7 @@ export default function AdminOrdersPage() {
       toast.error(getApiErrorMessage(e, "تعذر الموافقة على الطلب"));
     }
   }
+
 
   function handleRejectBundle(cgId: string) {
     setRejectTarget(cgId);
@@ -1445,5 +1463,20 @@ export default function AdminOrdersPage() {
       />
 
     </div>
+  );
+}
+
+export default function AdminOrdersPage() {
+  return (
+    <Suspense
+      fallback={
+        <div dir="rtl" lang="ar" className="space-y-6">
+          <PageHeader title="الطلبات" subtitle="جارٍ تجهيز فلاتر الطلبات…" />
+          <OrdersTableSkeleton />
+        </div>
+      }
+    >
+      <AdminOrdersContent />
+    </Suspense>
   );
 }

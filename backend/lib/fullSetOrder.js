@@ -30,28 +30,39 @@ const DEFAULT_PACKAGE_PRICE = 50000;
 
 // ── «التسعيرة» (per-wholesaler pricing) ──────────────────────────────────────
 // Defaults seeded by migration 032; merged here too so a missing/legacy key is safe.
-// All amounts are IQD surcharges added ONLY to the student-facing price.
+// Every amount is an immutable admin/selling pair. The difference belongs to the rep.
 const DEFAULT_ADDONS = {
-  royal_sash: 15000,                 // وشاح ملكي
-  royal_cap_when_normal_sash: 3000,  // وشاح عادي + قبعة ملكية
-  extra_cap_embroidery: 3000,        // تطريز القبعة الثاني (الأول مجاني)
-  robe_sleeve_each: 5000,            // تطريز ردن الروب — لكل ردن (حد أقصى ردنان)
-  american_shawl: 25000,             // شال امريكي
-  piece_sash_normal: 20000,
-  piece_sash_royal: 25000,
-  piece_cap_normal: 15000,
-  piece_cap_royal: 20000,
-  piece_robe_normal: 25000,
-  piece_robe_royal: 25000,
+  royal_sash: { admin: 15000, selling: 15000 },
+  royal_cap_when_normal_sash: { admin: 3000, selling: 3000 },
+  extra_cap_embroidery: { admin: 3000, selling: 3000 },
+  robe_sleeve_each: { admin: 5000, selling: 5000 },
+  american_shawl: { admin: 20000, selling: 25000 },
+  piece_sash_normal: { admin: 20000, selling: 20000 },
+  piece_sash_royal: { admin: 25000, selling: 25000 },
+  piece_cap_normal: { admin: 15000, selling: 15000 },
+  piece_cap_royal: { admin: 20000, selling: 20000 },
+  piece_robe_normal: { admin: 25000, selling: 25000 },
+  piece_robe_royal: { admin: 25000, selling: 25000 },
 };
 
 function sanitizeAddons(raw) {
   const out = {};
   for (const k of Object.keys(DEFAULT_ADDONS)) {
-    const n = Number(raw?.[k]);
-    out[k] = Number.isFinite(n) && n >= 0 ? Math.round(n) : DEFAULT_ADDONS[k];
+    const legacy = Number(raw?.[k]);
+    const admin = Number(raw?.[k]?.admin);
+    const selling = Number(raw?.[k]?.selling);
+    out[k] = {
+      admin: Number.isFinite(admin) && admin >= 0 ? Math.round(admin)
+        : Number.isFinite(legacy) && legacy >= 0 ? Math.round(legacy) : DEFAULT_ADDONS[k].admin,
+      selling: Number.isFinite(selling) && selling >= 0 ? Math.round(selling)
+        : Number.isFinite(legacy) && legacy >= 0 ? Math.round(legacy) : DEFAULT_ADDONS[k].selling,
+    };
   }
   return out;
+}
+
+function addonAmounts(addons, side) {
+  return Object.fromEntries(Object.entries(addons).map(([key, pair]) => [key, pair[side]]));
 }
 
 // Load a rep's effective pricing. adminPrice/wholesalerPrice are base طقم prices;
@@ -244,22 +255,24 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
   const pricing = await loadWholesalerPricing(student.wholesaler_id);
   const isFullPackage = selectedSet.has('sash') && selectedSet.has('robe') && selectedSet.has('cap');
   const fullPackageBase = pricing.wholesalerPrice > 0 ? pricing.wholesalerPrice : DEFAULT_PACKAGE_PRICE;
+  const sellingAddons = addonAmounts(pricing.addons, 'selling');
+  const adminAddons = addonAmounts(pricing.addons, 'admin');
   const itemBasePrice = isFullPackage
     ? { sash: fullPackageBase, robe: 0, cap: 0 }
     : {
         sash: selectedSet.has('sash')
-          ? (sashType === 'ملكي' ? pricing.addons.piece_sash_royal : pricing.addons.piece_sash_normal)
+          ? (sashType === 'ملكي' ? sellingAddons.piece_sash_royal : sellingAddons.piece_sash_normal)
           : 0,
         cap: selectedSet.has('cap')
-          ? (capType === 'ملكي' ? pricing.addons.piece_cap_royal : pricing.addons.piece_cap_normal)
+          ? (capType === 'ملكي' ? sellingAddons.piece_cap_royal : sellingAddons.piece_cap_normal)
           : 0,
         robe: selectedSet.has('robe')
           ? (sashType === 'ملكي' || capType === 'ملكي'
-              ? pricing.addons.piece_robe_royal
-              : pricing.addons.piece_robe_normal)
+              ? sellingAddons.piece_robe_royal
+              : sellingAddons.piece_robe_normal)
           : 0,
       };
-  const addonLines = addonLinesFor(pricing.addons, {
+  const addonLines = addonLinesFor(sellingAddons, {
     selectedPieces, capEmbCount, robeSleeveCount, shawlEnabled, isFullPackage, sashType, capType,
   });
   const addonByType = { sash: 0, robe: 0, cap: 0 };
@@ -270,9 +283,25 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
     cap: itemBasePrice.cap + addonByType.cap,
   };
   const totalPrice = selectedPieces.reduce((s, type) => s + itemPrice[type], 0);
-  const itemCost = { sash: 0, robe: 0, cap: 0 };
-  // The legacy admin cost is still a bundle-level private number; keep it once per group.
-  itemCost[selectedPieces[0]] = pricing.adminPrice;
+  const adminBase = isFullPackage
+    ? { sash: pricing.adminPrice, robe: 0, cap: 0 }
+    : {
+        sash: selectedSet.has('sash') ? (sashType === 'ملكي' ? adminAddons.piece_sash_royal : adminAddons.piece_sash_normal) : 0,
+        cap: selectedSet.has('cap') ? (capType === 'ملكي' ? adminAddons.piece_cap_royal : adminAddons.piece_cap_normal) : 0,
+        robe: selectedSet.has('robe') ? (sashType === 'ملكي' || capType === 'ملكي' ? adminAddons.piece_robe_royal : adminAddons.piece_robe_normal) : 0,
+      };
+  // Add-ons use each rep's per-add-on ADMIN value as the admin due. Only شال امريكي carries a rep
+  // margin (admin 20,000 < selling); all other add-ons are configured admin == selling (100% admin).
+  const adminAddonLines = addonLinesFor(adminAddons, {
+    selectedPieces, capEmbCount, robeSleeveCount, shawlEnabled, isFullPackage, sashType, capType,
+  });
+  const adminAddonByType = { sash: 0, robe: 0, cap: 0 };
+  for (const line of adminAddonLines) adminAddonByType[line.type] += line.amount;
+  const itemCost = {
+    sash: adminBase.sash + adminAddonByType.sash,
+    robe: adminBase.robe + adminAddonByType.robe,
+    cap: adminBase.cap + adminAddonByType.cap,
+  };
 
   const itemFlags = {
     sash: { has_embroidery: sashHasEmb, status: sashHasDesign ? 'design_complete' : 'preparing' },
@@ -374,7 +403,8 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
         await client.query(
           `UPDATE orders SET price=$1, cost=$2, batch_id=$3, package_id=$4, checkout_group_id=$5,
              status=$6, has_embroidery=$7, needs_pressing=$8, measurements=$9, notes=$10,
-             wholesaler_approval='pending', wholesaler_reject_reason=NULL
+             wholesaler_approval='pending', wholesaler_reject_reason=NULL,
+             returned_to_customer=FALSE, returned_reason=NULL
            WHERE id=$11`,
           [itemPrice[type], itemCost[type], resolvedBatchId, package_id, cgId, flags.status, flags.has_embroidery, needsPressing, measurementsJson, groupNotes, oid]
         );
@@ -400,20 +430,24 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
       const baseLine = {
         label: isFullPackage && type === 'sash' ? 'طقم كامل' : `قطعة: ${pieceName}`,
         price: itemBasePrice[type],
+        admin_price: adminBase[type],
       };
       const lines = [
         baseLine,
-        ...specLines[type].map((l) => ({ ...l, price: 0 })),
+        ...specLines[type].map((l) => ({ ...l, price: 0, admin_price: 0 })),
         ...addonLines
           .filter((l) => l.type === type)
-          .map((l) => ({ label: l.label, price: l.amount })),
+          .map((l) => ({
+            label: l.label, price: l.amount,
+            admin_price: adminAddonLines.find((a) => a.type === type && a.label === l.label)?.amount || 0,
+          })),
       ];
       for (const it of lines) {
         await client.query(
-          `INSERT INTO order_items (order_id, group_id, option_id, label_snapshot, price_snapshot, qty,
+          `INSERT INTO order_items (order_id, group_id, option_id, label_snapshot, price_snapshot, admin_price_snapshot, qty,
                                     customer_image_url, customer_text)
-           VALUES ($1,NULL,NULL,$2,$3,1,$4,$5)`,
-          [oid, it.label, it.price || 0, it.customer_image_url || null, it.customer_text || null]
+           VALUES ($1,NULL,NULL,$2,$3,$4,1,$5,$6)`,
+          [oid, it.label, it.price || 0, it.admin_price || 0, it.customer_image_url || null, it.customer_text || null]
         );
       }
       ids[type] = oid;

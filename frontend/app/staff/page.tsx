@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { OrderCard } from "@/components/staff/OrderCard";
 import { StaffAttendancePanel } from "@/components/staff/StaffAttendancePanel";
@@ -865,15 +866,23 @@ function MonitorDashboard({
 
 function StaffPageContent() {
   const { user, loading } = useRequireAuth(["staff", "admin"]);
+  const router = useRouter();
 
-  if (loading || !user) {
+  const myTypes = user?.staff_types ?? (user?.staff_type ? [user.staff_type] : []);
+  const isPureTailor =
+    user?.role === "staff" && myTypes.length > 0 && myTypes.every((type) => type === "tailor");
+
+  useEffect(() => {
+    if (!loading && isPureTailor) router.replace("/staff/tailor");
+  }, [isPureTailor, loading, router]);
+
+  if (loading || !user || isPureTailor) {
     return <PageLoader />;
   }
 
   // Multi-role staff: staff_types[] is authoritative (the backend scopes off the union, not the
   // primary scalar). Landing on the wrong home was a real bug — a designer+manager lost the
   // dashboard, a tailor+embroiderer hit «الدور غير محدد».
-  const myTypes = user.staff_types ?? (user.staff_type ? [user.staff_type] : []);
   const isManager = user.role === "admin" || myTypes.includes("manager");
   const showSourceFilter = isManager || user.order_scope === "both";
 

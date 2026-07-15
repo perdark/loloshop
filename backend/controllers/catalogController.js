@@ -31,6 +31,28 @@ async function priceRoleForUser(user, override) {
   return rows[0]?.wholesaler_id ? 'wholesaler' : 'retail';
 }
 
+// --- Discount visibility gate ---
+// Per-product compare_at_price discounts (the struck old price + «خصم N٪» badge) are
+// shown to customers ONLY while the site-wide promo (site_settings.discount_popup) is
+// live: active === true AND its deadline — if set — hasn't passed. When the promo ends,
+// EVERY product badge hides at once, so "ending the discount" is a single switch and can
+// never go stale per product. Admin catalog views are intentionally NOT gated (they must
+// see/edit the real compare_at_price). Fail-safe: any error / missing setting => not live
+// (discounts hidden), so we never accidentally advertise an expired discount.
+async function isPromoLive() {
+  try {
+    const { rows } = await query(
+      `SELECT value FROM site_settings WHERE key = 'discount_popup'`
+    );
+    const cfg = rows[0] && rows[0].value;
+    if (!cfg || cfg.active !== true) return false;
+    if (cfg.deadline && Date.now() >= new Date(cfg.deadline).getTime()) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // ---------- PUBLIC: full product config for the configurator ----------
 async function getProductFull(req, res) {
   const { id } = req.params;
@@ -51,6 +73,9 @@ async function getProductFull(req, res) {
     return res.status(404).json({ error: 'المنتج غير موجود', code: 'ERR_NOT_FOUND' });
   }
   const row = prod.rows[0];
+
+  // Hide the discount unless the site-wide promo is live (see isPromoLive).
+  if (!(await isPromoLive())) row.compare_at_price = null;
 
   // Enforce audience visibility for non-admin/staff users
   const isPrivileged = req.user && (req.user.role === 'admin' || req.user.role === 'staff');
@@ -188,8 +213,13 @@ async function getShop(req, res) {
     );
     full_set_packages = fs.rows;
   }
+  // Hide every discount unless the site-wide promo is live (see isPromoLive) — one switch.
+  const promoLive = await isPromoLive();
   const by_type = {};
-  products.rows.forEach((p) => (by_type[p.type] ||= []).push(p));
+  products.rows.forEach((p) => {
+    if (!promoLive) p.compare_at_price = null;
+    (by_type[p.type] ||= []).push(p);
+  });
   res.json({ data: { price_role: role, audience, packages, full_set_packages, by_type } });
 }
 

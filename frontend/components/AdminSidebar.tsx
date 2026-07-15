@@ -15,12 +15,14 @@ const navItems: {
 }[] = [
   { href: "/admin", label: "لوحة التحكم", exact: true },
   { href: "/admin/orders", label: "الطلبات", exact: false },
+  { href: "/design-support", label: "أيادي التصميم", exact: false },
   { href: "/admin/custom-order", label: "طلب مخصص", exact: false },
   { href: "/admin/attendance", label: "بصمة الموظفين", exact: false },
   { href: "/admin/wholesalers", label: "الممثلون", exact: false },
   { href: "/admin/products", label: "الكتالوج", exact: false },
   { href: "/admin/packages", label: "باقات VIP", exact: false },
   { href: "/admin/calligraphy", label: "الخط العربي", exact: false },
+  { href: "/admin/workshop", label: "الورشة", exact: false },
   { href: "/staff", label: "الإنتاج ومتابعة الموظفين", exact: false },
 ];
 
@@ -120,7 +122,7 @@ export function AdminSidebar({ user, open, onClose }: AdminSidebarProps) {
         </div>
       </div>
 
-      <nav className="relative flex-1 space-y-1 px-3 py-4">
+      <nav className="relative min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-4">
         {navItems.map((item) => (
           <Link
             key={item.href}

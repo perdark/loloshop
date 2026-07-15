@@ -1,4 +1,4 @@
-const CACHE_VERSION = "loloshop-v1";
+const CACHE_VERSION = "loloshop-v2";
 const OFFLINE_URL = "/offline.html";
 const PRECACHE_URLS = [
   OFFLINE_URL,
@@ -32,6 +32,10 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
+
+  // Never cache local development chunks. Next's dev chunk URLs can remain stable
+  // while their contents change, which otherwise leaves localhost showing an old UI.
+  if (url.hostname === "localhost" || url.hostname === "127.0.0.1") return;
 
   if (request.mode === "navigate") {
     event.respondWith(

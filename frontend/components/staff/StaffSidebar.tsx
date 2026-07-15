@@ -177,12 +177,21 @@ export function StaffSidebar({ user, open, onClose }: StaffSidebarProps) {
         : [];
   const canCalligraphy =
     isAdmin || myTypes.includes("manager") || myTypes.includes("designer");
-  const productionLinks = canCalligraphy
+  const productionAndToolLinks = canCalligraphy
     ? [
         ...baseLinks,
         { href: "/staff/calligraphy", label: "الخط العربي", icon: iconPen(), prefix: true },
       ]
     : baseLinks;
+  const canSeeWholesalers =
+    user.role === "staff" &&
+    (myTypes.includes("manager") || user.order_scope === "wholesaler" || user.order_scope === "both");
+  const productionLinks = canSeeWholesalers
+    ? [
+        ...productionAndToolLinks,
+        { href: "/staff/wholesalers", label: "الممثلون", icon: iconUsers(), prefix: true },
+      ]
+    : productionAndToolLinks;
 
   // Staff (not pure admins) track their own salary + activity.
   const links =

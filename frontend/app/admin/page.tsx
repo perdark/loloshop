@@ -3,7 +3,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { toast } from "sonner";
-import { getAdminAnalytics, getAdminAccounting, getPendingApprovalCount } from "@/lib/admin";
+import { getAdminAnalytics, getAdminAccounting, getPendingApprovalCount, getVisitorStats, type VisitorStats } from "@/lib/admin";
 import { PromoControl } from "@/components/admin/PromoControl";
 import { MaintenanceControl } from "@/components/admin/MaintenanceControl";
 import { getTailorSummary, type TailorSummary } from "@/lib/staff";
@@ -228,6 +228,7 @@ export default function AdminDashboardPage() {
   // without waiting for a remount.
   const gate = useMoneyGate();
   const [configuredLocal, setConfiguredLocal] = useState(false);
+  const [visitors, setVisitors] = useState<VisitorStats | null>(null);
   const moneyConfigured = gate.configured || configuredLocal;
   const showMoney = gate.revealed;
   const onGateSaved = useCallback(
@@ -260,6 +261,11 @@ export default function AdminDashboardPage() {
     // failure here never blocks the core dashboard.
     try {
       setTailor(await getTailorSummary());
+    } catch {
+      /* leave previous value */
+    }
+    try {
+      setVisitors(await getVisitorStats());
     } catch {
       /* leave previous value */
     }
@@ -382,6 +388,25 @@ export default function AdminDashboardPage() {
         />
         <Figure label="عدد الطلبات" value={String(data.orderCount)} />
       </dl>
+
+      {/* Live storefront visitors — first-party, never money → always visible */}
+      <section className="mt-6 grid grid-cols-3 gap-3">
+        <div className="rounded-2xl border border-line bg-surface p-4 text-center">
+          <p className="flex items-center justify-center gap-1.5 text-xs text-ink-soft">
+            <span className="inline-block h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+            يشاهدون الآن
+          </p>
+          <p className="mt-1 text-2xl font-bold tabular-nums text-ink">{toArabicDigits(visitors?.now ?? 0)}</p>
+        </div>
+        <div className="rounded-2xl border border-line bg-surface p-4 text-center">
+          <p className="text-xs text-ink-soft">زوّار اليوم</p>
+          <p className="mt-1 text-2xl font-bold tabular-nums text-ink">{toArabicDigits(visitors?.today ?? 0)}</p>
+        </div>
+        <div className="rounded-2xl border border-line bg-surface p-4 text-center">
+          <p className="text-xs text-ink-soft">إجمالي الزوّار</p>
+          <p className="mt-1 text-2xl font-bold tabular-nums text-ink">{toArabicDigits(visitors?.total ?? 0)}</p>
+        </div>
+      </section>
 
       {/* First-run nudge to set the gate secret (only when none configured). */}
       {!moneyConfigured && <MoneyGateSetup onSaved={onGateSaved} />}

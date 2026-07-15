@@ -24,6 +24,8 @@ const ROLE_REDIRECT: Record<UserRole, string> = {
   staff: "/staff",
   wholesaler: "/wholesaler",
   retail: "/",
+  worker: "/workshop",
+  design_helper: "/design-support",
 };
 
 export default function RegisterPage() {

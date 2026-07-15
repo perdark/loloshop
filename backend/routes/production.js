@@ -27,6 +27,8 @@ router.post('/orders/:id/revert', c.revert);
 router.post('/orders/:id/return-to-customer', c.returnToCustomer);
 router.post('/orders/:id/claim', c.claim);
 router.post('/orders/:id/release', c.release);
+// Permanent grouped-order deletion is intentionally manager/admin-only.
+router.delete('/orders/:id', requireStaffType(), c.deleteOrder);
 
 // «الفصال» (tailor) — parallel, independent track over RETAIL orders. Permission
 // (tailor staff_type OR manager/admin) is enforced inside each controller.

@@ -6,6 +6,98 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
+## 2026-07-15 — أيادي التصميم desk made REAL (was empty) + committed/pushed the whole workshop/design-team/pricing batch
+
+**Committed + pushed to main → auto-deploys prod.** Migration **064 applied to Neon + verified.** Gates: BE `node --check` 0 · FE `tsc` 0 ·
+`eslint` 0 (6 pre-existing warnings). Verified: controller e2e on the shared DB (claim→ready→reject-reopen→approve→converting, self-cleaned)
++ **browser** as محمد هيثم (247 real jobs list, job modal with real spec + upload + الخط العربي, calligraphy tool loads for design_helper,
+console clean).
+
+**Why.** The أيادي التصميم `/d/` desk was **structurally empty** — its job board read the dead `designs` table (retail Fabric designer
+removed 2026-06-20; 0 rows, nothing writes it). User's model: **محمد هيثم = a mini production-manager over his OWN design sub-team**; his
+designers work the real retail orders + calligraphy; محمد هيثم reviews/approves like a manager sees staff; **admin sees the team as ONE unit
+via محمد هيثم**, not each sub-designer (design_helper role stays out of the normal staff surface — that isolation was already right).
+
+**What changed.** Re-pointed the desk from `designs` → **real retail orders at `design_complete`** (design_id NULL, has_embroidery, not
+returned — 247 jobs: sash/cap/robe/shawl, same set the staff designer sees).
+- **Migration 064** (`db/migrations/064_design_team_orders.sql` + schema.sql mirror): re-key `design_team_tasks` PK from `design_id →
+  designs(id)` to `order_id → orders(id)` (table was empty → clean drop+recreate).
+- **`designTeamController.js`**: `JOB_SELECT` now reads orders + `order_items` typed-spec lines (label/text/photo, allow-listed — no
+  price/phone/PII) + `final_design_url`; jobs keyed on order_id; new `lockRetailPendingOrder`; **new `uploadFinalDesign`** (helper/lead
+  uploads the artwork onto the order, same storage as staff `/final-design`). **Approve → order advances `design_complete → converting`**
+  (into the normal pipeline, exactly like the staff designer). **Reject = reopen the task for the helper with a note; the order is NOT
+  touched** (internal rework, not a send-back to the student).
+- **`routes/designTeam.js`**: `:designId`→`:orderId`, added `POST /jobs/:orderId/final-design`.
+- **Calligraphy for the team was ALREADY wired** (`routes/calligraphy.js allowCalligraphyUser` allows active `design_helper`). Added the
+  frontend reach: `app/design-support/calligraphy/page.tsx` + «الخط العربي» links in the desk header and job modal.
+- **Frontend** `lib/design-team.ts` (new Job shape: specLines + finalDesignUrl + rich `student` + `uploadDesignTeamFinal`) +
+  `app/design-support/page.tsx` (spec + photos + final-design upload/replace + calligraphy link; lead sees «اعتماد وإرسال للتحويل» /
+  «إعادته للعضو»). Per user: **student search box** (name / university / انستغرام / phone) + a **«معلومات الطالب» panel** in each job —
+  full name, **Instagram (linked, from `students.instagram_username` or the bundle's `checkout_groups`)**, phone (tel:), gender, governorate,
+  event date, notes. The desk is now intentionally NOT PII-lean (the team contacts students to confirm designs).
+
+**This push also ships everything previously uncommitted:** the الورشة/Team-B workshop module (060–063), dual admin/selling pricing
+(`fullSetOrder.js` + `admin_price_snapshot`), the 2026-07-11 order-actions/rep-pricing/money-reveal/visitors batch, and staff/admin edits.
+Reviewed pre-push (critic): no CRITICAL/HIGH; portals fail-closed + timing-safe (`lib/secretCompare.js`), ledgers frozen-rate, SQL
+parameterized.
+
+### Open follow-ups
+- **⚠️ VPS `.env` (prod) MUST get the portal keys or the secret URLs 404 (fail-closed):** `DESIGN_TEAM_PORTAL_KEY`, `WORKSHOP_PORTAL_KEY`,
+  confirm `STAFF_PORTAL_KEY`, `MONEY_GATE_SECRET`, `OPENROUTER_API_KEY` (calligraphy), then `pm2 restart`. Migrations 060–064 are already on
+  the shared Neon DB (dev+prod share it).
+- **The design desk shows ALL retail `design_complete` has_embroidery orders (sash+cap+robe+shawl, 247)** — same set the staff `designer`
+  queue shows. Both systems can see the same order (pre-existing overlap; admin decides who works it). If محمد's desk should be sash-only,
+  add `AND p.type='sash'` to `JOB_WHERE`.
+- **NOT fixed (flagged, user-scoped out):** workshop `myProduction` self-report has no `qty` upper bound (`validatePiece`) — a worker could
+  inflate their own payable. 3-line cap when wanted.
+- **Junk left untracked (excluded from the commit):** `voice_01-07-2026_20-02-38`, `design-mockups/`, `STAFF_ADMIN_READINESS.md`.
+
+---
+
+## 2026-07-10 — NEW «الورشة / Team B» module: bulk piecework production + wage ledger (standalone, no Team-A handoff)
+
+**Uncommitted on main. NOT deployed.** Migration **060 applied to Neon + verified** (dev+prod share one DB). Gates green: BE `node --check`
+0 (2 files) · FE `tsc` 0 · `eslint` 0. **Verified live end-to-end**: backend controller e2e on Neon **22/22** (self-cleaned) + HTTP smoke
+(all workshop routes 200; portal key-gate 200/404; auth 401) + **browser** (worker portal + admin overview + run-detail reconciliation,
+console clean). Spec: `docs/superpowers/specs/2026-07-10-workshop-team-b-design.md`. Memory: `project_workshop_team_b`.
+
+**What & why.** LoloShop's garments are physically built by a *second* crew — the **Syrian workshop workers** (حمزة/محمود/بهاء), "Team B" —
+who work in **bulk quantities** and are paid **per piece** (cutting → أوفرلوك/خياطة القبعة → خياطة الروب/تسكير الشال). This is separate from
+"Team A" (the existing `role='staff'` per-order pipeline: محمد عماد embroiderer, ابو عبدو فصال, pressers). Team B can't be modeled by
+`orders.tailor_status` (no quantities/multi-worker/wages). **Scope locked with user: build Team B standalone — it completes its own chain and
+STOPS. NO auto-handoff into Team-A/التطريز (deferred). `orders` untouched.** Primary surface = admin view + **Syrian-dialect (اللهجة السورية)**
+worker screens. Admin is omnipotent.
+
+**Identity.** Workshop workers reuse `users` with a NEW **`role='worker'`** → same JWT/`authRequired`/session layer + a **secret-URL portal, no
+OTP** (mirrors `staffPortalLogin`). ابو عبدو = his existing `staff` user *linked* into the roster (no role change, فصال screen untouched); his
+cutting is recorded on his behalf. `workshop_workers.is_lead` (حمزة) may start runs + record cut qty + record on behalf.
+
+**Backend.** Migration `060_workshop.sql` (mirrored in `db/schema.sql`): `worker` enum value + 6 tables `workshop_{workers,piece_rates,runs,
+assignments,ledger,payments}` + enums `workshop_run_source`/`workshop_ledger_kind`. NEW `controllers/workshopController.js` + `routes/workshop.js`
+mounted at `/api/workshop` in `server.js`. Ledger is **append-only with the rate FROZEN per row** (rate edits never rewrite history);
+`completed = SUM(ledger completion)`, `balance = Σamount − Σpayments`. Reconciliation per run/op: assigned/completed/damaged/remaining/unassigned +
+warnings (over-assigned, over-completed, cut≠expected). Over-assign is capped server-side. Gating: admin = `requireRole('admin')`; lead-or-admin
+for runs/assign/record; worker-self for `/me/*`.
+
+**Frontend.** NEW `lib/workshop.ts` (typed wrappers) · `app/w/[key]/page.tsx` (Syrian portal login) · `app/workshop/page.tsx` (Syrian worker
+screen: «شغلك» jobs recorder + «حسابك» ledger) · `app/admin/workshop/page.tsx` (admin: نظرة عامة / الدفعات / العمّال / الأسعار tabs — runs,
+per-op reconciliation, assign, record-on-behalf, workers CRUD + link-staff-for-ابو عبدو, rates matrix, payments). Sidebar link «الورشة» added.
+`UserRole` gained `'worker'` (+ role-redirect maps → `/workshop`).
+
+**⚠️ Env needed.** `WORKSHOP_PORTAL_KEY` was added to **local** `backend/.env` → worker portal = **`/w/d23ddc1bc90e01617496`**. **Set it in prod
+`.env` on the VPS + `pm2 restart`** or the portal 404s (fail-closed, like `STAFF_PORTAL_KEY`).
+
+### Open follow-ups
+- **Demo data left in the shared DB** (I seeded it for the browser shots, then **did NOT delete it** because live testing was happening):
+  workers **«حمزة (تجريبي)» / «محمود (تجريبي)»**, run **«دفعة دابي (تجريبية)»**, and robe rates (cut 500 / overlock 300 / robe_sew 1000).
+  Delete the «(تجريبي)» worker + «(تجريبية)» run from the العمّال/الدفعات tabs when done. **Also present (NOT mine):** the real **ابو عبدو**
+  staff user is linked as a workshop **lead** (created during live testing via the «ربط موظف» flow — left in place, it's real/intentional).
+- **Not committed / not deployed.** Run `next build` before deploy (dev servers left up: BE :4000, FE :3000). Seed not updated for 060.
+- **Rates/operations to confirm with user:** real per-piece wages, exact operation→product chains, محمود/بهاء split (all admin-editable now).
+- Deferred by design: the Team-B → Team-A (التطريز) handoff. Wire later if wanted (spec §6).
+
+---
+
 ## 2026-07-08 — شال امريكي optional notes · TV 🎓 reveal now shows money + menu button · home reverted to old cover · **whole 2026-07-07 session COMMITTED + PUSHED (live redeploy)**
 
 **Committed + pushed to main → auto-deploys prod.** This shipped the entire previously-uncommitted 2026-07-07 session (money-gate,

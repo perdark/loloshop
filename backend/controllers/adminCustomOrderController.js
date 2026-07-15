@@ -6,6 +6,7 @@ const { persistFullSetOrder, loadWholesalerPricing } = require('../lib/fullSetOr
 const { setBundleApproval } = require('../lib/orderApproval');
 
 const SALT_ROUNDS = 10;
+const sellingAddons = (addons) => Object.fromEntries(Object.entries(addons).map(([key, pair]) => [key, pair.selling]));
 
 async function customOrderConfig(req, res) {
   const [packages, wholesalers] = await Promise.all([
@@ -31,14 +32,14 @@ async function customOrderConfig(req, res) {
       name: row.name,
       university_name: row.university_name,
       department: row.department,
-      pricing: { base: p.wholesalerPrice, addons: p.addons },
+      pricing: { base: p.wholesalerPrice, addons: sellingAddons(p.addons) },
     });
   }
 
   res.json({
     data: {
       packages: packages.rows,
-      pricing: { base: 0, addons: (await loadWholesalerPricing(null)).addons },
+      pricing: { base: 0, addons: sellingAddons((await loadWholesalerPricing(null)).addons) },
       wholesalers: reps,
     },
   });

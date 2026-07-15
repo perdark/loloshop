@@ -1335,7 +1335,10 @@ async function repFullSetContext(req, res) {
     packages = pk.rows;
     // Rep/student-facing pricing only (base + add-ons) — never the admin-private price.
     const p = await loadWholesalerPricing(student.wholesaler_id);
-    pricing = { base: p.wholesalerPrice, addons: p.addons };
+    pricing = {
+      base: p.wholesalerPrice,
+      addons: Object.fromEntries(Object.entries(p.addons).map(([key, pair]) => [key, pair.selling])),
+    };
     if (approved) existing = await readFullSetOrder(student.id);
     const ap = await query(
       `SELECT o.wholesaler_approval, o.wholesaler_reject_reason

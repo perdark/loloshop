@@ -21,6 +21,7 @@ import {
   confirmDelivery,
   revertOrder,
   returnOrderToCustomer,
+  deleteProductionOrder,
   claimOrder,
   releaseOrder,
   uploadFinalDesign,
@@ -289,7 +290,7 @@ function IntakeCard({
                 href={`https://instagram.com/${intake.instagram_username}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="font-medium text-orange-ink underline underline-offset-2"
+                className="inline-flex min-h-11 items-center font-medium text-orange-ink underline underline-offset-2"
                 dir="ltr"
               >
                 @{intake.instagram_username}
@@ -300,15 +301,15 @@ function IntakeCard({
         {phone1 && (
           <div className="flex justify-between gap-4 border-b border-orange-ink/10 pb-2.5">
             <dt className="text-muted">الهاتف الأول</dt>
-            <dd className="flex gap-2">
-              <a href={`tel:+${phone1}`} className="font-medium text-ink tabular-nums" dir="ltr">
+            <dd className="flex flex-wrap items-center gap-2">
+              <a href={`tel:+${phone1}`} className="inline-flex min-h-11 items-center font-medium text-ink tabular-nums" dir="ltr">
                 +{phone1}
               </a>
               <a
                 href={`https://wa.me/${phone1}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="rounded-full bg-[#25D366]/15 px-2 py-0.5 text-xs font-semibold text-[#128C7E]"
+                className="inline-flex min-h-11 items-center rounded-full bg-[#25D366]/15 px-3 py-1 text-xs font-semibold text-[#128C7E]"
               >
                 واتساب
               </a>
@@ -318,15 +319,15 @@ function IntakeCard({
         {phone2 && (
           <div className="flex justify-between gap-4 border-b border-orange-ink/10 pb-2.5">
             <dt className="text-muted">الهاتف الثاني</dt>
-            <dd className="flex gap-2">
-              <a href={`tel:+${phone2}`} className="font-medium text-ink tabular-nums" dir="ltr">
+            <dd className="flex flex-wrap items-center gap-2">
+              <a href={`tel:+${phone2}`} className="inline-flex min-h-11 items-center font-medium text-ink tabular-nums" dir="ltr">
                 +{phone2}
               </a>
               <a
                 href={`https://wa.me/${phone2}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="rounded-full bg-[#25D366]/15 px-2 py-0.5 text-xs font-semibold text-[#128C7E]"
+                className="inline-flex min-h-11 items-center rounded-full bg-[#25D366]/15 px-3 py-1 text-xs font-semibold text-[#128C7E]"
               >
                 واتساب
               </a>
@@ -684,14 +685,18 @@ function ProductionOrderDetailContent() {
   const [rejectReason, setRejectReason] = useState("");
   const [rejectSubmitting, setRejectSubmitting] = useState(false);
 
-  // Revert confirm modal
+  // Revert to the previous production stage
   const [revertOpen, setRevertOpen] = useState(false);
   const [revertSubmitting, setRevertSubmitting] = useState(false);
 
-  // «إرجاع للطالب» — return a retail order to the student to edit
+  // «إرجاع للزبون لتعديله» — return an early-stage order to the student to edit
   const [returnOpen, setReturnOpen] = useState(false);
   const [returnReason, setReturnReason] = useState("");
   const [returnSubmitting, setReturnSubmitting] = useState(false);
+
+  // «حذف الطلب» — permanent delete (all staff), confirm dialog
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false);
 
   // Delivery confirmation modal (ready → delivered)
   const [deliverOpen, setDeliverOpen] = useState(false);
@@ -811,6 +816,23 @@ function ProductionOrderDetailContent() {
     }
   }
 
+  async function handleDelete() {
+    if (!detail) return;
+    setDeleteSubmitting(true);
+    try {
+      await deleteProductionOrder(detail.order.id);
+      toast.success("تم حذف الطلب نهائياً");
+      setDeleteOpen(false);
+      // The order no longer exists — invalidate the App Router cache and leave the page.
+      router.refresh();
+      router.push("/staff/queue");
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "تعذر حذف الطلب"));
+    } finally {
+      setDeleteSubmitting(false);
+    }
+  }
+
   async function handleRevert() {
     if (!detail) return;
     setRevertSubmitting(true);
@@ -820,12 +842,10 @@ function ProductionOrderDetailContent() {
         `تم الإرجاع إلى: ${ORDER_STATUS_LABELS[updated.status as keyof typeof ORDER_STATUS_LABELS] ?? updated.status}`
       );
       setRevertOpen(false);
-      // Invalidate App Router cache before navigating.
       router.refresh();
       router.push("/staff");
     } catch (err) {
       toast.error(getApiErrorMessage(err, "تعذر إرجاع الطلب"));
-      setRevertOpen(false);
     } finally {
       setRevertSubmitting(false);
     }
@@ -878,7 +898,6 @@ function ProductionOrderDetailContent() {
       router.push("/staff");
     } catch (err) {
       toast.error(getApiErrorMessage(err, "تعذر رفض التصميم"));
-      setRejectOpen(false);
     } finally {
       setRejectSubmitting(false);
     }
@@ -963,6 +982,7 @@ function ProductionOrderDetailContent() {
   const showAdvance = !!available_actions.advance;
   const showRevert = !!available_actions.revert;
   const showReturnToCustomer = !!available_actions.return_to_customer;
+  const canDelete = !!available_actions.can_delete;
   const advanceLabel = available_actions.advance?.label ?? "تقدم للمرحلة التالية";
 
   // Approve and advance never apply to the same order, presented as ONE primary button.
@@ -987,8 +1007,8 @@ function ProductionOrderDetailContent() {
         }
       : null;
 
-  // Final design upload — available to every staff member + admin
-  const showFinalDesignUpload = !!user && (user.role === "admin" || user.role === "staff");
+  // Exact mirror of POST /final-design's role guard, supplied by the backend.
+  const showFinalDesignUpload = !!available_actions.can_upload_final_design;
 
   // Show price only when backend returns it (admin + embroiderer)
   const showPrice = typeof order.price === "number" && order.price > 0;
@@ -1245,9 +1265,7 @@ function ProductionOrderDetailContent() {
             )
           )}
 
-          {/* Advance / revert — for the no-zone case (designed sash) + manager fallback.
-              available_actions is backend-gated, so the button shows only when allowed. */}
-          {(showAdvance || showRevert) && (
+          {(showAdvance || showRevert || showReturnToCustomer || canDelete) && (
             <div className="flex flex-col gap-2">
               {showAdvance && (
                 <Button fullWidth loading={actionLoading} onClick={onPrimaryAction}>
@@ -1256,31 +1274,54 @@ function ProductionOrderDetailContent() {
               )}
               {showRevert && (
                 <Button variant="ghost" fullWidth onClick={() => setRevertOpen(true)}>
-                  إرجاع للتعديل
+                  إرجاع للمرحلة السابقة
+                </Button>
+              )}
+              {showReturnToCustomer && (
+                <Button variant="ghost" fullWidth onClick={() => setReturnOpen(true)}>
+                  إرجاع للزبون لتعديله
+                </Button>
+              )}
+              {canDelete && (
+                <Button variant="danger" fullWidth onClick={() => setDeleteOpen(true)}>
+                  حذف الطلب
                 </Button>
               )}
             </div>
           )}
         </div>
 
-        {/* Revert confirm modal (the إرجاع button above triggers it) */}
         <Modal
           open={revertOpen}
           onClose={() => setRevertOpen(false)}
-          title="إرجاع الطلب للتعديل"
+          title="إرجاع الطلب للمرحلة السابقة"
           footer={
             <>
-              <Button variant="ghost" onClick={() => setRevertOpen(false)}>
+              <Button variant="ghost" onClick={() => setRevertOpen(false)}>إلغاء</Button>
+              <Button variant="danger" loading={revertSubmitting} onClick={handleRevert}>تأكيد الإرجاع</Button>
+            </>
+          }
+        >
+          <p className="text-sm text-ink-soft">سيعود الطلب إلى مرحلة الإنتاج السابقة ليُعدّل ثم يُستكمل.</p>
+        </Modal>
+
+        <Modal
+          open={deleteOpen}
+          onClose={() => setDeleteOpen(false)}
+          title="حذف الطلب نهائياً"
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setDeleteOpen(false)}>
                 إلغاء
               </Button>
-              <Button variant="danger" loading={revertSubmitting} onClick={handleRevert}>
-                تأكيد الإرجاع
+              <Button variant="danger" loading={deleteSubmitting} onClick={handleDelete}>
+                تأكيد الحذف
               </Button>
             </>
           }
         >
           <p className="text-sm text-ink-soft">
-            سيتم إرجاع الطلب للمرحلة السابقة. هل أنت متأكد؟
+            سيُحذف الطلب وكل قطعه (الوشاح/الروب/القبعة) نهائياً ولا يمكن التراجع. هل أنت متأكد؟
           </p>
         </Modal>
       </div>
@@ -1332,46 +1373,43 @@ function ProductionOrderDetailContent() {
       )}
 
       {/* ── Primary action — big tap target on mobile ── */}
-      {(showPrimaryAction || showRevert) && (
-        <div className="mb-4 flex flex-col gap-2 sm:hidden">
-          {showPrimaryAction && (
-            <Button
-              fullWidth
-              loading={actionLoading}
-              onClick={onPrimaryAction}
-            >
-              {primaryLabel}
-            </Button>
-          )}
-          {canReject && (
-            <Button
-              variant="danger"
-              fullWidth
-              loading={actionLoading}
-              onClick={() => setRejectOpen(true)}
-            >
-              رفض التصميم
-            </Button>
-          )}
-          {showRevert && (
-            <Button
-              variant="ghost"
-              fullWidth
-              onClick={() => setRevertOpen(true)}
-            >
-              إرجاع للتعديل
-            </Button>
-          )}
-          {showReturnToCustomer && (
-            <Button
-              variant="ghost"
-              fullWidth
-              onClick={() => setReturnOpen(true)}
-            >
-              إرجاع للطالب لتعديله
-            </Button>
-          )}
-        </div>
+      {(showPrimaryAction || canReject || showRevert || showReturnToCustomer || canDelete) && (
+      <div className="mb-4 flex flex-col gap-2 sm:hidden">
+        {showPrimaryAction && (
+          <Button
+            fullWidth
+            loading={actionLoading}
+            onClick={onPrimaryAction}
+          >
+            {primaryLabel}
+          </Button>
+        )}
+        {canReject && (
+          <Button
+            variant="danger"
+            fullWidth
+            loading={actionLoading}
+            onClick={() => setRejectOpen(true)}
+          >
+            رفض التصميم
+          </Button>
+        )}
+        {showRevert && (
+          <Button variant="ghost" fullWidth onClick={() => setRevertOpen(true)}>
+            إرجاع للمرحلة السابقة
+          </Button>
+        )}
+        {showReturnToCustomer && (
+          <Button variant="ghost" fullWidth onClick={() => setReturnOpen(true)}>
+            إرجاع للزبون لتعديله
+          </Button>
+        )}
+        {canDelete && (
+          <Button variant="danger" fullWidth onClick={() => setDeleteOpen(true)}>
+            حذف الطلب
+          </Button>
+        )}
+      </div>
       )}
 
       {/* Final design upload — single instance, visible at all breakpoints */}
@@ -1420,7 +1458,7 @@ function ProductionOrderDetailContent() {
                 <dd>
                   <a
                     href={`tel:${order.delivery_phone}`}
-                    className="font-semibold text-orange-ink hover:underline"
+                    className="inline-flex min-h-11 items-center font-semibold text-orange-ink hover:underline"
                     dir="ltr"
                   >
                     {order.delivery_phone}
@@ -1515,7 +1553,11 @@ function ProductionOrderDetailContent() {
               {order.student_phone && (
                 <div className="flex justify-between gap-4 border-b border-line pb-2.5">
                   <dt className="text-muted">الهاتف</dt>
-                  <dd dir="ltr">{order.student_phone}</dd>
+                  <dd dir="ltr">
+                    <a href={`tel:${order.student_phone}`} className="inline-flex min-h-11 items-center font-medium text-ink">
+                      {order.student_phone}
+                    </a>
+                  </dd>
                 </div>
               )}
               {order.instagram_username && (
@@ -1526,7 +1568,7 @@ function ProductionOrderDetailContent() {
                       href={`https://instagram.com/${order.instagram_username}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="font-medium text-orange-ink underline underline-offset-2"
+                      className="inline-flex min-h-11 items-center font-medium text-orange-ink underline underline-offset-2"
                     >
                       @{order.instagram_username}
                     </a>
@@ -1866,45 +1908,42 @@ function ProductionOrderDetailContent() {
           )}
 
           {/* ── Action buttons — desktop only (mobile shown above) ── */}
-          {(showPrimaryAction || showRevert) && (
-            <article className="hidden sm:block rounded-[var(--radius-card)] border border-orange-ink/15 bg-warm-veil p-5 shadow-[var(--shadow-soft)]">
-              <h3 className="mb-4 font-display-ar text-base font-bold text-ink">الإجراءات</h3>
-              <div className="flex flex-col gap-2">
-                {showPrimaryAction && (
-                  <Button fullWidth loading={actionLoading} onClick={onPrimaryAction}>
-                    {primaryLabel}
-                  </Button>
-                )}
-                {canReject && (
-                  <Button
-                    variant="danger"
-                    fullWidth
-                    loading={actionLoading}
-                    onClick={() => setRejectOpen(true)}
-                  >
-                    رفض التصميم
-                  </Button>
-                )}
-                {showRevert && (
-                  <Button
-                    variant="ghost"
-                    fullWidth
-                    onClick={() => setRevertOpen(true)}
-                  >
-                    إرجاع للتعديل
-                  </Button>
-                )}
-                {showReturnToCustomer && (
-                  <Button
-                    variant="ghost"
-                    fullWidth
-                    onClick={() => setReturnOpen(true)}
-                  >
-                    إرجاع للطالب لتعديله
-                  </Button>
-                )}
-              </div>
-            </article>
+          {(showPrimaryAction || canReject || showRevert || showReturnToCustomer || canDelete) && (
+          <article className="hidden sm:block rounded-[var(--radius-card)] border border-orange-ink/15 bg-warm-veil p-5 shadow-[var(--shadow-soft)]">
+            <h3 className="mb-4 font-display-ar text-base font-bold text-ink">الإجراءات</h3>
+            <div className="flex flex-col gap-2">
+              {showPrimaryAction && (
+                <Button fullWidth loading={actionLoading} onClick={onPrimaryAction}>
+                  {primaryLabel}
+                </Button>
+              )}
+              {canReject && (
+                <Button
+                  variant="danger"
+                  fullWidth
+                  loading={actionLoading}
+                  onClick={() => setRejectOpen(true)}
+                >
+                  رفض التصميم
+                </Button>
+              )}
+              {showRevert && (
+                <Button variant="ghost" fullWidth onClick={() => setRevertOpen(true)}>
+                  إرجاع للمرحلة السابقة
+                </Button>
+              )}
+              {showReturnToCustomer && (
+                <Button variant="ghost" fullWidth onClick={() => setReturnOpen(true)}>
+                  إرجاع للزبون لتعديله
+                </Button>
+              )}
+              {canDelete && (
+                <Button variant="danger" fullWidth onClick={() => setDeleteOpen(true)}>
+                  حذف الطلب
+                </Button>
+              )}
+            </div>
+          </article>
           )}
         </section>
       </div>
@@ -1949,24 +1988,38 @@ function ProductionOrderDetailContent() {
         </div>
       </Modal>
 
-      {/* ── Revert confirm modal ── */}
       <Modal
         open={revertOpen}
         onClose={() => setRevertOpen(false)}
-        title="إرجاع الطلب للتعديل"
+        title="إرجاع الطلب للمرحلة السابقة"
         footer={
           <>
-            <Button variant="ghost" onClick={() => setRevertOpen(false)}>
+            <Button variant="ghost" onClick={() => setRevertOpen(false)}>إلغاء</Button>
+            <Button variant="danger" loading={revertSubmitting} onClick={handleRevert}>تأكيد الإرجاع</Button>
+          </>
+        }
+      >
+        <p className="text-sm text-ink-soft">سيعود الطلب إلى مرحلة الإنتاج السابقة ليُعدّل ثم يُستكمل.</p>
+      </Modal>
+
+      {/* ── Delete confirm modal ── */}
+      <Modal
+        open={deleteOpen}
+        onClose={() => setDeleteOpen(false)}
+        title="حذف الطلب نهائياً"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setDeleteOpen(false)}>
               إلغاء
             </Button>
-            <Button variant="danger" loading={revertSubmitting} onClick={handleRevert}>
-              تأكيد الإرجاع
+            <Button variant="danger" loading={deleteSubmitting} onClick={handleDelete}>
+              تأكيد الحذف
             </Button>
           </>
         }
       >
         <p className="text-sm text-ink-soft">
-          سيتم إرجاع الطلب للمرحلة السابقة. هل أنت متأكد؟
+          سيُحذف الطلب وكل قطعه (الوشاح/الروب/القبعة) نهائياً ولا يمكن التراجع. هل أنت متأكد؟
         </p>
       </Modal>
 

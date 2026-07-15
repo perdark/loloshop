@@ -7,7 +7,8 @@ import { toast } from "sonner";
 import { PageLoader } from "@/components/ui/Spinner";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { getQueue } from "@/lib/staff";
+import { deleteProductionOrder, getQueue } from "@/lib/staff";
+import { getUser } from "@/lib/auth";
 import { getApiErrorMessage } from "@/lib/api";
 import {
   ORDER_STATUS_LABELS,
@@ -375,17 +376,18 @@ function KpiStrip({ items }: { items: ProductionQueueItem[] }) {
 
 // ─── Mobile order card ────────────────────────────────────────────────────────
 
-function OrderMobileCard({ item }: { item: ProductionQueueItem }) {
+function OrderMobileCard({ item, canDelete, onDelete }: { item: ProductionQueueItem; canDelete: boolean; onDelete: (id: string) => void }) {
   const overdue = isOverdue(item);
   const missing = isMissingDesign(item);
   const dl      = deadlineLabel(item);
 
   return (
+    <div className="rounded-xl border border-line bg-surface">
     <Link
       href={`/staff/orders/${item.id}?from=${encodeURIComponent("/staff/queue")}`}
       className={[
         "block rounded-xl border p-3 transition-colors hover:bg-surface-sink",
-        overdue ? "border-danger/50 bg-danger/5" : "border-line bg-surface",
+        overdue ? "border-danger/50 bg-danger/5" : "border-transparent",
       ].join(" ")}
     >
       {/* Row 1: name + alert */}
@@ -435,6 +437,8 @@ function OrderMobileCard({ item }: { item: ProductionQueueItem }) {
         <span className={dl.cls}>{dl.text}</span>
       </div>
     </Link>
+    {canDelete && <button type="button" onClick={() => onDelete(item.id)} className="mx-3 mb-3 min-h-11 rounded-full border border-danger/30 px-4 text-xs font-semibold text-danger hover:bg-danger/5">حذف الطلب</button>}
+    </div>
   );
 }
 
@@ -443,9 +447,13 @@ function OrderMobileCard({ item }: { item: ProductionQueueItem }) {
 function OrderTableRow({
   item,
   showStage,
+  canDelete,
+  onDelete,
 }: {
   item: ProductionQueueItem;
   showStage: boolean;
+  canDelete: boolean;
+  onDelete: (id: string) => void;
 }) {
   const router  = useRouter();
   const overdue = isOverdue(item);
@@ -554,6 +562,7 @@ function OrderTableRow({
           </span>
         )}
       </td>
+      {canDelete && <td className="px-4 py-2.5"><button type="button" onClick={(event) => { event.stopPropagation(); onDelete(item.id); }} className="min-h-11 rounded-full border border-danger/30 px-3 text-xs font-semibold text-danger hover:bg-danger/5">حذف</button></td>}
     </tr>
   );
 }
@@ -641,7 +650,7 @@ function Pagination({
       onClick={() => !disabled && onPage(p)}
       disabled={disabled}
       className={[
-        "inline-flex h-9 min-w-[36px] items-center justify-center rounded-lg border text-sm font-semibold transition-colors disabled:opacity-35 disabled:cursor-default",
+        "inline-flex h-11 min-w-11 items-center justify-center rounded-lg border text-sm font-semibold transition-colors disabled:opacity-35 disabled:cursor-default",
         p === page
           ? "border-orange-ink bg-orange-ink text-white"
           : "border-line bg-surface text-muted hover:border-orange-ink/40 hover:text-ink",
@@ -674,7 +683,7 @@ function Pagination({
 
 function chipCls(active: boolean) {
   return [
-    "inline-flex min-h-[36px] items-center rounded-full border px-3 py-1 text-sm font-semibold whitespace-nowrap transition-colors",
+    "inline-flex min-h-11 items-center rounded-full border px-3 py-1 text-sm font-semibold whitespace-nowrap transition-colors",
     active
       ? "border-orange-ink bg-orange-ink/10 text-orange-ink"
       : "border-line bg-surface text-muted hover:border-orange-ink/30 hover:text-ink",
@@ -686,6 +695,8 @@ function chipCls(active: boolean) {
 function ConsoleContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const currentUser = getUser();
+  const canDelete = currentUser?.role === "admin" || currentUser?.staff_type === "manager" || currentUser?.staff_types?.includes("manager") === true;
 
   // ── URL state ──────────────────────────────────────────────────────────────
   const stage  = (searchParams.get("stage") || undefined) as OrderStatus | undefined;
@@ -720,6 +731,17 @@ function ConsoleContent() {
     },
     [zoneParam]
   );
+
+  async function handleDelete(orderId: string) {
+    if (!window.confirm("سيُحذف الطلب الكامل وكل قطعه نهائياً. هل أنت متأكد؟")) return;
+    try {
+      const deleted = await deleteProductionOrder(orderId);
+      toast.success(`تم حذف الطلب (${deleted} قطعة)`);
+      await load(true);
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "تعذّر حذف الطلب"));
+    }
+  }
 
   useEffect(() => {
     load();
@@ -910,7 +932,7 @@ function ConsoleContent() {
                     type="button"
                     onClick={() => setSourceTab(key)}
                     className={[
-                      "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-semibold transition-colors min-h-[36px]",
+                      "inline-flex min-h-11 items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-semibold transition-colors",
                       source === key
                         ? "border-orange-ink bg-orange-ink text-white"
                         : "border-line bg-surface text-muted hover:border-orange-ink/30 hover:text-ink",
@@ -940,7 +962,7 @@ function ConsoleContent() {
                 value={search}
                 onChange={(e) => { setSearch(e.target.value); setPage(1); }}
                 dir="rtl"
-                className="min-h-[36px] w-40 sm:w-52 rounded-full border border-line bg-surface px-3 py-1 text-sm text-ink placeholder:text-muted focus:border-orange-ink focus:outline-none"
+                className="min-h-11 w-full min-w-0 rounded-full border border-line bg-surface px-3 py-1 text-sm text-ink placeholder:text-muted focus:border-orange-ink focus:outline-none sm:w-52"
               />
             </div>
 
@@ -950,7 +972,7 @@ function ConsoleContent() {
                 <button
                   type="button"
                   onClick={() => setRep(null)}
-                  className="inline-flex min-h-[36px] items-center gap-1 rounded-full border border-line bg-surface px-3 py-1 text-sm font-medium text-muted hover:border-orange-ink/40 hover:text-ink transition-colors"
+                  className="inline-flex min-h-11 items-center gap-1 rounded-full border border-line bg-surface px-3 py-1 text-sm font-medium text-muted hover:border-orange-ink/40 hover:text-ink transition-colors"
                 >
                   ← كل الممثلين
                 </button>
@@ -1069,6 +1091,7 @@ function ConsoleContent() {
                       <th className="sticky top-0 bg-beige z-10 px-4 py-2.5 font-bold">يعمل عليه</th>
                       <th className="sticky top-0 bg-beige z-10 px-4 py-2.5 font-bold">الاستحقاق / الوقت</th>
                       <th className="sticky top-0 bg-beige z-10 px-4 py-2.5 font-bold text-center">تنبيه</th>
+                      {canDelete && <th className="sticky top-0 bg-beige z-10 px-4 py-2.5 font-bold">حذف</th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -1077,6 +1100,8 @@ function ConsoleContent() {
                         key={item.id}
                         item={item}
                         showStage={!stage}
+                        canDelete={canDelete}
+                        onDelete={handleDelete}
                       />
                     ))}
                   </tbody>
@@ -1086,7 +1111,7 @@ function ConsoleContent() {
               {/* Mobile cards */}
               <div className="flex flex-col gap-2.5 p-3 md:hidden">
                 {pageItems.map((item) => (
-                  <OrderMobileCard key={item.id} item={item} />
+                  <OrderMobileCard key={item.id} item={item} canDelete={canDelete} onDelete={handleDelete} />
                 ))}
               </div>
 

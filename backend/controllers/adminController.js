@@ -18,6 +18,10 @@ function parsePrice(v) {
   return Math.round(n);
 }
 
+function pricingOrderIsValid(adminPrice, sellingPrice, addons) {
+  return sellingPrice >= adminPrice && Object.values(addons).every((pair) => pair.selling >= pair.admin);
+}
+
 const STAFF_TYPES = ['designer', 'embroiderer', 'presser', 'preparer', 'manager', 'digitizer', 'tailor'];
 const STAFF_SCOPES = ['retail', 'wholesaler', 'both'];
 
@@ -214,6 +218,9 @@ async function createWholesaler(req, res) {
     return res.status(400).json({ error: 'سعر غير صالح', code: 'ERR_VALIDATION' });
   }
   const pricingAddons = sanitizeAddons(req.body.pricing_addons);
+  if (!pricingOrderIsValid(adminPrice, wholesalerPrice, pricingAddons)) {
+    return res.status(400).json({ error: 'سعر البيع يجب أن يساوي أو يتجاوز مبلغ الإدارة', code: 'ERR_VALIDATION' });
+  }
   if (!name || !phone || !password || !referral_code) {
     return res.status(400).json({ error: 'بيانات ناقصة', code: 'ERR_VALIDATION' });
   }
@@ -346,6 +353,9 @@ async function updatePricing(req, res) {
     return res.status(400).json({ error: 'سعر غير صالح', code: 'ERR_VALIDATION' });
   }
   const pricingAddons = sanitizeAddons(req.body.pricing_addons);
+  if (!pricingOrderIsValid(adminPrice, wholesalerPrice, pricingAddons)) {
+    return res.status(400).json({ error: 'سعر البيع يجب أن يساوي أو يتجاوز مبلغ الإدارة', code: 'ERR_VALIDATION' });
+  }
   const { rows } = await query(
     `UPDATE wholesalers SET admin_price = $1, wholesaler_price = $2, pricing_addons = $3::jsonb
      WHERE id = $4 RETURNING id, admin_price, wholesaler_price, pricing_addons`,
@@ -765,6 +775,50 @@ async function pendingApprovalCount(req, res) {
   res.json({ data: { pending_bundles: rows[0].n } });
 }
 
+// DELETE /api/admin/orders/:id — permanently remove the complete linked order group.
+async function deleteOrder(req, res) {
+  const { id } = req.params;
+  const result = await tx(async (client) => {
+    const found = await client.query(
+      `SELECT id, checkout_group_id, student_id FROM orders WHERE id=$1 FOR UPDATE`, [id]
+    );
+    if (!found.rows.length) return null;
+    const order = found.rows[0];
+    const group = order.checkout_group_id;
+    const target = group
+      ? await client.query(`SELECT id FROM orders WHERE checkout_group_id=$1`, [group])
+      : { rows: [{ id: order.id }] };
+    const ids = target.rows.map((row) => row.id);
+    await client.query(`DELETE FROM staff_activity_log WHERE order_id=ANY($1::uuid[])`, [ids]);
+    await client.query(`DELETE FROM orders WHERE id=ANY($1::uuid[])`, [ids]);
+    if (group) await client.query(`DELETE FROM checkout_groups WHERE id=$1`, [group]);
+    await client.query(
+      `INSERT INTO audit_log(actor_id,action,entity,entity_id,details)
+       VALUES($1,'delete_order','order',$2,$3)`,
+      [req.user.id, order.id, JSON.stringify({ deleted_order_ids: ids, checkout_group_id: group, student_id: order.student_id })]
+    );
+    return ids.length;
+  });
+  if (result == null) return res.status(404).json({ error: 'الطلب غير موجود', code: 'ERR_NOT_FOUND' });
+  res.json({ data: { deleted: result } });
+}
+
+// GET /api/admin/visitors → { now, today, total } — distinct storefront sessions
+// (first-party site_visits, same source the TV board counts). Not money → not gated.
+async function visitorsStats(req, res) {
+  const { rows } = await query(
+    `SELECT
+       COUNT(DISTINCT session_id) FILTER (WHERE created_at > now() - INTERVAL '30 minutes')::int AS now,
+       COUNT(DISTINCT session_id) FILTER (
+         WHERE created_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Baghdad') AT TIME ZONE 'Asia/Baghdad'
+       )::int AS today,
+       COUNT(DISTINCT session_id)::int AS total
+     FROM site_visits`
+  );
+  const r = rows[0] || {};
+  res.json({ data: { now: r.now || 0, today: r.today || 0, total: r.total || 0 } });
+}
+
 // ---------- Admin: money gate (reveal secret for TV/dashboard IQD amounts) ----------
 
 // GET /api/admin/money-gate → { configured } — whether a reveal passphrase is set
@@ -797,5 +851,6 @@ module.exports = {
   listStaff, createStaff, updateStaffType, updateStaffScope, updateStaffPassword, deleteStaff,
   repsOverview, updatePromo, updateMaintenance,
   approveOrderAdmin, rejectOrderAdmin, pendingApprovalCount,
+  deleteOrder, visitorsStats,
   getMoneyGate, verifyMoneyGate, setMoneyGateSecret,
 };

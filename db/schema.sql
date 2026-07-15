@@ -162,7 +162,7 @@ ALTER TABLE wholesalers ADD COLUMN IF NOT EXISTS commission_rate NUMERIC(5,2) NO
 ALTER TABLE wholesalers ADD COLUMN IF NOT EXISTS admin_price      BIGINT NOT NULL DEFAULT 0 CHECK (admin_price >= 0);
 ALTER TABLE wholesalers ADD COLUMN IF NOT EXISTS wholesaler_price BIGINT NOT NULL DEFAULT 0 CHECK (wholesaler_price >= 0);
 ALTER TABLE wholesalers ADD COLUMN IF NOT EXISTS pricing_addons   JSONB  NOT NULL DEFAULT
-  '{"royal_sash":10000,"royal_cap_when_normal_sash":3000,"extra_cap_embroidery":3000,"robe_sleeve_each":5000,"american_shawl":25000}'::jsonb;
+  '{"royal_sash":{"admin":15000,"selling":15000},"royal_cap_when_normal_sash":{"admin":3000,"selling":3000},"extra_cap_embroidery":{"admin":3000,"selling":3000},"robe_sleeve_each":{"admin":5000,"selling":5000},"american_shawl":{"admin":20000,"selling":25000},"piece_sash_normal":{"admin":20000,"selling":20000},"piece_sash_royal":{"admin":25000,"selling":25000},"piece_cap_normal":{"admin":15000,"selling":15000},"piece_cap_royal":{"admin":20000,"selling":20000},"piece_robe_normal":{"admin":25000,"selling":25000},"piece_robe_royal":{"admin":25000,"selling":25000}}'::jsonb;
 CREATE INDEX IF NOT EXISTS idx_wholesalers_code ON wholesalers(referral_code);
 
 -- =====================================================
@@ -465,6 +465,7 @@ CREATE TABLE IF NOT EXISTS order_items (
   option_id      UUID REFERENCES options(id) ON DELETE SET NULL,
   label_snapshot TEXT NOT NULL,
   price_snapshot BIGINT NOT NULL DEFAULT 0,
+  admin_price_snapshot BIGINT NOT NULL DEFAULT 0 CHECK (admin_price_snapshot >= 0),
   qty            INTEGER NOT NULL DEFAULT 1,
   customer_image_url TEXT,
   created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -907,5 +908,130 @@ CREATE INDEX IF NOT EXISTS idx_calligraphy_job     ON calligraphy_plates(job_id)
 CREATE INDEX IF NOT EXISTS idx_calligraphy_student ON calligraphy_plates(student_id);
 CREATE INDEX IF NOT EXISTS idx_calligraphy_status  ON calligraphy_plates(status);
 CREATE INDEX IF NOT EXISTS idx_calligraphy_orderitem ON calligraphy_plates(order_item_id);
+
+-- =====================================================
+-- WORKSHOP (الورشة / Team B) — direct piecework production + wage ledger.
+-- Does NOT touch orders / the Team-A pipeline. See db/migrations/060_workshop.sql for the
+-- full rationale. Workers reuse `users` with role 'worker' (secret-URL portal, no OTP).
+-- =====================================================
+ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'worker';
+
+CREATE TABLE IF NOT EXISTS workshop_workers (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+  is_lead    BOOLEAN NOT NULL DEFAULT FALSE,
+  active     BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS workshop_piece_rates (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  operation  TEXT NOT NULL,
+  product    TEXT NOT NULL,
+  amount     BIGINT NOT NULL DEFAULT 0 CHECK (amount >= 0),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  UNIQUE (operation, product)
+);
+
+-- Fresh/demo databases get useful example rates; existing admin-edited values win.
+INSERT INTO workshop_piece_rates (operation, product, amount)
+VALUES
+  ('cut', 'robe', 500), ('overlock', 'robe', 750), ('robe_sew', 'robe', 1500),
+  ('cut', 'cap', 250), ('cap_sew', 'cap', 750),
+  ('cut', 'shawl', 250), ('shawl_close', 'shawl', 500), ('american_shawl', 'shawl', 1000),
+  ('cut', 'sash', 250), ('shawl_close', 'sash', 500)
+ON CONFLICT (operation, product) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS workshop_production_entries (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  worker_id UUID NOT NULL REFERENCES workshop_workers(id) ON DELETE CASCADE,
+  product TEXT NOT NULL, operation TEXT NOT NULL,
+  qty INTEGER NOT NULL CHECK (qty > 0),
+  rate BIGINT NOT NULL CHECK (rate >= 0), amount BIGINT NOT NULL CHECK (amount >= 0),
+  work_date DATE NOT NULL DEFAULT CURRENT_DATE, note TEXT,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_workshop_production_worker ON workshop_production_entries(worker_id, work_date DESC, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS workshop_adjustments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  worker_id UUID NOT NULL REFERENCES workshop_workers(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK (kind IN ('bonus','deduction')),
+  amount BIGINT NOT NULL CHECK (amount > 0), reason TEXT NOT NULL,
+  entry_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_workshop_adjustments_worker ON workshop_adjustments(worker_id, entry_date DESC, created_at DESC);
+
+-- =====================================================
+-- DESIGN TEAM — first-stage retail design support only.
+-- Helpers are intentionally a separate `design_helper` role rather than staff:
+-- they must not inherit attendance, payroll, checkout/money, or the general
+-- production console. See db/migrations/062_design_team.sql for the rationale.
+-- =====================================================
+ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'design_helper';
+
+DO $$ BEGIN
+  CREATE TYPE design_team_member_role AS ENUM ('lead', 'helper');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE design_team_task_status AS ENUM ('open', 'ready');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+CREATE TABLE IF NOT EXISTS design_teams (
+  id           BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (id),
+  name_ar      TEXT NOT NULL DEFAULT 'أيادي التصميم',
+  helper_limit SMALLINT NOT NULL DEFAULT 2 CHECK (helper_limit = 2),
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+INSERT INTO design_teams (id) VALUES (TRUE) ON CONFLICT (id) DO NOTHING;
+UPDATE design_teams SET name_ar = 'أيادي التصميم' WHERE id = TRUE;
+
+CREATE TABLE IF NOT EXISTS design_team_members (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  team_id     BOOLEAN NOT NULL DEFAULT TRUE REFERENCES design_teams(id) ON DELETE CASCADE,
+  user_id     UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+  member_role design_team_member_role NOT NULL,
+  active      BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_design_team_members_team_active
+  ON design_team_members(team_id, active, member_role);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_design_team_active_lead
+  ON design_team_members(team_id)
+  WHERE active = TRUE AND member_role = 'lead';
+
+CREATE TABLE IF NOT EXISTS design_team_tasks (
+  order_id      UUID PRIMARY KEY REFERENCES orders(id) ON DELETE CASCADE,
+  team_id       BOOLEAN NOT NULL DEFAULT TRUE REFERENCES design_teams(id) ON DELETE CASCADE,
+  status        design_team_task_status NOT NULL DEFAULT 'open',
+  note          TEXT,
+  assigned_to   UUID REFERENCES users(id) ON DELETE SET NULL,
+  assigned_at   TIMESTAMPTZ,
+  ready_by      UUID REFERENCES users(id) ON DELETE SET NULL,
+  ready_at      TIMESTAMPTZ,
+  resolved_at   TIMESTAMPTZ,
+  updated_by    UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_design_team_tasks_status
+  ON design_team_tasks(team_id, status, updated_at DESC);
+
+DROP TRIGGER IF EXISTS trg_design_teams_updated ON design_teams;
+CREATE TRIGGER trg_design_teams_updated
+  BEFORE UPDATE ON design_teams FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+DROP TRIGGER IF EXISTS trg_design_team_members_updated ON design_team_members;
+CREATE TRIGGER trg_design_team_members_updated
+  BEFORE UPDATE ON design_team_members FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+DROP TRIGGER IF EXISTS trg_design_team_tasks_updated ON design_team_tasks;
+CREATE TRIGGER trg_design_team_tasks_updated
+  BEFORE UPDATE ON design_team_tasks FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 COMMIT;

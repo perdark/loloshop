@@ -65,8 +65,10 @@ export default function WholesalerOrdersPage() {
 
   // Stats derived from a "all" fetch would need extra call — compute from current rows only
   const stats = useMemo(() => {
-    const pending = rows.filter((r) => r.approval === "pending").length;
-    return { total: rows.length, pending };
+    return {
+      admin: rows.reduce((sum, row) => sum + row.admin_amount, 0),
+      wholesaler: rows.reduce((sum, row) => sum + row.wholesaler_amount, 0),
+    };
   }, [rows]);
 
   const fetchOrders = useCallback(
@@ -191,12 +193,8 @@ export default function WholesalerOrdersPage() {
 
       {/* Stats */}
       <div className="grid grid-cols-2 gap-3">
-        <StatCard label="الكل" value={String(stats.total)} />
-        <StatCard
-          label="بانتظار الموافقة"
-          value={String(stats.pending)}
-          accent={stats.pending > 0 ? "profit" : "default"}
-        />
+        <StatCard label="سعر الإدارة" value={formatPrice(stats.admin)} />
+        <StatCard label="سعر الممثل" value={formatPrice(stats.wholesaler)} accent="profit" />
       </div>
 
       {/* Tab strip */}
@@ -298,10 +296,11 @@ export default function WholesalerOrdersPage() {
                     {row.product_summary}
                   </p>
 
-                  <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-                    <span className="font-semibold text-orange-ink tabular-nums">
-                      {formatPrice(row.total_price)}
-                    </span>
+                  <div className="mt-2 grid grid-cols-2 gap-2 rounded-xl bg-surface-sink p-3 text-sm">
+                    <span className="text-ink-soft">سعر الإدارة<br/><b className="text-ink tabular-nums">{formatPrice(row.admin_amount)}</b></span>
+                    <span className="text-ink-soft">سعر الممثل<br/><b className="text-orange-ink tabular-nums">{formatPrice(row.wholesaler_amount)}</b></span>
+                  </div>
+                  <div className="mt-2 flex items-center text-sm">
                     <span className="text-ink-soft" dir="ltr">
                       {formatDate(row.submitted_at)}
                     </span>

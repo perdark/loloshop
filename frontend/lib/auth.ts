@@ -55,6 +55,8 @@ export function logout(): void {
 export function dashboardPathFor(role: User["role"] | undefined): string | null {
   if (role === "admin") return "/admin";
   if (role === "staff") return "/staff";
+  if (role === "worker") return "/workshop";
+  if (role === "design_helper") return "/design-support";
   return null;
 }
 

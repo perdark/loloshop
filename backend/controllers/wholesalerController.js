@@ -14,7 +14,10 @@ async function getWholesalerId(userId) {
 // package price client-side) + the add-on surcharges. NEVER exposes the admin-private price.
 async function publicPricingFor(wholesalerId) {
   const p = await loadWholesalerPricing(wholesalerId);
-  return { base: p.wholesalerPrice, addons: p.addons };
+  return {
+    base: p.wholesalerPrice,
+    addons: Object.fromEntries(Object.entries(p.addons).map(([key, pair]) => [key, pair.selling])),
+  };
 }
 
 async function dashboard(req, res) {
@@ -23,6 +26,7 @@ async function dashboard(req, res) {
   const { rows } = await query(
     `SELECT
        w.deadline, w.referral_code, w.commission_rate, w.embroidery_color,
+       w.admin_price, w.wholesaler_price, w.pricing_addons,
        (SELECT COUNT(*) FROM students s WHERE s.wholesaler_id = w.id) AS student_count,
        (SELECT COUNT(*) FROM students s WHERE s.wholesaler_id = w.id AND s.status = 'pending_approval') AS pending_count,
        (SELECT COUNT(*) FROM students s JOIN designs d ON d.student_id = s.id
@@ -32,6 +36,10 @@ async function dashboard(req, res) {
          FROM students s JOIN orders o ON o.student_id = s.id
          WHERE s.wholesaler_id = w.id AND o.status <> 'cancelled'
        ), 0) AS earned_commission
+       ,COALESCE((
+         SELECT SUM(o.cost)::bigint FROM students s JOIN orders o ON o.student_id=s.id
+         WHERE s.wholesaler_id=w.id AND o.status <> 'cancelled'
+       ),0) AS admin_due
      FROM wholesalers w WHERE w.id = $1`,
     [wId]
   );
@@ -43,6 +51,12 @@ async function dashboard(req, res) {
     completed_designs: parseInt(r.completed_designs, 10),
     commission_rate: Number(r.commission_rate),
     earned_commission: Number(r.earned_commission),
+    admin_due: Number(r.admin_due),
+    pricing: {
+      admin_base: Number(r.admin_price || 0),
+      selling_base: Number(r.wholesaler_price || 0),
+      addons: (await loadWholesalerPricing(wId)).addons,
+    },
     referral_url: `${process.env.FRONTEND_URL}/join/${r.referral_code}`,
     referral_code: r.referral_code,
     embroidery_color: r.embroidery_color || null,
@@ -388,7 +402,8 @@ async function listOrdersForApproval(req, res) {
             MAX(o.wholesaler_reject_reason)            AS reject_reason,
             s.id                                       AS student_id,
             u.name                                     AS student_name,
-            SUM(o.price)                               AS total_price,
+            SUM(o.cost)                                AS admin_amount,
+            SUM(o.price)                               AS wholesaler_amount,
             STRING_AGG(p.name_ar, '، ' ORDER BY p.type) AS product_summary
        FROM orders o
        JOIN students s ON s.id = o.student_id
@@ -399,7 +414,11 @@ async function listOrdersForApproval(req, res) {
       ORDER BY submitted_at DESC`,
     params
   );
-  res.json({ data: rows.map(r => ({ ...r, total_price: Number(r.total_price || 0) })) });
+  res.json({ data: rows.map(r => ({
+    ...r,
+    admin_amount: Number(r.admin_amount || 0),
+    wholesaler_amount: Math.max(0, Number(r.wholesaler_amount || 0)),
+  })) });
 }
 
 // POST /api/wholesaler/orders/:checkoutGroupId/approve

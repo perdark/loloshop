@@ -21,6 +21,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
+import { formatIQD } from "@/lib/format";
 
 // ─── Shared status pill (warm brand palette, no blue/purple) ──────────────────
 const STATUS_PILL: Partial<Record<OrderStatus, string>> = {
@@ -212,12 +213,47 @@ function OrdersTab({
     }),
     [orders]
   );
+  const money = useMemo(() => ({
+    admin: filtered.reduce((sum, order) => sum + (order.adminAmount || 0), 0),
+    wholesaler: filtered.reduce((sum, order) => sum + (order.wholesalerAmount || 0), 0),
+    visible: filtered.some((order) => order.adminAmount != null),
+  }), [filtered]);
+
+  // Full "why is it this number" split for the admin. Reconciles exactly to the money tiles:
+  //   admin due  = pkgAdmin + shawlAdmin(20k×n) + otherStudent + pieceStudent
+  //   rep profit = pkgRep (base spread) + shawlRep (شال − 20k) ; add-ons & single pieces → 0.
+  const breakdown = useMemo(() => {
+    const a = { pkgCount: 0, pkgStudent: 0, pkgAdmin: 0, shawlCount: 0, shawlStudent: 0, otherStudent: 0, pieceStudent: 0 };
+    for (const o of filtered) {
+      if (o.adminAmount == null) continue;
+      a.pkgCount += o.pkgCount;
+      a.pkgStudent += o.pkgStudent;
+      a.shawlCount += o.shawlCount;
+      a.shawlStudent += o.shawlStudent;
+      a.otherStudent += o.otherStudent;
+      a.pieceStudent += o.pieceStudent;
+      // package admin share = this order's admin due minus the non-package admin shares
+      a.pkgAdmin += (o.adminAmount || 0) - 20000 * o.shawlCount - o.otherStudent - o.pieceStudent;
+    }
+    const shawlAdmin = 20000 * a.shawlCount;
+    return { ...a, shawlAdmin, pkgRep: a.pkgStudent - a.pkgAdmin, shawlRep: a.shawlStudent - shawlAdmin };
+  }, [filtered]);
 
   // Opening an order should return to THIS rep's page (not the generic /staff home).
   const backFrom = `/staff/wholesalers/${wholesalerId}/students`;
 
   return (
     <div className="space-y-4">
+      {money.visible && (
+        <div className="space-y-3">
+          <div className="grid grid-cols-3 gap-3">
+            <MoneyTotal label="حصة الإدارة" value={money.admin} />
+            <MoneyTotal label="يجمعه الممثل" value={money.wholesaler} accent />
+            <MoneyTotal label="ربح الممثل" value={money.wholesaler - money.admin} />
+          </div>
+          <MoneyBreakdown b={breakdown} totalStudent={money.wholesaler} totalAdmin={money.admin} />
+        </div>
+      )}
       {/* Zone chips — horizontal scroll on mobile */}
       <nav
         aria-label="تصفية حسب مكان التطريز"
@@ -415,6 +451,7 @@ function OrderRow({
             {order.productName}
             {order.batchName ? ` · ${order.batchName}` : ""}
           </p>
+          {order.adminAmount != null && <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs"><span className="text-ink-soft">سعر الإدارة: <b className="text-ink" dir="ltr">{formatIQD(order.adminAmount)}</b></span><span className="text-ink-soft">سعر الممثل: <b className="text-orange-ink" dir="ltr">{formatIQD(order.wholesalerAmount || 0)}</b></span></div>}
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${pill}`}>
@@ -428,6 +465,70 @@ function OrderRow({
         </div>
       </Link>
     </li>
+  );
+}
+
+function MoneyTotal({ label, value, accent }: { label: string; value: number; accent?: boolean }) {
+  return <div className="rounded-2xl border border-line bg-surface p-4"><p className="text-xs text-ink-soft">{label}</p><p className={`mt-1 text-lg font-bold ${accent ? "text-orange-ink" : "text-ink"}`} dir="ltr">{formatIQD(value)}</p></div>;
+}
+
+interface BreakdownData {
+  pkgCount: number; pkgStudent: number; pkgAdmin: number; pkgRep: number;
+  shawlCount: number; shawlStudent: number; shawlAdmin: number; shawlRep: number;
+  otherStudent: number; pieceStudent: number;
+}
+
+/** Full "why these totals" table for the admin: every line traced to admin vs. rep. */
+function MoneyBreakdown({ b, totalStudent, totalAdmin }: { b: BreakdownData; totalStudent: number; totalAdmin: number }) {
+  const ar = (n: number) => n.toLocaleString("ar-EG");
+  const rows: { label: string; count?: number; student: number; admin: number; rep: number; note?: string }[] = [];
+  if (b.pkgStudent) rows.push({ label: "أطقم كاملة", count: b.pkgCount, student: b.pkgStudent, admin: b.pkgAdmin, rep: b.pkgRep, note: "الممثل يربح فرق السعر الأساسي" });
+  if (b.shawlStudent) rows.push({ label: "شال امريكي", count: b.shawlCount, student: b.shawlStudent, admin: b.shawlAdmin, rep: b.shawlRep, note: "٢٠٬٠٠٠ للإدارة لكل شال، والباقي للممثل" });
+  if (b.otherStudent) rows.push({ label: "إضافات أخرى", student: b.otherStudent, admin: b.otherStudent, rep: 0, note: "كاملة للإدارة" });
+  if (b.pieceStudent) rows.push({ label: "قطع مفردة (غير طقم)", student: b.pieceStudent, admin: b.pieceStudent, rep: 0, note: "كاملة للإدارة" });
+  const totalRep = totalStudent - totalAdmin;
+  return (
+    <div className="rounded-2xl border border-line bg-surface p-4">
+      <p className="mb-2 text-sm font-bold text-ink">تفصيل الحساب — كيف تكوّنت هذه المبالغ</p>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[440px] border-collapse text-right text-xs">
+          <thead>
+            <tr className="border-b border-line text-ink-soft">
+              <th className="py-1.5 pe-2 font-semibold">البند</th>
+              <th className="py-1.5 px-2 font-semibold">العدد</th>
+              <th className="py-1.5 px-2 font-semibold">يدفعه الطلاب</th>
+              <th className="py-1.5 px-2 font-semibold">حصة الإدارة</th>
+              <th className="py-1.5 ps-2 font-semibold">ربح الممثل</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.label} className="border-b border-line/60 align-top">
+                <td className="py-2 pe-2">
+                  <span className="font-medium text-ink">{r.label}</span>
+                  {r.note && <span className="block text-[10px] text-ink-soft">{r.note}</span>}
+                </td>
+                <td className="py-2 px-2 text-ink-soft" dir="ltr">{r.count != null ? ar(r.count) : "—"}</td>
+                <td className="py-2 px-2 text-ink" dir="ltr">{formatIQD(r.student)}</td>
+                <td className="py-2 px-2 text-ink" dir="ltr">{formatIQD(r.admin)}</td>
+                <td className="py-2 ps-2 font-semibold text-emerald-700" dir="ltr">{formatIQD(r.rep)}</td>
+              </tr>
+            ))}
+            <tr className="font-bold text-ink">
+              <td className="py-2 pe-2">الإجمالي</td>
+              <td className="py-2 px-2"></td>
+              <td className="py-2 px-2 text-orange-ink" dir="ltr">{formatIQD(totalStudent)}</td>
+              <td className="py-2 px-2" dir="ltr">{formatIQD(totalAdmin)}</td>
+              <td className="py-2 ps-2 text-emerald-700" dir="ltr">{formatIQD(totalRep)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-2 text-[11px] leading-relaxed text-ink-soft">
+        «يجمعه الممثل» = ما يدفعه الطلاب. «حصة الإدارة» = ما يسلّمه الممثل للإدارة. الفرق هو ربح الممثل =
+        فرق سعر الطقم الأساسي لكل طقم + (سعر الشال − ٢٠٬٠٠٠) لكل شال امريكي. الإضافات الأخرى والقطع المفردة كاملة للإدارة (ربح الممثل منها صفر).
+      </p>
+    </div>
   );
 }
 

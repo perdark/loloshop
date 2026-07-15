@@ -181,6 +181,41 @@ export default function WholesalerDashboardPage() {
         </section>
       )}
 
+      <section className="rounded-2xl border border-line bg-surface p-5">
+        <div className="grid grid-cols-3 gap-3">
+          <div className="rounded-xl border border-line bg-beige p-4">
+            <p className="text-xs text-ink-soft">ما تجمعه من الطلاب</p>
+            <p className="mt-1 text-lg font-bold text-ink" dir="ltr">{formatIQD((dashboard.adminDue ?? 0) + (dashboard.earnedCommission ?? 0))}</p>
+          </div>
+          <div className="rounded-xl border border-orange-ink/20 bg-warm-veil p-4">
+            <p className="text-xs text-ink-soft">ما تسلّمه للإدارة</p>
+            <p className="mt-1 text-lg font-bold text-orange-ink" dir="ltr">{formatIQD(dashboard.adminDue ?? 0)}</p>
+          </div>
+          <div className="rounded-xl border border-emerald-600/25 bg-emerald-50 p-4">
+            <p className="text-xs text-ink-soft">ربحك</p>
+            <p className="mt-1 text-lg font-bold text-emerald-700" dir="ltr">{formatIQD(dashboard.earnedCommission ?? 0)}</p>
+          </div>
+        </div>
+        {dashboard.pricing && (
+          <div className="mt-5">
+            <p className="mb-2 text-sm font-bold text-ink">أسعار الطالب</p>
+            <div className="overflow-x-auto">
+              <div className="min-w-[320px]">
+                <div className="grid grid-cols-[1fr_130px] gap-2 border-b border-line pb-2 text-xs font-semibold text-ink-soft"><span>البند</span><span>سعر الطالب</span></div>
+                <PriceViewRow label="الطقم الأساسي" selling={dashboard.pricing.sellingBase} />
+                {([
+                  ["royal_sash","وشاح ملكي"],["royal_cap_when_normal_sash","وشاح عادي + قبعة ملكية"],
+                  ["extra_cap_embroidery","تطريز القبعة الثاني"],["robe_sleeve_each","تطريز ردن الروب"],
+                  ["american_shawl","شال امريكي"],["piece_sash_normal","وشاح عادي منفرد"],
+                  ["piece_sash_royal","وشاح ملكي منفرد"],["piece_cap_normal","قبعة عادية"],
+                  ["piece_cap_royal","قبعة ملكية"],["piece_robe_normal","روب عادي"],["piece_robe_royal","روب ملكي"],
+                ] as const).map(([key,label]) => <PriceViewRow key={key} label={label} selling={dashboard.pricing!.addons[key].selling} />)}
+              </div>
+            </div>
+          </div>
+        )}
+      </section>
+
       {/* لون التطريز — rep edits their own embroidery thread color */}
       <section className="surface-card rounded-2xl p-5">
         <p className="mb-3 text-sm font-semibold text-ink">لون التطريز</p>
@@ -382,4 +417,8 @@ export default function WholesalerDashboardPage() {
       </Modal>
     </div>
   );
+}
+
+function PriceViewRow({ label, selling }: { label: string; selling: number }) {
+  return <div className="grid grid-cols-[1fr_130px] gap-2 border-b border-line/70 py-2.5 text-sm last:border-0"><span className="text-ink">{label}</span><span className="tabular-nums text-ink" dir="ltr">{formatIQD(selling)}</span></div>;
 }
