@@ -879,9 +879,11 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- Migration 045: per-plate embroidery zone (front / back / cap).
+-- Migration 065 adds 'cap_side' («تطريز القبعة من الجانب»).
 DO $$ BEGIN
-  CREATE TYPE calligraphy_variant AS ENUM ('front','back','cap');
+  CREATE TYPE calligraphy_variant AS ENUM ('front','back','cap','cap_side');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE calligraphy_variant ADD VALUE IF NOT EXISTS 'cap_side';
 
 CREATE TABLE IF NOT EXISTS calligraphy_plates (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),

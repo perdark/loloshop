@@ -147,6 +147,28 @@ New `frontend/components/staff/DesignGallery.tsx`:
   the top of the design column — التحويل asked for it, and manager/admin/التجهيز benefit; the
   embroidery + tailor stations are NOT changed (user: التطريز is fine).
 
+## 7b. F — المكوجي gets everything except caps (routing)
+
+User (2026-07-15): «المكوجي orders he get everything else the cap, from wholesalers students
+or even retail students». Today a plain (no-embroidery) piece enters at `preparing`, skipping
+الكوي — only embroidered sash/robe pass through `pressing`. Change:
+
+- **Initial status for plain pieces:** `cap` → `preparing` (unchanged) · every other type
+  (sash/robe/shawl) → **`pressing`**. Applied at every order-creation choke point
+  (`orderController.configureOrder` / `configureFullSet` / `configurePackage`,
+  `cartController` checkout, `lib/fullSetOrder.js persistFullSetOrder` — the same 5 paths that
+  set `needs_pressing`). Embroidered/designed pieces keep entering at `design_complete`.
+- `needs_pressing` unified to `product_type !== 'cap'` in all 5 paths (today the cart path
+  says sash/robe only — a plain shawl would differ per path).
+- `productionController.isFirstProductionStage`: a plain piece's first stage is now
+  `pressing` OR `preparing` (legacy rows + caps) — keeps «إرجاع للزبون» offered correctly.
+- The presser queue (`QUEUE_STAGES.presser = ['pressing']`) then naturally contains every
+  non-cap order, retail + wholesaler, plain + embroidered. His advance stays
+  «إنهاء الكوي، نقل للتجهيز».
+- **Existing in-flight plain orders at `preparing` are NOT migrated** (same decision as the
+  2026-06-24 كوي backfill: old orders keep their routing; only new/edited orders get the new
+  entry point). Admin can revert an individual order to pressing if needed.
+
 ## 8. Error handling
 
 - Send endpoint: Arabic errors with codes (`ERR_BAD_STATUS`, `ERR_FORBIDDEN`, `ERR_NOT_FOUND`);
