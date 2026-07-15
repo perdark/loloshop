@@ -304,9 +304,11 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
   };
 
   const itemFlags = {
-    sash: { has_embroidery: sashHasEmb, status: sashHasDesign ? 'design_complete' : 'preparing' },
+    // Plain (no design work) sash/robe start at الكوي — المكوجي gets everything except
+    // caps (user 2026-07-15). Plain caps keep entering at التجهيز.
+    sash: { has_embroidery: sashHasEmb, status: sashHasDesign ? 'design_complete' : 'pressing' },
     cap: { has_embroidery: capHasEmb, status: capHasEmb ? 'design_complete' : 'preparing' },
-    robe: { has_embroidery: robeHasEmb, status: robeHasEmb ? 'design_complete' : 'preparing' },
+    robe: { has_embroidery: robeHasEmb, status: robeHasEmb ? 'design_complete' : 'pressing' },
   };
 
   const specLines = {

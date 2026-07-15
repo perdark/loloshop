@@ -24,9 +24,10 @@ import type { OrderStatus } from "@/lib/types";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
+// Stage-2 («التحويل») removed 2026-07-15 — design goes straight to التطريز. Legacy orders
+// still AT converting (created by old code) keep rendering via STAGE_PILL, just no rail chip.
 const STAGES: OrderStatus[] = [
   "design_complete",
-  "converting",
   "embroidery",
   "pressing",
   "preparing",

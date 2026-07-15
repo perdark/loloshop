@@ -373,7 +373,6 @@ function QueueView({
 
 const STAGE_ORDER: OrderStatus[] = [
   "design_complete",
-  "converting",
   "embroidery",
   "pressing",
   "preparing",

@@ -159,7 +159,7 @@ async function checkout(req, res) {
 
       // Compute routing flags
       const has_embroidery = !!ci.design_id || priced.hasEmbroidery;
-      const needs_pressing = (ci.product_type === 'sash' || ci.product_type === 'robe');
+      const needs_pressing = ci.product_type !== 'cap';
 
       if (ci.design_id) {
         // Designed sash → finalize the design and place it into the approval pipeline.
@@ -198,7 +198,8 @@ async function checkout(req, res) {
         } else if (priced.hasEmbroidery) {
           status = 'design_complete'; // designer handles design-less embroidery
         } else {
-          status = 'preparing';
+          // المكوجي gets every plain piece except caps → plain non-cap starts at الكوي.
+          status = ci.product_type === 'cap' ? 'preparing' : 'pressing';
         }
         const existing = await client.query(
           `SELECT id FROM orders WHERE student_id = $1 AND product_id = $2 AND design_id IS NULL AND status <> 'cancelled'`,

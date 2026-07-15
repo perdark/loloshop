@@ -799,10 +799,10 @@ async function uploadFinalDesign(req, res) {
 
 // ── Lead decisions ───────────────────────────────────────────────────────────
 // Only an active lead (محمد هيثم) or an admin reaches these. Approve pushes the
-// order forward into the normal production pipeline (design_complete → converting),
-// exactly like the staff designer's advance. Reject bounces the task back to the
-// helper with a note WITHOUT touching the order — an internal rework, not a
-// send-back to the student.
+// order forward into the normal production pipeline (design_complete → embroidery;
+// stage-2 «التحويل» removed 2026-07-15), exactly like the staff designer's advance.
+// Reject bounces the task back to the helper with a note WITHOUT touching the
+// order — an internal rework, not a send-back to the student.
 async function approveJob(req, res) {
   const { orderId } = req.params;
   if (!validUuid(orderId)) return res.status(400).json({ error: 'الطلب غير صحيح', code: 'ERR_VALIDATION' });
@@ -811,7 +811,7 @@ async function approveJob(req, res) {
     if (!job) return null;
     await client.query(
       `UPDATE orders
-          SET status = 'converting', working_staff_id = NULL, working_since = NULL
+          SET status = 'embroidery', working_staff_id = NULL, working_since = NULL
         WHERE id = $1`,
       [orderId]
     );
@@ -828,12 +828,12 @@ async function approveJob(req, res) {
     await client.query(
       `INSERT INTO notifications (user_id, type, title_ar, body_ar, link)
        VALUES ($1, 'design_approved', $2, $3, '/')`,
-      [job.studentUserId, 'تمت الموافقة على تصميمك', 'اعتُمد تصميم الوشاح وانتقل لتحويل التطريز']
+      [job.studentUserId, 'تمت الموافقة على تصميمك', 'اعتُمد تصميم الوشاح وانتقل إلى التطريز']
     );
     return job;
   });
   if (!result) return res.status(404).json({ error: 'مهمة التصميم غير موجودة', code: 'ERR_NOT_FOUND' });
-  publish({ type: 'order', orderId, status: 'converting' });
+  publish({ type: 'order', orderId, status: 'embroidery' });
   publish({ type: 'presence', orderId, working_staff_id: null, working_staff_name: null });
   res.json({ data: { id: orderId, approval_status: 'approved', advanced: 1 } });
 }

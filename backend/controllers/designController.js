@@ -161,7 +161,8 @@ async function getDesignByStudent(req, res) {
   res.json({ data: rows[0] });
 }
 
-// Designer / manager / admin: approve an individual design → its sash order enters 'converting'.
+// Designer / manager / admin: approve an individual design → its sash order enters التطريز
+// directly (stage-2 «التحويل» removed 2026-07-15; conversion happens inside the embroidery station).
 async function approveDesign(req, res) {
   const { id } = req.params; // design id
   const result = await tx(async (client) => {
@@ -173,7 +174,7 @@ async function approveDesign(req, res) {
     );
     if (!d.rows.length) return null;
     const o = await client.query(
-      `UPDATE orders SET status = 'converting'
+      `UPDATE orders SET status = 'embroidery'
        WHERE design_id = $1 AND status = 'design_complete' RETURNING id, student_id`,
       [id]
     );
@@ -186,7 +187,7 @@ async function approveDesign(req, res) {
     const orderId = o.rows[0]?.id || null;
     await client.query(
       `INSERT INTO staff_activity_log (user_id, action, order_id, from_stage, to_stage)
-       VALUES ($1, 'approve_design', $2, 'design_complete', 'converting')`,
+       VALUES ($1, 'approve_design', $2, 'design_complete', 'embroidery')`,
       [req.user.id, orderId]
     );
     const stu = await client.query(`SELECT user_id FROM students WHERE id = $1`, [d.rows[0].student_id]);
@@ -194,14 +195,14 @@ async function approveDesign(req, res) {
       await client.query(
         `INSERT INTO notifications (user_id, type, title_ar, body_ar, link)
          VALUES ($1, 'design_approved', $2, $3, '/')`,
-        [stu.rows[0].user_id, 'تمت الموافقة على تصميمك', 'اعتُمد تصميم الوشاح وانتقل لتحويل التطريز']
+        [stu.rows[0].user_id, 'تمت الموافقة على تصميمك', 'اعتُمد تصميم الوشاح وانتقل إلى التطريز']
       );
     }
     return { advanced: o.rows.length, orderId };
   });
   if (!result) return res.status(404).json({ error: 'التصميم غير موجود', code: 'ERR_NOT_FOUND' });
   if (result.orderId) {
-    publish({ type: 'order', orderId: result.orderId, status: 'converting' });
+    publish({ type: 'order', orderId: result.orderId, status: 'embroidery' });
     publish({ type: 'presence', orderId: result.orderId, working_staff_id: null, working_staff_name: null });
   }
   res.json({ data: { id, approval_status: 'approved', advanced: result.advanced } });

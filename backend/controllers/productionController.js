@@ -107,20 +107,23 @@ async function detectEmbroideryZones(orderId, progress) {
 }
 
 // Route-aware next stage: design-bearing sashes must use approve (not advance).
-// Advance is for: converting, embroidery, pressing, preparing, ready + design-less embroidery orders
+// Advance is for: embroidery, pressing, preparing, ready + design-less embroidery orders
 // from design_complete. An APPROVED design at design_complete may also advance (sash done, move on).
+// STAGE-2 REMOVED (user 2026-07-15): «تحويل التصميم لتطريز» (converting) is no longer part of
+// the live pipeline — design goes straight to التطريز; conversion happens inside that station.
+// The 'converting' case below is DRAIN-ONLY (legacy rows + orders created by prod before deploy).
 function nextStageFor(order) {
   const { status, design_id, needs_pressing, design_approval_status } = order;
   switch (status) {
     case 'design_complete':
-      // design-bearing sash: must be approved before it can advance to converting.
+      // design-bearing sash: must be approved before it can advance to embroidery.
       // Pending or rejected designs still need the designer's verdict first.
       if (design_id) {
-        if (design_approval_status === 'approved') return 'converting';
+        if (design_approval_status === 'approved') return 'embroidery';
         return null; // pending/rejected → use approve endpoint
       }
-      return 'converting';
-    case 'converting':
+      return 'embroidery';
+    case 'converting': // drain-only
       return 'embroidery';
     case 'embroidery':
       return needs_pressing ? 'pressing' : 'preparing';
@@ -143,8 +146,8 @@ const REVERT_MAP = {
   ready: 'preparing',
   preparing: 'embroidery',
   pressing: 'embroidery',
-  embroidery: 'converting',
-  converting: 'design_complete',
+  embroidery: 'design_complete', // stage-2 (converting) removed — one step back = the design desk
+  converting: 'design_complete', // drain-only
   design_complete: 'designing',
 };
 
@@ -153,11 +156,42 @@ const REVERT_MAP = {
 // embroidered piece starts at design_complete (or designing); a plain piece starts at preparing.
 // has_embroidery distinguishes a plain order sitting at its first 'preparing' stage from an
 // embroidered order that REACHED 'preparing' after embroidery (the latter is NOT first-stage).
+// Key the advance label on the actual EDGE (status→next), not just the current status —
+// at 'embroidery' the next stage is pressing OR preparing (needs_pressing-driven), so a
+// status-keyed label would lie ("نقل للكوي" even when going straight to التجهيز).
+// Module-scoped: also consumed by the calligraphy workbench («تحويل للتطريز» button label).
+const ADVANCE_LABEL_AR = {
+  'design_complete→embroidery': 'تحويل للتطريز',
+  'design_complete→converting': 'إرسال للتحويل / التطريز', // drain-only (stage-2 removed)
+  'converting→embroidery':      'إنهاء التحويل، نقل للتطريز', // drain-only
+  'embroidery→pressing':        'إنهاء التطريز، نقل للكوي',
+  'embroidery→preparing':       'إنهاء التطريز، نقل للتجهيز',
+  'pressing→preparing':         'إنهاء الكوي، نقل للتجهيز',
+  'preparing→ready':            'إنهاء التجهيز، تحديد جاهز',
+  'ready→delivered':            'تأكيد التسليم',
+};
+
 function isFirstProductionStage(order) {
   const designed = !!order.has_embroidery || !!order.design_id;
   return designed
     ? (order.status === 'designing' || order.status === 'design_complete')
-    : (order.status === 'preparing');
+    // Plain pieces: non-cap now starts at الكوي ('pressing'); caps (and legacy rows)
+    // start at التجهيز ('preparing').
+    : (order.status === 'preparing' || order.status === 'pressing');
+}
+
+// One-step-back target, aware of PLAIN pieces (no design/embroidery): they never visited
+// التطريز, so REVERT_MAP's embroidery targets would invent a ghost stage for them. A plain
+// piece at its first stage has nothing to revert to; a plain piece at التجهيز goes back to
+// الكوي (where it came from) when it pressed, else nowhere. Needs order.{status, design_id,
+// has_embroidery, needs_pressing}.
+function resolveRevertTarget(order) {
+  const plain = !order.design_id && !order.has_embroidery;
+  if (plain) {
+    if (order.status === 'pressing') return null; // first stage for plain non-cap
+    if (order.status === 'preparing') return order.needs_pressing ? 'pressing' : null;
+  }
+  return REVERT_MAP[order.status] ?? null;
 }
 
 // ---------- Stage-scoped work queue for the requesting staff member ----------
@@ -438,22 +472,9 @@ async function getOrder(req, res) {
     design_approval_status: design?.approval_status ?? null,
   };
   const nextTo = nextStageFor(orderForActions);
-  const revertTo = REVERT_MAP[order.status] ?? null;
+  const revertTo = resolveRevertTarget(order);
 
   const { canStaffTransition: canTransition } = require('./orderController');
-
-  // Key the advance label on the actual EDGE (status→next), not just the current status —
-  // at 'embroidery' the next stage is pressing OR preparing (needs_pressing-driven), so a
-  // status-keyed label would lie ("نقل للكوي" even when going straight to التجهيز).
-  const ADVANCE_LABEL_AR = {
-    'design_complete→converting': 'إرسال للتحويل / التطريز',
-    'converting→embroidery':      'إنهاء التحويل، نقل للتطريز',
-    'embroidery→pressing':        'إنهاء التطريز، نقل للكوي',
-    'embroidery→preparing':       'إنهاء التطريز، نقل للتجهيز',
-    'pressing→preparing':         'إنهاء الكوي، نقل للتجهيز',
-    'preparing→ready':            'إنهاء التجهيز، تحديد جاهز',
-    'ready→delivered':            'تأكيد التسليم',
-  };
 
   // Per-zone embroidery checklist (محمد عماد ticks each zone; all-done auto-advances).
   // Computed BEFORE available_actions so it can gate the manual advance. Only meaningful at the
@@ -781,7 +802,7 @@ async function deliver(req, res) {
 async function revert(req, res) {
   const { id } = req.params;
   const cur = await query(
-    `SELECT o.id, o.status, o.design_id, s.user_id, s.wholesaler_id
+    `SELECT o.id, o.status, o.design_id, o.has_embroidery, o.needs_pressing, s.user_id, s.wholesaler_id
      FROM orders o JOIN students s ON s.id = o.student_id WHERE o.id = $1`,
     [id]
   );
@@ -791,7 +812,7 @@ async function revert(req, res) {
     return res.status(403).json({ error: 'هذا الطلب خارج نطاقك', code: 'ERR_FORBIDDEN' });
   }
   const from = order.status;
-  const to = REVERT_MAP[from];
+  const to = resolveRevertTarget(order);
   if (!to) {
     return res.status(409).json({ error: 'لا يمكن التراجع عن هذه الحالة', code: 'ERR_INVALID_TRANSITION' });
   }

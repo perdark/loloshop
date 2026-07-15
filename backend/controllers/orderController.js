@@ -11,18 +11,19 @@ const ALL_STATUSES = [
 ];
 
 // Allowed status transitions (state machine).
-// Pipeline: pending_approval → designing → design_complete
-//   → (designer APPROVES sash) converting → (digitizer) embroidery → pressing → preparing → ready → delivered
-//   → (designer ADVANCES design-less emb order) converting → ...
+// Pipeline: pending_approval → designing → design_complete (بانتظار التصميم)
+//   → (designer sends «تحويل للتطريز») embroidery → pressing → preparing → ready → delivered
+// STAGE-2 REMOVED (user 2026-07-15): 'converting' is drain-only — legacy rows + orders the
+// old prod code still creates until deploy keep their edges so they can flow out.
 // Also includes reopen edges (delivered→preparing etc.) for reverting.
 const TRANSITIONS = {
   pending_approval: ['designing', 'cancelled'],
   designing: ['design_complete', 'cancelled'],
   design_complete: ['converting', 'embroidery', 'designing', 'cancelled'],
-  converting: ['embroidery', 'design_complete', 'cancelled'],
-  embroidery: ['pressing', 'preparing', 'cancelled'],
+  converting: ['embroidery', 'design_complete', 'cancelled'], // drain-only
+  embroidery: ['pressing', 'preparing', 'design_complete', 'cancelled'],
   pressing: ['preparing', 'cancelled'],
-  preparing: ['ready', 'embroidery', 'cancelled'],
+  preparing: ['ready', 'embroidery', 'pressing', 'cancelled'],
   ready: ['delivered', 'preparing', 'cancelled'],
   delivered: ['preparing'],
   cancelled: [],
@@ -35,9 +36,10 @@ const TRANSITIONS = {
 // admin role and `manager` staff_type bypass this map entirely; cancelling is manager/admin only.
 const STAGE_AUTHZ = {
   // forward edges
-  'design_complete→converting': ['designer'],
-  'converting→embroidery': ['digitizer'],
-  'converting→design_complete': ['digitizer'],
+  'design_complete→embroidery': ['designer'], // stage-2 removed: design goes straight to التطريز
+  'design_complete→converting': ['designer'], // drain-only
+  'converting→embroidery': ['digitizer'],     // drain-only
+  'converting→design_complete': ['digitizer'], // drain-only
   'embroidery→pressing': ['embroiderer'],
   'embroidery→preparing': ['embroiderer'],
   'pressing→preparing': ['presser'],
@@ -48,8 +50,11 @@ const STAGE_AUTHZ = {
   'delivered→preparing': ['preparer'],
   'ready→preparing': ['preparer'],
   'preparing→embroidery': ['preparer'],
+  // Revert for a PLAIN piece that came straight from الكوي (never embroidered).
+  'preparing→pressing': ['preparer'],
   'pressing→embroidery': ['presser'],
-  'embroidery→converting': ['embroiderer'],
+  'embroidery→converting': ['embroiderer'], // drain-only
+  'embroidery→design_complete': ['embroiderer'], // revert: one step back = the design desk
 };
 
 function canStaffTransition(user, from, to) {
@@ -551,7 +556,7 @@ async function configureOrder(req, res) {
 
   // Compute routing flags
   const has_embroidery = !!design_id || priced.hasEmbroidery;
-  const needs_pressing = (productType === 'sash' || productType === 'robe');
+  const needs_pressing = productType !== 'cap';
 
   // Determine initial status based on routing
   let initialStatus;
@@ -560,7 +565,9 @@ async function configureOrder(req, res) {
   } else if (priced.hasEmbroidery) {
     initialStatus = 'design_complete'; // designer handles design-less embroidery
   } else {
-    initialStatus = 'preparing';
+    // المكوجي gets every piece except caps (user 2026-07-15): a plain sash/robe/shawl
+    // starts at الكوي; only plain caps go straight to التجهيز.
+    initialStatus = productType === 'cap' ? 'preparing' : 'pressing';
   }
 
   const measurementsJson = (productType === 'robe' && measurements) ? JSON.stringify(measurements) : null;
@@ -730,9 +737,9 @@ async function configurePackage(req, res) {
         `SELECT id FROM orders WHERE student_id = $1 AND product_id = $2 AND design_id IS NULL AND status <> 'cancelled'`,
         [student.id, prodId]
       );
-      // Only the sash is designed by the student; robe + cap have nothing to design,
-      // so they enter the preparer's queue directly.
-      const pkgStatus = prodId === byType.sash ? 'designing' : 'preparing';
+      // Only the sash is designed by the student; the robe passes through الكوي first
+      // (المكوجي gets everything except caps), the cap enters the preparer's queue directly.
+      const pkgStatus = prodId === byType.sash ? 'designing' : prodId === byType.cap ? 'preparing' : 'pressing';
       // كوي (pressing) follows embroidery for sashes & robes; caps skip it. (Only the
       // sash actually reaches the embroidery→pressing edge here — robe/cap start at
       // 'preparing' — but keep it type-based for consistency with every other path.)
@@ -975,7 +982,8 @@ async function configureFullSet(req, res) {
   // option requires text/image. Same routing rules as configureOrder.
   const itemFlags = {
     sash: { has_embroidery: true, status: 'design_complete' },
-    robe: { has_embroidery: priced.robe.hasEmbroidery, status: priced.robe.hasEmbroidery ? 'design_complete' : 'preparing' },
+    // Plain robe → الكوي first (المكوجي gets everything except caps); plain cap → التجهيز.
+    robe: { has_embroidery: priced.robe.hasEmbroidery, status: priced.robe.hasEmbroidery ? 'design_complete' : 'pressing' },
     cap: { has_embroidery: priced.cap.hasEmbroidery, status: priced.cap.hasEmbroidery ? 'design_complete' : 'preparing' },
   };
 

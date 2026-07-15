@@ -236,7 +236,7 @@ function JobDetail({
                 إعادته للعضو
               </Button>
               <Button onClick={onApprove} loading={busy === "approve"} disabled={actionBusy && busy !== "approve"}>
-                اعتماد وإرسال للتحويل
+                اعتماد وإرسال للتطريز
               </Button>
             </>
           )}
@@ -683,7 +683,7 @@ export default function DesignSupportPage() {
       const success = {
         claim: "تم استلام الطلب للتصميم",
         ready: "تم إرساله لمراجعة محمد",
-        approve: "تم اعتماد التصميم وإرساله للتحويل",
+        approve: "تم اعتماد التصميم وإرساله للتطريز",
         reject: "تمت إعادته للعضو",
       }[kind];
       toast.success(success);
