@@ -6,6 +6,59 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
+## 2026-07-15 (b) — Pipeline rework: stage-2 DELETED · «بانتظار التصميم» · calligraphy workbench (auto-link + تحويل للتطريز) · كوي station + everything-but-caps routing
+
+**Committed locally on main, NOT pushed (push = prod deploy — user tests first).** Migration **065 applied to Neon**
+(`calligraphy_variant` + `'cap_side'`; dev+prod share the DB). Gates: BE `node --check` 0 · FE `tsc` 0 · `eslint` 0 errors.
+Verified: self-cleaning controller e2e **25/25 on Neon** + live HTTP smoke (queue 4 zones, plates carry order context).
+**No browser test by Claude (user instruction)** — minted 7-day JWTs + click-walkthrough in **`TESTING-WALKTHROUGH.md`**
+(untracked, do not commit). Spec: `docs/superpowers/specs/2026-07-15-staff-pipeline-labels-calligraphy-stations-design.md`
+(incl. addenda) · plan: `docs/superpowers/plans/2026-07-15-staff-pipeline-labels-calligraphy-stations.md`.
+
+**What changed (user decisions locked mid-session):**
+1. **Label:** `design_complete` → **«بانتظار التصميم»** (`orderController.STATUS_LABEL_AR` + `frontend/lib/constants.ts` — the
+   only two sources; grep-verified no stragglers).
+2. **Stage-2 «التحويل» deleted from the live pipeline.** `nextStageFor: design_complete → embroidery` (approved-design +
+   design-less); `designController.approveDesign` + `designTeamController.approveJob` now advance to `embroidery`;
+   `REVERT_MAP.embroidery = design_complete`; STAGE_AUTHZ gained `design_complete→embroidery [designer]` +
+   `embroidery→design_complete [embroiderer]`. **`converting` is DRAIN-ONLY**: enum value, queues (digitizer/manager/tailor),
+   and its edges kept so legacy rows flow out; frontend rails dropped the chip. **0 orders were at converting** at cutover, but
+   prod keeps creating them until deploy → **after deploy run:** `UPDATE orders SET status='embroidery' WHERE status='converting';`
+3. **Calligraphy auto-link + send.** «ربط بالطلب» removed (route deleted). A done plate **auto-writes**
+   `order_items.customer_image_url` (`autoLinkPlate` in processNext/reroll/composePlate). NEW `GET /calligraphy/orders-zones?ids=`
+   (zones + has_image + can_send + state-machine-driven send_label) + `POST /calligraphy/orders/:orderId/send` = **«تحويل للتطريز»**
+   (gate: admin/staff manager|designer — design_helper 403s, keeps محمد هيثم's approval flow; catch-up links older unlinked
+   plates, then `performAdvance` — same tx/audit/notifications as the order page). Labels/targets derive from
+   `nextStageFor` + `ADVANCE_LABEL_AR` (now module-scoped + exported), so future pipeline changes re-label the button for free.
+4. **Calligraphy workbench UI** (`CalligraphyTool.tsx`): plates **grouped by student/order** (student name clickable →
+   `/staff/orders/[id]?from=<path>`; hidden for design_helper), zone ✓/✗ chips, per-group send button + confirm modal when
+   zones lack images, **sticky bar** (controls collapse into «توليد المزيد», filters الكل/بانتظار الإرسال/مُرسلة/بدون طلب +
+   ممثل select + name search), **«تنزيل إلى مجلد…»** (File System Access picker; ZIP fallback via NEW `POST /plates/zip`),
+   ممثل filter on the auto queue (`?wholesaler_id` on GET /queue + POST /queue/generate), **cap_side** 4th queue zone
+   («تطريز القبعة من الجانب», prompt reuses the cap style), back button (`backHref` prop from the wrapper pages).
+5. **كوي (presser).** ROUTING: plain (no-embroidery) **sash/robe/shawl now START at `pressing`**; plain caps stay `preparing`
+   (`needs_pressing = type!=='cap'` unified in all 5 creation paths: configureOrder/configureFullSet/configurePackage/cart/
+   fullSetOrder). `isFirstProductionStage` + `resolveRevertTarget` know plain pieces (plain@pressing = first stage, no revert;
+   plain@preparing reverts to pressing; new authz edge `preparing→pressing [preparer]`). **Existing plain orders at preparing
+   were NOT migrated** (per the 2026-06-24 precedent). VIEW: dedicated `layout='presser'` station (name + product photo +
+   DesignGallery + sizes/spec + قياسات + advance); backend stops nulling item images/text for presser and grants measurements;
+   phone/instagram/money/delivery still stripped (e2e-verified).
+6. **Orders page:** `FinalDesignUpload` + its preview + the red «لم تُرفع صورة التصميم» alert **deleted** (all layouts). NEW
+   shared `components/staff/DesignGallery.tsx` (zone images + «التصميم النهائي» legacy entry, tap-fullscreen portal + تنزيل)
+   mounted on the full view + كوي station. التطريز/الفصال stations untouched. Queue `getQueue` gained `has_design_images`
+   (EXISTS over item images) and «تصميم مفقود» = no final_design_url AND no item images. The backend `/final-design` upload
+   endpoint STAYS (design-team desk flow unchanged).
+
+### Open follow-ups
+- **User browser walkthrough pending** — tokens + steps in `TESTING-WALKTHROUGH.md`. Then commit-push to deploy (`next build`
+  runs on the server; NOT run locally — disk 93%).
+- **After deploy:** re-drain converting (SQL above) + glance the live calligraphy page.
+- Old plates generated before auto-link stay unlinked until their order is SENT (catch-up links then) — cosmetic.
+- Digitizer (يوسف ريفو) role is now dormant (drain queue only) — admin may unassign/repurpose later.
+- `TESTING-WALKTHROUGH.md` + scratchpad e2e are intentionally untracked; don't commit tokens.
+
+---
+
 ## 2026-07-15 — أيادي التصميم desk made REAL (was empty) + committed/pushed the whole workshop/design-team/pricing batch
 
 **Committed + pushed to main → auto-deploys prod.** Migration **064 applied to Neon + verified.** Gates: BE `node --check` 0 · FE `tsc` 0 ·
