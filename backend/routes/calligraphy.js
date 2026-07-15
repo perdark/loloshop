@@ -36,6 +36,19 @@ async function allowCalligraphyUser(req, res, next) {
   }
 }
 
+// «تحويل للتطريز» (advance an order out of بانتظار التصميم) is STRICTER than the tool
+// itself: admin or staff manager/designer only. design_helper can generate/compose plates
+// but never push orders — the أيادي التصميم flow keeps going through محمد هيثم's approval.
+function requireDesignerOrAdmin(req, res, next) {
+  const u = req.user;
+  if (u && u.role === 'admin') return next();
+  if (u && u.role === 'staff') {
+    const mine = staffTypesOf(u);
+    if (mine.includes('manager') || mine.includes('designer')) return next();
+  }
+  return res.status(403).json({ error: 'ممنوع', code: 'ERR_FORBIDDEN' });
+}
+
 router.use(authRequired, allowCalligraphyUser);
 
 // generation is the expensive path — cap it
@@ -48,7 +61,11 @@ router.post('/jobs/:jobId/process', genLimit, c.processNext);
 router.get('/jobs/:jobId', c.getJob);
 router.get('/jobs/:jobId/download', c.downloadZip);
 router.post('/plates/:id/reroll', genLimit, c.reroll);
-router.post('/plates/:id/link', c.linkToOrder);
+// «ربط بالطلب» removed 2026-07-15 — plates auto-attach on generation; the only manual
+// action is the order-level send below.
+router.post('/plates/zip', c.platesZip);
+router.get('/orders-zones', c.ordersZones);
+router.post('/orders/:orderId/send', requireDesignerOrAdmin, c.sendOrder);
 
 // Queue endpoints
 router.get('/queue', c.getQueue);

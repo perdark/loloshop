@@ -7,11 +7,18 @@ const { cropSheet } = require('../lib/sheetCrop');
 const { buildSheetPrompt, buildSinglePrompt } = require('../lib/calligraphyPrompt');
 const { saveBufferToUploads } = require('../lib/upload');
 
-const FRONT_LABEL   = 'تطريز الوشاح من الأمام';
-const BACK_LABEL    = 'تطريز الوشاح من الخلف';
-const CAP_TOP_LABEL = 'تطريز القبعة من الأعلى';
-const LABEL_VARIANT = { [FRONT_LABEL]: 'front', [BACK_LABEL]: 'back', [CAP_TOP_LABEL]: 'cap' };
-const VARIANTS = ['front', 'back', 'cap'];
+const FRONT_LABEL    = 'تطريز الوشاح من الأمام';
+const BACK_LABEL     = 'تطريز الوشاح من الخلف';
+const CAP_TOP_LABEL  = 'تطريز القبعة من الأعلى';
+const CAP_SIDE_LABEL = 'تطريز القبعة من الجانب';
+const LABEL_VARIANT = {
+  [FRONT_LABEL]: 'front', [BACK_LABEL]: 'back',
+  [CAP_TOP_LABEL]: 'cap', [CAP_SIDE_LABEL]: 'cap_side',
+};
+const VARIANTS = ['front', 'back', 'cap', 'cap_side'];
+// The prompt library only knows front/back/cap styles — cap_side renders with the cap style.
+const promptVariant = (v) => (v === 'cap_side' ? 'cap' : v);
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const BATCH = 10;
 
 function bad(res, msg, code = 'ERR_VALIDATION', status = 400) {
@@ -49,10 +56,10 @@ async function listWholesalers(req, res) {
   res.json({ data: rows });
 }
 
-// GET /wholesalers/:id/names — grab list from sash front/back AND cap-top embroidery lines
+// GET /wholesalers/:id/names — grab list from sash front/back AND cap top/side embroidery lines
 async function wholesalerNames(req, res) {
   const { id } = req.params;
-  const ALL_LABELS = [FRONT_LABEL, BACK_LABEL, CAP_TOP_LABEL];
+  const ALL_LABELS = [FRONT_LABEL, BACK_LABEL, CAP_TOP_LABEL, CAP_SIDE_LABEL];
   const { rows } = await query(
     `SELECT s.id AS student_id, u.name AS student_name,
             oi.id AS order_item_id, oi.customer_text AS render_text,
@@ -69,7 +76,7 @@ async function wholesalerNames(req, res) {
        ) cp ON TRUE
       WHERE s.wholesaler_id = $1 AND COALESCE(oi.customer_text,'') <> ''
       ORDER BY u.name,
-               array_position(ARRAY['تطريز الوشاح من الأمام','تطريز الوشاح من الخلف','تطريز القبعة من الأعلى']::text[], oi.label_snapshot)`,
+               array_position(ARRAY['تطريز الوشاح من الأمام','تطريز الوشاح من الخلف','تطريز القبعة من الأعلى','تطريز القبعة من الجانب']::text[], oi.label_snapshot)`,
     [id, ALL_LABELS]);
   res.json({ data: rows.map((r) => ({
     student_id: r.student_id, student_name: r.student_name,
@@ -104,9 +111,9 @@ async function insertPlates(jobId, items, { source, model, createdBy }) {
 // "Needs a plate" = order_item with the zone label + non-empty customer_text
 // + no 'done' plate already. Applies isRealName junk-guard before returning.
 // ---------------------------------------------------------------------------
-const ZONE_LABEL = { front: FRONT_LABEL, back: BACK_LABEL, cap: CAP_TOP_LABEL };
+const ZONE_LABEL = { front: FRONT_LABEL, back: BACK_LABEL, cap: CAP_TOP_LABEL, cap_side: CAP_SIDE_LABEL };
 
-async function poolFor(variant, limit = 1000) {
+async function poolFor(variant, limit = 1000, wholesalerId = null) {
   const label = ZONE_LABEL[variant];
   if (!label) return [];
   const { rows } = await query(
@@ -118,12 +125,13 @@ async function poolFor(variant, limit = 1000) {
        JOIN students s  ON s.id = o.student_id
        JOIN users u     ON u.id = s.user_id
       WHERE oi.label_snapshot = $1 AND COALESCE(oi.customer_text,'') <> ''
+        AND ($3::uuid IS NULL OR s.wholesaler_id = $3)
         AND NOT EXISTS (
               SELECT 1 FROM calligraphy_plates cp
                WHERE cp.order_item_id = oi.id AND cp.status = 'done')
       ORDER BY o.created_at
       LIMIT $2`,
-    [label, limit]);
+    [label, limit, wholesalerId]);
   // Apply the same junk guard used in createJob — never pool non-Arabic junk
   return rows
     .filter((r) => isRealName(r.render_text))
@@ -177,7 +185,57 @@ async function createJob(req, res) {
   const out = await insertPlates(jobId, items.map((it) => ({ ...it, wholesaler_id })), {
     source, model: pickModel(model), createdBy: req.user.id,
   });
-  res.status(201).json({ data: { job_id: jobId, total: out.length, dropped, plates: out } });
+  res.status(201).json({ data: { job_id: jobId, total: out.length, dropped, plates: await attachOrderContext(out) } });
+}
+
+// «ربط بالطلب» removed (user 2026-07-15): a finished plate attaches itself to its order
+// line immediately — the plate IS the design the later stations see. Idempotent; a deleted
+// order line just leaves the plate unlinked (it falls into the «بدون طلب» group).
+async function autoLinkPlate(plateRow) {
+  if (!plateRow || !plateRow.order_item_id || !plateRow.plate_path) return plateRow;
+  const upd = await query(
+    `UPDATE order_items SET customer_image_url = $2 WHERE id = $1 RETURNING id`,
+    [plateRow.order_item_id, plateRow.plate_path]);
+  if (!upd.rows.length) return plateRow;
+  const { rows } = await query(
+    `UPDATE calligraphy_plates SET linked_at = NOW() WHERE id = $1 RETURNING *`, [plateRow.id]);
+  return rows[0] || plateRow;
+}
+
+// Batch-attach order context (student/product/status/zone/rep) onto plate DTOs so the
+// workbench can group by order without N+1 requests. Plates with no order line pass through.
+async function attachOrderContext(plates) {
+  const ids = [...new Set(plates.map((p) => p.order_item_id).filter(Boolean))];
+  if (!ids.length) return plates.map((p) => ({ ...p, order_id: null }));
+  const { rows } = await query(
+    `SELECT oi.id AS order_item_id, oi.order_id, oi.label_snapshot,
+            o.status::text AS order_status,
+            u.name AS student_name, p.name_ar AS product_name, p.type AS product_type,
+            s.wholesaler_id, wu.name AS wholesaler_name
+       FROM order_items oi
+       JOIN orders o    ON o.id = oi.order_id
+       JOIN students s  ON s.id = o.student_id
+       JOIN users u     ON u.id = s.user_id
+       JOIN products p  ON p.id = o.product_id
+       LEFT JOIN wholesalers w ON w.id = s.wholesaler_id
+       LEFT JOIN users wu ON wu.id = w.user_id
+      WHERE oi.id = ANY($1)`, [ids]);
+  const byId = new Map(rows.map((r) => [r.order_item_id, r]));
+  return plates.map((p) => {
+    const ctx = p.order_item_id ? byId.get(p.order_item_id) : null;
+    if (!ctx) return { ...p, order_id: null };
+    return {
+      ...p,
+      order_id: ctx.order_id,
+      order_status: ctx.order_status,
+      zone_label: ctx.label_snapshot,
+      student_name: ctx.student_name,
+      product_name: ctx.product_name,
+      product_type: ctx.product_type,
+      wholesaler_id: ctx.wholesaler_id,
+      wholesaler_name: ctx.wholesaler_name,
+    };
+  });
 }
 
 async function jobCost(jobId) {
@@ -234,7 +292,7 @@ async function processNext(req, res) {
     attemptsUsed = attempt;
     let gen;
     try {
-      gen = await generateImage({ model, prompt: buildSheetPrompt(names, variant) });
+      gen = await generateImage({ model, prompt: buildSheetPrompt(names, promptVariant(variant)) });
     } catch (err) {
       await query(`UPDATE calligraphy_plates SET status='failed', error=$2 WHERE id = ANY($1)`,
         [batch.map((b) => b.id), err.code || 'ERR_OPENROUTER']);
@@ -275,10 +333,10 @@ async function processNext(req, res) {
       `UPDATE calligraphy_plates SET status='done', model=$2, cost_usd=$3, sheet_path=$4, plate_path=$5, error=NULL
         WHERE id=$1 RETURNING *`,
       [batch[i].id, model, perCost, sheet.url, plate.url]);
-    updated.push(toPlate(rows[0]));
+    updated.push(toPlate(await autoLinkPlate(rows[0])));
   }
   const c = await jobCounts(jobId);
-  res.json({ data: { processed: updated.length, ...c, remaining: c.pending, job_cost: await jobCost(jobId), attempts: attemptsUsed, plates: updated } });
+  res.json({ data: { processed: updated.length, ...c, remaining: c.pending, job_cost: await jobCost(jobId), attempts: attemptsUsed, plates: await attachOrderContext(updated) } });
 }
 
 // GET /jobs/:jobId
@@ -287,7 +345,7 @@ async function getJob(req, res) {
   const { rows } = await query(`SELECT * FROM calligraphy_plates WHERE job_id=$1 ORDER BY created_at`, [jobId]);
   if (!rows.length) return bad(res, 'المهمة غير موجودة', 'ERR_NOT_FOUND', 404);
   const c = await jobCounts(jobId);
-  res.json({ data: { job_id: jobId, ...c, job_cost: await jobCost(jobId), plates: rows.map(toPlate) } });
+  res.json({ data: { job_id: jobId, ...c, job_cost: await jobCost(jobId), plates: await attachOrderContext(rows.map(toPlate)) } });
 }
 
 // POST /plates/:id/reroll
@@ -298,7 +356,7 @@ async function reroll(req, res) {
   const p = pr[0];
   const model = p.model || MODELS.standard;
   let gen;
-  try { gen = await generateImage({ model, prompt: buildSinglePrompt(p.render_text, p.variant, p.element_text) }); }
+  try { gen = await generateImage({ model, prompt: buildSinglePrompt(p.render_text, promptVariant(p.variant), p.element_text) }); }
   catch (err) { return res.status(err.status || 502).json({ error: err.message, code: err.code || 'ERR_OPENROUTER' }); }
   // single-name image: trim to one band (expected 1); fall back to full image
   let plateBuf = gen.buffer;
@@ -308,33 +366,15 @@ async function reroll(req, res) {
     `UPDATE calligraphy_plates SET status='done', plate_path=$2, cost_usd = cost_usd + $3, error=NULL,
             linked_at = NULL WHERE id=$1 RETURNING *`,
     [id, plate.url, Number(gen.cost || 0)]);
-  res.json({ data: toPlate(rows[0]) });
+  // Re-attach the fresh artwork onto the order line right away (auto-link, no manual step).
+  const [withCtx] = await attachOrderContext([toPlate(await autoLinkPlate(rows[0]))]);
+  res.json({ data: withCtx });
 }
 
-// POST /plates/:id/link — write plate onto the order_item's customer_image_url
-async function linkToOrder(req, res) {
-  const { id } = req.params;
-  const { rows: pr } = await query(`SELECT * FROM calligraphy_plates WHERE id=$1`, [id]);
-  if (!pr.length) return bad(res, 'الصورة غير موجودة', 'ERR_NOT_FOUND', 404);
-  const p = pr[0];
-  if (!p.order_item_id) return bad(res, 'لا يوجد طلب مرتبط بهذه الصورة');
-  if (!p.plate_path || p.status !== 'done') return bad(res, 'الصورة غير جاهزة بعد');
-  const upd = await query(`UPDATE order_items SET customer_image_url=$2 WHERE id=$1 RETURNING id`, [p.order_item_id, p.plate_path]);
-  if (!upd.rows.length) return bad(res, 'بند الطلب غير موجود', 'ERR_NOT_FOUND', 404);
-  await query(`UPDATE calligraphy_plates SET linked_at = NOW() WHERE id=$1`, [id]);
-  res.json({ data: { ok: true, order_item_id: p.order_item_id, url: p.plate_path } });
-}
-
-// GET /jobs/:jobId/download
-async function downloadZip(req, res) {
-  const { jobId } = req.params;
-  const includeSheets = String(req.query.sheets || '0') === '1';
-  const { rows } = await query(
-    `SELECT render_text, plate_path, sheet_path FROM calligraphy_plates
-      WHERE job_id=$1 AND status='done' AND plate_path IS NOT NULL ORDER BY created_at`, [jobId]);
-  if (!rows.length) return bad(res, 'لا توجد صور جاهزة للتنزيل', 'ERR_NOT_FOUND', 404);
+// Shared ZIP streamer for plate rows [{render_text, plate_path, sheet_path?}].
+function streamPlatesZip(res, rows, filename, includeSheets = false) {
   res.setHeader('Content-Type', 'application/zip');
-  res.setHeader('Content-Disposition', `attachment; filename="calligraphy-${jobId.slice(0, 8)}.zip"`);
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
   const archive = archiver('zip', { zlib: { level: 9 } });
   archive.on('error', (e) => { console.error('zip error', e); try { res.status(500).end(); } catch {} });
   archive.pipe(res);
@@ -352,14 +392,41 @@ async function downloadZip(req, res) {
   archive.finalize();
 }
 
+// GET /jobs/:jobId/download
+async function downloadZip(req, res) {
+  const { jobId } = req.params;
+  const includeSheets = String(req.query.sheets || '0') === '1';
+  const { rows } = await query(
+    `SELECT render_text, plate_path, sheet_path FROM calligraphy_plates
+      WHERE job_id=$1 AND status='done' AND plate_path IS NOT NULL ORDER BY created_at`, [jobId]);
+  if (!rows.length) return bad(res, 'لا توجد صور جاهزة للتنزيل', 'ERR_NOT_FOUND', 404);
+  streamPlatesZip(res, rows, `calligraphy-${jobId.slice(0, 8)}.zip`, includeSheets);
+}
+
+// POST /plates/zip {ids} — ZIP an arbitrary selection (fallback for browsers without the
+// File System Access folder picker used by «تنزيل إلى مجلد…»).
+async function platesZip(req, res) {
+  const raw = Array.isArray(req.body && req.body.ids) ? req.body.ids : [];
+  const ids = raw.filter((x) => typeof x === 'string' && UUID_RE.test(x)).slice(0, 500);
+  if (!ids.length) return bad(res, 'لا توجد صور محددة');
+  const { rows } = await query(
+    `SELECT render_text, plate_path FROM calligraphy_plates
+      WHERE id = ANY($1) AND status='done' AND plate_path IS NOT NULL ORDER BY created_at`, [ids]);
+  if (!rows.length) return bad(res, 'لا توجد صور جاهزة للتنزيل', 'ERR_NOT_FOUND', 404);
+  streamPlatesZip(res, rows, `calligraphy-plates-${rows.length}.zip`);
+}
+
 // ---------------------------------------------------------------------------
 // GET /queue — per-zone pending count + up to 200 item previews
 // ---------------------------------------------------------------------------
 async function getQueue(req, res) {
+  // Optional ممثل filter — counts + previews scoped to one wholesaler's students.
+  const wid = req.query.wholesaler_id && UUID_RE.test(req.query.wholesaler_id)
+    ? req.query.wholesaler_id : null;
   const data = {};
   for (const variant of VARIANTS) {
     // TRUE count: pool with a high limit so we never under-count
-    const full = await poolFor(variant, 10000);
+    const full = await poolFor(variant, 10000, wid);
     const items = full.slice(0, 200).map(({ wholesaler_id: _wid, ...rest }) => rest); // strip wholesaler_id
     data[variant] = { pending: full.length, items };
   }
@@ -371,11 +438,12 @@ async function getQueue(req, res) {
 // body: { variant: 'front'|'back'|'cap', mode: 'full'|'all' }
 // ---------------------------------------------------------------------------
 async function queueGenerate(req, res) {
-  const { variant, mode } = req.body || {};
-  if (!VARIANTS.includes(variant)) return bad(res, 'variant غير صالح — يجب أن يكون front أو back أو cap');
+  const { variant, mode, wholesaler_id } = req.body || {};
+  if (!VARIANTS.includes(variant)) return bad(res, 'variant غير صالح — يجب أن يكون front أو back أو cap أو cap_side');
   if (!['full', 'all'].includes(mode)) return bad(res, 'mode غير صالح — يجب أن يكون full أو all');
+  const wid = wholesaler_id && UUID_RE.test(wholesaler_id) ? wholesaler_id : null;
 
-  const pool = await poolFor(variant, 1000);
+  const pool = await poolFor(variant, 1000, wid);
   if (!pool.length) return bad(res, 'لا توجد أسماء بانتظار التوليد', 'ERR_EMPTY', 400);
 
   let selected;
@@ -394,7 +462,7 @@ async function queueGenerate(req, res) {
   const plates = await insertPlates(jobId, selected.map((it) => ({ ...it })), {
     source: 'wholesaler', model: MODELS.standard, createdBy: req.user.id,
   });
-  res.status(201).json({ data: { job_id: jobId, total: plates.length, dropped: [], plates } });
+  res.status(201).json({ data: { job_id: jobId, total: plates.length, dropped: [], plates: await attachOrderContext(plates) } });
 }
 
 // ---------------------------------------------------------------------------
@@ -405,7 +473,7 @@ async function recentPlates(req, res) {
   const { rows } = await query(
     `SELECT * FROM calligraphy_plates WHERE status='done' ORDER BY created_at DESC LIMIT $1`,
     [limit]);
-  res.json({ data: { plates: rows.map(toPlate) } });
+  res.json({ data: { plates: await attachOrderContext(rows.map(toPlate)) } });
 }
 
 // POST /plates/:id/compose — receive merged PNG from the compositor, save as new plate image
@@ -418,7 +486,74 @@ async function composePlate(req, res) {
   const { rows } = await query(
     `UPDATE calligraphy_plates SET plate_path=$2, linked_at=NULL, status='done' WHERE id=$1 RETURNING *`,
     [id, saved.url]);
-  res.json({ data: toPlate(rows[0]) });
+  // Composited artwork replaces the order-line image too (auto-link, no manual step).
+  const [withCtx] = await attachOrderContext([toPlate(await autoLinkPlate(rows[0]))]);
+  res.json({ data: withCtx });
+}
+
+// ---------------------------------------------------------------------------
+// GET /orders-zones?ids=a,b,c — per-order zone/image status + send-readiness for
+// the workbench. can_send + send_label are STATE-MACHINE-DRIVEN (nextStageFor +
+// ADVANCE_LABEL_AR), so a future pipeline change re-labels the button for free.
+// ---------------------------------------------------------------------------
+async function ordersZones(req, res) {
+  const ids = String(req.query.ids || '')
+    .split(',').map((s) => s.trim()).filter((s) => UUID_RE.test(s)).slice(0, 100);
+  if (!ids.length) return res.json({ data: [] });
+  const production = require('./productionController');
+  const out = [];
+  for (const orderId of ids) {
+    const row = await production.loadAdvanceRow(orderId);
+    if (!row) continue;
+    const zones = await production.detectZonesWithImages(orderId);
+    const next = row.status === 'design_complete' ? production.nextStageFor(row) : null;
+    out.push({
+      order_id: orderId,
+      order_status: row.status,
+      zones,
+      can_send: !!next,
+      next_stage: next,
+      send_label: next
+        ? (production.ADVANCE_LABEL_AR[`design_complete→${next}`] || 'تحويل للتطريز')
+        : null,
+    });
+  }
+  res.json({ data: out });
+}
+
+// ---------------------------------------------------------------------------
+// POST /orders/:orderId/send — «تحويل للتطريز»: push the order out of بانتظار
+// التصميم through the REAL state machine (same tx/audit/notifications as the
+// order-page advance). Route-gated to admin/manager/designer (design_helper 403s
+// — the أيادي التصميم flow keeps going through محمد هيثم's approval).
+// ---------------------------------------------------------------------------
+async function sendOrder(req, res) {
+  const { orderId } = req.params;
+  if (!UUID_RE.test(orderId)) return bad(res, 'الطلب غير صحيح');
+  const production = require('./productionController');
+  const { canStaffTransition } = require('./orderController');
+  const row = await production.loadAdvanceRow(orderId);
+  if (!row) return bad(res, 'الطلب غير موجود', 'ERR_NOT_FOUND', 404);
+  if (row.status !== 'design_complete') {
+    return bad(res, 'الطلب ليس بانتظار التصميم', 'ERR_BAD_STATUS', 409);
+  }
+  const to = production.nextStageFor(row);
+  if (!to) return bad(res, 'التصميم بحاجة لاعتماد المصمم أولاً', 'ERR_BAD_STATUS', 409);
+  if (!canStaffTransition(req.user, 'design_complete', to)) {
+    return res.status(403).json({ error: 'ممنوع', code: 'ERR_FORBIDDEN' });
+  }
+  // Catch-up: attach any DONE plates generated before auto-linking shipped (idempotent —
+  // only fills lines that still have no image; newest plate per line wins).
+  await query(
+    `UPDATE order_items oi SET customer_image_url = cp.plate_path
+       FROM (SELECT DISTINCT ON (order_item_id) order_item_id, plate_path
+               FROM calligraphy_plates
+              WHERE status='done' AND plate_path IS NOT NULL AND order_item_id IS NOT NULL
+              ORDER BY order_item_id, created_at DESC) cp
+      WHERE cp.order_item_id = oi.id AND oi.order_id = $1 AND oi.customer_image_url IS NULL`,
+    [orderId]);
+  const updated = await production.performAdvance(row, req.user);
+  res.json({ data: { ok: true, order_id: orderId, status: updated.status } });
 }
 
 // POST /element — generate a standalone motif for the compositor (white bg → transparent)
@@ -440,6 +575,7 @@ async function generateElement(req, res) {
 }
 
 module.exports = {
-  listWholesalers, wholesalerNames, createJob, processNext, getJob, reroll, linkToOrder, downloadZip,
+  listWholesalers, wholesalerNames, createJob, processNext, getJob, reroll, downloadZip,
   getQueue, queueGenerate, recentPlates, composePlate, generateElement,
+  ordersZones, sendOrder, platesZip,
 };
