@@ -169,6 +169,31 @@ or even retail students». Today a plain (no-embroidery) piece enters at `prepar
   2026-06-24 كوي backfill: old orders keep their routing; only new/edited orders get the new
   entry point). Admin can revert an individual order to pressing if needed.
 
+## 7c. Addendum (2026-07-15, mid-build user decisions)
+
+1. **Stage-2 «تحويل التصميم لتطريز» DELETED from the live pipeline.** `design_complete → embroidery`
+   directly (advance, both approve flows, design-team desk). `converting` stays in the enum and
+   all its edges/queues as DRAIN-ONLY (prod writes it until deploy; 0 rows at decision time —
+   re-check/drain `UPDATE orders SET status='embroidery' WHERE status='converting'` after deploy).
+   Frontend rails drop the converting chip; labels keep a legacy entry.
+2. **«ربط بالطلب» DELETED.** Plates AUTO-ATTACH to their order line the moment they're generated
+   (processNext/reroll/compose write `order_items.customer_image_url` + `linked_at`). The only
+   action left is the order-level **«تحويل للتطريز»** button (admin/designer/manager), which also
+   catch-up-links any older unlinked plates before advancing.
+3. **Wholesaler filter** in the calligraphy tool: `GET /queue?wholesaler_id=` scopes counts +
+   `POST /queue/generate {wholesaler_id}` scopes generation; the plates grid gets a ممثل filter
+   (order context carries `wholesaler_id`/`wholesaler_name`).
+4. **Bulk download to a folder**: «تنزيل إلى مجلد…» uses `showDirectoryPicker()` (Chrome/Edge
+   desktop) writing each visible done plate as `<student>.png`; fallback = `POST /plates/zip
+   {ids}` streaming a ZIP of the same selection.
+5. **Student name on a plate group links to the order** (`/staff/orders/[id]?from=<calligraphy
+   path>`); the calligraphy page gets its own back button; the order page's back honors `?from`.
+6. **Orders page: FinalDesignUpload + its preview + the missing-final-design alert are REMOVED**
+   (all layouts). The design column shows the DesignGallery; a legacy `final_design_url` still
+   renders as a read-only gallery entry. The backend upload endpoint stays (design-team desk
+   flow unchanged). `getQueue` gains `has_design_images` (EXISTS over item images) and the
+   queue's «تصميم مفقود» badge = design expected AND no final_design_url AND no item images.
+
 ## 8. Error handling
 
 - Send endpoint: Arabic errors with codes (`ERR_BAD_STATUS`, `ERR_FORBIDDEN`, `ERR_NOT_FOUND`);

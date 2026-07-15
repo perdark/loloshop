@@ -106,6 +106,28 @@ async function detectEmbroideryZones(orderId, progress) {
   return zones;
 }
 
+// Zones + image-presence for the calligraphy workbench: which embroidery zones does this
+// order carry, and does each already have its artwork (plate/photo) attached? Same ZONE_DEFS
+// matching as the embroiderer checklist, but keyed on has_image instead of the tick-progress.
+async function detectZonesWithImages(orderId) {
+  const { rows } = await query(
+    `SELECT label_snapshot, customer_text, customer_image_url FROM order_items WHERE order_id = $1`, [orderId]);
+  const seen = new Map();
+  for (const it of rows) {
+    const label = it.label_snapshot || '';
+    const hasContent = (it.customer_text && it.customer_text.trim() !== '') || it.customer_image_url;
+    if (!hasContent) continue;
+    for (const z of ZONE_DEFS) {
+      if (z.test(label)) {
+        const prev = seen.get(z.key);
+        const has_image = !!it.customer_image_url || !!(prev && prev.has_image);
+        seen.set(z.key, { key: z.key, label: z.label, has_image });
+      }
+    }
+  }
+  return [...seen.values()];
+}
+
 // Route-aware next stage: design-bearing sashes must use approve (not advance).
 // Advance is for: embroidery, pressing, preparing, ready + design-less embroidery orders
 // from design_complete. An APPROVED design at design_complete may also advance (sash done, move on).
@@ -221,6 +243,8 @@ async function getQueue(req, res) {
     `SELECT o.id, o.status, o.created_at, o.design_id, o.checkout_group_id,
             o.working_staff_id, o.working_since,
             o.final_design_url, o.has_embroidery,
+            EXISTS(SELECT 1 FROM order_items oi2
+                    WHERE oi2.order_id = o.id AND oi2.customer_image_url IS NOT NULL) AS has_design_images,
             u.name AS student_name, s.university_name, s.department,
             p.name_ar AS product_name, p.type AS product_type,
             b.name_ar AS batch_name, b.deadline,
@@ -283,7 +307,9 @@ async function getOrder(req, res) {
   // (single source of truth, mirrors the available_actions pattern).
   const canSeeContact = frontDesk;
   const canSeeMoney = frontDesk;
-  const canSeeMeasurements = frontDesk || tailorOnly; // الفصال needs the robe قياسات
+  // الفصال needs the robe قياسات; المكوجي needs the sizes too (his station shows
+  // name + product photo + sizes + design images — user 2026-07-15).
+  const canSeeMeasurements = frontDesk || tailorOnly || presserOnly;
   const canSeePackage = frontDesk;                    // only front-desk/manager hop between siblings
   const canSeeDesign = !presserOnly && !tailorOnly && !embroidererOnly;
 
@@ -424,15 +450,15 @@ async function getOrder(req, res) {
     design = d.rows[0] || null;
   }
 
-  // Option selections (sizes etc.). Customer reference photos are design-side → hide from presser.
+  // Option selections (sizes etc.) + the zone/design images. The presser SEES the design
+  // images now (his station is name + product photo + sizes + design — user 2026-07-15);
+  // money/contact stay stripped below.
   const itemsRes = await query(
     `SELECT label_snapshot, price_snapshot, qty, customer_image_url, customer_text, group_id, option_id
      FROM order_items WHERE order_id = $1 ORDER BY created_at`,
     [id]
   );
-  let items = itemsRes.rows.map((it) =>
-    presserOnly ? { ...it, customer_image_url: null, customer_text: null } : it
-  );
+  let items = itemsRes.rows;
   // Per-line price is money — strip it for everyone but front-desk/manager (covers tailor,
   // embroiderer + lean designer/digitizer). The UI never renders it, but defence in depth.
   if (!canSeeMoney) {
@@ -1339,4 +1365,6 @@ module.exports = {
   streamEvents, nextStageFor, markEmbroideryZone,
   tailorQueue, tailorComplete, tailorReopen, tailorCompleteBulk, tailorSummary,
   deleteOrder,
+  // Shared with the calligraphy workbench («تحويل للتطريز» reuses the real state machine).
+  loadAdvanceRow, performAdvance, ADVANCE_LABEL_AR, detectZonesWithImages,
 };
