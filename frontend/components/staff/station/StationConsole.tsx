@@ -83,6 +83,39 @@ function typeLabel(t: string): string {
   return (PRODUCT_TYPE_LABELS as Record<string, string>)[t] ?? t;
 }
 
+// ─── Session persistence — «getting back perfectly» (user 2026-07-16) ─────────
+// Opening التفاصيل navigates away and unmounts the console; on back the worker must
+// land EXACTLY where they were (view, chip, checked boxes, filters, open sheet).
+// UI state is mirrored to sessionStorage per station and restored on mount. Safe to
+// lazy-init: the console only ever mounts client-side (behind the auth loading gate).
+interface StoredConsoleState {
+  view?: View;
+  search?: string;
+  sourceFilter?: "" | "retail" | "wholesaler";
+  repFilter?: string;
+  batchFilter?: string;
+  activeZone?: string;
+  activeType?: string;
+  selected?: string[];
+  openStudentKey?: string | null;
+}
+const STORAGE_PREFIX = "loloshop-station:";
+
+function readStored(kind: StationKind): StoredConsoleState {
+  if (typeof window === "undefined") return {};
+  try {
+    return JSON.parse(sessionStorage.getItem(STORAGE_PREFIX + kind) || "{}") as StoredConsoleState;
+  } catch {
+    return {};
+  }
+}
+
+// الفصال has no «عرض بالقطع» (user 2026-07-16) — students + المنجزة only.
+function validView(kind: StationKind, v: View | undefined): View {
+  if (kind === "tailor") return v === "done" ? "done" : "students";
+  return v === "pieces" ? "pieces" : "students";
+}
+
 function queueToPiece(r: ProductionQueueItem, kind: StationKind): StationPiece {
   return {
     id: r.id,
@@ -142,25 +175,56 @@ export function StationConsole({
   const pathname = usePathname() || "/staff";
   const meta = META[kind];
 
+  // Restore the last UI state for this station (see StoredConsoleState above).
+  const [stored] = useState<StoredConsoleState>(() => readStored(kind));
   const [pieces, setPieces] = useState<StationPiece[]>([]);
   const [doneRows, setDoneRows] = useState<TailorOrderRow[]>([]);
   const [loading, setLoading] = useState(true);
+  // TRUE after the first successful fetch — the restored selection/chip/sheet must
+  // not be validated (and wiped) against the EMPTY pre-fetch data.
+  const [loadedOnce, setLoadedOnce] = useState(false);
   const [doneLoading, setDoneLoading] = useState(false);
   const [fetchError, setFetchError] = useState(false);
-  const [view, setView] = useState<View>("students");
-  const [search, setSearch] = useState("");
-  const [sourceFilter, setSourceFilter] = useState<"" | "retail" | "wholesaler">("");
-  const [repFilter, setRepFilter] = useState("");
-  const [batchFilter, setBatchFilter] = useState("");
-  const [activeZone, setActiveZone] = useState("");
-  const [activeType, setActiveType] = useState("all");
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [view, setView] = useState<View>(validView(kind, stored.view));
+  const [search, setSearch] = useState(stored.search ?? "");
+  const [sourceFilter, setSourceFilter] = useState<"" | "retail" | "wholesaler">(
+    stored.sourceFilter ?? ""
+  );
+  const [repFilter, setRepFilter] = useState(stored.repFilter ?? "");
+  const [batchFilter, setBatchFilter] = useState(stored.batchFilter ?? "");
+  const [activeZone, setActiveZone] = useState(stored.activeZone ?? "");
+  const [activeType, setActiveType] = useState(stored.activeType ?? "all");
+  const [selected, setSelected] = useState<Set<string>>(
+    () => new Set(Array.isArray(stored.selected) ? stored.selected : [])
+  );
   const [busyKeys, setBusyKeys] = useState<Set<string>>(new Set());
   const [bulkLoading, setBulkLoading] = useState(false);
   const [reopeningId, setReopeningId] = useState<string | null>(null);
   const [advanced, setAdvanced] = useState<Map<string, AdvancedGhost>>(new Map());
-  const [openStudentKey, setOpenStudentKey] = useState<string | null>(null);
+  const [openStudentKey, setOpenStudentKey] = useState<string | null>(
+    stored.openStudentKey ?? null
+  );
   const [lightbox, setLightbox] = useState<{ url: string; title: string } | null>(null);
+
+  // Mirror the UI state so back-navigation restores it exactly.
+  useEffect(() => {
+    try {
+      const snapshot: StoredConsoleState = {
+        view,
+        search,
+        sourceFilter,
+        repFilter,
+        batchFilter,
+        activeZone,
+        activeType,
+        selected: [...selected],
+        openStudentKey,
+      };
+      sessionStorage.setItem(STORAGE_PREFIX + kind, JSON.stringify(snapshot));
+    } catch {
+      /* storage full/unavailable — persistence is best-effort */
+    }
+  }, [kind, view, search, sourceFilter, repFilter, batchFilter, activeZone, activeType, selected, openStudentKey]);
 
   // ─── Data ───────────────────────────────────────────────────────────────────
   const load = useCallback(
@@ -178,6 +242,7 @@ export function StationConsole({
           const data = await getQueue(undefined, undefined, undefined, true);
           setPieces(data.filter((r) => r.status === stage).map((r) => queueToPiece(r, kind)));
         }
+        setLoadedOnce(true);
       } catch (err) {
         if (!silent) {
           toast.error(getApiErrorMessage(err, "تعذر تحميل القطع"));
@@ -214,13 +279,15 @@ export function StationConsole({
   }, kind !== "tailor");
 
   // Selection can only reference pieces that still exist (silent reloads prune it).
+  // Gated on loadedOnce so a RESTORED selection isn't wiped against the empty pre-fetch list.
   useEffect(() => {
+    if (!loadedOnce) return;
     setSelected((prev) => {
       const valid = new Set(pieces.map((p) => p.id));
       const next = new Set([...prev].filter((id) => valid.has(id)));
       return next.size === prev.size ? prev : next;
     });
-  }, [pieces]);
+  }, [pieces, loadedOnce]);
 
   // ─── Filters ────────────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
@@ -300,9 +367,12 @@ export function StationConsole({
   }, [filtered]);
 
   useEffect(() => {
-    if (kind !== "embroidery") return;
-    if (!zoneChips.some((c) => c.key === activeZone)) setActiveZone(zoneChips[0]?.key ?? "");
-  }, [zoneChips, activeZone, kind]);
+    if (kind !== "embroidery" || !loadedOnce) return;
+    if (!zoneChips.some((c) => c.key === activeZone)) {
+      setActiveZone(zoneChips[0]?.key ?? "");
+      setSelected(new Set()); // the restored/previous selection belonged to the old zone
+    }
+  }, [zoneChips, activeZone, kind, loadedOnce]);
 
   const typeChips = useMemo(() => {
     const m = new Map<string, number>();
@@ -311,8 +381,9 @@ export function StationConsole({
   }, [filtered]);
 
   useEffect(() => {
+    if (!loadedOnce) return;
     if (activeType !== "all" && !typeChips.some((c) => c.type === activeType)) setActiveType("all");
-  }, [typeChips, activeType]);
+  }, [typeChips, activeType, loadedOnce]);
 
   const pieceRows = useMemo(() => {
     if (kind === "embroidery") {
@@ -335,10 +406,8 @@ export function StationConsole({
   );
   const allChecked = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id));
 
-  // Switching chip/view/filter invalidates the current selection's meaning.
-  useEffect(() => {
-    setSelected(new Set());
-  }, [view, activeZone, activeType, sourceFilter, repFilter, batchFilter]);
+  // NB: selection is cleared EXPLICITLY in the chip/view/filter handlers (not via an
+  // effect) so restoring a persisted selection on mount doesn't immediately wipe it.
 
   // ─── Actions ────────────────────────────────────────────────────────────────
   const markBusy = (key: string, on: boolean) =>
@@ -481,8 +550,9 @@ export function StationConsole({
   }, [advanced, openStudentKey, openGroup]);
 
   useEffect(() => {
+    if (!loadedOnce) return; // a restored open sheet must survive until real data arrives
     if (openStudentKey && !openGroup && openGhosts.length === 0) setOpenStudentKey(null);
-  }, [openStudentKey, openGroup, openGhosts]);
+  }, [openStudentKey, openGroup, openGhosts, loadedOnce]);
 
   const toggleOne = (id: string) =>
     setSelected((prev) => {
@@ -515,23 +585,27 @@ export function StationConsole({
         }
       />
 
-      {/* View toggle */}
-      <div
-        className={`grid gap-2 rounded-2xl bg-surface-sink p-1 ${
-          kind === "tailor" ? "grid-cols-3" : "grid-cols-2"
-        }`}
-      >
+      {/* View toggle — الفصال has no «عرض بالقطع» (user 2026-07-16): students + المنجزة only */}
+      <div className="grid grid-cols-2 gap-2 rounded-2xl bg-surface-sink p-1">
         {(
-          [
-            { id: "students", label: "عرض بالطلب" },
-            { id: "pieces", label: "عرض بالقطع" },
-            ...(kind === "tailor" ? [{ id: "done", label: "المنجزة" }] : []),
-          ] as { id: View; label: string }[]
+          kind === "tailor"
+            ? [
+                { id: "students", label: "عرض بالطلب" },
+                { id: "done", label: "المنجزة" },
+              ]
+            : ([
+                { id: "students", label: "عرض بالطلب" },
+                { id: "pieces", label: "عرض بالقطع" },
+              ] as { id: View; label: string }[])
         ).map((t) => (
           <button
             key={t.id}
             type="button"
-            onClick={() => setView(t.id)}
+            onClick={() => {
+              if (view === t.id) return;
+              setView(t.id as View);
+              setSelected(new Set());
+            }}
             aria-pressed={view === t.id}
             className={`min-h-11 rounded-xl px-3 text-sm font-bold transition-colors ${
               view === t.id
@@ -569,7 +643,11 @@ export function StationConsole({
                     <button
                       key={s.id}
                       type="button"
-                      onClick={() => setSourceFilter(s.id)}
+                      onClick={() => {
+                        if (sourceFilter === s.id) return;
+                        setSourceFilter(s.id);
+                        setSelected(new Set());
+                      }}
                       aria-pressed={sourceFilter === s.id}
                       className={`min-h-10 flex-1 rounded-xl border px-3 text-xs font-bold transition-colors ${
                         sourceFilter === s.id
@@ -587,7 +665,11 @@ export function StationConsole({
                   <Select
                     aria-label="الممثل"
                     value={repFilter}
-                    onChange={(e) => setRepFilter(e.target.value)}
+                    onChange={(e) => {
+                      if (e.target.value === repFilter) return;
+                      setRepFilter(e.target.value);
+                      setSelected(new Set());
+                    }}
                     options={[
                       { value: "", label: "كل الممثلين" },
                       ...repOptions.map((r) => ({ value: r, label: r })),
@@ -596,7 +678,11 @@ export function StationConsole({
                   <Select
                     aria-label="الدفعة"
                     value={batchFilter}
-                    onChange={(e) => setBatchFilter(e.target.value)}
+                    onChange={(e) => {
+                      if (e.target.value === batchFilter) return;
+                      setBatchFilter(e.target.value);
+                      setSelected(new Set());
+                    }}
                     options={[
                       { value: "", label: "كل الدفعات" },
                       ...batchOptions.map((b) => ({ value: b, label: b })),
@@ -676,7 +762,11 @@ export function StationConsole({
                   <button
                     key={c.key}
                     type="button"
-                    onClick={() => setActiveZone(c.key)}
+                    onClick={() => {
+                      if (activeZone === c.key) return;
+                      setActiveZone(c.key);
+                      setSelected(new Set());
+                    }}
                     aria-pressed={activeZone === c.key}
                     className={`flex min-h-10 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-xs font-bold transition-colors ${
                       activeZone === c.key
@@ -698,7 +788,11 @@ export function StationConsole({
                   <button
                     key={c.type}
                     type="button"
-                    onClick={() => setActiveType(c.type)}
+                    onClick={() => {
+                      if (activeType === c.type) return;
+                      setActiveType(c.type);
+                      setSelected(new Set());
+                    }}
                     aria-pressed={activeType === c.type}
                     className={`flex min-h-10 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-xs font-bold transition-colors ${
                       activeType === c.type

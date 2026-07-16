@@ -6,6 +6,37 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
+## 2026-07-16 (b) — FIX: wholesaler order EDIT duplicated the sash (38 bundles double-counted, +2.6M IQD phantom revenue)
+
+**Uncommitted on main** (only `backend/lib/fullSetOrder.js` + docs; no migration). Data repair APPLIED to the shared Neon DB.
+Gates: BE `node --check` 0 · repro e2e FAIL→PASS + self-heal PASS (self-cleaning throwaway rep/student, live DB, 0 leftovers).
+
+**Bug (user report: «orders price 135/100/75 — عبدالله محسن»).** Since the form stopped sending `package_id`, `persistFullSetOrder`
+resolved each piece to the *first active product per type* (`ORDER BY featured DESC…`). «وشاح الفراشة» was created **2026-07-06 with
+featured=true** → jumped ahead of the old «وشاح» parent → every EDIT of a pre-07-06 order resolved sash to a DIFFERENT product id →
+the `(student_id, product_id)` upsert missed → **second live sash order inserted**, old one never cancelled (cleanup loop was
+deselected-types-only). 38 bundles across 4 reps (محمد باقر 29 · عبدالله محسن 5 · عبدالعزيز 2 · مهدي 2) double-counted the sash
+(65+65=130k, 90+90=180k; the user's 135k = تبارك محمد فوزي 65+65+5k cap). 36 stale dups sat at design_complete = double-production
+risk. NB: 75k/100k-style totals are usually LEGIT التسعيرة add-ons (ملكي +15k, شال +25k, ردن 5k×2, قبعة ثانٍ +5k).
+
+**Fix (`backend/lib/fullSetOrder.js`, 3 edits):** ① a student's existing live order now **pins the product per piece type** on edit
+(DISTINCT ON query overrides package/first-active resolution) — catalog changes can never fork a duplicate again; ② deselect-cancel
+is now piece-TYPE-based scoped to the bundle's checkout group (was single-product-id); ③ post-upsert **SELF-HEAL** cancels any other
+live same-type design-less order in the same checkout group (damaged bundles auto-collapse on next edit).
+
+**Data repair (applied, in one tx, audit_log action `repair_duplicate_sash`):** cancelled the 38 OLDER duplicates (newer order =
+the rep's latest edit/spec, kept); label-matched image migration filled NULLs only → restored 1 lost شال امريكي photo (the other
+candidate was the rep deliberately removing the shawl — left alone); `final_design_url` losses: 0. Re-scan: **0 duplicate bundles**.
+عبدالله محسن verified before→after: حوراء 180k→90k · نبأ 180k→90k · زينب 130k→65k · فاطمه 120k→70k · الممثل test 165k→100k.
+
+### Open follow-ups
+- **⚠️ PROD still runs the buggy code until the next push** — reps editing orders on lolo-shop96.com can re-create duplicates
+  meanwhile (self-heal will collapse them on next edit AFTER deploy). After deploy, re-run the duplicate scan (query in the
+  audit_log details / PROGRESS entry) and cancel any new stragglers.
+- Rides the next deploy together with the (separate, concurrent) staff-pipeline session's commits — coordinate the push.
+
+---
+
 ## 2026-07-16 — Station console: «عرض بالطلب» / «عرض بالقطع» for التطريز · الفصال · الكوي (shared StationConsole)
 
 **Committed locally on main, NOT pushed (push = prod deploy — user tests first). No migration.** Gates: BE `node --check` 0 ·
@@ -32,10 +63,18 @@ scope = التطريز + الفصال + الكوي (التجهيز later maybe).
   becomes a green «انتقلت إلى الكوي ✓» ghost row in the open sheet (state: `advanced` Map, deduped against live rows). Zero-zone
   embroidery piece (canvas-designed retail sash) shows manual «إكمال التطريز» (= `advance`, backend already allows exactly this).
 - **«عرض بالقطع»:** التطريز = zone chips w/ pending counts (ZONE_ORDER mirrors backend ZONE_DEFS) → rows of pieces missing that
-  zone (name · product · text · thumb) → select-all + sticky bulk «إكمال المنطقة (N)»; الفصال/الكوي = piece-type chips وشاح/روب/شال
-  + bulk «تم الفصال (N)» / «إكمال الكوي (N)». الفصال gets a 3rd view «المنجزة» (search + إرجاع/reopen). Shared filters: search +
-  الكل/تجزئة/ممثلين (hidden unless showSourceFilter) + ممثل/دفعة selects (derived client-side; hidden for tailor). 15s
-  `usePolling` + `useProductionEvents` reload; selection pruned/reset on data-refresh/chip-switch.
+  zone (name · product · text · thumb) → select-all + sticky bulk «إكمال المنطقة (N)»; الكوي = piece-type chips وشاح/روب/شال
+  + bulk «إكمال الكوي (N)». **الفصال has NO «عرض بالقطع» (user follow-up same day)** — his toggle is عرض بالطلب + «المنجزة»
+  (search + إرجاع/reopen); per-piece «تم الفصال» lives in the student sheet. Row body = Link to the order (user: no side
+  «التفاصيل» button; checkbox is the only selection target). Shared filters: search + الكل/تجزئة/ممثلين (hidden unless
+  showSourceFilter) + ممثل/دفعة selects (derived client-side; hidden for tailor). 15s `usePolling` + `useProductionEvents`
+  reload; selection pruned on data-refresh, cleared explicitly on chip/view/filter change.
+- **«Getting back perfectly» (user follow-up):** the console mirrors its whole UI state (view, chips, filters, search, CHECKED
+  selection, open student sheet) to **sessionStorage per station** (`loloshop-station:<kind>`) and lazy-restores on mount — so
+  «التفاصيل» → back lands exactly where the worker was mid-batch. Restoration is guarded by `loadedOnce` (validation effects
+  that prune selection / reset chips / auto-close the sheet only run AFTER the first fetch, else the restored state would be
+  wiped against the empty pre-fetch list). Safe to lazy-init from sessionStorage: the console only mounts client-side behind
+  the auth loading gate (no SSR hydration mismatch).
 - **Backend (`productionController.js` + `routes/production.js`, all additive):**
   - `getQueue?station=1` → rows gain `student_id`, embroidery rows gain `zones:[{key,label,done,text,image_url}]` via NEW
     **batched `detectZonesForOrders(ids, progressById)`** (ONE order_items query, same content rule + first-match-wins as
