@@ -27,7 +27,7 @@ import {
   type TailorOrderRow,
 } from "@/lib/staff";
 import type { ProductionQueueItem, StationZone } from "@/lib/staff-types";
-import { PRODUCT_TYPE_LABELS } from "@/lib/constants";
+import { PRODUCT_TYPE_LABELS, STUDY_TYPE_LABELS } from "@/lib/constants";
 import { usePolling } from "@/lib/hooks/usePolling";
 import { useProductionEvents } from "@/hooks/useProductionEvents";
 import { Button } from "@/components/ui/Button";
@@ -93,7 +93,6 @@ interface StoredConsoleState {
   search?: string;
   sourceFilter?: "" | "retail" | "wholesaler";
   repFilter?: string;
-  batchFilter?: string;
   activeZone?: string;
   activeType?: string;
   selected?: string[];
@@ -125,6 +124,9 @@ function queueToPiece(r: ProductionQueueItem, kind: StationKind): StationPiece {
     productType: r.product_type,
     batchName: r.batch_name,
     wholesalerName: r.wholesaler_name,
+    universityName: r.university_name,
+    department: r.department,
+    studyType: r.study_type ?? null,
     source: r.source,
     deadline: r.deadline,
     createdAt: r.created_at,
@@ -144,6 +146,9 @@ function tailorToPiece(r: TailorOrderRow): StationPiece {
     productType: r.productType,
     batchName: r.batchName,
     wholesalerName: null,
+    universityName: null,
+    department: null,
+    studyType: null,
     source: "retail",
     deadline: r.deadline,
     createdAt: r.createdAt,
@@ -158,10 +163,21 @@ interface StudentGroup {
   name: string;
   batchName: string | null;
   source: "retail" | "wholesaler";
+  universityName: string | null;
+  department: string | null;
+  studyType: string | null;
   pieces: StationPiece[];
   zoneDone: number;
   zoneTotal: number;
   overdue: boolean;
+}
+
+/** جامعة · قسم · صباحي/مسائي — extra context for wholesaler students (never for الفصال: keep it simple). */
+function studentInfoLine(g: Pick<StudentGroup, "source" | "universityName" | "department" | "studyType"> | null): string | null {
+  if (!g || g.source !== "wholesaler") return null;
+  const study = (STUDY_TYPE_LABELS as Record<string, string>)[g.studyType ?? ""] ?? null;
+  const line = [g.universityName, g.department, study].filter(Boolean).join(" · ");
+  return line || null;
 }
 
 // ─── The console ──────────────────────────────────────────────────────────────
@@ -191,7 +207,6 @@ export function StationConsole({
     stored.sourceFilter ?? ""
   );
   const [repFilter, setRepFilter] = useState(stored.repFilter ?? "");
-  const [batchFilter, setBatchFilter] = useState(stored.batchFilter ?? "");
   const [activeZone, setActiveZone] = useState(stored.activeZone ?? "");
   const [activeType, setActiveType] = useState(stored.activeType ?? "all");
   const [selected, setSelected] = useState<Set<string>>(
@@ -214,7 +229,6 @@ export function StationConsole({
         search,
         sourceFilter,
         repFilter,
-        batchFilter,
         activeZone,
         activeType,
         selected: [...selected],
@@ -224,7 +238,7 @@ export function StationConsole({
     } catch {
       /* storage full/unavailable — persistence is best-effort */
     }
-  }, [kind, view, search, sourceFilter, repFilter, batchFilter, activeZone, activeType, selected, openStudentKey]);
+  }, [kind, view, search, sourceFilter, repFilter, activeZone, activeType, selected, openStudentKey]);
 
   // ─── Data ───────────────────────────────────────────────────────────────────
   const load = useCallback(
@@ -296,10 +310,9 @@ export function StationConsole({
       (p) =>
         (!q || p.studentName.toLowerCase().includes(q)) &&
         (!sourceFilter || p.source === sourceFilter) &&
-        (!repFilter || p.wholesalerName === repFilter) &&
-        (!batchFilter || p.batchName === batchFilter)
+        (!repFilter || p.wholesalerName === repFilter)
     );
-  }, [pieces, search, sourceFilter, repFilter, batchFilter]);
+  }, [pieces, search, sourceFilter, repFilter]);
 
   const repOptions = useMemo(() => {
     const s = new Set<string>();
@@ -308,20 +321,6 @@ export function StationConsole({
     });
     return [...s];
   }, [pieces]);
-
-  const batchOptions = useMemo(() => {
-    const s = new Set<string>();
-    pieces.forEach((p) => {
-      if (!p.batchName) return;
-      if (repFilter && p.wholesalerName !== repFilter) return;
-      s.add(p.batchName);
-    });
-    return [...s];
-  }, [pieces, repFilter]);
-
-  useEffect(() => {
-    if (batchFilter && !batchOptions.includes(batchFilter)) setBatchFilter("");
-  }, [batchOptions, batchFilter]);
 
   // ─── «عرض بالطلب» grouping ──────────────────────────────────────────────────
   const groups = useMemo(() => {
@@ -335,6 +334,9 @@ export function StationConsole({
           name: p.studentName,
           batchName: p.batchName,
           source: p.source,
+          universityName: p.universityName,
+          department: p.department,
+          studyType: p.studyType,
           pieces: [],
           zoneDone: 0,
           zoneTotal: 0,
@@ -646,6 +648,9 @@ export function StationConsole({
                       onClick={() => {
                         if (sourceFilter === s.id) return;
                         setSourceFilter(s.id);
+                        // Reps don't apply to retail — clear a stale rep filter that the
+                        // (now hidden) select could no longer undo.
+                        if (s.id === "retail") setRepFilter("");
                         setSelected(new Set());
                       }}
                       aria-pressed={sourceFilter === s.id}
@@ -660,35 +665,21 @@ export function StationConsole({
                   ))}
                 </div>
               )}
-              {(repOptions.length > 0 || batchOptions.length > 0) && (
-                <div className="grid grid-cols-2 gap-2">
-                  <Select
-                    aria-label="الممثل"
-                    value={repFilter}
-                    onChange={(e) => {
-                      if (e.target.value === repFilter) return;
-                      setRepFilter(e.target.value);
-                      setSelected(new Set());
-                    }}
-                    options={[
-                      { value: "", label: "كل الممثلين" },
-                      ...repOptions.map((r) => ({ value: r, label: r })),
-                    ]}
-                  />
-                  <Select
-                    aria-label="الدفعة"
-                    value={batchFilter}
-                    onChange={(e) => {
-                      if (e.target.value === batchFilter) return;
-                      setBatchFilter(e.target.value);
-                      setSelected(new Set());
-                    }}
-                    options={[
-                      { value: "", label: "كل الدفعات" },
-                      ...batchOptions.map((b) => ({ value: b, label: b })),
-                    ]}
-                  />
-                </div>
+              {/* Rep filter — irrelevant to retail pieces, so it hides on تجزئة (user 2026-07-16). */}
+              {sourceFilter !== "retail" && repOptions.length > 0 && (
+                <Select
+                  aria-label="الممثل"
+                  value={repFilter}
+                  onChange={(e) => {
+                    if (e.target.value === repFilter) return;
+                    setRepFilter(e.target.value);
+                    setSelected(new Set());
+                  }}
+                  options={[
+                    { value: "", label: "كل الممثلين" },
+                    ...repOptions.map((r) => ({ value: r, label: r })),
+                  ]}
+                />
               )}
             </>
           )}
@@ -936,6 +927,7 @@ export function StationConsole({
           kind={kind}
           studentName={openGroup?.name ?? openGhosts[0]?.piece.studentName ?? ""}
           batchName={openGroup?.batchName ?? openGhosts[0]?.piece.batchName ?? null}
+          info={kind === "tailor" ? null : studentInfoLine(openGroup ?? openGhosts[0]?.piece ?? null)}
           pieces={openGroup?.pieces ?? []}
           ghosts={openGhosts}
           busyKeys={busyKeys}

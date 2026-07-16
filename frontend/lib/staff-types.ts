@@ -69,6 +69,8 @@ export interface ProductionQueueItem {
   student_name: string;
   university_name: string | null;
   department: string | null;
+  /** صباحي/مسائي — surfaced on the station console for wholesaler students. */
+  study_type?: "morning" | "evening" | null;
   product_name: string;
   product_type: string;
   batch_name: string | null;

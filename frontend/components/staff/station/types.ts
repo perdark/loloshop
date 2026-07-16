@@ -16,6 +16,9 @@ export interface StationPiece {
   productType: string;
   batchName: string | null;
   wholesalerName: string | null;
+  universityName: string | null;
+  department: string | null;
+  studyType: string | null;
   source: "retail" | "wholesaler";
   deadline: string | null;
   createdAt: string;

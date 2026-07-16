@@ -18,6 +18,8 @@ interface StudentSheetProps {
   kind: StationKind;
   studentName: string;
   batchName: string | null;
+  /** جامعة · قسم · صباحي/مسائي for wholesaler students (null for retail / الفصال). */
+  info?: string | null;
   pieces: StationPiece[];
   ghosts: AdvancedGhost[];
   /** Busy keys: piece id (complete) or `${id}:${zone}` (zone tick). */
@@ -32,6 +34,7 @@ export function StudentSheet({
   kind,
   studentName,
   batchName,
+  info,
   pieces,
   ghosts,
   busyKeys,
@@ -79,6 +82,7 @@ export function StudentSheet({
               {" · "}
               {pieces.length > 0 ? `${pieces.length} قطعة بانتظار العمل` : "لا قطع متبقية"}
             </p>
+            {info && <p className="mt-0.5 truncate text-xs text-ink-soft">{info}</p>}
           </div>
           <button
             type="button"

@@ -283,7 +283,7 @@ async function getQueue(req, res) {
             o.final_design_url, o.has_embroidery,
             EXISTS(SELECT 1 FROM order_items oi2
                     WHERE oi2.order_id = o.id AND oi2.customer_image_url IS NOT NULL) AS has_design_images,
-            u.name AS student_name, s.university_name, s.department,
+            u.name AS student_name, s.university_name, s.department, s.study_type,
             p.name_ar AS product_name, p.type AS product_type,
             b.name_ar AS batch_name, b.deadline,
             d.approval_status, d.rejection_reason,
