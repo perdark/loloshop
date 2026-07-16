@@ -1,5 +1,33 @@
 # Progress
 
+## 2026-07-16 (b) — FIX: wholesaler edit duplicated the sash order (38 bundles, +2.6M IQD phantom)
+
+Root cause: the طقم form stopped sending `package_id`, so `fullSetOrder.js` resolved each piece to the *first active product per
+type* (`featured DESC`). When «وشاح الفراشة» went featured on 2026-07-06 the sash re-resolved to a different product id on every
+EDIT of an older order → the (student, product) upsert missed → a **second live sash order** was inserted (65+65=130k, 90+90=180k…).
+Fix in `backend/lib/fullSetOrder.js`: existing live order now **pins the product per piece type** on edit; deselect-cancel is
+type-based within the bundle; post-upsert **self-heal** cancels any second live same-type order in the checkout group. Data repair
+on Neon: 38 stale sash orders cancelled (audit_log `repair_duplicate_sash`), 1 lost شال photo restored, 0 duplicate bundles remain.
+Verified: repro script FAIL→PASS + self-heal PASS (self-cleaning, live DB) · `node --check` 0. **Uncommitted; prod still has the
+buggy code until next push — re-run the duplicate scan after deploy.**
+
+## 2026-07-16 — Station console: «عرض بالطلب» / «عرض بالقطع» for التطريز · الفصال · الكوي
+
+One shared `StationConsole` (spec `docs/superpowers/specs/2026-07-16-station-console-two-view-modes-design.md`) replacing the flat
+per-order lists on the three stations, supporting both real work modes:
+1. **«عرض بالطلب»** (default) — students-only list (name + N قطعة + X/Y مناطق + متأخر) → tap → full-screen sheet with the student's
+   pieces: inline **zone checkboxes with the stitch text + plate thumbnail** (التطريز), or one «تم الفصال»/«إنهاء الكوي» button per
+   piece. All zones done → the piece auto-advances (existing engine) and stays visible as a green ✓ row.
+2. **«عرض بالقطع»** — flat work items: **zone chips with pending counts** (التطريز: كل يمين، ثم كل يسار…) or **piece-type chips**
+   (الفصال/الكوي: وشاح/روب/شال), tap-to-select rows + sticky bulk bar. NEW `POST /production/embroidery-zone-bulk` (same guards as
+   the single tick, per-item skip-and-report, auto-advance). الفصال gets a third «المنجزة» view (search + إرجاع).
+3. Backend: `getQueue?station=1` enrichment — per-order `zones` (batched `detectZonesForOrders`, one order_items query, text+image
+   content, شال امريكي still excluded) + backend-granted `can_advance`/`advance_label` on الكوي rows + `student_id` everywhere
+   (also on tailor-queue). State machine untouched; الفصال stays parallel + retail-only; manager `/staff/queue` untouched.
+Verified: BE `node --check` 0 · FE `tsc` 0 · `eslint` 0 · live API smoke (30 embroidery rows all carrying zones w/ plate URLs,
+15/15 pressing rows granted, bulk validation 400, no raw jsonb leak). **Browser testing = user** (tokens + steps appended to
+`TESTING-WALKTHROUGH.md`, untracked). Uncommitted→committed locally, NOT pushed.
+
 ## 2026-07-15 — Pipeline rework: stage-2 deleted · «بانتظار التصميم» · calligraphy workbench · كوي station + routing
 
 Whole staff pipeline reshaped (committed locally, **NOT pushed/deployed**; spec `docs/superpowers/specs/2026-07-15-staff-pipeline-labels-calligraphy-stations-design.md`):

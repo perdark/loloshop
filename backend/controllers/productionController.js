@@ -128,6 +128,43 @@ async function detectZonesWithImages(orderId) {
   return [...seen.values()];
 }
 
+// Batched detectEmbroideryZones for the station console («عرض بالطلب»/«عرض بالقطع»):
+// ONE order_items query for every id, same content rule + first-match-wins semantics as
+// the single-order version, plus each zone's stitch content (text + image) so the list
+// can show WHAT to embroider without opening the order. progressById: id → jsonb map.
+async function detectZonesForOrders(ids, progressById) {
+  const byOrder = new Map(ids.map((id) => [id, []]));
+  if (!ids.length) return byOrder;
+  const { rows } = await query(
+    `SELECT order_id, label_snapshot, customer_text, customer_image_url
+     FROM order_items WHERE order_id = ANY($1) ORDER BY order_id`,
+    [ids]
+  );
+  const seenByOrder = new Map();
+  for (const it of rows) {
+    const label = it.label_snapshot || '';
+    const text = (it.customer_text || '').trim();
+    const hasContent = text !== '' || it.customer_image_url;
+    if (!hasContent) continue;
+    for (const z of ZONE_DEFS) {
+      let seen = seenByOrder.get(it.order_id);
+      if (!seen) { seen = new Set(); seenByOrder.set(it.order_id, seen); }
+      if (!seen.has(z.key) && z.test(label)) {
+        seen.add(z.key);
+        const progress = progressById.get(it.order_id) || {};
+        byOrder.get(it.order_id)?.push({
+          key: z.key,
+          label: z.label,
+          done: !!progress[z.key],
+          text: text || null,
+          image_url: it.customer_image_url || null,
+        });
+      }
+    }
+  }
+  return byOrder;
+}
+
 // Route-aware next stage: design-bearing sashes must use approve (not advance).
 // Advance is for: embroidery, pressing, preparing, ready + design-less embroidery orders
 // from design_complete. An APPROVED design at design_complete may also advance (sash done, move on).
@@ -241,6 +278,7 @@ async function getQueue(req, res) {
   const zoneClause = req.query.zone ? orderZoneClause(req.query.zone, 'o') : null;
   const { rows } = await query(
     `SELECT o.id, o.status, o.created_at, o.design_id, o.checkout_group_id,
+            o.student_id, o.needs_pressing, o.embroidery_zones,
             o.working_staff_id, o.working_since,
             o.final_design_url, o.has_embroidery,
             EXISTS(SELECT 1 FROM order_items oi2
@@ -280,6 +318,32 @@ async function getQueue(req, res) {
      ORDER BY b.deadline ASC NULLS LAST, o.created_at ASC`,
     [stages]
   );
+  // Station-console enrichment (?station=1): per-piece embroidery zones (with the stitch
+  // content) for التطريز rows, and a backend-granted advance for الكوي rows — so the console
+  // never re-derives state-machine rules client-side.
+  if (String(req.query.station || '') === '1') {
+    const embIds = rows.filter((r) => r.status === 'embroidery').map((r) => r.id);
+    const zonesById = await detectZonesForOrders(
+      embIds,
+      new Map(rows.map((r) => [r.id, r.embroidery_zones || {}]))
+    );
+    for (const r of rows) {
+      if (r.status === 'embroidery') r.zones = zonesById.get(r.id) || [];
+      if (r.status === 'pressing') {
+        const next = nextStageFor({
+          status: r.status,
+          design_id: r.design_id,
+          needs_pressing: r.needs_pressing,
+          design_approval_status: r.approval_status,
+        });
+        r.next_status = next;
+        r.can_advance = !!next && next !== 'delivered' && canStaffTransition(u, r.status, next);
+        r.advance_label = next ? ADVANCE_LABEL_AR[`${r.status}→${next}`] ?? null : null;
+      }
+    }
+  }
+  // The raw progress jsonb is internal — expose only the computed zones list.
+  for (const r of rows) delete r.embroidery_zones;
   res.json({ data: rows });
 }
 
@@ -646,27 +710,18 @@ async function advance(req, res) {
 // embroidery zone. When EVERY present zone is done (and there's at least one), the order
 // AUTO-ADVANCES through the normal advance path (embroidery→pressing/preparing via
 // needs_pressing). Only embroiderer + manager/admin may tick; only while at 'embroidery'.
-async function markEmbroideryZone(req, res) {
-  const { id } = req.params;
-  const { zone, done } = req.body;
-  const uTypes = staffTypesOf(req.user);
-  if (!isManager(req.user) && !uTypes.includes('embroiderer')) {
-    return res.status(403).json({ error: 'ممنوع', code: 'ERR_FORBIDDEN' });
-  }
+// Core per-order zone toggle shared by the single + bulk endpoints. The role gate
+// (embroiderer OR manager/admin) is the CALLER's job; every order-level guard lives here.
+// Returns {ok:true, zones, advanced, status} or {ok:false, reason}.
+async function applyZoneTick(user, id, zone, done) {
   const order = await loadAdvanceRow(id);
-  if (!order) return res.status(404).json({ error: 'الطلب غير موجود', code: 'ERR_NOT_FOUND' });
-  if (!staffScopeAllows(req.user, order.wholesaler_id == null)) {
-    return res.status(403).json({ error: 'هذا الطلب خارج نطاقك', code: 'ERR_FORBIDDEN' });
-  }
-  if (order.status !== 'embroidery') {
-    return res.status(409).json({ error: 'لا يمكن تعديل التطريز في هذه المرحلة', code: 'ERR_INVALID_TRANSITION' });
-  }
+  if (!order) return { ok: false, reason: 'not_found' };
+  if (!staffScopeAllows(user, order.wholesaler_id == null)) return { ok: false, reason: 'forbidden' };
+  if (order.status !== 'embroidery') return { ok: false, reason: 'wrong_stage' };
   // Validate the zone is one this order actually has, from current progress.
   const prog = (await query('SELECT embroidery_zones FROM orders WHERE id = $1', [id])).rows[0]?.embroidery_zones || {};
   const zones = await detectEmbroideryZones(id, prog);
-  if (!zones.some((z) => z.key === zone)) {
-    return res.status(400).json({ error: 'منطقة تطريز غير صالحة', code: 'ERR_VALIDATION' });
-  }
+  if (!zones.some((z) => z.key === zone)) return { ok: false, reason: 'invalid_zone' };
   // Merge the toggle into the jsonb progress map.
   await query(
     `UPDATE orders SET embroidery_zones = embroidery_zones || $1::jsonb WHERE id = $2`,
@@ -675,7 +730,7 @@ async function markEmbroideryZone(req, res) {
   await query(
     `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
      VALUES ($1, 'embroidery_zone', 'order', $2, $3)`,
-    [req.user.id, id, JSON.stringify({ zone, done: !!done })]
+    [user.id, id, JSON.stringify({ zone, done: !!done })]
   );
   // Recompute with the new progress; if every present zone is now done → auto-advance.
   const newProg = (await query('SELECT embroidery_zones FROM orders WHERE id = $1', [id])).rows[0]?.embroidery_zones || {};
@@ -688,13 +743,74 @@ async function markEmbroideryZone(req, res) {
     // Gate the auto-advance through the SAME state-machine check the manual advance uses,
     // so this can never become a ghost transition if STAGE_AUTHZ for the embroidery edges
     // ever changes. Zones stay saved either way; only the stage move is gated.
-    if (to && canStaffTransition(req.user, fresh.status, to)) {
-      const updated = await performAdvance(fresh, req.user);
+    if (to && canStaffTransition(user, fresh.status, to)) {
+      const updated = await performAdvance(fresh, user);
       advanced = true;
       status = updated?.status ?? 'embroidery';
     }
   }
-  res.json({ data: { zones: recomputed, advanced, status } });
+  return { ok: true, zones: recomputed, advanced, status };
+}
+
+async function markEmbroideryZone(req, res) {
+  const { id } = req.params;
+  const { zone, done } = req.body;
+  const uTypes = staffTypesOf(req.user);
+  if (!isManager(req.user) && !uTypes.includes('embroiderer')) {
+    return res.status(403).json({ error: 'ممنوع', code: 'ERR_FORBIDDEN' });
+  }
+  const r = await applyZoneTick(req.user, id, zone, done);
+  if (!r.ok) {
+    if (r.reason === 'not_found') return res.status(404).json({ error: 'الطلب غير موجود', code: 'ERR_NOT_FOUND' });
+    if (r.reason === 'forbidden') return res.status(403).json({ error: 'هذا الطلب خارج نطاقك', code: 'ERR_FORBIDDEN' });
+    if (r.reason === 'wrong_stage') return res.status(409).json({ error: 'لا يمكن تعديل التطريز في هذه المرحلة', code: 'ERR_INVALID_TRANSITION' });
+    return res.status(400).json({ error: 'منطقة تطريز غير صالحة', code: 'ERR_VALIDATION' });
+  }
+  res.json({ data: { zones: r.zones, advanced: r.advanced, status: r.status } });
+}
+
+// ---------- Bulk zone tick — «عرض بالقطع» batch mode (all يمين, then all يسار…) ----------
+// items: [{order_id, zone}] — each ticked DONE independently with the same guards as the
+// single endpoint (scope, stage, zone-validity); completed pieces auto-advance. One bad
+// item never blocks the rest (mirrors advanceBulk's skip-and-report contract).
+async function markEmbroideryZoneBulk(req, res) {
+  const uTypes = staffTypesOf(req.user);
+  if (!isManager(req.user) && !uTypes.includes('embroiderer')) {
+    return res.status(403).json({ error: 'ممنوع', code: 'ERR_FORBIDDEN' });
+  }
+  const raw = Array.isArray(req.body.items) ? req.body.items : [];
+  const seen = new Set();
+  const items = [];
+  for (const it of raw) {
+    if (!it || typeof it.order_id !== 'string' || !it.order_id) continue;
+    if (typeof it.zone !== 'string' || !it.zone) continue;
+    const k = `${it.order_id}:${it.zone}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    items.push({ order_id: it.order_id, zone: it.zone });
+    if (items.length >= 200) break;
+  }
+  if (!items.length) {
+    return res.status(400).json({ error: 'لم تُحدد أي قطع', code: 'ERR_VALIDATION' });
+  }
+  const results = [];
+  let done = 0;
+  let advanced = 0;
+  for (const it of items) {
+    try {
+      const r = await applyZoneTick(req.user, it.order_id, it.zone, true);
+      if (r.ok) {
+        done++;
+        if (r.advanced) advanced++;
+        results.push({ order_id: it.order_id, zone: it.zone, ok: true, advanced: r.advanced, status: r.status });
+      } else {
+        results.push({ order_id: it.order_id, zone: it.zone, ok: false, reason: r.reason });
+      }
+    } catch {
+      results.push({ order_id: it.order_id, zone: it.zone, ok: false, reason: 'error' });
+    }
+  }
+  res.json({ data: { done, advanced, skipped: items.length - done, results } });
 }
 
 // ---------- Bulk advance: "إكمال" multiple orders one stage at a time ----------
@@ -1118,7 +1234,7 @@ async function tailorQueue(req, res) {
   const tailorStatus = wantDone ? 'done' : 'pending';
   const { rows } = await query(
     `SELECT o.id, o.status, o.created_at,
-            o.tailor_status, o.tailor_done_at,
+            o.tailor_status, o.tailor_done_at, o.student_id,
             u.name AS student_name,
             p.name_ar AS product_name, p.type AS product_type,
             b.name_ar AS batch_name, b.deadline
@@ -1362,7 +1478,7 @@ async function deleteOrder(req, res) {
 
 module.exports = {
   getQueue, getOrder, advance, advanceBulk, deliver, revert, returnToCustomer, claim, release, completed, uploadFinalDesign, monitor,
-  streamEvents, nextStageFor, markEmbroideryZone,
+  streamEvents, nextStageFor, markEmbroideryZone, markEmbroideryZoneBulk,
   tailorQueue, tailorComplete, tailorReopen, tailorCompleteBulk, tailorSummary,
   deleteOrder,
   // Shared with the calligraphy workbench («تحويل للتطريز» reuses the real state machine).

@@ -6,6 +6,62 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
+## 2026-07-16 — Station console: «عرض بالطلب» / «عرض بالقطع» for التطريز · الفصال · الكوي (shared StationConsole)
+
+**Committed locally on main, NOT pushed (push = prod deploy — user tests first). No migration.** Gates: BE `node --check` 0 ·
+FE `tsc` 0 · `eslint` 0. Verified via **live API smoke on Neon** (read-only: 30 embroidery rows all carry `zones` with stitch
+text + plate image URLs; 15/15 pressing rows carry `can_advance`+`advance_label`; bulk endpoint 400s on empty; no raw
+`embroidery_zones` jsonb leak; tailor queue has `student_id` on all 396 rows). **NO browser test by Claude (user instruction —
+"open the browser and I will test")**: browser left open at `/staff` logged in as محمد عماد; fresh 7-day tokens + click-steps
+appended to **`TESTING-WALKTHROUGH.md`** (untracked, do not commit). Spec:
+`docs/superpowers/specs/2026-07-16-station-console-two-view-modes-design.md` (committed).
+
+**Why.** User: the التطريز/الفصال screens show a flat row per order/item — «hard UX». Real work happens two ways: **طالب طالب**
+(finish one student's whole order) and **بالجملة** (enter a rep's دفعة, do ALL sashes' يمين, then كل يسار, then كل خلف; caps جانب
+then أعلى). Locked decisions: التطريز includes the cap (شال امريكي stays excluded); **الفصال stays parallel + retail-only**;
+scope = التطريز + الفصال + الكوي (التجهيز later maybe).
+
+**What shipped.**
+- **NEW `components/staff/station/`** — `StationConsole.tsx` (shared console, per-kind config `embroidery|tailor|pressing`) +
+  `StudentSheet.tsx` (portal full-screen sheet) + `Lightbox.tsx` + `types.ts`. Mounted: `/staff` home renders it for sole-role
+  embroiderer/presser (`app/staff/page.tsx` — QueueView untouched for other roles); `/staff/tailor` is now a thin wrapper around
+  it. Manager console `/staff/queue` untouched.
+- **«عرض بالطلب» (default):** students-only list (name + `N قطعة · X/Y مناطق` + متأخر dot) → tap → sheet: piece cards with inline
+  zone checkboxes (label + **the text to stitch + plate thumbnail**, tap = fullscreen) for التطريز, or one big «تم الفصال» /
+  backend-labelled «إنهاء الكوي…» button otherwise. Last zone ticked → auto-advance (existing `markEmbroideryZone` engine) → piece
+  becomes a green «انتقلت إلى الكوي ✓» ghost row in the open sheet (state: `advanced` Map, deduped against live rows). Zero-zone
+  embroidery piece (canvas-designed retail sash) shows manual «إكمال التطريز» (= `advance`, backend already allows exactly this).
+- **«عرض بالقطع»:** التطريز = zone chips w/ pending counts (ZONE_ORDER mirrors backend ZONE_DEFS) → rows of pieces missing that
+  zone (name · product · text · thumb) → select-all + sticky bulk «إكمال المنطقة (N)»; الفصال/الكوي = piece-type chips وشاح/روب/شال
+  + bulk «تم الفصال (N)» / «إكمال الكوي (N)». الفصال gets a 3rd view «المنجزة» (search + إرجاع/reopen). Shared filters: search +
+  الكل/تجزئة/ممثلين (hidden unless showSourceFilter) + ممثل/دفعة selects (derived client-side; hidden for tailor). 15s
+  `usePolling` + `useProductionEvents` reload; selection pruned/reset on data-refresh/chip-switch.
+- **Backend (`productionController.js` + `routes/production.js`, all additive):**
+  - `getQueue?station=1` → rows gain `student_id`, embroidery rows gain `zones:[{key,label,done,text,image_url}]` via NEW
+    **batched `detectZonesForOrders(ids, progressById)`** (ONE order_items query, same content rule + first-match-wins as
+    `detectEmbroideryZones`, شال امريكي still ignored); pressing rows gain `next_status`/`can_advance`/`advance_label` (derived
+    server-side via `nextStageFor` + `canStaffTransition` + `ADVANCE_LABEL_AR` — console never re-derives the state machine).
+    Raw `o.embroidery_zones` jsonb selected for progress but **deleted from every response row**.
+  - NEW **`POST /production/embroidery-zone-bulk`** `{items:[{order_id, zone}]}` (cap 200, dedup) — the single-tick logic was
+    extracted into shared `applyZoneTick(user, id, zone, done)` (same guards: role caller-side, scope/stage/zone-validity inside;
+    same audit rows; same auto-advance path); `markEmbroideryZone` is now a thin wrapper mapping reasons→the exact same
+    status codes/Arabic errors as before. Bulk = per-item skip-and-report (mirrors `advanceBulk`), returns
+    `{done, advanced, skipped, results[]}`.
+  - `tailorQueue` SELECT gains `o.student_id`.
+- **FE lib:** `getQueue(..., station?)` + `markEmbroideryZoneBulk` + `ZoneBulkResult` in `lib/staff.ts`; `StationZone` + queue-row
+  enrichment fields in `lib/staff-types.ts`; `TailorOrderRow.studentId`.
+
+### Open follow-ups
+- **User browser walkthrough pending** (then commit-push to deploy; `next build` runs on the server — disk local 94%). Steps in
+  `TESTING-WALKTHROUGH.md` §2026-07-16. Dev servers left UP: BE :4000 (plain `node server.js`, pid in scratchpad logs), FE :3000
+  (`next dev`). Browser tab open as محمد عماد.
+- التجهيز (preparer) intentionally NOT switched to the console (user scoped it out) — roll `StationConsole` there later if wanted.
+- «عرض بالقطع» bulk for التطريز ticks ONLY the selected zone per piece — by design (zone-first batching).
+- Old flat presser/embroiderer queue UI still exists in `app/staff/page.tsx` (`QueueView`) for multi-role staff (e.g.
+  designer+embroiderer keep the merged queue) — deliberate, so multi-role workflows didn't change out from under them.
+
+---
+
 ## 2026-07-15 (b) — Pipeline rework: stage-2 DELETED · «بانتظار التصميم» · calligraphy workbench (auto-link + تحويل للتطريز) · كوي station + everything-but-caps routing
 
 **Committed locally on main, NOT pushed (push = prod deploy — user tests first).** Migration **065 applied to Neon**

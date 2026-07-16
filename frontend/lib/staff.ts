@@ -98,12 +98,14 @@ export { FILTER_STATUSES, STAFF_ACTION_STATUSES };
 export async function getQueue(
   stage?: OrderStatus,
   source?: "retail" | "wholesaler",
-  zone?: string
+  zone?: string,
+  station?: boolean
 ): Promise<ProductionQueueItem[]> {
   const params: Record<string, string> = {};
   if (stage) params.stage = stage;
   if (source) params.source = source;
   if (zone) params.zone = zone;
+  if (station) params.station = "1"; // enrich rows with zones / advance grants (station console)
   const { data } = await api.get<{ data: ProductionQueueItem[] }>("/production/queue", {
     params: Object.keys(params).length ? params : undefined,
   });
@@ -152,6 +154,34 @@ export async function markEmbroideryZone(id: string, zone: string, done: boolean
     advanced: boolean;
     status: string;
   };
+}
+
+export interface ZoneBulkResult {
+  done: number;
+  advanced: number;
+  skipped: number;
+  results: {
+    order_id: string;
+    zone: string;
+    ok: boolean;
+    advanced?: boolean;
+    status?: string;
+    reason?: string;
+  }[];
+}
+
+/**
+ * POST /production/embroidery-zone-bulk — «عرض بالقطع» batch mode: tick ONE zone across
+ * many pieces (all يمين, then all يسار…). Completed pieces auto-advance server-side.
+ */
+export async function markEmbroideryZoneBulk(
+  items: { order_id: string; zone: string }[]
+): Promise<ZoneBulkResult> {
+  const { data } = await api.post<{ data: ZoneBulkResult }>(
+    "/production/embroidery-zone-bulk",
+    { items }
+  );
+  return data.data;
 }
 
 // ─── Wholesaler order-working console (one rep's students' orders) ─────────────
@@ -272,6 +302,7 @@ export async function advanceBulk(ids: string[]): Promise<BulkAdvanceResult> {
  */
 export interface TailorOrderRow {
   id: string;
+  studentId: string;
   studentName: string;
   productName: string;
   productType: "sash" | "robe" | "cap" | "shawl" | string;
@@ -287,6 +318,7 @@ export interface TailorOrderRow {
 
 interface TailorOrderApiRow {
   id: string;
+  student_id: string;
   student_name: string;
   product_name: string;
   product_type: string;
@@ -302,6 +334,7 @@ interface TailorOrderApiRow {
 function mapTailorRow(r: TailorOrderApiRow): TailorOrderRow {
   return {
     id: r.id,
+    studentId: r.student_id,
     studentName: r.student_name,
     productName: r.product_name,
     productType: r.product_type,

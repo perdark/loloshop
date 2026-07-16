@@ -91,6 +91,27 @@ export interface ProductionQueueItem {
   has_embroidery?: boolean;
   /** TRUE when any spec line carries an image (auto-attached calligraphy plate / photo). */
   has_design_images?: boolean;
+  /** Grouping key for the station console («عرض بالطلب»). */
+  student_id?: string;
+  needs_pressing?: boolean;
+  /**
+   * Station console only (?station=1), التطريز rows: the piece's embroidery zones with
+   * the stitch content (text / plate image) so the worker sees WHAT to embroider inline.
+   */
+  zones?: StationZone[];
+  /** Station console only, الكوي rows: backend-granted advance (never derived client-side). */
+  can_advance?: boolean;
+  next_status?: OrderStatus | null;
+  advance_label?: string | null;
+}
+
+/** One embroidery zone on a station-console queue row. */
+export interface StationZone {
+  key: string;
+  label: string;
+  done: boolean;
+  text: string | null;
+  image_url: string | null;
 }
 
 /** One item in the `items[]` array on the production order detail */

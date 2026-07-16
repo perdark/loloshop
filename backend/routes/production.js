@@ -19,6 +19,8 @@ router.post('/orders/:id/advance', c.advance);
 // Per-zone embroidery checklist — embroiderer ticks each zone (all-done auto-advances).
 // Permission (embroiderer OR manager/admin) is enforced inside the controller.
 router.post('/orders/:id/embroidery-zone', c.markEmbroideryZone);
+// Bulk zone tick — «عرض بالقطع» batch mode: one zone across many pieces (guards inside).
+router.post('/embroidery-zone-bulk', c.markEmbroideryZoneBulk);
 // Bulk "إكمال" — advance many orders one stage (per-order guards inside the controller).
 router.post('/advance-bulk', c.advanceBulk);
 router.post('/orders/:id/deliver', c.deliver);

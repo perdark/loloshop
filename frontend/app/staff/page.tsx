@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { OrderCard } from "@/components/staff/OrderCard";
 import { StaffAttendancePanel } from "@/components/staff/StaffAttendancePanel";
+import { StationConsole } from "@/components/staff/station/StationConsole";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { PageLoader } from "@/components/ui/Spinner";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -899,6 +900,20 @@ function StaffPageContent() {
 
   // First role the staffer holds that has a queue view (falls through to the empty state if none).
   const staffType = myTypes.find((t) => t in QUEUE_META) ?? null;
+
+  // التطريز + الكوي get the station console (عرض بالطلب / عرض بالقطع) instead of the
+  // flat queue — student-first navigation + zone/type batch mode (user 2026-07-16).
+  if (staffType === "embroiderer" || staffType === "presser") {
+    return (
+      <>
+        <StaffAttendancePanel compact className="mb-4" />
+        <StationConsole
+          kind={staffType === "embroiderer" ? "embroidery" : "pressing"}
+          showSourceFilter={showSourceFilter}
+        />
+      </>
+    );
+  }
 
   if (staffType && staffType in QUEUE_META) {
     return (
