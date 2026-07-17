@@ -21,11 +21,11 @@ import { api } from "./api";
  */
 export async function verifyMoneyGate(secret: string): Promise<boolean> {
   try {
-    const { data } = await api.post<{ ok?: boolean }>(
+    const { data } = await api.post<{ data?: { ok?: boolean } }>(
       "/admin/money-gate/verify",
       { secret }
     );
-    return data?.ok === true;
+    return data?.data?.ok === true;
   } catch {
     return false;
   }
@@ -45,10 +45,10 @@ export async function setMoneyGate(secret: string): Promise<void> {
  */
 export async function getMoneyGateStatus(): Promise<{ configured: boolean }> {
   try {
-    const { data } = await api.get<{ configured?: boolean }>(
+    const { data } = await api.get<{ data?: { configured?: boolean } }>(
       "/admin/money-gate"
     );
-    return { configured: data?.configured === true };
+    return { configured: data?.data?.configured === true };
   } catch {
     return { configured: false };
   }

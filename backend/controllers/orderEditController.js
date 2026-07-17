@@ -210,17 +210,31 @@ async function saveFullSetOrder(req, res) {
   const infoResult = await applyStudentInfo(student, pre, null);
   if (infoResult.error) return res.status(400).json({ error: infoResult.error, code: 'ERR_VALIDATION' });
 
+  // FIX #2 (2026-07-17): approval preservation is now threaded INTO persistFullSetOrder
+  // so the restore happens atomically, in the SAME transaction as the piece writes — no
+  // more post-commit restoreApproval() call, so a crash/Neon drop right after persist's
+  // commit can no longer leave an approved bundle stuck at 'pending'. Compute the exact
+  // SAME target restoreApproval used to (prior state if one existed, else auto-approved
+  // for rep-linked students / NULL for an independent admin edit).
+  const isRepLinked = student.wholesaler_id != null;
+  const approvalTarget = prev.exists ? prev.state : (isRepLinked ? 'approved' : null);
+  const approvalParam = {
+    state: approvalTarget,
+    approved_at: prev.exists ? prev.wholesaler_approved_at : null,
+    approved_by: (prev.exists && prev.wholesaler_approved_by) || req.user.id || null,
+    reject_reason: prev.exists ? prev.wholesaler_reject_reason : null,
+  };
+
   const { status, json } = await persistFullSetOrder({
     student: { id: student.id, name: student.name, phone: student.phone ?? '', wholesaler_id: student.wholesaler_id },
     body: req.body,
     actorUserId: req.user.id,
+    approval: approvalParam,
   });
   if (status !== 201) return res.status(status).json(json);
 
   const cgId = json.data.checkout_group_id;
-  const approval = await restoreApproval({
-    checkoutGroupId: cgId, prev, isRepLinked: student.wholesaler_id != null, actorUserId: req.user.id,
-  });
+  const approval = approvalTarget;
   // Group-level fields (IG mirror + phones) exist only after the group does → after persist.
   const groupInfo = await applyStudentInfo(student,
     Object.fromEntries(Object.entries(info).filter(([k]) => ['instagram_username', 'phone_primary', 'phone_secondary'].includes(k))),
@@ -254,6 +268,24 @@ async function patchOrderDetails(req, res) {
   const order = o.rows[0];
   const student = await loadStudent(order.student_id);
   if (!student) return res.status(404).json({ error: 'الطالب غير موجود', code: 'ERR_NOT_FOUND' });
+
+  // FIX #8 (2026-07-17): spec-line customer_text edits stay allowed for ANY order (harmless
+  // — only typed text already on that order). But the student/group INFO writes below
+  // (applyStudentInfo: name/instagram_username/phones/notes) can rewrite a RETAIL
+  // self-registered student's real login account name + their bundle's contact info — that
+  // must be blocked here. Checked BEFORE the tx that edits items, so nothing is half-applied
+  // when a retail student's request sneaks info fields in alongside spec-line edits.
+  const bodyStudent = req.body?.student || {};
+  const bodyGroup = req.body?.group || {};
+  const hasInfoFields =
+    Object.prototype.hasOwnProperty.call(bodyStudent, 'name') ||
+    Object.prototype.hasOwnProperty.call(bodyStudent, 'instagram_username') ||
+    Object.prototype.hasOwnProperty.call(bodyGroup, 'phone_primary') ||
+    Object.prototype.hasOwnProperty.call(bodyGroup, 'phone_secondary') ||
+    Object.prototype.hasOwnProperty.call(bodyGroup, 'notes');
+  if (hasInfoFields && !eligibleForFullSet(student)) {
+    return res.status(403).json({ error: 'لا يمكن تعديل بيانات طالب التجزئة من هنا', code: 'ERR_FORBIDDEN' });
+  }
 
   const items = Array.isArray(req.body?.items) ? req.body.items : [];
   if (items.length > 30) return res.status(400).json({ error: 'عدد كبير من التعديلات', code: 'ERR_VALIDATION' });

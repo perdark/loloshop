@@ -61,19 +61,23 @@ async function analytics(req, res) {
        COUNT(DISTINCT COALESCE(o.checkout_group_id, o.id))::int AS orders
      FROM orders o WHERE ${billableOrderSql('o')}`
   );
+  // Pipeline funnel = OPERATIONAL, not settlement (decision locked 2026-07-17): count every
+  // active order (incl. pending/rejected rep bundles awaiting approval) so WIP isn't
+  // understated. Only the MONEY aggregates (totals/topWholesalers/accounting) stay on
+  // billableOrderSql — this is the one place that deliberately does NOT gate on approval.
   const byStatus = await query(
     `SELECT o.status, COUNT(*)::int AS count
      FROM orders o
-     WHERE ${billableOrderSql('o')}
+     WHERE o.status <> 'cancelled'
      GROUP BY o.status`
   );
   const daily = await query(
     `SELECT DATE(o.created_at AT TIME ZONE 'Asia/Baghdad') AS date,
             COUNT(DISTINCT COALESCE(o.checkout_group_id, o.id))::int AS orders,
-            COALESCE(SUM(o.price), 0)::bigint AS revenue
+            COALESCE(SUM(o.price) FILTER (WHERE ${billableOrderSql('o')}), 0)::bigint AS revenue
      FROM orders o
      WHERE o.created_at > NOW() - INTERVAL '30 days'
-       AND ${billableOrderSql('o')}
+       AND o.status <> 'cancelled'
      GROUP BY 1 ORDER BY 1`
   );
   const topWholesalers = await query(
@@ -146,11 +150,29 @@ async function accounting(req, res) {
        AND o.status <> 'cancelled'
        AND o.wholesaler_approval IS NULL`
   );
+  // Defensive bucket (0 live rows today): a deleted wholesaler SETs its students'
+  // wholesaler_id to NULL (FK ON DELETE SET NULL), but the orders they already approved
+  // keep wholesaler_approval='approved' — so they'd fall out of BOTH by_wholesaler (no
+  // matching w.id anymore) and independent_retail (requires wholesaler_approval IS NULL)
+  // and the breakdown would stop summing to `totals`. Catch them here so
+  // by_wholesaler + independent_retail + orphaned_billable == totals always holds.
+  const orphaned = await query(
+    `SELECT COALESCE(SUM(o.price),0)::bigint AS revenue,
+            COALESCE(SUM(o.cost),0)::bigint AS cost,
+            COALESCE(SUM(o.profit),0)::bigint AS profit,
+            COUNT(DISTINCT COALESCE(o.checkout_group_id, o.id))::int AS orders
+     FROM orders o
+     JOIN students s ON s.id = o.student_id
+     WHERE s.wholesaler_id IS NULL
+       AND o.status <> 'cancelled'
+       AND o.wholesaler_approval = 'approved'`
+  );
   res.json({
     totals: totals.rows[0],
     by_batch: byBatch.rows,
     by_wholesaler: byWholesaler.rows,
     independent_retail: retail.rows[0],
+    orphaned_billable: orphaned.rows[0],
   });
 }
 
@@ -811,10 +833,44 @@ async function deleteOrder(req, res) {
   const { id } = req.params;
   const result = await tx(async (client) => {
     const found = await client.query(
-      `SELECT id, checkout_group_id, student_id FROM orders WHERE id=$1 FOR UPDATE`, [id]
+      `SELECT id, checkout_group_id, student_id, price, cost FROM orders WHERE id=$1 FOR UPDATE`, [id]
     );
     if (!found.rows.length) return null;
     const order = found.rows[0];
+
+    // Lock every row in the bundle BEFORE counting/reassigning siblings so two concurrent
+    // piece-deletes in the same checkout_group serialize instead of racing each other.
+    if (order.checkout_group_id) {
+      await client.query(`SELECT id FROM orders WHERE checkout_group_id=$1 FOR UPDATE`, [order.checkout_group_id]);
+    }
+
+    // Re-anchor the deleted piece's price/cost onto a surviving sibling in the SAME bundle
+    // so settled revenue doesn't vanish when the SASH (which carries the whole طقم price)
+    // is the piece being deleted while robe/cap siblings survive. Prefer robe, then cap,
+    // then any surviving live sibling (deterministic tie-break by created_at).
+    let priceReanchoredTo = null;
+    if (order.checkout_group_id && (Number(order.price) > 0 || Number(order.cost) > 0)) {
+      const survivor = await client.query(
+        `SELECT o2.id
+           FROM orders o2
+           JOIN products p2 ON p2.id = o2.product_id
+          WHERE o2.checkout_group_id = $1
+            AND o2.design_id IS NULL
+            AND o2.status <> 'cancelled'
+            AND o2.id <> $2
+          ORDER BY CASE p2.type WHEN 'robe' THEN 0 WHEN 'cap' THEN 1 ELSE 2 END ASC, o2.created_at ASC
+          LIMIT 1`,
+        [order.checkout_group_id, id]
+      );
+      if (survivor.rows.length) {
+        priceReanchoredTo = survivor.rows[0].id;
+        await client.query(
+          `UPDATE orders SET price = price + $1, cost = cost + $2 WHERE id = $3`,
+          [Number(order.price) || 0, Number(order.cost) || 0, priceReanchoredTo]
+        );
+      }
+    }
+
     await client.query(`DELETE FROM staff_activity_log WHERE order_id=$1`, [id]);
     await client.query(`DELETE FROM orders WHERE id=$1`, [id]);
     let remaining = [];
@@ -830,7 +886,7 @@ async function deleteOrder(req, res) {
     await client.query(
       `INSERT INTO audit_log(actor_id,action,entity,entity_id,details)
        VALUES($1,'delete_order','order',$2,$3)`,
-      [req.user.id, order.id, JSON.stringify({ piece_only: true, remaining_order_ids: remaining, checkout_group_id: order.checkout_group_id, student_id: order.student_id })]
+      [req.user.id, order.id, JSON.stringify({ piece_only: true, remaining_order_ids: remaining, checkout_group_id: order.checkout_group_id, student_id: order.student_id, price_reanchored_to: priceReanchoredTo })]
     );
     return { remaining, groupDeleted };
   });

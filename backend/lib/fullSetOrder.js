@@ -128,9 +128,18 @@ const err = (status, error, code = 'ERR_VALIDATION') => ({ status, json: { error
  * @param {object} student  { id, name, phone, wholesaler_id }
  * @param {object} body     request body (package_id, measurements, sash_type, cap_type, embroidery, notes)
  * @param {string} actorUserId  user id to attribute the audit row to (rep or student)
+ * @param {object} [approval]  OPTIONAL final wholesaler_approval override, applied ATOMICALLY
+ *   inside the same transaction as the piece writes (see the block right before `return
+ *   { cgId, ids }` below). Shape: { state: 'pending'|'approved'|'rejected'|null, approved_at,
+ *   approved_by, reject_reason }. Omit entirely (undefined) for CURRENT/default behavior —
+ *   every saved piece is left at the 'pending' the writes below already produce. This is used
+ *   by admin/manager edit + admin-custom-order paths to preserve/restore a bundle's prior
+ *   approval state without a post-commit window where it could be caught stuck at 'pending'.
+ *   The rep-fill and student self-fill call sites never pass this — they must keep writing
+ *   'pending' on every save, unchanged.
  * @returns {{ status:number, json:object }}
  */
-async function persistFullSetOrder({ student, body, actorUserId }) {
+async function persistFullSetOrder({ student, body, actorUserId, approval }) {
   const { package_id, measurements, sash_type, cap_type, embroidery, notes } = body || {};
 
   // package_id is now OPTIONAL — if provided we pin sub-products to it; if absent we
@@ -386,10 +395,15 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
   }
 
   const result = await tx(async (client) => {
+    // FIX #6 (2026-07-17): scoped the SAME way readFullSetOrder() reads a student's
+    // package bundle back (o.design_id IS NULL) — without this, a legacy retail-CART
+    // checkout_group (design_id set) could be the "most recent" group and this طقم
+    // (plus its approval state + restoreGroupPhone) would get bound onto that cart
+    // bundle instead of the package bundle readFullSetOrder actually reads back.
     const prevGroup = await client.query(
       `SELECT cg.id FROM checkout_groups cg
        JOIN orders o ON o.checkout_group_id = cg.id
-       WHERE o.student_id = $1 AND o.status <> 'cancelled'
+       WHERE o.student_id = $1 AND o.status <> 'cancelled' AND o.design_id IS NULL
        ORDER BY cg.created_at DESC LIMIT 1`,
       [student.id]
     );
@@ -503,6 +517,48 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
       }
       ids[type] = oid;
     }
+
+    // ── Optional final approval override (FIX #2, 2026-07-17) ──────────────────────
+    // Applied INSIDE this same transaction, AFTER every piece write + self-heal above,
+    // so a caller that needs to preserve/restore a bundle's prior approval state never
+    // has a post-commit window where the bundle sits at the 'pending' the writes above
+    // just produced (the old capture-BEFORE/persist/restore-AFTER pattern could lose an
+    // 'approved' bundle to a crash/Neon drop between persist's commit and the separate
+    // restore query). `approval` is omitted (undefined) by every rep/student call site,
+    // so their behavior is byte-identical to before this fix.
+    if (approval !== undefined) {
+      const state = approval?.state ?? null;
+      if (state === 'pending') {
+        // no-op — the piece writes above already left the bundle 'pending'
+      } else if (state === 'approved') {
+        await client.query(
+          `UPDATE orders SET wholesaler_approval = 'approved'::wholesaler_approval_status,
+                  wholesaler_reject_reason = NULL,
+                  wholesaler_approved_at = COALESCE($2, NOW()),
+                  wholesaler_approved_by = $3, updated_at = NOW()
+             WHERE checkout_group_id = $1 AND wholesaler_approval IS NOT NULL`,
+          [cgId, approval.approved_at || null, approval.approved_by || null]
+        );
+      } else if (state === 'rejected') {
+        await client.query(
+          `UPDATE orders SET wholesaler_approval = 'rejected'::wholesaler_approval_status,
+                  wholesaler_reject_reason = $2, updated_at = NOW()
+             WHERE checkout_group_id = $1 AND wholesaler_approval IS NOT NULL`,
+          [cgId, approval.reject_reason || null]
+        );
+      } else {
+        // null → clear back to an independent/direct-order state. Not gated on
+        // wholesaler_approval IS NOT NULL (mirrors the old restoreApproval's null branch —
+        // this is also the branch that covers a bundle that was already NULL).
+        await client.query(
+          `UPDATE orders SET wholesaler_approval = NULL, wholesaler_reject_reason = NULL,
+                  wholesaler_approved_at = NULL, wholesaler_approved_by = NULL, updated_at = NOW()
+             WHERE checkout_group_id = $1`,
+          [cgId]
+        );
+      }
+    }
+
     return { cgId, ids };
   });
 

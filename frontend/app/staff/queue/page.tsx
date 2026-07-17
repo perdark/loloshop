@@ -746,6 +746,18 @@ function ConsoleContent() {
   const storedZoneFallback = searchParams.toString() === "" ? stored.zone : undefined;
   const effectiveZone = zoneParam ?? storedZoneFallback;
 
+  // True once the restored stage/source/rep/zone (if any) are actually reflected in the URL —
+  // either nothing needed rehydrating, or the mount-time `router.replace` below has committed.
+  // Next's search-param update runs as a low-priority transition, so the (normal-priority) first
+  // fetch's `setItems`/`setLoadedOnce` can commit BEFORE it — at that instant `stage`/`source`/
+  // `repParam` still read their pre-rehydration (empty) values even though `loadedOnce` just
+  // became true. The page-clamp effect below must wait for BOTH `loadedOnce` AND this flag, else
+  // it clamps a restored page against a `filtered` list computed from stale (unrehydrated)
+  // filters. `searchParams.toString() !== ""` is a safe proxy for "the rehydration landed" since
+  // rehydration is the only thing that can turn an initially-bare URL non-empty.
+  const needsRehydration = Boolean(stored.stage || stored.source || stored.rep || stored.zone);
+  const rehydrated = searchParams.toString() !== "" || !needsRehydration;
+
   // ── Local state ────────────────────────────────────────────────────────────
   const [items,      setItems]      = useState<ProductionQueueItem[]>([]);
   const [loading,    setLoading]    = useState(true);
@@ -949,12 +961,14 @@ function ConsoleContent() {
   const pageItems = filtered.slice((page - 1) * PER_PAGE, (page - 1) * PER_PAGE + PER_PAGE);
 
   // A restored page number may exceed the fresh list's page count — degrade to page 1 instead
-  // of silently rendering an empty slice.
+  // of silently rendering an empty slice. Gated on `rehydrated` too (see definition above) so
+  // this never clamps against a `filtered` count computed before the mount-time URL rehydration
+  // has actually landed.
   useEffect(() => {
-    if (!loadedOnce) return;
+    if (!loadedOnce || !rehydrated) return;
     const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
     if (page > totalPages) setPage(1);
-  }, [loadedOnce, filtered.length, page]);
+  }, [loadedOnce, rehydrated, filtered.length, page]);
 
   // Whether to show rep grid vs table
   const showRepGrid     = source === "wholesaler" && repParam === null;

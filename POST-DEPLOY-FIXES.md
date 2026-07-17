@@ -1,80 +1,74 @@
 # Post-deploy fix list — 2026-07-17 review
 
-Code review (3-agent + verify) of the multi-session uncommitted batch before this push.
-**No blockers shipped.** Pricing verified consistent with the owner-locked settlement rules;
-live-DB check confirmed the new settled-money gate currently orphans 0 orders.
-These are the follow-ups, ranked. Delete items as they're fixed.
+Code review (3-agent + verify) of the multi-session uncommitted batch.
+**No blockers shipped.** Pricing verified consistent with the owner-locked settlement rules.
+**ALL 12 review items + the money-gate reveal bug are now FIXED** (2026-07-17, 3 parallel
+agents + central review; backend `node --check` 0, frontend `tsc` 0). Two product decisions
+were locked with the owner: funnel = **operational**, sash-delete = **move price to a survivor**.
 
-## Fix soon (real bugs, low blast radius today)
+## Fixed
 
-1. **Dashboard charts silently exclude pending/rejected bundles** — `backend/controllers/adminController.js:64`
-   `by_status` + `daily` are now filtered by `billableOrderSql` (settled money). Previously they counted ALL
-   orders. ~19 pending rep bundles vanish from the admin pipeline funnel → WIP understated.
-   *Fix:* give the funnel/daily charts an operational filter (`status <> 'cancelled'` only), keep
-   `billableOrderSql` for money totals only. **Decide: is the funnel operational or settlement?**
+0. ✅ **Money-gate reveal never worked on the admin dashboard** — `frontend/lib/money-gate.ts`
+   `verifyMoneyGate`/`getMoneyGateStatus` read `data.ok`/`data.configured` but the axios instance
+   does NOT unwrap the `{ data: {...} }` envelope → always false, so `lolo2026` never revealed profit.
+   *Fixed:* read `data.data.ok` / `data.data.configured` (like every other wrapper). Backend verified
+   correct (`lolo2026` → ok server-side). TV unaffected (separate server-side path).
 
-2. **Approval restore not atomic** — `backend/controllers/orderEditController.js:213` (same pattern in
-   `adminCustomOrderController.createForExistingStudent`)
-   `persistFullSetOrder` commits `wholesaler_approval='pending'` in its own tx; `restoreApproval` runs after,
-   un-transacted. A crash/Neon drop in between leaves an approved bundle stuck at `pending` → invisible in
-   staff queue + settled money until re-edited. *Fix:* wrap capture→persist→restore in one `tx`, or retry
-   restore idempotently.
+1. ✅ **Funnel excluded pending/rejected bundles** — `adminController.analytics`
+   *Decision: OPERATIONAL.* `by_status` + daily order-count now use `status <> 'cancelled'`; daily
+   revenue stays settlement-only via `SUM(price) FILTER (WHERE billableOrderSql)`. Money totals
+   (totals/topWholesalers/accounting) untouched.
 
-3. ✅ **FIXED 2026-07-17** — Student-search spinner stuck forever — `frontend/components/staff/CustomOrderForm.tsx:70`
-   Type 2+ chars then delete below 2 before the debounce fires → `setSearching(false)` never runs.
-   *Fix applied:* the `q.length < 2` early-return branch now also calls `setSearching(false)`.
+2. ✅ **Approval restore not atomic** — `persistFullSetOrder` + `orderEditController.saveFullSetOrder`
+   + `adminCustomOrderController.createForExistingStudent`
+   *Fixed:* the final `wholesaler_approval` is now applied INSIDE persist's transaction via a new
+   optional `approval` param (state/approved_at/approved_by/reject_reason). The post-commit
+   `restoreApproval` window is gone for the edit + existing-student paths. Rep/student call sites pass
+   no `approval` → still write `pending` (byte-identical). Verified all 4 call sites.
 
-4. **Queue state-restore loses the page number** — `frontend/app/staff/queue/page.tsx:956`
-   Restored `page > 1` is clamped back to 1 when the mount-time `router.replace` re-applies the stage filter
-   and the list shrinks. *Fix:* gate the clamp effect on URL rehydration having settled (not just `loadedOnce`).
+3. ✅ Student-search spinner stuck — `CustomOrderForm.tsx` clears `setSearching(false)` on the `<2`-char early return.
 
-## Fix when touching the area (edge cases / hardening)
+4. ✅ **Queue state-restore loses the page number** — `staff/queue/page.tsx`
+   *Fixed:* added a derived `rehydrated` flag; the page-clamp effect now gates on `loadedOnce && rehydrated`
+   so a restored `page > 1` isn't clamped against a pre-rehydration (stale-filter) list.
 
-5. **restoreGroupPhone bails on checkout_group mismatch** — `backend/controllers/orderEditController.js:68`
-   If persist resolves a different group than captured, the admin-set group phone is wiped ('' for name-only
-   students) and never restored. Root cause is the known `prevGroup` edge in `fullSetOrder.js` (no design
-   filter) — fixing that fixes this.
+5. ✅ **restoreGroupPhone group mismatch** — fixed transitively by #6 (persist + readback now resolve the same group).
 
-6. **restoreApproval writes approval onto a whole legacy cart group** — `backend/lib/fullSetOrder.js:389`
-   Same `prevGroup` edge: a طقم bound to a legacy retail-cart checkout_group gets the captured approval
-   stamped on the cart order too. Only legacy data can trigger it (new cart 403 blocks rep students).
-   *Fix:* scope persist/restore to design-less package pieces, or fix `prevGroup` selection.
+6. ✅ **prevGroup could bind a طقم to a legacy retail-cart group** — `fullSetOrder.js`
+   *Fixed:* `prevGroup` query scoped `AND o.design_id IS NULL`, matching `readFullSetOrder`.
 
-7. **Sash piece-delete leaves a counted bundle with 0 money** — `backend/controllers/adminController.js:838`
-   Documented/accepted that the طقم price rides the sash row — but note repsOverview/accounting still COUNT
-   the bundle as 1 approved bundle with 0 revenue → rep bundle count no longer reconciles with revenue.
-   *Option:* re-anchor the bundle price onto a surviving piece on sash delete, or exclude priceless bundles
-   from the count.
+7. ✅ **Sash piece-delete left a counted bundle with 0 money** — both `deleteOrder` fns (admin + production)
+   *Decision: MOVE PRICE TO SURVIVOR.* On delete, if the row has price/cost and a live sibling survives in
+   the same checkout_group, its price+cost are added onto one survivor (robe→cap→other); profit recomputes
+   (generated col). Audit logs `price_reanchored_to`.
 
-8. **Quick ✎ edit has no eligibility guard** — `backend/controllers/orderEditController.js:249`
-   `patchOrderDetails` can rename a retail self-registered student's real login account (users.name) and
-   rewrite their group contacts. Manager-only surface, but add the same `eligibleForFullSet`-style guard
-   (or restrict student/group writes to rep-linked/name-only students).
+8. ✅ **Quick ✎ edit had no eligibility guard** — `orderEditController.patchOrderDetails`
+   *Fixed:* student/group info writes (name/IG/phones/notes) now 403 for ineligible (retail) students BEFORE
+   the tx; spec-line text edits remain open for any order.
 
-9. ✅ **FIXED 2026-07-17** — Quick ✎ edit accepts priced lines that carry typed text — `backend/controllers/orderEditController.js:271`
-   WHERE only checked `customer_text IS NOT NULL`; now also `AND COALESCE(price_snapshot, 0) = 0` to honor the
-   text-only contract (COALESCE guards NULL-price rows so no legit text edit is rejected).
+9. ✅ Quick ✎ edit accepted priced lines with text — WHERE now `AND COALESCE(price_snapshot,0)=0`.
 
-10. **Concurrent piece deletes can orphan an empty checkout_groups row** — `backend/controllers/productionController.js:1476`
-    Lock the group's rows (`SELECT … FOR UPDATE` on the checkout_group) before counting siblings. Blast radius:
-    one orphan row, no money impact.
+10. ✅ **Concurrent piece-deletes could orphan an empty group** — both `deleteOrder` fns
+    *Fixed:* `SELECT id FROM orders WHERE checkout_group_id=$1 FOR UPDATE` locks the bundle before the sibling
+    count/re-anchor. (Residual: two admins deleting *different* pieces of the *same* bundle simultaneously can
+    deadlock → Postgres aborts one, admin retries. No corruption; far better than the silent orphan before.)
 
-11. ✅ **FIXED 2026-07-17** — Money-explanation panel can render NaN / false equation — `frontend/components/admin/CalculationDetails.tsx:58`
-    Added `Number.isFinite` fallbacks (`safePrice`, guarded `storedCost`/`storedProfit`) before printing the equation.
+11. ✅ Money-explanation NaN — `CalculationDetails.tsx` adds `Number.isFinite` guards (`safePrice`).
 
-12. **Latent: deleted-wholesaler approved orders vanish from accounting breakdowns** — `backend/controllers/adminController.js:145`
-    If a wholesaler is ever deleted (FK sets students.wholesaler_id NULL), their approved orders stay in
-    totals but drop out of by_wholesaler AND independent_retail (which now requires `approval IS NULL`) →
-    sections stop summing to totals. 0 live rows today (verified on Neon 2026-07-17).
+12. ✅ **Deleted-wholesaler approved orders vanished from accounting** — `adminController.accounting`
+    *Fixed defensively (0 live rows):* new `orphaned_billable` bucket for `wholesaler_id IS NULL AND
+    wholesaler_approval='approved'`, so `by_wholesaler + independent_retail + orphaned_billable == totals`.
 
-## Post-deploy actions carried over from earlier sessions (do after this push)
+## Post-deploy actions (do after this push)
 
 - Drain legacy converting rows: `UPDATE orders SET status='embroidery' WHERE status='converting';`
 - Re-run the duplicate-bundle scan + settlement rule-violation scan (queries in audit_log details,
   actions `repair_duplicate_sash` / `repair_pricing_config`).
 - Confirm VPS `.env` has: `DESIGN_TEAM_PORTAL_KEY`, `WORKSHOP_PORTAL_KEY`, `STAFF_PORTAL_KEY`,
   `MONEY_GATE_SECRET`, `OPENROUTER_API_KEY`, `DEMO_LOGIN_PHONES` → `pm2 restart`.
-- Change the money-gate passphrase (`lolo2026`) via /admin → 🎓 → «تعيين الرمز».
+- Change the money-gate passphrase (`lolo2026`) via /admin → 🎓 → «تعيين الرمز» (now that reveal works).
+- Browser walkthrough of the money-critical paths (approval preserved after an admin edit; sash piece-delete
+  keeps bundle revenue; 🎓 reveal works) — static + review verified, no live e2e re-run this session.
 
 ## Reviewed & intentional (do NOT "fix")
 

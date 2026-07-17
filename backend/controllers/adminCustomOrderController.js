@@ -65,16 +65,37 @@ async function createForExistingStudent(req, res) {
 
   const prev = await captureApproval(student.id);
   const prevContact = await captureGroupPhone(prev);
+  const isRepLinked = student.wholesaler_id != null;
+
+  // FIX #2 (2026-07-17): for a PRE-EXISTING bundle, thread its captured approval state
+  // into persistFullSetOrder so the restore happens atomically, inside the SAME
+  // transaction as the piece writes (same fix as orderEditController.saveFullSetOrder —
+  // no more post-commit restoreApproval() window where a crash could strand the bundle
+  // at 'pending'). A FRESH bundle (prev.exists===false) has no prior state to restore —
+  // it's left 'pending' by persist and decided below (unchanged: rep-linked → auto-approve
+  // via setBundleApproval, independent → restoreApproval sets NULL).
+  const approvalParam = prev.exists
+    ? {
+        state: prev.state,
+        approved_at: prev.wholesaler_approved_at,
+        // Same fallback restoreApproval used: keep the ORIGINAL approver when one is on
+        // record, else attribute to this actor (mirrors orderEditController.saveFullSetOrder).
+        approved_by: prev.wholesaler_approved_by || req.user.id || null,
+        reject_reason: prev.wholesaler_reject_reason,
+      }
+    : undefined;
+
   const result = await persistFullSetOrder({
     student: { id: student.id, name: student.name, phone: student.phone ?? '', wholesaler_id: student.wholesaler_id },
     body: req.body,
     actorUserId: req.user.id,
+    approval: approvalParam,
   });
   if (result.status !== 201) return res.status(result.status).json(result.json);
   const cgId = result.json.data.checkout_group_id;
 
   let approval;
-  if (!prev.exists && student.wholesaler_id) {
+  if (!prev.exists && isRepLinked) {
     approval = 'approved';
     try {
       await setBundleApproval({ checkoutGroupId: cgId, decision: 'approved', actorUserId: req.user.id });
@@ -82,9 +103,13 @@ async function createForExistingStudent(req, res) {
       console.error(`custom order (existing student): approval flip failed for checkout_group ${cgId}:`, e.message);
       approval = 'pending';
     }
+  } else if (prev.exists) {
+    // Already restored atomically inside persistFullSetOrder's own transaction above.
+    approval = prev.state ?? null;
   } else {
+    // Fresh, independent (non-rep) bundle → stays a direct admin order (NULL).
     approval = await restoreApproval({
-      checkoutGroupId: cgId, prev, isRepLinked: student.wholesaler_id != null, actorUserId: req.user.id,
+      checkoutGroupId: cgId, prev, isRepLinked, actorUserId: req.user.id,
     });
   }
   await restoreGroupPhone({ checkoutGroupId: cgId, ...prevContact });

@@ -1477,9 +1477,43 @@ async function deleteOrder(req, res) {
   const id = String(req.params.id || '');
   if (!/^[0-9a-f-]{36}$/i.test(id)) return res.status(400).json({ error: 'طلب غير صحيح', code: 'ERR_VALIDATION' });
   const result = await tx(async (client) => {
-    const found = await client.query(`SELECT id,checkout_group_id,student_id FROM orders WHERE id=$1 FOR UPDATE`, [id]);
+    const found = await client.query(`SELECT id,checkout_group_id,student_id,price,cost FROM orders WHERE id=$1 FOR UPDATE`, [id]);
     if (!found.rows.length) return null;
     const order = found.rows[0];
+
+    // Lock every row in the bundle BEFORE counting/reassigning siblings so two concurrent
+    // piece-deletes in the same checkout_group serialize instead of racing each other.
+    if (order.checkout_group_id) {
+      await client.query(`SELECT id FROM orders WHERE checkout_group_id=$1 FOR UPDATE`, [order.checkout_group_id]);
+    }
+
+    // Re-anchor the deleted piece's price/cost onto a surviving sibling in the SAME bundle
+    // so settled revenue doesn't vanish when the SASH (which carries the whole طقم price)
+    // is the piece being deleted while robe/cap siblings survive. Prefer robe, then cap,
+    // then any surviving live sibling (deterministic tie-break by created_at).
+    let priceReanchoredTo = null;
+    if (order.checkout_group_id && (Number(order.price) > 0 || Number(order.cost) > 0)) {
+      const survivor = await client.query(
+        `SELECT o2.id
+           FROM orders o2
+           JOIN products p2 ON p2.id = o2.product_id
+          WHERE o2.checkout_group_id = $1
+            AND o2.design_id IS NULL
+            AND o2.status <> 'cancelled'
+            AND o2.id <> $2
+          ORDER BY CASE p2.type WHEN 'robe' THEN 0 WHEN 'cap' THEN 1 ELSE 2 END ASC, o2.created_at ASC
+          LIMIT 1`,
+        [order.checkout_group_id, id]
+      );
+      if (survivor.rows.length) {
+        priceReanchoredTo = survivor.rows[0].id;
+        await client.query(
+          `UPDATE orders SET price = price + $1, cost = cost + $2 WHERE id = $3`,
+          [Number(order.price) || 0, Number(order.cost) || 0, priceReanchoredTo]
+        );
+      }
+    }
+
     await client.query(`DELETE FROM staff_activity_log WHERE order_id=$1`, [id]);
     await client.query(`DELETE FROM orders WHERE id=$1`, [id]);
     let remaining = [];
@@ -1494,7 +1528,7 @@ async function deleteOrder(req, res) {
     }
     await client.query(
       `INSERT INTO audit_log(actor_id,action,entity,entity_id,details) VALUES($1,'delete_order','order',$2,$3)`,
-      [req.user.id, order.id, JSON.stringify({ piece_only: true, remaining_order_ids: remaining, checkout_group_id: order.checkout_group_id, student_id: order.student_id, source: 'staff_workspace' })]
+      [req.user.id, order.id, JSON.stringify({ piece_only: true, remaining_order_ids: remaining, checkout_group_id: order.checkout_group_id, student_id: order.student_id, source: 'staff_workspace', price_reanchored_to: priceReanchoredTo })]
     );
     return { remaining, groupDeleted };
   });
