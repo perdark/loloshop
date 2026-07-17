@@ -81,7 +81,10 @@ export function Modal({ open, onClose, title, children, footer, descriptionId }:
   // the fixed bottom nav and clip the footer buttons off-screen).
   return createPortal(
     <div
-      className="animate-fade-page-in fixed inset-0 z-50 flex items-end justify-center bg-ink/45 p-4 backdrop-blur-sm sm:items-center"
+      // Bottom sheet on mobile (`items-end`): pad past the iPhone home-indicator
+      // safe area so the sheet — and its footer buttons — never sit under it.
+      // `env()` resolves to 0 on devices without an inset, so this is a no-op there.
+      className="animate-fade-page-in fixed inset-0 z-50 flex items-end justify-center bg-ink/45 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] backdrop-blur-sm sm:items-center sm:pb-4"
       onClick={() => onCloseRef.current()}
       role="presentation"
     >

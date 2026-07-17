@@ -8,12 +8,14 @@ import { useRequireAuth } from "@/hooks/useRequireAuth";
 import { getApiErrorMessage } from "@/lib/api";
 import {
   getOrderEditContext,
+  patchOrderDetails,
   saveStudentFullSetOrder,
   uploadProductionImage,
   type OrderEditContext,
 } from "@/lib/staff";
 import type { CreateFullSetPayload } from "@/lib/wholesaler";
 import { FullSetOrderForm } from "@/components/wholesaler/FullSetOrderForm";
+import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { PageLoader } from "@/components/ui/Spinner";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -37,6 +39,10 @@ export default function StaffOrderEditPage() {
   const [phonePrimary, setPhonePrimary] = useState("");
   const [phoneSecondary, setPhoneSecondary] = useState("");
 
+  // Limited (quick) editor — retail orders, one text value per editable spec line.
+  const [itemTexts, setItemTexts] = useState<Record<string, string>>({});
+  const [quickSubmitting, setQuickSubmitting] = useState(false);
+
   useEffect(() => {
     if (!user) return;
     let alive = true;
@@ -49,6 +55,11 @@ export default function StaffOrderEditPage() {
         setInstagram(data.group?.instagram_username || data.student.instagram_username || "");
         setPhonePrimary(data.group?.phone_primary || data.student.phone || "");
         setPhoneSecondary(data.group?.phone_secondary || "");
+        const seed: Record<string, string> = {};
+        (data.editable_items || []).forEach((it) => {
+          seed[it.id] = it.text || "";
+        });
+        setItemTexts(seed);
       })
       .catch((e) => {
         if (alive) setLoadError(getApiErrorMessage(e, "تعذر تحميل بيانات الطلب"));
@@ -59,6 +70,33 @@ export default function StaffOrderEditPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderId, user?.id]);
+
+  async function handleQuickSave() {
+    if (!ctx) return;
+    if (!name.trim()) {
+      toast.error("اسم الطالب مطلوب");
+      return;
+    }
+    setQuickSubmitting(true);
+    try {
+      // Only non-empty item texts are sent — the backend 400s an empty customer_text,
+      // so a blanked field is simply skipped (not cleared) rather than failing the save.
+      const items = Object.entries(itemTexts)
+        .filter(([, value]) => value.trim())
+        .map(([item_id, value]) => ({ item_id, customer_text: value.trim() }));
+      await patchOrderDetails(orderId, {
+        items,
+        student: { name: name.trim(), instagram_username: instagram.trim() },
+        group: { phone_primary: phonePrimary.trim(), phone_secondary: phoneSecondary.trim() },
+      });
+      toast.success("تم حفظ التعديلات");
+      router.push(`/staff/orders/${orderId}`);
+    } catch (e) {
+      toast.error(getApiErrorMessage(e, "تعذر حفظ التعديلات"));
+    } finally {
+      setQuickSubmitting(false);
+    }
+  }
 
   async function handleSubmit(payload: CreateFullSetPayload) {
     if (!ctx) return;
@@ -96,16 +134,9 @@ export default function StaffOrderEditPage() {
     );
   }
 
-  if (!ctx.can_edit_full_set) {
-    return (
-      <div className="mx-auto max-w-lg px-4 py-16" dir="rtl">
-        <EmptyState
-          title="لا يمكن تعديل هذا الطلب من هنا"
-          message="نموذج الطقم يخص طلبات الممثلين والطلبات المخصصة فقط — طلبات التجزئة تُعدَّل من صفحة الطلب مباشرة."
-        />
-      </div>
-    );
-  }
+  // Full طقم form (wholesaler/admin-created, design-less bundles) vs the limited
+  // (quick) editor for everything else, incl. retail orders — same header either way.
+  const isLimited = !ctx.can_edit_full_set;
 
   return (
     <div dir="rtl" lang="ar" className="space-y-5 animate-fade-page-in">
@@ -159,20 +190,53 @@ export default function StaffOrderEditPage() {
         </div>
       </section>
 
-      {ctx.existing && (
-        <p className="rounded-xl border border-line bg-[var(--shop-sink)] px-3.5 py-2.5 text-xs text-ink-soft">
-          الحقول معبّأة بالطلب الحالي — الحفظ يُحدّثه، وتبقى حالة موافقة الممثل كما هي.
-        </p>
-      )}
+      {isLimited ? (
+        <>
+          <section className="rounded-2xl border border-line bg-surface p-4 shadow-[var(--shadow-soft)]">
+            <h2 className="mb-3 text-sm font-bold text-ink">القطع</h2>
+            {ctx.editable_items.length === 0 ? (
+              <p className="text-sm text-ink-soft">
+                لا توجد بنود نصية قابلة للتعديل — يمكنك تعديل معلومات الطالب فقط.
+              </p>
+            ) : (
+              <div className="grid gap-3 md:grid-cols-2">
+                {ctx.editable_items.map((it) => (
+                  <Input
+                    key={it.id}
+                    label={it.label}
+                    value={itemTexts[it.id] ?? ""}
+                    onChange={(e) =>
+                      setItemTexts((prev) => ({ ...prev, [it.id]: e.target.value }))
+                    }
+                    maxLength={200}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
 
-      <FullSetOrderForm
-        pricing={ctx.pricing}
-        initial={ctx.existing}
-        submitting={submitting}
-        submitLabel="حفظ التعديلات"
-        onUploadImage={uploadProductionImage}
-        onSubmit={handleSubmit}
-      />
+          <Button fullWidth loading={quickSubmitting} onClick={handleQuickSave}>
+            حفظ التعديلات
+          </Button>
+        </>
+      ) : (
+        <>
+          {ctx.existing && (
+            <p className="rounded-xl border border-line bg-[var(--shop-sink)] px-3.5 py-2.5 text-xs text-ink-soft">
+              الحقول معبّأة بالطلب الحالي — الحفظ يُحدّثه، وتبقى حالة موافقة الممثل كما هي.
+            </p>
+          )}
+
+          <FullSetOrderForm
+            pricing={ctx.pricing}
+            initial={ctx.existing}
+            submitting={submitting}
+            submitLabel="حفظ التعديلات"
+            onUploadImage={uploadProductionImage}
+            onSubmit={handleSubmit}
+          />
+        </>
+      )}
     </div>
   );
 }

@@ -193,6 +193,9 @@ export interface OrderEditContext {
   existing: FullSetExistingOrder | null;
   pricing: FullSetPricing | null;
   can_edit_full_set: boolean;
+  /** The order's own typed spec lines (e.g. «تطريز الوشاح» → «احمد») — editable via
+   *  the limited (quick) editor when `can_edit_full_set` is false (retail orders). */
+  editable_items: { id: string; label: string; text: string }[];
 }
 
 export async function getOrderEditContext(orderId: string): Promise<OrderEditContext> {

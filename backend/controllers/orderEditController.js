@@ -169,6 +169,16 @@ async function editContext(req, res) {
     );
     group = g.rows[0] || null;
   }
+  // The order's editable spec lines — typed content only, never option/price rows (same set
+  // patchOrderDetails accepts). This drives the LIMITED editor for retail orders (which can't
+  // use the full طقم form): edit the student's info + each piece's text, no re-pricing.
+  const editable = await query(
+    `SELECT id, label_snapshot AS label, customer_text AS text
+       FROM order_items
+      WHERE order_id = $1 AND customer_text IS NOT NULL AND COALESCE(price_snapshot, 0) = 0
+      ORDER BY id`,
+    [order.id]
+  );
   res.json({
     data: {
       student: {
@@ -185,6 +195,7 @@ async function editContext(req, res) {
       existing,
       pricing: await publicPricing(student.wholesaler_id),
       can_edit_full_set: canEdit,
+      editable_items: editable.rows,
     },
   });
 }
@@ -269,24 +280,10 @@ async function patchOrderDetails(req, res) {
   const student = await loadStudent(order.student_id);
   if (!student) return res.status(404).json({ error: 'الطالب غير موجود', code: 'ERR_NOT_FOUND' });
 
-  // FIX #8 (2026-07-17): spec-line customer_text edits stay allowed for ANY order (harmless
-  // — only typed text already on that order). But the student/group INFO writes below
-  // (applyStudentInfo: name/instagram_username/phones/notes) can rewrite a RETAIL
-  // self-registered student's real login account name + their bundle's contact info — that
-  // must be blocked here. Checked BEFORE the tx that edits items, so nothing is half-applied
-  // when a retail student's request sneaks info fields in alongside spec-line edits.
-  const bodyStudent = req.body?.student || {};
-  const bodyGroup = req.body?.group || {};
-  const hasInfoFields =
-    Object.prototype.hasOwnProperty.call(bodyStudent, 'name') ||
-    Object.prototype.hasOwnProperty.call(bodyStudent, 'instagram_username') ||
-    Object.prototype.hasOwnProperty.call(bodyGroup, 'phone_primary') ||
-    Object.prototype.hasOwnProperty.call(bodyGroup, 'phone_secondary') ||
-    Object.prototype.hasOwnProperty.call(bodyGroup, 'notes');
-  if (hasInfoFields && !eligibleForFullSet(student)) {
-    return res.status(403).json({ error: 'لا يمكن تعديل بيانات طالب التجزئة من هنا', code: 'ERR_FORBIDDEN' });
-  }
-
+  // Owner decision (2026-07-17): the quick edit (student info + each piece's text) is allowed
+  // for RETAIL orders too — this endpoint is already manager/admin-only (requireStaffType),
+  // and admins need to fix a retail student's name/IG/phones + typed spec lines. Only the full
+  // طقم re-price form (saveFullSetOrder) stays blocked for retail (it would re-price the cart).
   const items = Array.isArray(req.body?.items) ? req.body.items : [];
   if (items.length > 30) return res.status(400).json({ error: 'عدد كبير من التعديلات', code: 'ERR_VALIDATION' });
   for (const it of items) {

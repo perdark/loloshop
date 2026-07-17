@@ -471,6 +471,58 @@ function InstaCopyButton({
   );
 }
 
+// ─── «نسخ بيانات الطلب» — non-editor staff (no manager/admin access) ──────────
+// A plain-text summary built ONLY from fields the backend actually sent this role
+// (contact is stripped server-side for lean production roles) — pastes cleanly
+// into WhatsApp. Shown in place of «تعديل الطلب» wherever the caller can't edit.
+
+function buildOrderCopyText(
+  order: ProductionOrderDetail["order"],
+  items: ProductionOrderItem[]
+): string {
+  const lines: string[] = [order.student_name];
+  if (order.student_phone) lines.push(order.student_phone);
+  if (order.instagram_username) lines.push(`@${order.instagram_username}`);
+  items
+    .filter((i) => !!i.customer_text)
+    .forEach((i) => lines.push(`«${i.label_snapshot}»: ${i.customer_text}`));
+  return lines.join("\n");
+}
+
+function CopyOrderDetailsButton({
+  order,
+  items,
+}: {
+  order: ProductionOrderDetail["order"];
+  items: ProductionOrderItem[];
+}) {
+  const [copying, setCopying] = useState(false);
+
+  async function handleCopy() {
+    setCopying(true);
+    try {
+      const text = buildOrderCopyText(order, items);
+      await navigator.clipboard.writeText(text);
+      toast.success("تم نسخ البيانات");
+    } catch {
+      toast.error("تعذر النسخ");
+    } finally {
+      setCopying(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      disabled={copying}
+      onClick={handleCopy}
+      className="inline-flex min-h-11 w-full items-center justify-center rounded-full border border-orange-ink/40 bg-orange-ink/5 px-4 text-sm font-semibold text-orange-ink transition-colors hover:bg-orange-ink/10 disabled:opacity-60"
+    >
+      نسخ بيانات الطلب
+    </button>
+  );
+}
+
 // ─── Embroidery zones checklist (FEATURE 1 — محمد عماد) ───────────────────────
 
 /**
@@ -897,8 +949,10 @@ function ProductionOrderDetailContent() {
   const showRevert = !!available_actions.revert;
   const showReturnToCustomer = !!available_actions.return_to_customer;
   const canDelete = !!available_actions.can_delete;
+  // Manager/admin (any order) — gates «تعديل الطلب» vs «نسخ بيانات الطلب» in both
+  // action bars. `can_edit_full_set` is a stricter sub-case the /edit page itself
+  // checks to decide the full طقم form vs the limited (quick) editor.
   const canEdit = !!available_actions.can_edit;
-  const canEditFullSet = !!available_actions.can_edit_full_set;
   const advanceLabel = available_actions.advance?.label ?? "تقدم للمرحلة التالية";
 
   // Approve and advance never apply to the same order, presented as ONE primary button.
@@ -1439,8 +1493,9 @@ function ProductionOrderDetailContent() {
         </div>
       )}
 
-      {/* ── Primary action — big tap target on mobile ── */}
-      {(showPrimaryAction || canReject || showRevert || showReturnToCustomer || canDelete || canEditFullSet) && (
+      {/* ── Primary action — big tap target on mobile ──
+          Always rendered: every order shows either «تعديل الطلب» (canEdit = manager/
+          admin) or «نسخ بيانات الطلب» (everyone else) at minimum. */}
       <div className="mb-4 flex flex-col gap-2 sm:hidden">
         {showPrimaryAction && (
           <Button
@@ -1471,13 +1526,15 @@ function ProductionOrderDetailContent() {
             إرجاع للزبون لتعديله
           </Button>
         )}
-        {canEditFullSet && (
+        {canEdit ? (
           <Link
             href={`/staff/orders/${order.id}/edit`}
             className="inline-flex min-h-11 w-full items-center justify-center rounded-full border border-orange-ink/40 bg-orange-ink/5 px-4 text-sm font-semibold text-orange-ink transition-colors hover:bg-orange-ink/10"
           >
             تعديل الطلب
           </Link>
+        ) : (
+          <CopyOrderDetailsButton order={order} items={items} />
         )}
         {canDelete && (
           <Button variant="danger" fullWidth onClick={() => setDeleteOpen(true)}>
@@ -1485,7 +1542,6 @@ function ProductionOrderDetailContent() {
           </Button>
         )}
       </div>
-      )}
 
       {/* ── Delivery details — shown once the order is delivered ── */}
       {order.status === "delivered" && order.delivery_method && (
@@ -1621,7 +1677,7 @@ function ProductionOrderDetailContent() {
                         onClick={() =>
                           setQuickEdit({ kind: "instagram", value: order.instagram_username || "" })
                         }
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-line text-ink-soft transition-colors hover:border-orange-ink/50 hover:text-orange-ink"
+                        className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-line text-ink-soft transition-colors hover:border-orange-ink/50 hover:text-orange-ink"
                         aria-label="تعديل يوزر الانستا"
                       >
                         ✎
@@ -1818,7 +1874,7 @@ function ProductionOrderDetailContent() {
                                   value: item.customer_text || "",
                                 })
                               }
-                              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-line text-ink-soft transition-colors hover:border-orange-ink/50 hover:text-orange-ink"
+                              className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-line text-ink-soft transition-colors hover:border-orange-ink/50 hover:text-orange-ink"
                               aria-label={`تعديل ${item.label_snapshot}`}
                             >
                               ✎
@@ -1981,8 +2037,9 @@ function ProductionOrderDetailContent() {
             </article>
           )}
 
-          {/* ── Action buttons — desktop only (mobile shown above) ── */}
-          {(showPrimaryAction || canReject || showRevert || showReturnToCustomer || canDelete || canEditFullSet) && (
+          {/* ── Action buttons — desktop only (mobile shown above) ──
+              Always rendered: every order shows either «تعديل الطلب» or
+              «نسخ بيانات الطلب» at minimum. */}
           <article className="hidden sm:block rounded-[var(--radius-card)] border border-orange-ink/15 bg-warm-veil p-5 shadow-[var(--shadow-soft)]">
             <h3 className="mb-4 font-display-ar text-base font-bold text-ink">الإجراءات</h3>
             <div className="flex flex-col gap-2">
@@ -2011,13 +2068,15 @@ function ProductionOrderDetailContent() {
                   إرجاع للزبون لتعديله
                 </Button>
               )}
-              {canEditFullSet && (
+              {canEdit ? (
                 <Link
                   href={`/staff/orders/${order.id}/edit`}
                   className="inline-flex min-h-11 w-full items-center justify-center rounded-full border border-orange-ink/40 bg-orange-ink/5 px-4 text-sm font-semibold text-orange-ink transition-colors hover:bg-orange-ink/10"
                 >
                   تعديل الطلب
                 </Link>
+              ) : (
+                <CopyOrderDetailsButton order={order} items={items} />
               )}
               {canDelete && (
                 <Button variant="danger" fullWidth onClick={() => setDeleteOpen(true)}>
@@ -2026,7 +2085,6 @@ function ProductionOrderDetailContent() {
               )}
             </div>
           </article>
-          )}
         </section>
       </div>
 
@@ -2105,17 +2163,19 @@ function ProductionOrderDetailContent() {
         </p>
       </Modal>
 
-      {/* ── «تعديل سريع» modal — spec-line text / يوزر الانستا (manager/admin) ── */}
+      {/* ── «تعديل سريع» modal — spec-line text / يوزر الانستا (manager/admin) ──
+          Mobile-first: full-width equal-split footer buttons (easy to hit with a
+          thumb, never cramped) + a 16px input (iOS won't zoom the page on focus). */}
       <Modal
         open={!!quickEdit}
         onClose={() => setQuickEdit(null)}
         title={quickEdit?.kind === "instagram" ? "تعديل يوزر الانستا" : `تعديل — ${quickEdit?.kind === "item" ? quickEdit.label : ""}`}
         footer={
           <>
-            <Button variant="ghost" onClick={() => setQuickEdit(null)}>
+            <Button variant="ghost" className="flex-1" onClick={() => setQuickEdit(null)}>
               إلغاء
             </Button>
-            <Button loading={quickEditSaving} onClick={handleQuickEditSave}>
+            <Button className="flex-1" loading={quickEditSaving} onClick={handleQuickEditSave}>
               حفظ
             </Button>
           </>
@@ -2129,6 +2189,7 @@ function ProductionOrderDetailContent() {
           }
           maxLength={quickEdit?.kind === "instagram" ? 100 : 200}
           dir={quickEdit?.kind === "instagram" ? "ltr" : undefined}
+          className="text-base"
           autoFocus
         />
       </Modal>
