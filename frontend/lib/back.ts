@@ -10,7 +10,7 @@ export function backHrefFromParam(
     case "vip":
       return "/vip";
     case "packages":
-      return "/full-set";
+      return "/vip";
     case "catalog":
       return "/#catalog";
     default:

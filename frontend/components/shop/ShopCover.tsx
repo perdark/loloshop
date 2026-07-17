@@ -9,7 +9,7 @@ import Link from "next/link";
  */
 
 const CATALOG_HREF = "/#catalog";
-const FULLSET_HREF = "/full-set";
+const FULLSET_HREF = "/vip";
 
 export function ShopCover() {
   return (
