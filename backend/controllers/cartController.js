@@ -45,6 +45,12 @@ async function addItem(req, res) {
   if (!product_id) return res.status(400).json({ error: 'المنتج مطلوب', code: 'ERR_VALIDATION' });
   const student = await studentFor(req.user.id);
   if (!student) return res.status(404).json({ error: 'حساب الطالب غير موجود', code: 'ERR_NOT_FOUND' });
+  if (student.wholesaler_id) {
+    return res.status(403).json({
+      error: 'استخدم نموذج طلب الممثل حتى تُطبّق التسعيرة والموافقة بصورة صحيحة',
+      code: 'ERR_REP_ORDER_FLOW',
+    });
+  }
 
   const role = await priceRoleForUser(req.user);
   const priced = await priceSelections({
@@ -125,6 +131,12 @@ async function removeItem(req, res) {
 async function checkout(req, res) {
   const student = await studentFor(req.user.id);
   if (!student) return res.status(404).json({ error: 'حساب الطالب غير موجود', code: 'ERR_NOT_FOUND' });
+  if (student.wholesaler_id) {
+    return res.status(403).json({
+      error: 'استخدم نموذج طلب الممثل حتى تُطبّق التسعيرة والموافقة بصورة صحيحة',
+      code: 'ERR_REP_ORDER_FLOW',
+    });
+  }
   const role = await priceRoleForUser(req.user);
 
   const cart = await query(`SELECT id FROM carts WHERE user_id = $1`, [req.user.id]);
@@ -154,6 +166,7 @@ async function checkout(req, res) {
     const created = [];
     for (const { ci, priced } of lines) {
       const note = ci.qty > 1 ? `الكمية المطلوبة: ${ci.qty}` : null;
+      const orderTotal = priced.total * ci.qty;
       const measurementsJson = ci.measurements ? JSON.stringify(ci.measurements) : null;
       let oid;
 
@@ -177,7 +190,7 @@ async function checkout(req, res) {
             `UPDATE orders SET price = $1, status = 'design_complete', notes = $2, checkout_group_id = $3,
              has_embroidery = $4, needs_pressing = $5, measurements = $6
              WHERE id = $7`,
-            [priced.total, note, bundleId, has_embroidery, needs_pressing, measurementsJson, oid]
+            [orderTotal, note, bundleId, has_embroidery, needs_pressing, measurementsJson, oid]
           );
           await client.query(`DELETE FROM order_items WHERE order_id = $1`, [oid]);
         } else {
@@ -185,7 +198,7 @@ async function checkout(req, res) {
             `INSERT INTO orders (student_id, product_id, design_id, price, status, notes, checkout_group_id,
                                  has_embroidery, needs_pressing, measurements)
              VALUES ($1, $2, $3, $4, 'design_complete', $5, $6, $7, $8, $9) RETURNING id`,
-            [student.id, ci.product_id, ci.design_id, priced.total, note, bundleId,
+            [student.id, ci.product_id, ci.design_id, orderTotal, note, bundleId,
              has_embroidery, needs_pressing, measurementsJson]
           );
           oid = o.rows[0].id;
@@ -211,7 +224,7 @@ async function checkout(req, res) {
             `UPDATE orders SET price = $1, status = $2, notes = $3, checkout_group_id = $4,
              has_embroidery = $5, needs_pressing = $6, measurements = $7
              WHERE id = $8`,
-            [priced.total, status, note, bundleId, has_embroidery, needs_pressing, measurementsJson, oid]
+            [orderTotal, status, note, bundleId, has_embroidery, needs_pressing, measurementsJson, oid]
           );
           await client.query(`DELETE FROM order_items WHERE order_id = $1`, [oid]);
         } else {
@@ -219,7 +232,7 @@ async function checkout(req, res) {
             `INSERT INTO orders (student_id, product_id, price, status, notes, checkout_group_id,
                                  has_embroidery, needs_pressing, measurements)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
-            [student.id, ci.product_id, priced.total, status, note, bundleId,
+            [student.id, ci.product_id, orderTotal, status, note, bundleId,
              has_embroidery, needs_pressing, measurementsJson]
           );
           oid = o.rows[0].id;
@@ -229,7 +242,9 @@ async function checkout(req, res) {
         await client.query(
           `INSERT INTO order_items (order_id, group_id, option_id, label_snapshot, price_snapshot, qty, customer_image_url, customer_text)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-          [oid, it.group_id, it.option_id, it.label, it.price, it.qty,
+          [oid, it.group_id, it.option_id,
+           ci.qty > 1 ? `${it.label} ×${ci.qty}` : it.label,
+           it.price * ci.qty, it.qty * ci.qty,
            it.customer_image_url || null, it.customer_text || null]
         );
       }

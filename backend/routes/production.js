@@ -29,8 +29,18 @@ router.post('/orders/:id/revert', c.revert);
 router.post('/orders/:id/return-to-customer', c.returnToCustomer);
 router.post('/orders/:id/claim', c.claim);
 router.post('/orders/:id/release', c.release);
-// Permanent grouped-order deletion is intentionally manager/admin-only.
+// Permanent single-piece deletion is intentionally manager/admin-only.
 router.delete('/orders/:id', requireStaffType(), c.deleteOrder);
+
+// Admin/مدير الإنتاج order editing (full طقم re-save + per-piece quick edits) — no
+// types listed → manager staff_type + admin only.
+const edit = require('../controllers/orderEditController');
+router.get('/students-search', requireStaffType(), edit.studentsSearch);
+router.get('/students/:studentId/full-set-order', requireStaffType(), edit.getStudentFullSet);
+router.get('/orders/:id/edit-context', requireStaffType(), edit.editContext);
+router.post('/students/:studentId/full-set-order', requireStaffType(), edit.saveFullSetOrder);
+router.patch('/orders/:id/details', requireStaffType(), edit.patchOrderDetails);
+router.post('/uploads/image', requireStaffType(), imageUpload.single('file'), edit.uploadImage);
 
 // «الفصال» (tailor) — parallel, independent track over RETAIL orders. Permission
 // (tailor staff_type OR manager/admin) is enforced inside each controller.

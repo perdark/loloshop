@@ -16,6 +16,7 @@ import { useMoneyGate } from "@/hooks/useMoneyGate";
 import { MoneyMask } from "@/components/MoneyMask";
 import { MoneyRevealTrigger } from "@/components/MoneyRevealTrigger";
 import { setMoneyGate } from "@/lib/money-gate";
+import { CalculationDetails } from "@/components/admin/CalculationDetails";
 
 const DashboardCharts = dynamic(
   () =>
@@ -386,8 +387,21 @@ export default function AdminDashboardPage() {
           accent
           hint={showMoney ? margin : undefined}
         />
-        <Figure label="عدد الطلبات" value={String(data.orderCount)} />
+        <Figure label="عدد الطلبات / الباقات" value={String(data.orderCount)} />
       </dl>
+      <CalculationDetails summary="كيف حُسبت أرقام لوحة التحكم؟" className="mt-3 bg-surface">
+        <p>
+          المحاسبة تشمل طلبات التجزئة غير الملغاة، وطلبات الممثلين الموافق عليها وغير الملغاة فقط.
+          الطلب المعلّق أو المُرجع لا يدخل في الإيراد أو التكلفة أو الربح.
+        </p>
+        <div className="mt-2 space-y-1 rounded-lg bg-ink/[0.04] px-2.5 py-2 text-ink">
+          <p>الإيراد = مجموع السعر النهائي المخزن للطلبات الداخلة في المحاسبة.</p>
+          <p>التكلفة = مجموع تكلفة التجزئة أو حصة الإدارة في طلبات الممثلين.</p>
+          <p>الربح = الإيراد − التكلفة.</p>
+          <p>هامش الربح = الربح ÷ الإيراد × ١٠٠، مقرباً لأقرب نسبة صحيحة.</p>
+          <p>عدد الطلبات / الباقات = كل طلب منفرد مرة، وكل مجموعة شراء مرتبطة مرة واحدة مهما كان عدد قطعها.</p>
+        </div>
+      </CalculationDetails>
 
       {/* Live storefront visitors — first-party, never money → always visible */}
       <section className="mt-6 grid grid-cols-3 gap-3">
@@ -443,6 +457,13 @@ export default function AdminDashboardPage() {
           daily={data.dailyOrders}
           ordersByStatus={data.ordersByStatus}
         />
+        <CalculationDetails summary="كيف حُسبت الرسوم؟" className="mt-4 bg-surface">
+          <p>
+            الرسم اليومي يعد الطلبات المنطقية: الباقة متعددة القطع تظهر مرة واحدة في يوم إنشائها.
+            رسم الحالات يعد القطع داخل الطلبات، لأن كل قطعة قد تكون في مرحلة إنتاج مختلفة.
+            النطاق المحاسبي نفسه مطبق هنا: لا ملغى، ولا طلب ممثل معلّق أو مُرجع.
+          </p>
+        </CalculationDetails>
       </section>
 
       {/* Promo / Discount Popup control */}
@@ -570,6 +591,15 @@ export default function AdminDashboardPage() {
               </MoneyMask>
             </span>
           </div>
+          <CalculationDetails summary="شرح إيصال المحاسبة" className="mt-4 bg-surface">
+            <p>
+              صافي الربح = الإيراد − التكلفة. صفوف «حسب الدفعة» و«حسب الممثل» طريقتان بديلتان لعرض طلبات الممثلين نفسها؛ لا تُجمع إحداهما مع الأخرى.
+              «تجزئة مستقلة» تعرض الطلبات التي لا ترتبط بممثل.
+            </p>
+            <p className="mt-2">
+              عدد الطلبات يحسب الباقة مرة واحدة، والحساب لا يشمل طلبات الممثلين المعلّقة أو المُرجعة ولا أي طلب ملغى.
+            </p>
+          </CalculationDetails>
         </div>
       </section>
 
@@ -580,31 +610,38 @@ export default function AdminDashboardPage() {
           meta={data.topWholesalers.length ? `${data.topWholesalers.length} ممثل` : undefined}
         />
         {data.topWholesalers.length ? (
-          <ol className="border-t border-ink/10">
-            {data.topWholesalers.map((w, i) => (
-              <li
-                key={w.id}
-                className="flex items-center gap-5 border-b border-ink/8 py-4 transition-colors hover:bg-[var(--shop-sink)]"
-              >
-                <span
-                  className={`w-8 shrink-0 text-center font-display text-2xl font-bold tabular-nums ${
-                    i === 0 ? "text-orange-ink" : "text-ink/30"
-                  }`}
+          <>
+            <ol className="border-t border-ink/10">
+              {data.topWholesalers.map((w, i) => (
+                <li
+                  key={w.id}
+                  className="flex items-center gap-5 border-b border-ink/8 py-4 transition-colors hover:bg-[var(--shop-sink)]"
                 >
-                  {i + 1}
-                </span>
-                <span className="flex-1 truncate font-medium text-ink">
-                  {w.name}
-                </span>
-                <span className="shrink-0 text-sm text-ink-soft">
-                  <span className="font-bold tabular-nums text-ink">
-                    {w.orderCount}
-                  </span>{" "}
-                  طلب
-                </span>
-              </li>
-            ))}
-          </ol>
+                  <span
+                    className={`w-8 shrink-0 text-center font-display text-2xl font-bold tabular-nums ${
+                      i === 0 ? "text-orange-ink" : "text-ink/30"
+                    }`}
+                  >
+                    {i + 1}
+                  </span>
+                  <span className="flex-1 truncate font-medium text-ink">
+                    {w.name}
+                  </span>
+                  <span className="shrink-0 text-sm text-ink-soft">
+                    <span className="font-bold tabular-nums text-ink">
+                      {w.orderCount}
+                    </span>{" "}
+                    طلب
+                  </span>
+                </li>
+              ))}
+            </ol>
+            <CalculationDetails summary="كيف تم ترتيب الممثلين؟" className="mt-4 bg-surface">
+              <p>
+                الترتيب حسب عدد الطلبات الموافق عليها وغير الملغاة. كل باقة مرتبطة بمجموعة شراء تُحسب طلباً واحداً، لا بعدد قطعها.
+              </p>
+            </CalculationDetails>
+          </>
         ) : (
           <p className="py-10 text-center text-sm text-[var(--shop-muted)]">
             لا يوجد ممثلون بعد

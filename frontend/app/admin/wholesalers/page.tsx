@@ -16,7 +16,7 @@ import {
 } from "@/lib/admin";
 import { SashSideLockEditor } from "@/components/designer/SashSideLockEditor";
 import { getApiErrorMessage } from "@/lib/api";
-import { formatDateIQ, getJoinUrl } from "@/lib/format";
+import { formatDateIQ, formatIQD, getJoinUrl } from "@/lib/format";
 import type { AdminWholesaler, WholesalerPricingAddons } from "@/lib/types";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
@@ -25,6 +25,7 @@ import { Modal } from "@/components/ui/Modal";
 import { Input } from "@/components/ui/Input";
 import { PageLoader } from "@/components/ui/Spinner";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { CalculationDetails } from "@/components/admin/CalculationDetails";
 import Link from "next/link";
 
 const SLUG_RE = /^[a-z0-9-]+$/;
@@ -117,6 +118,10 @@ export default function AdminWholesalersPage() {
 
   async function handleCreate() {
     if (!validateCreate()) return;
+    if (Number(wholesalerPrice) < Number(adminPrice)) {
+      toast.error("سعر الطالب يجب أن يساوي أو يتجاوز مبلغ الإدارة");
+      return;
+    }
     setSubmitting(true);
     try {
       await createWholesaler({
@@ -185,12 +190,16 @@ export default function AdminWholesalersPage() {
     const pricingAddons = Object.fromEntries(
       (Object.keys(pricingForm.addons) as (keyof WholesalerPricingAddons)[]).map((key) => {
         const price = num(pricingForm.addons[key].selling);
-        const admin = key === "american_shawl" ? Math.min(20000, price) : price;
+        const admin = key === "american_shawl" ? 20000 : price;
         return [key, { admin, selling: price }];
       })
     ) as unknown as WholesalerPricingAddons;
     if (num(pricingForm.wholesalerPrice) < num(pricingForm.adminPrice)) {
       toast.error("سعر الطالب يجب أن يساوي أو يتجاوز مبلغ الإدارة");
+      return;
+    }
+    if (num(pricingForm.addons.american_shawl.selling) < 20000) {
+      toast.error("سعر الشال الأمريكي يجب ألا يقل عن حصة الإدارة الثابتة: ٢٠٬٠٠٠ د.ع");
       return;
     }
     setSubmitting(true);
@@ -311,6 +320,18 @@ export default function AdminWholesalersPage() {
                     <span className="text-[var(--shop-muted)]">الموعد: </span>
                     {formatDateIQ(w.deadline)}
                   </p>
+                  <p className="mt-2 text-sm">
+                    <span className="text-[var(--shop-muted)]">ربح الممثل الموافق عليه: </span>
+                    <span className="font-bold tabular-nums text-ink" dir="ltr">
+                      {formatIQD(w.earnedCommission ?? 0)}
+                    </span>
+                  </p>
+                  <CalculationDetails summary="كيف حُسب ربح هذا الممثل؟" className="mt-2 max-w-xl">
+                    <p>
+                      ربح الممثل = مجموع ما يدفعه الطلاب − مجموع حصة الإدارة، للطلبات الموافق عليها وغير الملغاة فقط.
+                      الطلبات المعلّقة والمُرجعة لا تدخل في هذا الرصيد.
+                    </p>
+                  </CalculationDetails>
                   <p className="mt-2 break-all rounded-lg bg-ink/[0.04] px-2.5 py-1.5 text-xs text-ink-soft" dir="ltr">
                     {w.referralUrl || getJoinUrl(w.referralCode)}
                   </p>
@@ -496,6 +517,12 @@ export default function AdminWholesalersPage() {
           <p className="text-xs text-ink-soft">
             اضافات على السعر تُضبط لكل ممثل بعد الإنشاء من زر «التسعيرة».
           </p>
+          <CalculationDetails summary="كيف تتكوّن تسعيرة الممثل؟">
+            <p>
+              سعر الطالب هو ما يجمعه الممثل، ومبلغ الإدارة هو ما يسلّمه للإدارة، وربح الممثل في الطقم الأساسي هو الفرق بينهما.
+              الإضافات والقطع المفردة تُضبط بعد الإنشاء.
+            </p>
+          </CalculationDetails>
         </div>
       </Modal>
 
@@ -545,6 +572,22 @@ export default function AdminWholesalersPage() {
               الممثل يجمع «سعر الطالب» من الطلاب ويسلّم «مبلغ الإدارة» للإدارة؛ الفرق ربح الممثل.
               (مثال: طالب ٥٠٬٠٠٠ / إدارة ٤٠٬٠٠٠ ← ربح الممثل ١٠٬٠٠٠.)
             </p>
+            <div className="mt-3 grid grid-cols-3 gap-2 rounded-xl border border-line bg-surface-sink p-3 text-xs">
+              <div>
+                <p className="text-muted">يدفع الطالب</p>
+                <p className="mt-1 font-bold text-ink" dir="ltr">{formatIQD(Math.max(0, Math.round(Number(pricingForm.wholesalerPrice) || 0)))}</p>
+              </div>
+              <div>
+                <p className="text-muted">حصة الإدارة</p>
+                <p className="mt-1 font-bold text-ink" dir="ltr">{formatIQD(Math.max(0, Math.round(Number(pricingForm.adminPrice) || 0)))}</p>
+              </div>
+              <div>
+                <p className="text-muted">ربح الممثل</p>
+                <p className="mt-1 font-bold text-emerald-700" dir="ltr">
+                  {formatIQD(Math.max(0, Math.round(Number(pricingForm.wholesalerPrice) || 0)) - Math.max(0, Math.round(Number(pricingForm.adminPrice) || 0)))}
+                </p>
+              </div>
+            </div>
           </div>
 
           <div>
@@ -560,6 +603,13 @@ export default function AdminWholesalersPage() {
                   onChange={(value) => setPricingForm((form) => ({ ...form, addons: { ...form.addons, [key]: { admin: value, selling: value } } }))} />
               ))}
             </div>
+            <CalculationDetails summary="قاعدة توزيع كل إضافة" className="mt-3">
+              <div className="space-y-1">
+                <p>الشال الأمريكي: حصة الإدارة ثابتة ٢٠٬٠٠٠ د.ع، وربح الممثل = سعر الطالب − ٢٠٬٠٠٠ د.ع.</p>
+                <p>كل إضافة أخرى وكل قطعة مفردة: حصة الإدارة = سعر الطالب، لذلك ربح الممثل منها صفر.</p>
+                <p>الطقم الكامل: حصة الإدارة هي مبلغ الإدارة الأساسي، وربح الممثل هو فرق السعر الأساسي، ثم تُضاف البنود السابقة حسب الاختيارات.</p>
+              </div>
+            </CalculationDetails>
           </div>
         </div>
       </Modal>

@@ -6,6 +6,190 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
+## 2026-07-17 (c) — Navigation batch: sessionStorage state-restore on 5 screens · multi-role sidebar links · orphan pages deleted
+
+**Uncommitted on main** (frontend only). Gates: `tsc` 0 · `eslint` 0 (fixed the 2 hook-deps warnings the agents left). Built via
+4 parallel frontend subagents (one per screen) + direct edits; stale `.next/dev/types` deleted so tsc passes post-deletion.
+**Browser walkthrough = user** (dev servers UP: BE :4000 plain `node server.js`, FE :3000 `next dev`).
+
+**① State restoration** («يرجع وينسى مكانه» — the same bug class fixed for the stations on 07-16) ported via the SAME
+StationConsole sessionStorage-mirror pattern (lazy-init when the screen mounts behind a client auth gate, mount-effect+`restored`
+flag when it can SSR; `loadedOnce` guards so prune/validate effects never wipe restored state against the pre-fetch empty list):
+- `/staff/queue` — key `loloshop-console:production`. stage/source/rep/zone live in the URL → restored via one mount
+  `router.replace` when the incoming URL is bare; `effectiveZone = zoneParam ?? storedZoneFallback` makes the FIRST fetch use the
+  restored zone (no double-fetch). Prunes dead rep/batch → الكل; clamps restored page.
+- `/admin/orders` — key `loloshop-admin-orders` (all filters + viewMode + sort). **`?wholesaler=` URL wins over the snapshot**
+  (stored forced `{}` when present) so the rep-card → approval-default flow from (a) is byte-identical; prune keeps invalid
+  rep/batch out after first load.
+- `/staff/wholesalers/[id]/students` — key `loloshop-rep-console:<id>`; tab/zone/view/search + **checkbox selection** persist;
+  the old «wipe selection on every refetch» line replaced by prune-to-live-advanceable-rows after first load. Effect-restore
+  (page renders pre-auth → lazy init would hydration-mismatch).
+- `QueueView` on `/staff` — key `loloshop-staff-home-queue` (activeTab/sourceFilter/zoneFilter). Lazy-init (mounts behind gate).
+- `CalligraphyTool` — key `loloshop-calligraphy` (grid chip, plates+queue ممثل filters, search, sticky-bar open). First queue
+  fetch uses the restored `queueWid`; رep prune after wholesalers load; job-restore no longer force-collapses the sticky bar.
+
+**② Sidebar multi-role links** (old audit finding #7): `getNavLinks` now takes the `staff_types[]` union — home link labelled by
+the FIRST queue role (mirrors `/staff` routing), «الفصال» added for ANY tailor-role holder, console link once; pure tailor gets no
+/staff link (it's a redirect bounce). Role chip shows all roles joined با «·». `StaffSidebar.tsx`.
+
+**③ Orphan pages deleted** (nothing linked to them): `/verify-otp` + `components/auth/VerifyOtpForm.tsx` (dead since inline OTP
+2026-06-19; robots.ts entry removed), `/wholesaler/batch` + `/wholesaler/package` (nav removed 2026-06-16), and
+`/admin/wholesalers/[id]/students` (dead duplicate — the admin wholesalers page links to the STAFF console route which already
+switches to the `/admin/*` API). Kept: `/vip/preview` (deliberate mock). Also **sitemap.ts advertised nonexistent `/showcase`** —
+removed. NB deleting pages leaves stale `.next/dev/types` validators → `rm -rf .next/dev/types` before trusting tsc.
+
+### Open follow-ups
+- **User browser walkthrough pending**: e.g. /admin/orders set filters → open order → back (filters+rep+approval kept);
+  rep console tick boxes → open order → back (selection kept); قائمة الإنتاج drill into rep/دفعة → back; calligraphy filters →
+  student link → back; a multi-role (tailor+embroiderer) account sees BOTH sidebar links. Then commit+push (rides the money-repair
+  session's deploy).
+- Designer StationConsole (عرض بالطلب for التصميم) still not built — offered, no user decision yet.
+
+---
+
+## 2026-07-17 (b) — Designer gets full student contact (phone · instagram · intake) on the order page
+
+**Uncommitted on main** (backend `controllers/productionController.js` + a comment in FE `app/staff/orders/[orderId]/page.tsx`).
+Gates: `node --check` 0 · **verified over real HTTP** (designer JWT مضر محمد, dev :4000 — restarted `node server.js` to load it).
+
+**Why.** User: designers need to see انستغرام + phone + all student info (they contact the student to confirm the artwork —
+same rationale as the أيادي التصميم desk, 2026-07-15). Until now the designer got the lean strip: contact nulled, intake nulled.
+
+**What.** `getOrder`: `canSeeContact = frontDesk || designer` (any staff holding the `designer` type, sole or multi); the lean
+intake-null now skips designers → full intake card (customer name, phones, instagram, governorate, event date, notes).
+**Money stays hidden** — `canSeeMoney` unchanged (price deleted, `intake.deposit` deleted before the intake survives). The
+embroiderer/tailor/presser allow-lists are untouched (they rebuild AFTER the contact strip → still no contact). No FE change —
+the «بيانات الطالب» card + intake card already render rows only when supplied. Verified: phone+instagram+intake present for the
+designer, price/deposit absent, `view.layout` still `full`, design canvas still visible.
+
+**NB (asked & answered):** «navigation for designers» is NOT done — the StationConsole (عرض بالطلب/عرض بالقطع + state restore)
+covers التطريز/الفصال/الكوي only; designers still get the flat `QueueView` on `/staff`. The generic back-nav (`?from=`) does
+cover their order pages. Roll `StationConsole` to the designer queue later if wanted.
+
+---
+
+## 2026-07-17 (d) — حذف = piece-only · admin/مدير الإنتاج order edit (full طقم + quick ✎) · custom order to EXISTING student
+
+**Uncommitted on main** (rides the next deploy push with the other 07-17 sessions). No migration. Gates: BE `node --check` 0 ·
+FE `tsc` 0 source / `eslint` 0 · **live HTTP e2e on Neon 38/38, fully self-cleaned (0 leftovers)** — script in scratchpad
+`e2e-edit-delete.js`. **No browser test by Claude** — 7-day admin/manager tokens + click-steps appended to
+`TESTING-WALKTHROUGH.md` §2026-07-17 (untracked, don't commit). Spec:
+`docs/superpowers/specs/2026-07-17-piece-delete-admin-manager-order-edit-design.md` · plan in `docs/superpowers/plans/` (both committed).
+
+**① حذف القطعة (was: whole-bundle delete).** `productionController.deleteOrder` + `adminController.deleteOrder` now delete ONLY
+the given order row (order_items cascade); siblings survive; the empty `checkout_groups` row is deleted with the last piece.
+Response `{deleted:1, remaining, checkout_group_deleted}`; audit details gain `piece_only:true` + `remaining_order_ids`. UI
+(queue + order page): buttons/modals/toasts say «حذف القطعة» and explain that the rest of the bundle stays. Accepted edge
+(inherent, surfaced in the walkthrough): the طقم price rides the sash row, so deleting just the sash removes the priced row.
+
+**② Order edit for admin + مدير الإنتاج — NEW `backend/controllers/orderEditController.js`**, mounted in `routes/production.js`
+behind `requireStaffType()` (admin role + manager staff pass):
+- `GET /production/orders/:id/edit-context` · `POST /production/students/:studentId/full-set-order` ·
+  `PATCH /production/orders/:id/details` · `GET /production/students-search` ·
+  `GET /production/students/:studentId/full-set-order` · `POST /production/uploads/image`.
+- **Full form** = the rep's `FullSetOrderForm` pre-filled via `readFullSetOrder`, saved via `persistFullSetOrder` (single source
+  of truth — pin/self-heal apply). **KEY MECHANISM: approval preservation.** persist flips bundles to `pending` on every save
+  (rep-flow semantics); the edit endpoint captures the bundle's `wholesaler_approval` BEFORE and **restores it exactly AFTER**
+  (`captureApproval`/`restoreApproval`): approved→approved (at/by kept), NULL→NULL (admin direct orders never enter the approval
+  flow), pending→pending, rejected→rejected+reason. e2e-verified for all states.
+- **Eligibility guard** (`eligibleForFullSet`): student is rep-linked OR name-only (users.phone IS NULL). Retail self-registered
+  students are 403'd + hidden from students-search — the طقم form would re-price their cart bundles rep-style and its
+  deselect-cancel could kill cart pieces (prevGroup edge). They get the quick ✎ edit instead.
+- `student_info` on the POST dual-writes name (users + students + group customer_name) and IG (students + group); group phones.
+  `restoreGroupPhone` keeps an admin-set group phone from being wiped back to '' by a later save that omits student_info.
+- **Quick ✎ edit** (`PATCH .../details`): spec-line `customer_text` (only lines that already carry typed content — never option/
+  price rows, foreign item ids 400), student name/IG, group phones/notes. Audit `staff_order_edit` both paths.
+- FE: NEW `/staff/orders/[orderId]/edit` page; order page (full view) gains «تعديل الطلب» (shown when
+  `available_actions.can_edit_full_set`) + ✎ on spec lines and the instagram row (`can_edit` = manager/admin; IG row now renders
+  for editors even when empty). `getOrder` items now include `id`; available_actions gains `can_edit`/`can_edit_full_set`.
+
+**③ Custom order → existing student + manager access.** `adminCustomOrderController.createCustomOrder` accepts `student_id`
+(XOR `student_name`): loads the student, persists (upsert — a second call EDITS the same bundle, e2e-proven same checkout_group,
+deselect-cancel works), approval = preserved if a bundle existed, else rep-linked→auto-approved (setBundleApproval) /
+independent→NULL. Staff mirrors in `routes/staff.js` (`/staff/custom-order/*`, `requireStaffType()` ⇒ manager-only since
+requireRole('staff') blocks admin). FE: extracted shared `components/staff/CustomOrderForm.tsx` (طالب جديد/موجود toggle, debounced
+search, picked-student card, **picker pre-fills the student's existing طقم** — a blank save would wipe it via the
+optional-everything upsert); `/admin/custom-order` is now a thin wrapper; NEW `/staff/custom-order` (manager-guarded) + «طلب مخصص»
+in StaffSidebar's manager section. Managers see rep pricing here — accepted (managers already see money).
+
+### Open follow-ups
+- **Deploy = push** (with the concurrent 07-17 sessions' work). Backend :4000 restarted on the new code (plain `node server.js`);
+  FE dev on :3000. User browser walkthrough pending (steps + tokens in TESTING-WALKTHROUGH.md).
+- Quick ✎ covers TEXT lines only (colors, embroidery names, نوع…) — customer photos and priced option swaps are not editable
+  (by design; use the full form for طقم pieces).
+- `tsc` shows 4 pre-existing errors in stale `.next/dev/types` referencing pages deleted by the (c) navigation session — not
+  source errors; they vanish on the next clean build/dev restart.
+
+---
+
+## 2026-07-17 — Owner-approved money repair: شال rule locked · cost backfill (+682k) · retail duplicate-proofing · rep-card counts
+
+**Uncommitted on main** (backend: `controllers/{orderController,adminController}.js` + the (c) files). DB repairs APPLIED to Neon
+(audit_log `repair_pricing_config` + `repair_order_costs`). Gates: `node --check` 0 · SQL-semantics test PASS (self-cleaned) ·
+backend restarted on :4000 (plain `node server.js` — no nodemon; restart after edits or they don't load).
+
+**Owner decisions locked (2026-07-17):** شال امريكي admin share = **20,000 لكل شال، دائماً** (rep keeps selling−20000). Settlement
+rule: **cost = price − (طقم كامل base − admin_price) − (شال selling − 20000)** — admin gets everything except the package margin and
+the shawl margin. Config repair: محمد باقر (flat 30000 → {admin:20000, selling:30000}) + أنس صباح (flat 25000 → {20000,25000}).
+
+**Cost backfill (applied):** 47 live design-less wholesaler orders recomputed under the rule → **+682,000 IQD admin due** restored
+(باقر +133k · مهدي +178k · مصطفى +153k · عبدالعزيز +128k · عبدالله محسن +90k). Verification: **0 rule violations, 0 cost>price**
+across all live orders. `orders.profit` is GENERATED (price−cost) → auto-corrected. Item-level `admin_price_snapshot` on old rows
+stays 0 (display-only; orders.cost is the accounting source).
+
+**141 vs 148 explained (باقر):** 141 = bundles HE approved · +3 pending his approval · +4 he rejected = 148 admin-side live bundles.
+Settle on approved only. His old «2M أرباح» = 310k duplicate-phantom (repaired (b)) + 163k pending/rejected + 500k cost-bug margin →
+true rep cut now **1,590,000** (shawl margins restored). NB عبدالعزيز رعد خضير: 16 pending bundles, has approved NOTHING.
+
+**Retail duplicate-proofing:** ported the (b) pin+self-heal to `orderController.configureFullSet` + `configurePackage` — pin/heal
+scoped to **`package_id IS NOT NULL`** (cart orders are never pinned to or cancelled; verified by SQL-semantics test). Also fixed
+`adminController.repsOverview` + dashboard `topWholesalers` counting CANCELLED orders (rep card showed 463 vs real 420 for باقر).
+
+**«Just 141» (owner decision):** admin rep cards now count **approved live BUNDLES** (`repsOverview` → COUNT DISTINCT cg FILTER
+approved; باقر card = 141 = his own number, verified live) and clicking a rep on `/admin/orders` defaults the approval filter to
+«موافق عليه» (back-to-all resets it). FE `app/admin/orders/page.tsx` · `tsc` 0. NB عبدالعزيز's card now shows 0 (nothing approved —
+his 16 pending are behind the «بانتظار موافقة الممثل» chip).
+
+### Open follow-ups
+- **Deploy = push** (rides with the concurrent staff-pipeline session's commits). After deploy: re-run the duplicate scan + rule-violation
+  scan (queries in audit_log details / this session). Until deploy, PROD can still create duplicates + writes shawl cost at old config.
+- `configurePackage` for a rep-linked student still bypasses wholesaler approval + books cost=0 (critic finding, unfixed — unclear if
+  FE still calls it for rep students).
+- `prevGroup` in `fullSetOrder.js` can still bind a طقم to a retail cart checkout_group (edge, unfixed).
+
+---
+
+## 2026-07-16 (c) — Money audit after the duplicate-sash fix: 3 «cancelled rows counted in totals» fixes + historical cost drift quantified
+
+**Uncommitted on main** (backend only: `controllers/{batchController,wholesalerController,orderController}.js`). Audit = live-DB invariant
+scans + critic agent over the money paths. Gates: `node --check` 0 ×3 · **verified over real HTTP** (rep + admin JWTs, dev :4000 —
+plain `node server.js`, restarted to load the fix).
+
+**Fixed (all = cancelled orders leaking into money sums; became visible because the (b) repair cancels duplicates):**
+1. `wholesalerController.listOrdersForApproval` — rep «الطلبات» bundle amounts had NO `status <> 'cancelled'` filter → the 38 repaired
+   students still showed doubled amounts (180k) AFTER the repair. Fixed + verified live: حوراء/نبأ 90k · زينب 65k · فاطمه 70k.
+2. `orderController.listOrders` bundle mode — `total_price/cost/profit` summed cancelled rows. Now skips them; cancelled pieces stay
+   VISIBLE as items. Verified live: bundle total 90k with the cancelled sash listed.
+3. `batchController.getBatch` — student `total`/`grand_total` had no cancelled filter (cost/profit/order_count did → non-reconciling).
+   One-line FILTER. NOT live-testable: **0 batches exist in the DB** — precautionary consistency fix.
+
+**Audit findings NOT fixed (user decision pending):**
+- **Historical cost (admin-due) errors on pre-2026-07-15 rows** — old prod code wrote `cost` without addon-admin: **42 orders
+  understate admin due by 722,000 IQD** (e.g. رغد أركان حميد sash cost 40k, should be 75k); **3 partial pieces** stamped with the
+  full-package admin base (cost 40k > price 25k — fake loss); **51 more rows differ only by config drift** (rep التسعيرة values changed
+  after creation — snapshots arguably correct). **0 mismatches on orders written after Jul 15** (current prod code is correct).
+  Backfill = business decision (changes rep settlements retroactively).
+- `orderController.configureFullSet` + `configurePackage` (retail paths) still have the SAME featured-drift duplicate class fixed in
+  (b) — product-keyed upsert, no pin/self-heal. Port the pin+self-heal or route through `persistFullSetOrder` when touching them.
+- `configurePackage` for a rep-linked student bypasses wholesaler approval + books cost=0 (edge, unclear if FE still calls it).
+- محمد باقر's `pricing_addons` is legacy flat format → shawl admin=selling=30k (no rep margin), unlike عبدالله محسن's 20k/25k pair.
+  Admin should re-save his التسعيرة with intended admin values.
+- Accepted edge (documented): the (b) self-heal is same-checkout-group only; cross-group same-type dups aren't auto-cancelled —
+  deliberate, because cross-group cancel could kill retail CART orders, and approval-scoping would break admin custom orders
+  (`adminCustomOrderController` sets `wholesaler_approval = NULL`).
+
+---
+
 ## 2026-07-16 (b) — FIX: wholesaler order EDIT duplicated the sash (38 bundles double-counted, +2.6M IQD phantom revenue)
 
 **Uncommitted on main** (only `backend/lib/fullSetOrder.js` + docs; no migration). Data repair APPLIED to the shared Neon DB.

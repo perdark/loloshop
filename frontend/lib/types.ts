@@ -197,6 +197,8 @@ export interface WholesalerDashboard {
   commissionRate?: number;
   earnedCommission?: number;
   adminDue?: number;
+  /** Approved, non-cancelled student total collected by the representative. */
+  studentTotal?: number;
   pricing?: {
     adminBase: number;
     sellingBase: number;

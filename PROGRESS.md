@@ -1,5 +1,58 @@
 # Progress
 
+## 2026-07-17 (d) — حذف = piece-only · admin/مدير الإنتاج order edit (full طقم + quick ✎) · custom order to existing student
+
+① **Delete now removes ONE piece**, not the whole bundle: both `DELETE /production/orders/:id` and `/admin/orders/:id` delete the
+single order row (items cascade), keep siblings, and drop the checkout_group only when the last piece goes. UI copy updated
+(«حذف القطعة»). ② **Order editing for admin + manager** (new `orderEditController`, mounted under /api/production behind
+`requireStaffType()`): «تعديل الطلب» button on the order page opens `/staff/orders/[id]/edit` — the rep's FullSetOrderForm
+pre-filled + student info (name/IG/phones); the save goes through `persistFullSetOrder` then **restores the bundle's rep-approval
+state exactly** (approved stays approved, NULL stays NULL — an admin edit can never hide an order in pending). Quick ✎ edits on
+spec-line texts + instagram on ANY order via `PATCH /production/orders/:id/details`. ③ **Custom order → existing student**: both
+`/admin/custom-order` and NEW `/staff/custom-order` (manager, «طلب مخصص» sidebar link) share `components/staff/CustomOrderForm`
+with a طالب جديد/طالب موجود toggle; picking a student pre-fills their طقم (upsert = edit, never duplicate). Retail self-registered
+students are excluded from search AND rejected server-side (their cart bundles must never be re-priced by the طقم form). Gates:
+`node --check` 0 · `tsc` 0 (source) · `eslint` 0 · **live e2e on Neon 38/38, self-cleaned**. Browser walkthrough = user
+(TESTING-WALKTHROUGH.md §2026-07-17). See HANDOFF.
+
+## 2026-07-17 (c) — Navigation batch: state-restore on 5 screens · multi-role sidebar · orphan pages deleted
+
+Full-app navigation audit + fixes. ① **State restoration** (the «forgets your place on back» bug, same class fixed for the
+stations on 07-16) ported to 5 more screens via the same sessionStorage mirror pattern: `/staff/queue` (rail/source/rep/batch/
+zone/search/page — the URL-driven dims restore via router.replace), `/admin/orders` (all ~12 filters + sort; `?wholesaler=` URL
+still wins + the click-a-rep approval default preserved), rep bulk console (tab/zone/view/search + **checkbox selection**, pruned
+after first fetch), `QueueView` on `/staff`, and `CalligraphyTool` (chips/رep filters/search/sticky-bar). ② **Sidebar multi-role
+fix**: nav links now merge across `staff_types[]` (tailor+embroiderer sees both قائمة التطريز AND الفصال); role label shows all
+roles joined. ③ **Orphans deleted**: `/verify-otp` (+`VerifyOtpForm`), `/wholesaler/batch`, `/wholesaler/package`,
+`/admin/wholesalers/[id]/students` (dead duplicate — admin uses the staff console route); robots.ts + sitemap cleaned (sitemap
+advertised nonexistent `/showcase`). Gates: `tsc` 0 · `eslint` 0. Browser walkthrough = user. See HANDOFF 2026-07-17 (c).
+
+## 2026-07-17 (b) — Designer sees full student info (phone + instagram + intake) on the order page
+
+Per user: designers contact students to confirm designs, so the PII-lean strip no longer applies to them. In
+`productionController.getOrder`: `canSeeContact` now includes any staff with the `designer` type (sole or multi-role), and the
+lean intake-null skips designers — they get the full intake card (customer name, phones, instagram, governorate, event date,
+notes). Money stays hidden (price + intake.deposit still stripped by canSeeMoney). No FE change needed — the «بيانات الطالب» card
+already renders contact rows when the backend supplies them. Verified over real HTTP with a real designer JWT (مضر محمد): phone +
+instagram + intake present, price/deposit absent. Note: designers do NOT have the StationConsole — they still use the flat
+QueueView on `/staff` (console is التطريز/الفصال/الكوي only).
+
+## 2026-07-17 — Owner money rules locked + repairs: شال=20k admin · cost backfill +682k · retail duplicate-proofing
+
+Owner locked the settlement rule (admin gets all except package margin + شال margin; شال admin = 20,000 for every rep). Applied:
+config repair (باقر/أنس flat شال → pairs), cost backfill on 47 orders (+682k admin due, 0 rule violations / 0 cost>price after),
+pin+self-heal ported to retail `configureFullSet`/`configurePackage` (scoped `package_id IS NOT NULL`, cart never touched),
+rep-card counts stopped counting cancelled. 141 vs 148 explained (141 approved + 3 pending + 4 rejected). See HANDOFF 2026-07-17.
+
+## 2026-07-16 (c) — Money audit: cancelled rows no longer counted in rep/admin/batch totals · cost drift quantified
+
+Post-repair audit (invariant scans + critic). Fixed 3 «cancelled orders summed into money» bugs: rep approval list
+(`listOrdersForApproval` — the repaired students showed 180k until this), admin bundle totals (`listOrders` group=bundle, cancelled
+pieces stay visible but uncounted), batch student totals (`getBatch`, consistency — 0 batches in DB). Verified over real HTTP.
+NOT fixed (reported, pending user): 42 pre-Jul-15 orders understate admin cost by 722k IQD (old code dropped addon-admin) + 3 with
+cost>price; retail `configureFullSet`/`configurePackage` still carry the featured-drift duplicate class; محمد باقر legacy flat
+التسعيرة (shawl admin=selling=30k). See HANDOFF 2026-07-16 (c).
+
 ## 2026-07-16 (b) — FIX: wholesaler edit duplicated the sash order (38 bundles, +2.6M IQD phantom)
 
 Root cause: the طقم form stopped sending `package_id`, so `fullSetOrder.js` resolved each piece to the *first active product per

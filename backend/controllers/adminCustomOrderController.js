@@ -4,6 +4,10 @@ const { query, tx } = require('../lib/db');
 const { publicUrl } = require('../lib/upload');
 const { persistFullSetOrder, loadWholesalerPricing } = require('../lib/fullSetOrder');
 const { setBundleApproval } = require('../lib/orderApproval');
+const {
+  loadStudent, eligibleForFullSet, captureApproval, restoreApproval,
+  captureGroupPhone, restoreGroupPhone,
+} = require('./orderEditController');
 
 const SALT_ROUNDS = 10;
 const sellingAddons = (addons) => Object.fromEntries(Object.entries(addons).map(([key, pair]) => [key, pair.selling]));
@@ -45,7 +49,59 @@ async function customOrderConfig(req, res) {
   });
 }
 
+// «طلب لطالب موجود» — an existing student picked from the search. No user creation;
+// persistFullSetOrder is an upsert per student, so a second call EDITS the student's
+// bundle instead of duplicating it. Approval: a pre-existing bundle keeps its exact
+// state (captureApproval/restoreApproval); a fresh bundle mirrors the name-only path
+// (rep-linked → auto-approved via setBundleApproval, independent → NULL = direct order).
+async function createForExistingStudent(req, res) {
+  const student = await loadStudent(String(req.body.student_id));
+  if (!student) return res.status(404).json({ error: 'الطالب غير موجود', code: 'ERR_NOT_FOUND' });
+  // Never target a retail self-registered student: the طقم form would bind to (and
+  // could cancel pieces inside) their retail cart bundle, and re-price it rep-style.
+  if (!eligibleForFullSet(student)) {
+    return res.status(403).json({ error: 'لا يمكن إنشاء طلب طقم لطالب تجزئة من هنا', code: 'ERR_FORBIDDEN' });
+  }
+
+  const prev = await captureApproval(student.id);
+  const prevContact = await captureGroupPhone(prev);
+  const result = await persistFullSetOrder({
+    student: { id: student.id, name: student.name, phone: student.phone ?? '', wholesaler_id: student.wholesaler_id },
+    body: req.body,
+    actorUserId: req.user.id,
+  });
+  if (result.status !== 201) return res.status(result.status).json(result.json);
+  const cgId = result.json.data.checkout_group_id;
+
+  let approval;
+  if (!prev.exists && student.wholesaler_id) {
+    approval = 'approved';
+    try {
+      await setBundleApproval({ checkoutGroupId: cgId, decision: 'approved', actorUserId: req.user.id });
+    } catch (e) {
+      console.error(`custom order (existing student): approval flip failed for checkout_group ${cgId}:`, e.message);
+      approval = 'pending';
+    }
+  } else {
+    approval = await restoreApproval({
+      checkoutGroupId: cgId, prev, isRepLinked: student.wholesaler_id != null, actorUserId: req.user.id,
+    });
+  }
+  await restoreGroupPhone({ checkoutGroupId: cgId, ...prevContact });
+
+  await query(
+    `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
+     VALUES ($1, 'admin_custom_order_create', 'student', $2, $3::jsonb)`,
+    [req.user.id, student.id, JSON.stringify({
+      existing_student: true, checkout_group_id: cgId,
+      wholesaler_id: student.wholesaler_id || null, wholesaler_approval: approval,
+    })]
+  );
+  res.status(201).json({ data: { student_id: student.id, ...result.json.data, wholesaler_approval: approval } });
+}
+
 async function createCustomOrder(req, res) {
+  if (req.body?.student_id) return createForExistingStudent(req, res);
   const name = String(req.body?.student_name || '').trim();
   if (!name) return res.status(400).json({ error: 'اسم الطالب مطلوب', code: 'ERR_VALIDATION' });
   if (name.length > 120) {

@@ -44,6 +44,7 @@ import { PlateCompositor } from "@/components/calligraphy/PlateCompositor";
 
 type InputMode = "queue" | "typed" | "wholesaler" | "txt";
 type ModelMode = "standard" | "premium";
+type GridFilter = "all" | "awaiting" | "sent" | "no_order";
 
 // ─── Status pill colours ─────────────────────────────────────────────────────
 
@@ -321,6 +322,37 @@ function QueueZoneCard({
   );
 }
 
+// ─── Session persistence — «getting back perfectly» (mirrors StationConsole) ────
+// The worker sets the plates filter chip / ممثل selects / name search / sticky-bar
+// collapse, then taps a student's name (→ /staff/orders/[id]?from=<path>); on back
+// this component remounts and must land exactly where they left off. Only display/
+// filter state is mirrored — fetched data (jobs/plates/queue), in-flight generation,
+// modals, and textarea drafts (typed/txt/wholesaler-grab inputs + the download-folder
+// handle) are deliberately excluded. Safe to lazy-init: all three mounts (admin
+// layout, /staff/calligraphy, /design-support/calligraphy) gate behind a client-side
+// auth loading check, so this component never renders during SSR/prerender.
+interface StoredCalligraphyState {
+  gridFilter?: GridFilter;
+  gridWid?: string;
+  queueWid?: string;
+  searchText?: string;
+  controlsOpen?: boolean;
+}
+const STORAGE_KEY = "loloshop-calligraphy";
+
+function readStoredCalligraphy(): StoredCalligraphyState {
+  if (typeof window === "undefined") return {};
+  try {
+    return JSON.parse(sessionStorage.getItem(STORAGE_KEY) || "{}") as StoredCalligraphyState;
+  } catch {
+    return {};
+  }
+}
+
+function validGridFilter(v: GridFilter | undefined): GridFilter {
+  return v === "awaiting" || v === "sent" || v === "no_order" ? v : "all";
+}
+
 // ─── Main tool ─────────────────────────────────────────────────────────────────
 // Shared by the admin page (`/admin/calligraphy`) and the designer/staff page
 // (`/staff/calligraphy`). Both are thin wrappers around this component. It talks to
@@ -349,6 +381,9 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
     (me?.role === "staff" && myStaffTypes.some((t) => t === "designer" || t === "manager"));
   const canOpenOrders = me?.role === "admin" || me?.role === "staff";
 
+  // Restore the last UI state for this session (see StoredCalligraphyState above).
+  const [stored] = useState<StoredCalligraphyState>(() => readStoredCalligraphy());
+
   // ── mode + model ────────────────────────────────────────────────────────────
   const [mode, setMode] = useState<InputMode>("queue");
   const model: ModelMode = "standard";
@@ -364,6 +399,7 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
   // ── wholesaler grab ─────────────────────────────────────────────────────────
   const [wholesalers, setWholesalers] = useState<CalWholesaler[]>([]);
   const [wLoading, setWLoading] = useState(false);
+  const [wholesalersLoaded, setWholesalersLoaded] = useState(false);
   const [selectedWid, setSelectedWid] = useState("");
   const [grabRows, setGrabRows] = useState<CalGrabRow[]>([]);
   const [grabLoading, setGrabLoading] = useState(false);
@@ -380,7 +416,7 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
   const [queueLoading, setQueueLoading] = useState(false);
   const [queueError, setQueueError] = useState(false);
   // ممثل filter for the automatic queue (counts + generation scope). "" = الكل.
-  const [queueWid, setQueueWid] = useState("");
+  const [queueWid, setQueueWid] = useState(stored.queueWid ?? "");
 
   // ── job state ───────────────────────────────────────────────────────────────
   const [running, setRunning] = useState(false);
@@ -399,12 +435,11 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
   const [sendConfirm, setSendConfirm] = useState<{ orderId: string; missing: string[] } | null>(null);
 
   // ── grid filters (sticky bar) ────────────────────────────────────────────────
-  type GridFilter = "all" | "awaiting" | "sent" | "no_order";
-  const [gridFilter, setGridFilter] = useState<GridFilter>("all");
-  const [gridWid, setGridWid] = useState("");
-  const [searchText, setSearchText] = useState("");
+  const [gridFilter, setGridFilter] = useState<GridFilter>(validGridFilter(stored.gridFilter));
+  const [gridWid, setGridWid] = useState(stored.gridWid ?? "");
+  const [searchText, setSearchText] = useState(stored.searchText ?? "");
   // Generation controls collapse behind the sticky bar once results exist.
-  const [controlsOpen, setControlsOpen] = useState(true);
+  const [controlsOpen, setControlsOpen] = useState(stored.controlsOpen ?? true);
   const [folderSaving, setFolderSaving] = useState(false);
 
   // ── confirm gate (junk names / small batch / under-filled zone) ───────────────
@@ -445,8 +480,40 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
     getCalWholesalers()
       .then(setWholesalers)
       .catch(() => toast.error("تعذر تحميل الممثلين"))
-      .finally(() => setWLoading(false));
+      .finally(() => {
+        setWLoading(false);
+        setWholesalersLoaded(true);
+      });
   }, []);
+
+  // A restored ممثل filter (plates grid or auto-generation queue) may reference a
+  // wholesaler that no longer exists — degrade gracefully to "كل الممثلين" once the
+  // real list has loaded. Gated on wholesalersLoaded so a VALID restored id is never
+  // wiped against the empty pre-fetch array.
+  useEffect(() => {
+    if (!wholesalersLoaded) return;
+    const validIds = new Set(wholesalers.map((w) => w.id));
+    setGridWid((prev) => (prev && !validIds.has(prev) ? "" : prev));
+    setQueueWid((prev) => (prev && !validIds.has(prev) ? "" : prev));
+  }, [wholesalers, wholesalersLoaded]);
+
+  // Mirror the UI state so back-navigation restores it exactly (sessionStorage key
+  // above). Fetched data/progress/modals/drafts are deliberately excluded — see the
+  // StoredCalligraphyState comment.
+  useEffect(() => {
+    try {
+      const snapshot: StoredCalligraphyState = {
+        gridFilter,
+        gridWid,
+        queueWid,
+        searchText,
+        controlsOpen,
+      };
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+    } catch {
+      /* storage full/unavailable — persistence is best-effort */
+    }
+  }, [gridFilter, gridWid, queueWid, searchText, controlsOpen]);
 
   // ── fetch names when wholesaler selected ─────────────────────────────────────
   const loadGrab = useCallback(async (wid: string) => {
@@ -558,12 +625,14 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
           // silent — recent plates are best-effort
         }
       }
-      // Results restored → tuck the generation controls behind the sticky bar.
-      setControlsOpen(false);
+      // Results restored → tuck the generation controls behind the sticky bar, unless
+      // the worker already had a controlsOpen preference restored this session (their
+      // own toggle wins over this first-load default — see StoredCalligraphyState).
+      if (stored.controlsOpen === undefined) setControlsOpen(false);
     }
 
     restore();
-  }, []);
+  }, [stored.controlsOpen]);
 
   // ── read .txt file ───────────────────────────────────────────────────────────
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {

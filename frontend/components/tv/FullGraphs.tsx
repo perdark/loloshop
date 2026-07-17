@@ -59,10 +59,13 @@ export function MoneyScene({ data }: { data: TvSnapshot }) {
 
   return (
     <SceneFrame
-      kicker="🔓 الأداء المالي"
+      kicker="🔓 الأداء المالي · الطلبات الموافق عليها وغير الملغاة فقط"
       title="الإيراد والربح"
       right={
         <div className="flex items-center gap-6">
+          <span className="max-w-52 text-sm font-semibold leading-snug text-[#9a6a3a]">
+            الربح = الإيراد − التكلفة / حصة الإدارة
+          </span>
           <div>
             <div className="text-base font-semibold text-[#9a6a3a]">إيراد اليوم</div>
             <div className="font-[Cairo] text-4xl font-black tabular-nums text-[#F47B42]">{fmtNum(k.revenue_today ?? 0)}</div>

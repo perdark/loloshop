@@ -122,6 +122,49 @@ function orderZoneClause(zone, alias = 'o') {
   return `EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = ${alias}.id AND ${match}${content})`;
 }
 
+// Admin-facing calculation trace. `orders.price/cost` remain the accounting source of
+// truth; line snapshots explain their composition. Historical rows may have a zero
+// admin snapshot, so explicit adjustments reconcile the explanation without pretending
+// that old detail exists.
+async function moneyCalculations(rows) {
+  const ids = [...new Set(rows.map((r) => r.order_id || r.id).filter(Boolean))];
+  if (!ids.length) return new Map();
+  const detail = await query(
+    `SELECT order_id, label_snapshot, price_snapshot, admin_price_snapshot, qty
+     FROM order_items
+     WHERE order_id = ANY($1::uuid[])
+       AND (price_snapshot <> 0 OR admin_price_snapshot <> 0)
+     ORDER BY created_at`,
+    [ids]
+  );
+  const byId = new Map(ids.map((id) => [id, []]));
+  for (const line of detail.rows) {
+    byId.get(line.order_id)?.push({
+      label: line.label_snapshot,
+      price: Number(line.price_snapshot || 0),
+      admin_price: Number(line.admin_price_snapshot || 0),
+      qty: Number(line.qty || 1),
+    });
+  }
+  return byId;
+}
+
+function calculationFor(row, byId) {
+  const id = row.order_id || row.id;
+  const lines = byId.get(id) || [];
+  const linePrice = lines.reduce((sum, line) => sum + line.price, 0);
+  const lineAdmin = lines.reduce((sum, line) => sum + line.admin_price, 0);
+  const price = Number(row.price || 0);
+  const cost = Number(row.cost || 0);
+  return {
+    lines,
+    line_price_total: linePrice,
+    line_admin_total: lineAdmin,
+    price_adjustment: price - linePrice,
+    cost_adjustment: cost - lineAdmin,
+  };
+}
+
 async function listOrders(req, res) {
   const { wholesaler_id, batch_id, status, from, to, source, type, group, zone, approval } = req.query;
   // FIELD VISIBILITY (mirrors getOrder): this route is reachable by any staff role
@@ -153,14 +196,19 @@ async function listOrders(req, res) {
   if (status) {
     params.push(status);
     where.push(`o.status = $${params.length}`);
+  } else if (group !== 'bundle') {
+    // Cancelled rows remain available through the explicit status filter, but never
+    // silently enter default lists or their totals.
+    where.push(`o.status <> 'cancelled'`);
   }
   if (from) {
     params.push(from);
-    where.push(`o.created_at >= $${params.length}`);
+    where.push(`o.created_at >= ($${params.length}::date AT TIME ZONE 'Asia/Baghdad')`);
   }
   if (to) {
     params.push(to);
-    where.push(`o.created_at <= $${params.length}`);
+    // A date input means the whole local calendar day, not midnight at its start.
+    where.push(`o.created_at < (($${params.length}::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Baghdad')`);
   }
   // Wholesaler approval visibility:
   //  • admin = full oversight (sees pending/rejected) + optional ?approval= filter
@@ -171,7 +219,7 @@ async function listOrders(req, res) {
       where.push(`o.wholesaler_approval = $${params.length}`);
     }
   } else {
-    where.push(`(o.wholesaler_approval IS NULL OR o.wholesaler_approval = 'approved')`);
+    where.push(`(s.wholesaler_id IS NULL OR o.wholesaler_approval = 'approved')`);
   }
 
   // `type` filter — only applicable in item (flat) mode
@@ -203,6 +251,7 @@ async function listOrders(req, res) {
       ${whereSql}
       ORDER BY o.checkout_group_id NULLS LAST, o.created_at ASC`;
     const { rows } = await query(bundleSql, params);
+    const calculationByOrder = canSeeMoney ? await moneyCalculations(rows) : new Map();
 
     // Group by checkout_group_id; NULL rows each become their own single-item bundle
     const bundleMap = new Map();
@@ -235,9 +284,12 @@ async function listOrders(req, res) {
         });
       }
       const b = bundleMap.get(key);
-      b.total_price += Number(row.price) || 0;
-      b.total_cost += Number(row.cost) || 0;
-      b.total_profit += Number(row.profit) || 0;
+      // cancelled pieces stay visible as items but must not inflate the bundle money
+      if (row.status !== 'cancelled') {
+        b.total_price += Number(row.price) || 0;
+        b.total_cost += Number(row.cost) || 0;
+        b.total_profit += Number(row.profit) || 0;
+      }
       b.items.push({
         order_id: row.order_id,
         product_name: row.product_name,
@@ -246,6 +298,7 @@ async function listOrders(req, res) {
         price: Number(row.price) || 0,
         cost: Number(row.cost) || 0,
         profit: Number(row.profit) || 0,
+        calculation: canSeeMoney ? calculationFor(row, calculationByOrder) : undefined,
       });
     }
 
@@ -309,14 +362,18 @@ async function listOrders(req, res) {
     ORDER BY o.created_at DESC
     LIMIT $${dataParams.length - 1} OFFSET $${dataParams.length}`;
   const { rows } = await query(sql, dataParams);
+  const calculationByOrder = canSeeMoney ? await moneyCalculations(rows) : new Map();
+  const explainedRows = canSeeMoney
+    ? rows.map((r) => ({ ...r, calculation: calculationFor(r, calculationByOrder) }))
+    : rows;
   const data = (!canSeeMoney || !canSeePrice)
-    ? rows.map((r) => {
+    ? explainedRows.map((r) => {
         const o = { ...r };
-        if (!canSeeMoney) { delete o.cost; delete o.profit; }
+        if (!canSeeMoney) { delete o.cost; delete o.profit; delete o.calculation; }
         if (!canSeePrice) delete o.price;
         return o;
       })
-    : rows;
+    : explainedRows;
   res.json({ data, total: countRes.rows[0].total, limit, offset });
 }
 
@@ -490,9 +547,11 @@ async function configureOrder(req, res) {
     return res.status(404).json({ error: 'حساب الطالب غير موجود', code: 'ERR_NOT_FOUND' });
   }
   const student = st.rows[0];
-  // rep students need approval; independent retail (no wholesaler) are pre-approved
-  if (student.wholesaler_id && student.status !== 'approved') {
-    return res.status(403).json({ error: 'يجب موافقة الممثل أولاً', code: 'ERR_NOT_APPROVED' });
+  if (student.wholesaler_id) {
+    return res.status(403).json({
+      error: 'استخدم نموذج طلب الممثل حتى تُطبّق التسعيرة والموافقة بصورة صحيحة',
+      code: 'ERR_REP_ORDER_FLOW',
+    });
   }
   const role = await priceRoleForUser(req.user);
 
@@ -690,11 +749,12 @@ async function configurePackage(req, res) {
     return res.status(404).json({ error: 'حساب الطالب غير موجود', code: 'ERR_NOT_FOUND' });
   }
   const student = st.rows[0];
-  // Independent retail (no wholesaler) may now buy packages too; rep students still need approval.
-  if (student.wholesaler_id && student.status !== 'approved') {
-    return res.status(403).json({ error: 'يجب موافقة الممثل أولاً', code: 'ERR_NOT_APPROVED' });
+  if (student.wholesaler_id) {
+    return res.status(403).json({
+      error: 'استخدم نموذج طلب الممثل حتى تُطبّق التسعيرة والموافقة بصورة صحيحة',
+      code: 'ERR_REP_ORDER_FLOW',
+    });
   }
-
   let resolvedBatchId = null;
   if (batch_id) {
     const owned = await query(
@@ -719,6 +779,18 @@ async function configurePackage(req, res) {
   );
   const byType = {};
   for (const p of prods.rows) if (!byType[p.type]) byType[p.type] = p.id;
+  // EDIT STABILITY: an existing package order pins the product per piece type, so a
+  // catalog change (e.g. a new featured product) can't fork a duplicate on re-submit —
+  // same class as the 2026-07-16 طقم bug. Cart orders (package_id NULL) are never touched.
+  const pinnedPkg = await query(
+    `SELECT DISTINCT ON (p.type) p.type, o.product_id
+     FROM orders o JOIN products p ON p.id = o.product_id
+     WHERE o.student_id = $1 AND o.design_id IS NULL AND o.status <> 'cancelled'
+       AND o.package_id IS NOT NULL AND p.type IN ('sash','robe','cap')
+     ORDER BY p.type, o.created_at DESC`,
+    [student.id]
+  );
+  for (const r of pinnedPkg.rows) byType[r.type] = r.product_id;
 
   if (!byType.sash || !byType.robe || !byType.cap) {
     return res.status(500).json({ error: 'منتجات الباقة غير مكتملة في النظام', code: 'ERR_CONFIG' });
@@ -760,6 +832,16 @@ async function configurePackage(req, res) {
         );
         oid = o.rows[0].id;
       }
+      // SELF-HEAL: never leave a second live package order of the same piece type
+      // (cart orders have package_id NULL and are never touched).
+      const pieceType = prodId === byType.sash ? 'sash' : prodId === byType.robe ? 'robe' : 'cap';
+      await client.query(
+        `UPDATE orders o SET status='cancelled'
+         FROM products p
+         WHERE p.id = o.product_id AND o.student_id = $1 AND p.type = $2 AND o.id <> $3
+           AND o.package_id IS NOT NULL AND o.design_id IS NULL AND o.status <> 'cancelled'`,
+        [student.id, pieceType, oid]
+      );
       await client.query(
         `INSERT INTO order_items (order_id, label_snapshot, price_snapshot, qty, option_id)
          VALUES ($1, $2, $3, 1, $4)`,
@@ -827,10 +909,12 @@ async function configureFullSet(req, res) {
     return res.status(404).json({ error: 'حساب الطالب غير موجود', code: 'ERR_NOT_FOUND' });
   }
   const student = st.rows[0];
-  if (student.wholesaler_id && student.status !== 'approved') {
-    return res.status(403).json({ error: 'يجب موافقة الممثل أولاً', code: 'ERR_NOT_APPROVED' });
+  if (student.wholesaler_id) {
+    return res.status(403).json({
+      error: 'استخدم نموذج طلب الممثل حتى تُطبّق التسعيرة والموافقة بصورة صحيحة',
+      code: 'ERR_REP_ORDER_FLOW',
+    });
   }
-
   const pkg = await query(
     `SELECT id, name_ar, price FROM packages
      WHERE id = $1 AND active = TRUE AND is_full_set = TRUE`,
@@ -947,6 +1031,17 @@ async function configureFullSet(req, res) {
      ORDER BY type, featured DESC, sort, created_at`
   );
   for (const p of prods.rows) if (!byType[p.type]) byType[p.type] = p.id;
+  // EDIT STABILITY: an existing package order pins the product per piece type on re-submit
+  // (same duplicate class as the 2026-07-16 طقم bug; cart orders are never touched).
+  const pinnedFs = await query(
+    `SELECT DISTINCT ON (p.type) p.type, o.product_id
+     FROM orders o JOIN products p ON p.id = o.product_id
+     WHERE o.student_id = $1 AND o.design_id IS NULL AND o.status <> 'cancelled'
+       AND o.package_id IS NOT NULL AND p.type IN ('sash','robe','cap')
+     ORDER BY p.type, o.created_at DESC`,
+    [student.id]
+  );
+  for (const r of pinnedFs.rows) byType[r.type] = r.product_id;
   if (!byType.sash || !byType.robe || !byType.cap) {
     return res.status(500).json({ error: 'منتجات الطقم غير مكتملة في النظام', code: 'ERR_CONFIG' });
   }
@@ -1076,6 +1171,16 @@ async function configureFullSet(req, res) {
         );
         oid = o.rows[0].id;
       }
+
+      // SELF-HEAL: never leave a second live package order of the same piece type
+      // (cart orders have package_id NULL and are never touched).
+      await client.query(
+        `UPDATE orders o SET status='cancelled'
+         FROM products p
+         WHERE p.id = o.product_id AND o.student_id = $1 AND p.type = $2 AND o.id <> $3
+           AND o.package_id IS NOT NULL AND o.design_id IS NULL AND o.status <> 'cancelled'`,
+        [student.id, type, oid]
+      );
 
       // base line: the package price sits on the sash order so bundle totals stay exact
       const baseLine = type === 'sash'

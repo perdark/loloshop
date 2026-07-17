@@ -183,6 +183,7 @@ function govKey(text) {
 // Neon load low on an always-on board.
 const _legendCache = new Map(); // source → { at, data }
 const LEGEND_MS = 60000;
+const SETTLED_MONEY_SQL = `(s.wholesaler_id IS NULL OR o.wholesaler_approval = 'approved')`;
 
 async function buildLegend(source) {
   const ck = source || 'all';
@@ -197,7 +198,7 @@ async function buildLegend(source) {
          COUNT(DISTINCT o.student_id) FILTER (WHERE o.status::text<>'cancelled')::int AS graduates,
          COUNT(*) FILTER (WHERE o.status::text<>'cancelled')::int AS total_orders,
          COUNT(*) FILTER (WHERE o.status::text='delivered')::int AS delivered_total,
-         COALESCE(SUM(o.price) FILTER (WHERE o.status::text<>'cancelled'),0)::bigint AS revenue_total
+         COALESCE(SUM(o.price) FILTER (WHERE o.status::text<>'cancelled' AND ${SETTLED_MONEY_SQL}),0)::bigint AS revenue_total
        FROM orders o JOIN students s ON s.id=o.student_id WHERE TRUE ${src}`
     ),
     // Universities served — list (trophy wall) + implicit count.
@@ -211,7 +212,7 @@ async function buildLegend(source) {
     query(
       `SELECT d::text AS d, cnt, rev FROM (
          SELECT (o.created_at AT TIME ZONE '${TZ}')::date AS d, COUNT(*)::int AS cnt,
-                COALESCE(SUM(o.price),0)::bigint AS rev
+                COALESCE(SUM(o.price) FILTER (WHERE ${SETTLED_MONEY_SQL}),0)::bigint AS rev
          FROM orders o JOIN students s ON s.id=o.student_id
          WHERE o.status::text<>'cancelled'
            AND (o.created_at AT TIME ZONE '${TZ}')::date < (NOW() AT TIME ZONE '${TZ}')::date ${src}
@@ -242,11 +243,12 @@ async function buildLegend(source) {
        SELECT
          COUNT(*) FILTER (WHERE z.yr = EXTRACT(YEAR FROM t.now_local))::int AS this_year,
          COUNT(*) FILTER (WHERE z.yr = EXTRACT(YEAR FROM t.now_local) - 1)::int AS last_year,
-         COALESCE(SUM(z.price) FILTER (WHERE z.yr = EXTRACT(YEAR FROM t.now_local)),0)::bigint AS this_year_rev,
-         COALESCE(SUM(z.price) FILTER (WHERE z.yr = EXTRACT(YEAR FROM t.now_local) - 1),0)::bigint AS last_year_rev
+         COALESCE(SUM(z.price) FILTER (WHERE z.billable AND z.yr = EXTRACT(YEAR FROM t.now_local)),0)::bigint AS this_year_rev,
+         COALESCE(SUM(z.price) FILTER (WHERE z.billable AND z.yr = EXTRACT(YEAR FROM t.now_local) - 1),0)::bigint AS last_year_rev
        FROM (
          SELECT o.price, EXTRACT(YEAR FROM (o.created_at AT TIME ZONE '${TZ}'))::int AS yr,
-                EXTRACT(DOY FROM (o.created_at AT TIME ZONE '${TZ}'))::int AS doy
+                EXTRACT(DOY FROM (o.created_at AT TIME ZONE '${TZ}'))::int AS doy,
+                ${SETTLED_MONEY_SQL} AS billable
          FROM orders o JOIN students s ON s.id=o.student_id
          WHERE o.status::text<>'cancelled' ${src}
        ) z CROSS JOIN t
@@ -341,10 +343,14 @@ async function buildSnapshot(source, range) {
          COUNT(*) FILTER (WHERE dl = (SELECT d FROM t))::int AS delivered_today,
          COUNT(*) FILTER (WHERE dl = (SELECT d FROM t) - 1)::int AS delivered_yday
        FROM (
-         SELECT o.price, o.profit,
+         SELECT
+                CASE WHEN ${SETTLED_MONEY_SQL} THEN o.price ELSE 0 END AS price,
+                CASE WHEN ${SETTLED_MONEY_SQL} THEN o.profit ELSE 0 END AS profit,
                 (o.created_at AT TIME ZONE '${TZ}')::date AS cl,
                 (o.delivered_at AT TIME ZONE '${TZ}')::date AS dl,
-                CASE WHEN (o.created_at AT TIME ZONE '${TZ}')::date = (NOW() AT TIME ZONE '${TZ}')::date - 1 THEN o.price ELSE 0 END AS revenue_yday_price
+                CASE WHEN ${SETTLED_MONEY_SQL}
+                       AND (o.created_at AT TIME ZONE '${TZ}')::date = (NOW() AT TIME ZONE '${TZ}')::date - 1
+                     THEN o.price ELSE 0 END AS revenue_yday_price
          FROM orders o JOIN students s ON s.id = o.student_id
          WHERE o.status::text <> 'cancelled' ${src}
        ) x`
@@ -465,6 +471,7 @@ async function buildSnapshot(source, range) {
               COALESCE(SUM(o.profit),0)::bigint AS profit
        FROM orders o JOIN students s ON s.id = o.student_id
        WHERE o.status::text <> 'cancelled'
+         AND ${SETTLED_MONEY_SQL}
          AND o.created_at >= (NOW() AT TIME ZONE '${TZ}')::date - INTERVAL '${days - 1} days' ${src}
        GROUP BY bucket`
     ),

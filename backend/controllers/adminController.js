@@ -1,6 +1,6 @@
 const bcrypt = require('bcrypt');
 const { query, tx } = require('../lib/db');
-const { DEFAULT_ADDONS, sanitizeAddons } = require('../lib/fullSetOrder');
+const { DEFAULT_ADDONS, normalizeSettlementAddons } = require('../lib/fullSetOrder');
 const { normalizeIqPhone } = require('../lib/otp');
 const { setBundleApproval, notifyUser } = require('../lib/orderApproval');
 // Money-gate reveal logic lives in tvBoardController (single source of truth for the
@@ -22,6 +22,21 @@ function pricingOrderIsValid(adminPrice, sellingPrice, addons) {
   return sellingPrice >= adminPrice && Object.values(addons).every((pair) => pair.selling >= pair.admin);
 }
 
+// Money shown as revenue/cost/profit is settlement money: retail rows have NULL
+// approval; representative rows count only after approval. Pending/rejected rows stay
+// operationally visible elsewhere but never inflate settled totals.
+function billableOrderSql(alias = 'o') {
+  return `${alias}.status <> 'cancelled'
+    AND (
+      ${alias}.wholesaler_approval = 'approved'
+      OR (${alias}.wholesaler_approval IS NULL AND EXISTS (
+        SELECT 1 FROM students settled_student
+        WHERE settled_student.id = ${alias}.student_id
+          AND settled_student.wholesaler_id IS NULL
+      ))
+    )`;
+}
+
 const STAFF_TYPES = ['designer', 'embroiderer', 'presser', 'preparer', 'manager', 'digitizer', 'tailor'];
 const STAFF_SCOPES = ['retail', 'wholesaler', 'both'];
 
@@ -40,29 +55,36 @@ function normalizeStaffTypes(body) {
 async function analytics(req, res) {
   const totals = await query(
     `SELECT
-       COALESCE(SUM(price), 0)::bigint AS revenue,
-       COALESCE(SUM(cost), 0)::bigint AS cost,
-       COALESCE(SUM(profit), 0)::bigint AS profit,
-       COUNT(*)::int AS orders
-     FROM orders WHERE status <> 'cancelled'`
+       COALESCE(SUM(o.price), 0)::bigint AS revenue,
+       COALESCE(SUM(o.cost), 0)::bigint AS cost,
+       COALESCE(SUM(o.profit), 0)::bigint AS profit,
+       COUNT(DISTINCT COALESCE(o.checkout_group_id, o.id))::int AS orders
+     FROM orders o WHERE ${billableOrderSql('o')}`
   );
   const byStatus = await query(
-    `SELECT status, COUNT(*)::int AS count FROM orders GROUP BY status`
+    `SELECT o.status, COUNT(*)::int AS count
+     FROM orders o
+     WHERE ${billableOrderSql('o')}
+     GROUP BY o.status`
   );
   const daily = await query(
-    `SELECT DATE(created_at AT TIME ZONE 'UTC') AS date,
-            COUNT(*)::int AS orders,
-            COALESCE(SUM(price), 0)::bigint AS revenue
-     FROM orders
-     WHERE created_at > NOW() - INTERVAL '30 days'
+    `SELECT DATE(o.created_at AT TIME ZONE 'Asia/Baghdad') AS date,
+            COUNT(DISTINCT COALESCE(o.checkout_group_id, o.id))::int AS orders,
+            COALESCE(SUM(o.price), 0)::bigint AS revenue
+     FROM orders o
+     WHERE o.created_at > NOW() - INTERVAL '30 days'
+       AND ${billableOrderSql('o')}
      GROUP BY 1 ORDER BY 1`
   );
   const topWholesalers = await query(
-    `SELECT w.id, u.name, COUNT(o.id)::int AS order_count
+    `SELECT w.id, u.name,
+            COUNT(DISTINCT COALESCE(o.checkout_group_id, o.id))::int AS order_count
      FROM wholesalers w
      JOIN users u ON u.id = w.user_id
      LEFT JOIN students s ON s.wholesaler_id = w.id
      LEFT JOIN orders o ON o.student_id = s.id
+       AND o.status <> 'cancelled'
+       AND o.wholesaler_approval = 'approved'
      GROUP BY w.id, u.name
      ORDER BY order_count DESC LIMIT 5`
   );
@@ -78,22 +100,24 @@ async function analytics(req, res) {
 
 async function accounting(req, res) {
   const totals = await query(
-    `SELECT COALESCE(SUM(price),0)::bigint AS revenue,
-            COALESCE(SUM(cost),0)::bigint AS cost,
-            COALESCE(SUM(profit),0)::bigint AS profit,
-            COUNT(*)::int AS orders
-     FROM orders WHERE status <> 'cancelled'`
+    `SELECT COALESCE(SUM(o.price),0)::bigint AS revenue,
+            COALESCE(SUM(o.cost),0)::bigint AS cost,
+            COALESCE(SUM(o.profit),0)::bigint AS profit,
+            COUNT(DISTINCT COALESCE(o.checkout_group_id, o.id))::int AS orders
+     FROM orders o WHERE ${billableOrderSql('o')}`
   );
   const byBatch = await query(
     `SELECT b.id, b.name_ar, wu.name AS wholesaler_name,
             COALESCE(SUM(o.price),0)::bigint AS revenue,
             COALESCE(SUM(o.cost),0)::bigint AS cost,
             COALESCE(SUM(o.profit),0)::bigint AS profit,
-            COUNT(o.id)::int AS orders
+            COUNT(DISTINCT COALESCE(o.checkout_group_id, o.id))::int AS orders
      FROM batches b
      LEFT JOIN wholesalers w ON w.id = b.wholesaler_id
      LEFT JOIN users wu ON wu.id = w.user_id
-     LEFT JOIN orders o ON o.batch_id = b.id AND o.status <> 'cancelled'
+     LEFT JOIN orders o ON o.batch_id = b.id
+       AND o.status <> 'cancelled'
+       AND o.wholesaler_approval = 'approved'
      GROUP BY b.id, wu.name ORDER BY revenue DESC`
   );
   const byWholesaler = await query(
@@ -101,22 +125,26 @@ async function accounting(req, res) {
             COALESCE(SUM(o.price),0)::bigint AS revenue,
             COALESCE(SUM(o.cost),0)::bigint AS cost,
             COALESCE(SUM(o.profit),0)::bigint AS profit,
-            ROUND(COALESCE(SUM(o.price),0) * w.commission_rate / 100)::bigint AS commission,
-            COUNT(o.id)::int AS orders
+            COALESCE(SUM(o.profit),0)::bigint AS commission,
+            COUNT(DISTINCT COALESCE(o.checkout_group_id, o.id))::int AS orders
      FROM wholesalers w
      JOIN users u ON u.id = w.user_id
      LEFT JOIN students s ON s.wholesaler_id = w.id
-     LEFT JOIN orders o ON o.student_id = s.id AND o.status <> 'cancelled'
+     LEFT JOIN orders o ON o.student_id = s.id
+       AND o.status <> 'cancelled'
+       AND o.wholesaler_approval = 'approved'
      GROUP BY w.id, u.name, w.commission_rate ORDER BY revenue DESC`
   );
   const retail = await query(
     `SELECT COALESCE(SUM(o.price),0)::bigint AS revenue,
             COALESCE(SUM(o.cost),0)::bigint AS cost,
             COALESCE(SUM(o.profit),0)::bigint AS profit,
-            COUNT(o.id)::int AS orders
+            COUNT(DISTINCT COALESCE(o.checkout_group_id, o.id))::int AS orders
      FROM orders o
      JOIN students s ON s.id = o.student_id
-     WHERE s.wholesaler_id IS NULL AND o.status <> 'cancelled'`
+     WHERE s.wholesaler_id IS NULL
+       AND o.status <> 'cancelled'
+       AND o.wholesaler_approval IS NULL`
   );
   res.json({
     totals: totals.rows[0],
@@ -128,8 +156,8 @@ async function accounting(req, res) {
 
 async function updateOrderCost(req, res) {
   const { id } = req.params;
-  const { cost } = req.body;
-  if (cost == null || cost < 0) {
+  const cost = Number(req.body.cost);
+  if (!Number.isFinite(cost) || !Number.isInteger(cost) || cost < 0) {
     return res.status(400).json({ error: 'تكلفة غير صالحة', code: 'ERR_VALIDATION' });
   }
   const { rows } = await query(
@@ -188,11 +216,12 @@ async function listWholesalers(req, res) {
        w.university_name, w.department, w.admin_price, w.wholesaler_price, w.pricing_addons,
        (SELECT COUNT(*)::int FROM students s WHERE s.wholesaler_id = w.id) AS student_count,
        (SELECT COUNT(*)::int FROM students s WHERE s.wholesaler_id = w.id AND s.status = 'pending_approval') AS pending_count,
-       -- «المستحق» = price-gap profit (سعر الممثل والطلاب − سعر المدير) across the rep's orders.
+       -- «المستحق» = approved price-gap profit only. Pending/rejected orders are not settled.
        COALESCE((
          SELECT SUM(o.profit)::bigint
          FROM students s JOIN orders o ON o.student_id = s.id
          WHERE s.wholesaler_id = w.id AND o.status <> 'cancelled'
+           AND o.wholesaler_approval = 'approved'
        ), 0) AS earned_commission
      FROM wholesalers w JOIN users u ON u.id = w.user_id
      ORDER BY w.created_at DESC`
@@ -201,7 +230,7 @@ async function listWholesalers(req, res) {
     ...r,
     admin_price: Number(r.admin_price || 0),
     wholesaler_price: Number(r.wholesaler_price || 0),
-    pricing_addons: sanitizeAddons(r.pricing_addons),
+    pricing_addons: normalizeSettlementAddons(r.pricing_addons),
     referral_url: `${process.env.FRONTEND_URL}/join/${r.referral_code}`,
   }));
   res.json({ data });
@@ -217,7 +246,7 @@ async function createWholesaler(req, res) {
   if (adminPrice === null || wholesalerPrice === null) {
     return res.status(400).json({ error: 'سعر غير صالح', code: 'ERR_VALIDATION' });
   }
-  const pricingAddons = sanitizeAddons(req.body.pricing_addons);
+  const pricingAddons = normalizeSettlementAddons(req.body.pricing_addons);
   if (!pricingOrderIsValid(adminPrice, wholesalerPrice, pricingAddons)) {
     return res.status(400).json({ error: 'سعر البيع يجب أن يساوي أو يتجاوز مبلغ الإدارة', code: 'ERR_VALIDATION' });
   }
@@ -352,7 +381,7 @@ async function updatePricing(req, res) {
   if (adminPrice === null || wholesalerPrice === null) {
     return res.status(400).json({ error: 'سعر غير صالح', code: 'ERR_VALIDATION' });
   }
-  const pricingAddons = sanitizeAddons(req.body.pricing_addons);
+  const pricingAddons = normalizeSettlementAddons(req.body.pricing_addons);
   if (!pricingOrderIsValid(adminPrice, wholesalerPrice, pricingAddons)) {
     return res.status(400).json({ error: 'سعر البيع يجب أن يساوي أو يتجاوز مبلغ الإدارة', code: 'ERR_VALIDATION' });
   }
@@ -372,7 +401,7 @@ async function updatePricing(req, res) {
       id: rows[0].id,
       admin_price: Number(rows[0].admin_price || 0),
       wholesaler_price: Number(rows[0].wholesaler_price || 0),
-      pricing_addons: sanitizeAddons(rows[0].pricing_addons),
+      pricing_addons: normalizeSettlementAddons(rows[0].pricing_addons),
     },
   });
 }
@@ -481,12 +510,13 @@ async function repsOverview(req, res) {
                 FILTER (WHERE b.id IS NOT NULL),
               '[]'
             ) AS batches,
-            COUNT(DISTINCT o.id)::int AS order_count
+            COUNT(DISTINCT COALESCE(o.checkout_group_id, o.id))
+              FILTER (WHERE o.wholesaler_approval = 'approved')::int AS order_count
      FROM wholesalers w
      JOIN users u ON u.id = w.user_id
      LEFT JOIN batches b ON b.wholesaler_id = w.id
      LEFT JOIN students s ON s.wholesaler_id = w.id
-     LEFT JOIN orders o ON o.student_id = s.id
+     LEFT JOIN orders o ON o.student_id = s.id AND o.status <> 'cancelled'
      GROUP BY w.id, u.name
      ORDER BY u.name ASC`
   );
@@ -775,7 +805,8 @@ async function pendingApprovalCount(req, res) {
   res.json({ data: { pending_bundles: rows[0].n } });
 }
 
-// DELETE /api/admin/orders/:id — permanently remove the complete linked order group.
+// DELETE /api/admin/orders/:id — permanently remove ONE piece (order row). Sibling
+// pieces of the bundle survive; the empty checkout_group goes with the last piece.
 async function deleteOrder(req, res) {
   const { id } = req.params;
   const result = await tx(async (client) => {
@@ -784,23 +815,27 @@ async function deleteOrder(req, res) {
     );
     if (!found.rows.length) return null;
     const order = found.rows[0];
-    const group = order.checkout_group_id;
-    const target = group
-      ? await client.query(`SELECT id FROM orders WHERE checkout_group_id=$1`, [group])
-      : { rows: [{ id: order.id }] };
-    const ids = target.rows.map((row) => row.id);
-    await client.query(`DELETE FROM staff_activity_log WHERE order_id=ANY($1::uuid[])`, [ids]);
-    await client.query(`DELETE FROM orders WHERE id=ANY($1::uuid[])`, [ids]);
-    if (group) await client.query(`DELETE FROM checkout_groups WHERE id=$1`, [group]);
+    await client.query(`DELETE FROM staff_activity_log WHERE order_id=$1`, [id]);
+    await client.query(`DELETE FROM orders WHERE id=$1`, [id]);
+    let remaining = [];
+    let groupDeleted = false;
+    if (order.checkout_group_id) {
+      const sib = await client.query(`SELECT id FROM orders WHERE checkout_group_id=$1`, [order.checkout_group_id]);
+      remaining = sib.rows.map((row) => row.id);
+      if (!remaining.length) {
+        await client.query(`DELETE FROM checkout_groups WHERE id=$1`, [order.checkout_group_id]);
+        groupDeleted = true;
+      }
+    }
     await client.query(
       `INSERT INTO audit_log(actor_id,action,entity,entity_id,details)
        VALUES($1,'delete_order','order',$2,$3)`,
-      [req.user.id, order.id, JSON.stringify({ deleted_order_ids: ids, checkout_group_id: group, student_id: order.student_id })]
+      [req.user.id, order.id, JSON.stringify({ piece_only: true, remaining_order_ids: remaining, checkout_group_id: order.checkout_group_id, student_id: order.student_id })]
     );
-    return ids.length;
+    return { remaining, groupDeleted };
   });
   if (result == null) return res.status(404).json({ error: 'الطلب غير موجود', code: 'ERR_NOT_FOUND' });
-  res.json({ data: { deleted: result } });
+  res.json({ data: { deleted: 1, remaining: result.remaining.length, checkout_group_deleted: result.groupDeleted } });
 }
 
 // GET /api/admin/visitors → { now, today, total } — distinct storefront sessions

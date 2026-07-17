@@ -61,6 +61,19 @@ function sanitizeAddons(raw) {
   return out;
 }
 
+// Owner-locked settlement policy (2026-07-17): every add-on goes fully to
+// administration except شال امريكي, where administration always receives 20,000 IQD.
+// Keep this rule server-side so an old or hand-crafted client cannot write a different
+// split and silently change settlements.
+function normalizeSettlementAddons(raw) {
+  const out = sanitizeAddons(raw);
+  for (const key of Object.keys(out)) {
+    if (key === 'american_shawl') out[key].selling = Math.max(20000, out[key].selling);
+    out[key].admin = key === 'american_shawl' ? 20000 : out[key].selling;
+  }
+  return out;
+}
+
 function addonAmounts(addons, side) {
   return Object.fromEntries(Object.entries(addons).map(([key, pair]) => [key, pair[side]]));
 }
@@ -79,7 +92,7 @@ async function loadWholesalerPricing(wholesalerId) {
   return {
     adminPrice: Math.max(0, Math.round(Number(row?.admin_price || 0))),
     wholesalerPrice: Math.max(0, Math.round(Number(row?.wholesaler_price || 0))),
-    addons: sanitizeAddons(row?.pricing_addons),
+    addons: normalizeSettlementAddons(row?.pricing_addons),
   };
 }
 
@@ -232,6 +245,20 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
      ORDER BY type, featured DESC, sort, created_at`
   );
   for (const p of prods.rows) if (!byType[p.type]) byType[p.type] = p.id;
+  // EDIT STABILITY: a student's existing live order pins the product per piece type.
+  // Without this, a catalog change (e.g. a new featured sash) re-resolves the type to a
+  // DIFFERENT product on edit → the (student, product) upsert misses → a second live
+  // order is inserted and the bundle double-counts the piece (bug found 2026-07-16:
+  // 38 bundles duplicated after «وشاح الفراشة» went featured on 2026-07-06).
+  const pinnedByExisting = await query(
+    `SELECT DISTINCT ON (p.type) p.type, o.product_id
+     FROM orders o JOIN products p ON p.id = o.product_id
+     WHERE o.student_id = $1 AND o.design_id IS NULL AND o.status <> 'cancelled'
+       AND p.type IN ('sash','robe','cap')
+     ORDER BY p.type, o.created_at DESC`,
+    [student.id]
+  );
+  for (const r of pinnedByExisting.rows) byType[r.type] = r.product_id;
   if (selectedPieces.some((type) => !byType[type])) {
     return err(500, 'منتجات الطلب غير مكتملة في النظام', 'ERR_CONFIG');
   }
@@ -255,6 +282,13 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
   const pricing = await loadWholesalerPricing(student.wholesaler_id);
   const isFullPackage = selectedSet.has('sash') && selectedSet.has('robe') && selectedSet.has('cap');
   const fullPackageBase = pricing.wholesalerPrice > 0 ? pricing.wholesalerPrice : DEFAULT_PACKAGE_PRICE;
+  // A rep-linked full package must never settle with a zero admin share merely because
+  // an old/missing config stored admin_price=0. In that case, use the selling fallback so
+  // the rep receives no accidental margin. Independent admin-created retail orders keep
+  // cost=0 until the admin enters their real cost.
+  const fullPackageAdminBase = pricing.adminPrice > 0
+    ? pricing.adminPrice
+    : (student.wholesaler_id ? fullPackageBase : 0);
   const sellingAddons = addonAmounts(pricing.addons, 'selling');
   const adminAddons = addonAmounts(pricing.addons, 'admin');
   const itemBasePrice = isFullPackage
@@ -284,7 +318,7 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
   };
   const totalPrice = selectedPieces.reduce((s, type) => s + itemPrice[type], 0);
   const adminBase = isFullPackage
-    ? { sash: pricing.adminPrice, robe: 0, cap: 0 }
+    ? { sash: fullPackageAdminBase, robe: 0, cap: 0 }
     : {
         sash: selectedSet.has('sash') ? (sashType === 'ملكي' ? adminAddons.piece_sash_royal : adminAddons.piece_sash_normal) : 0,
         cap: selectedSet.has('cap') ? (capType === 'ملكي' ? adminAddons.piece_cap_royal : adminAddons.piece_cap_normal) : 0,
@@ -375,12 +409,16 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
       cgId = cg.rows[0].id;
     }
 
+    // Deselected pieces: cancel by piece TYPE within this bundle (not by one product id —
+    // an old order may sit on a different product of the same type, see EDIT STABILITY above).
     for (const type of PRODUCT_PIECES) {
-      if (selectedSet.has(type) || !byType[type]) continue;
+      if (selectedSet.has(type)) continue;
       await client.query(
-        `UPDATE orders SET status='cancelled', wholesaler_approval='pending', wholesaler_reject_reason=NULL
-         WHERE student_id = $1 AND product_id = $2 AND design_id IS NULL AND status <> 'cancelled'`,
-        [student.id, byType[type]]
+        `UPDATE orders o SET status='cancelled', wholesaler_approval='pending', wholesaler_reject_reason=NULL
+         FROM products p
+         WHERE p.id = o.product_id AND o.student_id = $1 AND p.type = $2
+           AND o.checkout_group_id = $3 AND o.design_id IS NULL AND o.status <> 'cancelled'`,
+        [student.id, type, cgId]
       );
     }
 
@@ -394,7 +432,8 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
       const measurementsJson = type === 'robe' && hasAnyMeasurement ? JSON.stringify(meas) : null;
       const existing = await client.query(
         `SELECT id FROM orders
-         WHERE student_id = $1 AND product_id = $2 AND design_id IS NULL AND status <> 'cancelled'`,
+         WHERE student_id = $1 AND product_id = $2 AND design_id IS NULL AND status <> 'cancelled'
+         ORDER BY created_at DESC LIMIT 1`,
         [student.id, prodId]
       );
       let oid;
@@ -422,6 +461,16 @@ async function persistFullSetOrder({ student, body, actorUserId }) {
         );
         oid = o.rows[0].id;
       }
+
+      // SELF-HEAL: never leave a second live order of the same piece type in this bundle
+      // (cleans up bundles already duplicated by the pre-fix resolution drift).
+      await client.query(
+        `UPDATE orders o SET status='cancelled', wholesaler_approval='pending', wholesaler_reject_reason=NULL
+         FROM products p
+         WHERE p.id = o.product_id AND o.student_id = $1 AND p.type = $2 AND o.id <> $3
+           AND o.checkout_group_id = $4 AND o.design_id IS NULL AND o.status <> 'cancelled'`,
+        [student.id, type, oid, cgId]
+      );
 
       const pieceName =
         type === 'sash' && sashType
@@ -539,5 +588,5 @@ async function readFullSetOrder(studentId) {
 
 module.exports = {
   persistFullSetOrder, readFullSetOrder,
-  loadWholesalerPricing, DEFAULT_ADDONS, sanitizeAddons,
+  loadWholesalerPricing, DEFAULT_ADDONS, sanitizeAddons, normalizeSettlementAddons,
 };

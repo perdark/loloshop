@@ -4,32 +4,44 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import {
-  createAdminCustomOrder,
-  getAdminCustomOrderConfig,
-  uploadAdminCustomOrderImage,
-  type AdminCustomOrderConfig,
-} from "@/lib/admin";
+import { useRequireAuth } from "@/hooks/useRequireAuth";
 import { getApiErrorMessage } from "@/lib/api";
 import {
+  createStaffCustomOrder,
+  getStaffCustomOrderConfig,
   getStudentFullSetContext,
   searchProductionStudents,
+  uploadStaffCustomOrderImage,
+  type CustomOrderConfig,
   type CustomOrderPayload,
 } from "@/lib/staff";
 import { CustomOrderForm } from "@/components/staff/CustomOrderForm";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { PageLoader } from "@/components/ui/Spinner";
 import { EmptyState } from "@/components/ui/EmptyState";
+import type { StaffType } from "@/lib/types";
 
-export default function AdminCustomOrderPage() {
+// «طلب مخصص» for مدير الإنتاج — same shared form as /admin/custom-order, wired to the
+// /api/staff/custom-order mirrors (manager-only server-side; admins use the admin page).
+export default function StaffCustomOrderPage() {
+  const { user, loading: authLoading } = useRequireAuth(["staff", "admin"]);
   const router = useRouter();
-  const [config, setConfig] = useState<AdminCustomOrderConfig | null>(null);
+  const [config, setConfig] = useState<CustomOrderConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
+  const myTypes: StaffType[] =
+    user?.staff_types && user.staff_types.length
+      ? user.staff_types
+      : user?.staff_type
+        ? [user.staff_type]
+        : [];
+  const isManager = user?.role === "admin" || myTypes.includes("manager");
+
   useEffect(() => {
+    if (!user || !isManager) return;
     let alive = true;
-    getAdminCustomOrderConfig()
+    getStaffCustomOrderConfig()
       .then((data) => {
         if (alive) setConfig(data);
       })
@@ -40,14 +52,25 @@ export default function AdminCustomOrderPage() {
     return () => {
       alive = false;
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, isManager]);
+
+  if (authLoading || !user) return <PageLoader />;
+
+  if (!isManager) {
+    return (
+      <div className="mx-auto max-w-lg px-4 py-16" dir="rtl">
+        <EmptyState title="غير مصرّح" message="الطلب المخصص مخصّص لمدير الإنتاج فقط." />
+      </div>
+    );
+  }
 
   async function handleSubmit(payload: CustomOrderPayload) {
     setSubmitting(true);
     try {
-      await createAdminCustomOrder(payload);
+      await createStaffCustomOrder(payload);
       toast.success(payload.student_id ? "تم حفظ طلب الطالب" : "تم إنشاء الطلب المخصص");
-      router.push("/admin/orders");
+      router.push("/staff/queue");
     } catch (e) {
       toast.error(getApiErrorMessage(e, "تعذر إنشاء الطلب"));
     } finally {
@@ -64,10 +87,10 @@ export default function AdminCustomOrderPage() {
         subtitle="إنشاء أو تعديل طلب لطالب — جديد أو موجود"
         action={
           <Link
-            href="/admin/orders"
+            href="/staff/queue"
             className="inline-flex min-h-11 items-center rounded-full border border-line bg-beige px-4 text-sm font-semibold text-ink-soft hover:border-orange-ink/40"
           >
-            رجوع للطلبات
+            رجوع للمنصّة
           </Link>
         }
       />
@@ -77,7 +100,7 @@ export default function AdminCustomOrderPage() {
           config={config}
           submitting={submitting}
           onSubmit={handleSubmit}
-          onUploadImage={uploadAdminCustomOrderImage}
+          onUploadImage={uploadStaffCustomOrderImage}
           onSearchStudents={searchProductionStudents}
           onLoadStudentContext={getStudentFullSetContext}
         />

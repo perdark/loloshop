@@ -16,6 +16,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { StatCard } from "@/components/ui/StatCard";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
+import { CalculationDetails } from "@/components/admin/CalculationDetails";
 
 type ApprovalFilter = "pending" | "approved" | "rejected";
 
@@ -192,10 +193,19 @@ export default function WholesalerOrdersPage() {
       </h1>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 gap-3">
-        <StatCard label="سعر الإدارة" value={formatPrice(stats.admin)} />
-        <StatCard label="سعر الممثل" value={formatPrice(stats.wholesaler)} accent="profit" />
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <StatCard label="حصة الإدارة" value={formatPrice(stats.admin)} />
+        <StatCard label="ما يدفعه الطلاب" value={formatPrice(stats.wholesaler)} accent="profit" />
+        <StatCard label="ربح الممثل" value={formatPrice(stats.wholesaler - stats.admin)} />
       </div>
+      <CalculationDetails summary="كيف حُسبت أرقام هذه القائمة؟">
+        <p>
+          هذه مجاميع تبويب «{approvalLabel(tab)}» الحالي فقط. ربح الممثل = ما يدفعه الطلاب − حصة الإدارة.
+          {tab === "approved"
+            ? " هذه الطلبات فقط تدخل في رصيد التسوية إذا لم تكن ملغاة."
+            : " هذه أرقام للمراجعة وليست مستحقات مالية معتمدة بعد."}
+        </p>
+      </CalculationDetails>
 
       {/* Tab strip */}
       <div className="surface-card flex gap-1 rounded-2xl p-1.5">
@@ -297,9 +307,17 @@ export default function WholesalerOrdersPage() {
                   </p>
 
                   <div className="mt-2 grid grid-cols-2 gap-2 rounded-xl bg-surface-sink p-3 text-sm">
-                    <span className="text-ink-soft">سعر الإدارة<br/><b className="text-ink tabular-nums">{formatPrice(row.admin_amount)}</b></span>
-                    <span className="text-ink-soft">سعر الممثل<br/><b className="text-orange-ink tabular-nums">{formatPrice(row.wholesaler_amount)}</b></span>
+                    <span className="text-ink-soft">حصة الإدارة<br/><b className="text-ink tabular-nums">{formatPrice(row.admin_amount)}</b></span>
+                    <span className="text-ink-soft">ما يدفعه الطالب<br/><b className="text-orange-ink tabular-nums">{formatPrice(row.wholesaler_amount)}</b></span>
                   </div>
+                  <CalculationDetails summary="شرح مبلغ هذا الطلب" className="mt-2">
+                    <p className="text-ink">
+                      ربح الممثل = {formatPrice(row.wholesaler_amount)} − {formatPrice(row.admin_amount)} = {formatPrice(row.wholesaler_amount - row.admin_amount)}
+                    </p>
+                    {row.approval !== "approved" && (
+                      <p className="mt-1">لا يدخل هذا المبلغ في التسوية حتى تصبح حالة الطلب «موافق عليه».</p>
+                    )}
+                  </CalculationDetails>
                   <div className="mt-2 flex items-center text-sm">
                     <span className="text-ink-soft" dir="ltr">
                       {formatDate(row.submitted_at)}

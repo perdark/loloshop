@@ -23,11 +23,13 @@ import {
   revertOrder,
   returnOrderToCustomer,
   deleteProductionOrder,
+  patchOrderDetails,
   claimOrder,
   releaseOrder,
   approveDesign,
   rejectDesign,
 } from "@/lib/staff";
+import { Input } from "@/components/ui/Input";
 import { getApiErrorMessage } from "@/lib/api";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 import type { ProductionOrderDetail, ProductionOrderItem } from "@/lib/staff-types";
@@ -582,9 +584,17 @@ function ProductionOrderDetailContent() {
   const [returnReason, setReturnReason] = useState("");
   const [returnSubmitting, setReturnSubmitting] = useState(false);
 
-  // «حذف الطلب» — permanent delete (all staff), confirm dialog
+  // «حذف القطعة» — permanent single-piece delete (manager/admin), confirm dialog
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
+
+  // «تعديل سريع» — admin/manager inline edit of a typed spec line or يوزر الانستا
+  const [quickEdit, setQuickEdit] = useState<
+    | { kind: "item"; itemId: string; label: string; value: string }
+    | { kind: "instagram"; value: string }
+    | null
+  >(null);
+  const [quickEditSaving, setQuickEditSaving] = useState(false);
 
   // Delivery confirmation modal (ready → delivered)
   const [deliverOpen, setDeliverOpen] = useState(false);
@@ -709,15 +719,40 @@ function ProductionOrderDetailContent() {
     setDeleteSubmitting(true);
     try {
       await deleteProductionOrder(detail.order.id);
-      toast.success("تم حذف الطلب نهائياً");
+      toast.success("تم حذف القطعة نهائياً");
       setDeleteOpen(false);
       // The order no longer exists — invalidate the App Router cache and leave the page.
       router.refresh();
       router.push("/staff/queue");
     } catch (err) {
-      toast.error(getApiErrorMessage(err, "تعذر حذف الطلب"));
+      toast.error(getApiErrorMessage(err, "تعذر حذف القطعة"));
     } finally {
       setDeleteSubmitting(false);
+    }
+  }
+
+  async function handleQuickEditSave() {
+    if (!detail || !quickEdit) return;
+    const value = quickEdit.value.trim();
+    if (quickEdit.kind === "item" && !value) {
+      toast.error("النص مطلوب");
+      return;
+    }
+    setQuickEditSaving(true);
+    try {
+      await patchOrderDetails(
+        detail.order.id,
+        quickEdit.kind === "item"
+          ? { items: [{ item_id: quickEdit.itemId, customer_text: value }] }
+          : { student: { instagram_username: value } }
+      );
+      toast.success("تم حفظ التعديل");
+      setQuickEdit(null);
+      await load();
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "تعذر حفظ التعديل"));
+    } finally {
+      setQuickEditSaving(false);
     }
   }
 
@@ -862,6 +897,8 @@ function ProductionOrderDetailContent() {
   const showRevert = !!available_actions.revert;
   const showReturnToCustomer = !!available_actions.return_to_customer;
   const canDelete = !!available_actions.can_delete;
+  const canEdit = !!available_actions.can_edit;
+  const canEditFullSet = !!available_actions.can_edit_full_set;
   const advanceLabel = available_actions.advance?.label ?? "تقدم للمرحلة التالية";
 
   // Approve and advance never apply to the same order, presented as ONE primary button.
@@ -1155,7 +1192,7 @@ function ProductionOrderDetailContent() {
               )}
               {canDelete && (
                 <Button variant="danger" fullWidth onClick={() => setDeleteOpen(true)}>
-                  حذف الطلب
+                  حذف القطعة
                 </Button>
               )}
             </div>
@@ -1179,7 +1216,7 @@ function ProductionOrderDetailContent() {
         <Modal
           open={deleteOpen}
           onClose={() => setDeleteOpen(false)}
-          title="حذف الطلب نهائياً"
+          title="حذف القطعة نهائياً"
           footer={
             <>
               <Button variant="ghost" onClick={() => setDeleteOpen(false)}>
@@ -1192,7 +1229,7 @@ function ProductionOrderDetailContent() {
           }
         >
           <p className="text-sm text-ink-soft">
-            سيُحذف الطلب وكل قطعه (الوشاح/الروب/القبعة) نهائياً ولا يمكن التراجع. هل أنت متأكد؟
+            سيُحذف هذه القطعة فقط نهائياً ولا يمكن التراجع — بقية قطع الطلب (إن وجدت) تبقى كما هي. هل أنت متأكد؟
           </p>
         </Modal>
       </div>
@@ -1403,7 +1440,7 @@ function ProductionOrderDetailContent() {
       )}
 
       {/* ── Primary action — big tap target on mobile ── */}
-      {(showPrimaryAction || canReject || showRevert || showReturnToCustomer || canDelete) && (
+      {(showPrimaryAction || canReject || showRevert || showReturnToCustomer || canDelete || canEditFullSet) && (
       <div className="mb-4 flex flex-col gap-2 sm:hidden">
         {showPrimaryAction && (
           <Button
@@ -1434,9 +1471,17 @@ function ProductionOrderDetailContent() {
             إرجاع للزبون لتعديله
           </Button>
         )}
+        {canEditFullSet && (
+          <Link
+            href={`/staff/orders/${order.id}/edit`}
+            className="inline-flex min-h-11 w-full items-center justify-center rounded-full border border-orange-ink/40 bg-orange-ink/5 px-4 text-sm font-semibold text-orange-ink transition-colors hover:bg-orange-ink/10"
+          >
+            تعديل الطلب
+          </Link>
+        )}
         {canDelete && (
           <Button variant="danger" fullWidth onClick={() => setDeleteOpen(true)}>
-            حذف الطلب
+            حذف القطعة
           </Button>
         )}
       </div>
@@ -1542,7 +1587,7 @@ function ProductionOrderDetailContent() {
           <article className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
             <h2 className="font-display-ar text-lg font-bold text-ink">بيانات الطالب</h2>
             <dl className="mt-4 space-y-2.5 text-sm">
-              {/* Contact rows render only when the backend supplies them (front-desk/manager).
+              {/* Contact rows render only when the backend supplies them (front-desk/manager/designer).
                   Lean production roles get them stripped server-side → rows simply disappear. */}
               {order.student_phone && (
                 <div className="flex justify-between gap-4 border-b border-line pb-2.5">
@@ -1554,18 +1599,34 @@ function ProductionOrderDetailContent() {
                   </dd>
                 </div>
               )}
-              {order.instagram_username && (
+              {(order.instagram_username || canEdit) && (
                 <div className="flex justify-between gap-4 border-b border-line pb-2.5">
                   <dt className="text-muted">انستغرام</dt>
-                  <dd dir="ltr">
-                    <a
-                      href={`https://instagram.com/${order.instagram_username}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex min-h-11 items-center font-medium text-orange-ink underline underline-offset-2"
-                    >
-                      @{order.instagram_username}
-                    </a>
+                  <dd dir="ltr" className="flex items-center gap-1.5">
+                    {order.instagram_username ? (
+                      <a
+                        href={`https://instagram.com/${order.instagram_username}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex min-h-11 items-center font-medium text-orange-ink underline underline-offset-2"
+                      >
+                        @{order.instagram_username}
+                      </a>
+                    ) : (
+                      <span className="inline-flex min-h-11 items-center text-muted">—</span>
+                    )}
+                    {canEdit && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setQuickEdit({ kind: "instagram", value: order.instagram_username || "" })
+                        }
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-line text-ink-soft transition-colors hover:border-orange-ink/50 hover:text-orange-ink"
+                        aria-label="تعديل يوزر الانستا"
+                      >
+                        ✎
+                      </button>
+                    )}
                   </dd>
                 </div>
               )}
@@ -1739,12 +1800,31 @@ function ProductionOrderDetailContent() {
                     (i) => i.group_id !== null || !!i.customer_text || !!i.customer_image_url
                   )
                   .map((item, idx) => (
-                    <li key={idx} className="space-y-1.5">
+                    <li key={item.id ?? idx} className="space-y-1.5">
                       <div className="flex items-center justify-between gap-2 text-sm">
                         <span className="text-ink-soft">{item.label_snapshot}</span>
-                        {item.customer_text && (
-                          <span className="font-semibold text-ink">{item.customer_text}</span>
-                        )}
+                        <span className="flex items-center gap-1.5">
+                          {item.customer_text && (
+                            <span className="font-semibold text-ink">{item.customer_text}</span>
+                          )}
+                          {canEdit && item.customer_text && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setQuickEdit({
+                                  kind: "item",
+                                  itemId: item.id,
+                                  label: item.label_snapshot,
+                                  value: item.customer_text || "",
+                                })
+                              }
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-line text-ink-soft transition-colors hover:border-orange-ink/50 hover:text-orange-ink"
+                              aria-label={`تعديل ${item.label_snapshot}`}
+                            >
+                              ✎
+                            </button>
+                          )}
+                        </span>
                       </div>
                       {/* Customer reference photo shown inline (no download step) */}
                       {item.customer_image_url && (
@@ -1902,7 +1982,7 @@ function ProductionOrderDetailContent() {
           )}
 
           {/* ── Action buttons — desktop only (mobile shown above) ── */}
-          {(showPrimaryAction || canReject || showRevert || showReturnToCustomer || canDelete) && (
+          {(showPrimaryAction || canReject || showRevert || showReturnToCustomer || canDelete || canEditFullSet) && (
           <article className="hidden sm:block rounded-[var(--radius-card)] border border-orange-ink/15 bg-warm-veil p-5 shadow-[var(--shadow-soft)]">
             <h3 className="mb-4 font-display-ar text-base font-bold text-ink">الإجراءات</h3>
             <div className="flex flex-col gap-2">
@@ -1931,9 +2011,17 @@ function ProductionOrderDetailContent() {
                   إرجاع للزبون لتعديله
                 </Button>
               )}
+              {canEditFullSet && (
+                <Link
+                  href={`/staff/orders/${order.id}/edit`}
+                  className="inline-flex min-h-11 w-full items-center justify-center rounded-full border border-orange-ink/40 bg-orange-ink/5 px-4 text-sm font-semibold text-orange-ink transition-colors hover:bg-orange-ink/10"
+                >
+                  تعديل الطلب
+                </Link>
+              )}
               {canDelete && (
                 <Button variant="danger" fullWidth onClick={() => setDeleteOpen(true)}>
-                  حذف الطلب
+                  حذف القطعة
                 </Button>
               )}
             </div>
@@ -2000,7 +2088,7 @@ function ProductionOrderDetailContent() {
       <Modal
         open={deleteOpen}
         onClose={() => setDeleteOpen(false)}
-        title="حذف الطلب نهائياً"
+        title="حذف القطعة نهائياً"
         footer={
           <>
             <Button variant="ghost" onClick={() => setDeleteOpen(false)}>
@@ -2013,8 +2101,36 @@ function ProductionOrderDetailContent() {
         }
       >
         <p className="text-sm text-ink-soft">
-          سيُحذف الطلب وكل قطعه (الوشاح/الروب/القبعة) نهائياً ولا يمكن التراجع. هل أنت متأكد؟
+          سيُحذف هذه القطعة فقط نهائياً ولا يمكن التراجع — بقية قطع الطلب (إن وجدت) تبقى كما هي. هل أنت متأكد؟
         </p>
+      </Modal>
+
+      {/* ── «تعديل سريع» modal — spec-line text / يوزر الانستا (manager/admin) ── */}
+      <Modal
+        open={!!quickEdit}
+        onClose={() => setQuickEdit(null)}
+        title={quickEdit?.kind === "instagram" ? "تعديل يوزر الانستا" : `تعديل — ${quickEdit?.kind === "item" ? quickEdit.label : ""}`}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setQuickEdit(null)}>
+              إلغاء
+            </Button>
+            <Button loading={quickEditSaving} onClick={handleQuickEditSave}>
+              حفظ
+            </Button>
+          </>
+        }
+      >
+        <Input
+          label={quickEdit?.kind === "instagram" ? "يوزر الانستا (بدون @)" : "النص"}
+          value={quickEdit?.value ?? ""}
+          onChange={(e) =>
+            setQuickEdit((prev) => (prev ? { ...prev, value: e.target.value } : prev))
+          }
+          maxLength={quickEdit?.kind === "instagram" ? 100 : 200}
+          dir={quickEdit?.kind === "instagram" ? "ltr" : undefined}
+          autoFocus
+        />
       </Modal>
 
       {/* ── «إرجاع للطالب» modal — hand a retail order back to the student to edit ── */}

@@ -16,6 +16,7 @@ router.get('/orders', orders.listOrders);
 router.get('/custom-order/config', customOrders.customOrderConfig);
 router.post('/custom-order', customOrders.createCustomOrder);
 router.post('/custom-order/uploads/image', imageUpload.single('file'), customOrders.uploadImage);
+router.get('/custom-order/students-search', require('../controllers/orderEditController').studentsSearch);
 router.patch('/orders/:id/cost', c.updateOrderCost);
 router.delete('/orders/:id', c.deleteOrder);
 router.patch('/checkout-groups/:id', c.updateCheckoutGroup);

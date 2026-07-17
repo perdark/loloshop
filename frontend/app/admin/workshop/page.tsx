@@ -10,6 +10,7 @@ import { Modal } from "@/components/ui/Modal";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { formatIQD } from "@/lib/format";
 import { getApiErrorMessage } from "@/lib/api";
+import { CalculationDetails } from "@/components/admin/CalculationDetails";
 import {
   addWorkshopAdjustment, createWorkshopWorker, getLinkCandidates, getWorkshopDashboard,
   listRates, recordProductionForWorker, updateWorkshopWorker, upsertRate,
@@ -45,6 +46,12 @@ function Overview({ data, onChanged }: { data: WorkshopDashboard; onChanged: () 
   const [adjust, setAdjust] = useState<WorkshopWorker | null>(null);
   return <div className="space-y-6">
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-5"><Stat label="القطع" value={String(data.totals.pieces)} /><Stat label="أجور القطع" value={formatIQD(data.totals.production)} /><Stat label="الحوافز" value={formatIQD(data.totals.bonuses)} /><Stat label="الخصومات" value={formatIQD(data.totals.deductions)} /><Stat label="المستحق" value={formatIQD(data.totals.payable)} accent /></div>
+    <CalculationDetails summary="كيف حُسبت مستحقات الورشة؟">
+      <p>أجر كل تسجيل إنتاج = عدد القطع × سعر القطعة المحفوظ وقت التسجيل.</p>
+      <p className="mt-1 rounded-lg bg-ink/[0.04] px-2.5 py-2 text-ink">
+        إجمالي المستحق = أجور القطع {formatIQD(data.totals.production)} + الحوافز {formatIQD(data.totals.bonuses)} − الخصومات {formatIQD(data.totals.deductions)} = {formatIQD(data.totals.payable)}
+      </p>
+    </CalculationDetails>
     {data.workers.length === 0 ? <EmptyState title="لا يوجد عمّال" message="أضف عمّال الورشة من تبويب العمّال." /> : <div className="overflow-x-auto rounded-2xl border border-line bg-surface"><table className="w-full min-w-[720px] text-sm"><thead className="border-b border-line text-ink-soft"><tr className="[&>th]:px-4 [&>th]:py-3 [&>th]:text-start"><th>العامل</th><th>القطع</th><th>أجور القطع</th><th>الحوافز</th><th>الخصومات</th><th>المستحق</th><th></th></tr></thead><tbody className="divide-y divide-line">{data.workers.map((w) => <tr key={w.id} className="[&>td]:px-4 [&>td]:py-3"><td className="font-semibold text-ink">{w.name}</td><td>{w.pieces}</td><td>{formatIQD(w.production)}</td><td>{formatIQD(w.bonuses)}</td><td>{formatIQD(w.deductions)}</td><td className="font-bold text-orange-ink">{formatIQD(w.payable)}</td><td><Button size="sm" variant="secondary" onClick={() => setAdjust(w)}>حافز / خصم</Button></td></tr>)}</tbody></table></div>}
     <section><h2 className="mb-3 text-base font-bold text-ink">آخر التسجيلات</h2><div className="divide-y divide-line rounded-2xl border border-line bg-surface px-4">{data.recent.length ? data.recent.map((entry) => <div key={entry.id} className="flex items-center justify-between gap-3 py-3 text-sm"><div><p className="font-semibold text-ink">{entry.worker_name} · {entry.kind === 'production' ? `${entry.operation_label_ar} ${entry.product_label_ar} × ${entry.qty}` : entry.kind === 'bonus' ? 'حافز' : 'خصم'}</p><p className="text-xs text-ink-soft">{entry.reason || entry.entry_date}</p></div><b className={entry.kind === 'deduction' ? 'text-danger' : 'text-ink'}>{entry.kind === 'deduction' ? '−' : '+'}{formatIQD(entry.amount)}</b></div>) : <p className="py-8 text-center text-sm text-ink-soft">لا توجد تسجيلات بعد.</p>}</div></section>
     {adjust && <AdjustmentModal worker={adjust} onClose={() => setAdjust(null)} onDone={async () => { setAdjust(null); await onChanged(); }} />}

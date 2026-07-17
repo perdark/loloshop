@@ -19,6 +19,7 @@ interface ApiDashboard {
   referral_code: string;
   embroidery_color?: string | null;
   admin_due?: number;
+  student_total?: number;
   pricing?: {
     admin_base: number;
     selling_base: number;
@@ -46,6 +47,7 @@ export async function getWholesalerDashboard(): Promise<WholesalerDashboard> {
     commissionRate: data.commission_rate ?? 0,
     earnedCommission: data.earned_commission ?? 0,
     adminDue: data.admin_due ?? 0,
+    studentTotal: data.student_total ?? 0,
     pricing: data.pricing ? {
       adminBase: data.pricing.admin_base,
       sellingBase: data.pricing.selling_base,

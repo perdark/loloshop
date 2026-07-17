@@ -1,5 +1,11 @@
 import { api, apiUploadFile } from "./api";
 import type {
+  CreateFullSetPayload,
+  FullSetExistingOrder,
+  FullSetPackage,
+  FullSetPricing,
+} from "./wholesaler";
+import type {
   OrderStatus,
   SalaryTxnType,
   StaffActivity,
@@ -129,6 +135,187 @@ export async function deleteProductionOrder(id: string): Promise<number> {
   return data.data.deleted;
 }
 
+// ─── Admin/مدير الإنتاج order editing (/api/production, manager+admin) ────────
+
+export interface StudentSearchHit {
+  id: string;
+  name: string;
+  phone: string | null;
+  university_name: string | null;
+  wholesaler_id: string | null;
+  rep_name: string | null;
+  has_full_set: boolean;
+}
+
+export async function searchProductionStudents(q: string): Promise<StudentSearchHit[]> {
+  const { data } = await api.get<{ data: StudentSearchHit[] }>("/production/students-search", {
+    params: { q },
+  });
+  return data.data ?? [];
+}
+
+export interface StudentFullSetContext {
+  existing: FullSetExistingOrder | null;
+  pricing: FullSetPricing | null;
+}
+
+/** Read-back used by the custom-order picker so a picked student's طقم pre-fills. */
+export async function getStudentFullSetContext(studentId: string): Promise<StudentFullSetContext> {
+  const { data } = await api.get<{ data: StudentFullSetContext }>(
+    `/production/students/${studentId}/full-set-order`
+  );
+  return data.data;
+}
+
+export interface OrderEditStudent {
+  id: string;
+  name: string;
+  phone: string | null;
+  instagram_username: string | null;
+  university_name: string | null;
+  department: string | null;
+  wholesaler_id: string | null;
+  rep_name: string | null;
+}
+
+export interface OrderEditGroup {
+  id: string;
+  customer_name: string;
+  instagram_username: string | null;
+  phone_primary: string;
+  phone_secondary: string | null;
+  notes: string | null;
+}
+
+export interface OrderEditContext {
+  student: OrderEditStudent;
+  group: OrderEditGroup | null;
+  existing: FullSetExistingOrder | null;
+  pricing: FullSetPricing | null;
+  can_edit_full_set: boolean;
+}
+
+export async function getOrderEditContext(orderId: string): Promise<OrderEditContext> {
+  const { data } = await api.get<{ data: OrderEditContext }>(
+    `/production/orders/${orderId}/edit-context`
+  );
+  return data.data;
+}
+
+export interface StudentInfoPayload {
+  name?: string;
+  instagram_username?: string;
+  phone_primary?: string;
+  phone_secondary?: string;
+}
+
+export async function saveStudentFullSetOrder(
+  studentId: string,
+  payload: CreateFullSetPayload & { student_info?: StudentInfoPayload }
+): Promise<{ total: number; packageName: string }> {
+  const { data } = await api.post<{ data: { total: number; package_name: string } }>(
+    `/production/students/${studentId}/full-set-order`,
+    payload
+  );
+  return { total: data.data.total, packageName: data.data.package_name };
+}
+
+export interface QuickEditPayload {
+  items?: { item_id: string; customer_text: string }[];
+  student?: { name?: string; instagram_username?: string };
+  group?: { phone_primary?: string; phone_secondary?: string; notes?: string };
+}
+
+export async function patchOrderDetails(orderId: string, body: QuickEditPayload): Promise<void> {
+  await api.patch(`/production/orders/${orderId}/details`, body);
+}
+
+export async function uploadProductionImage(file: File): Promise<string> {
+  const res = (await apiUploadFile("/production/uploads/image", file)) as {
+    data: { url: string };
+  };
+  return res.data.url;
+}
+
+// ─── «طلب مخصص» for مدير الإنتاج (/api/staff/custom-order, manager-only) ──────
+
+export interface CustomOrderConfigWholesaler {
+  id: string;
+  name: string;
+  universityName: string | null;
+  department: string | null;
+  pricing: FullSetPricing;
+}
+
+export interface CustomOrderConfig {
+  packages: FullSetPackage[];
+  pricing: FullSetPricing | null;
+  wholesalers: CustomOrderConfigWholesaler[];
+}
+
+export interface CustomOrderPayload extends CreateFullSetPayload {
+  /** طالب جديد mode — required when student_id absent. */
+  student_name?: string;
+  /** طالب موجود mode — takes precedence over student_name. */
+  student_id?: string | null;
+  wholesaler_id?: string | null;
+}
+
+export async function getStaffCustomOrderConfig(): Promise<CustomOrderConfig> {
+  const { data } = await api.get<{
+    data: {
+      packages: FullSetPackage[];
+      pricing: FullSetPricing | null;
+      wholesalers: {
+        id: string;
+        name: string;
+        university_name: string | null;
+        department: string | null;
+        pricing: FullSetPricing;
+      }[];
+    };
+  }>("/staff/custom-order/config");
+  return {
+    packages: data.data.packages || [],
+    pricing: data.data.pricing ?? null,
+    wholesalers: (data.data.wholesalers || []).map((w) => ({
+      id: w.id,
+      name: w.name,
+      universityName: w.university_name,
+      department: w.department,
+      pricing: w.pricing,
+    })),
+  };
+}
+
+export async function createStaffCustomOrder(
+  payload: CustomOrderPayload
+): Promise<{ studentId: string; total: number; packageName: string }> {
+  const { data } = await api.post<{
+    data: { student_id: string; total: number; package_name: string };
+  }>("/staff/custom-order", payload);
+  return {
+    studentId: data.data.student_id,
+    total: data.data.total,
+    packageName: data.data.package_name,
+  };
+}
+
+export async function uploadStaffCustomOrderImage(file: File): Promise<string> {
+  const res = (await apiUploadFile("/staff/custom-order/uploads/image", file)) as {
+    data: { url: string };
+  };
+  return res.data.url;
+}
+
+export async function searchStaffCustomOrderStudents(q: string): Promise<StudentSearchHit[]> {
+  const { data } = await api.get<{ data: StudentSearchHit[] }>(
+    "/staff/custom-order/students-search",
+    { params: { q } }
+  );
+  return data.data ?? [];
+}
+
 /**
  * POST /production/orders/:id/advance
  * Advances the order to the next pipeline stage.
@@ -212,6 +399,8 @@ export interface WholesalerOrderRow {
   shawlStudent: number;
   otherStudent: number;
   pieceStudent: number;
+  /** Historical/non-standard paid lines that do not match the named pricing categories. */
+  unclassifiedStudent: number;
 }
 
 interface WholesalerOrderApiRow {
@@ -236,6 +425,7 @@ interface WholesalerOrderApiRow {
   shawl_student?: number;
   other_student?: number;
   piece_student?: number;
+  unclassified_student?: number;
 }
 
 /**
@@ -274,6 +464,7 @@ export async function getWholesalerOrders(
     shawlStudent: Number(r.shawl_student || 0),
     otherStudent: Number(r.other_student || 0),
     pieceStudent: Number(r.piece_student || 0),
+    unclassifiedStudent: Number(r.unclassified_student || 0),
   }));
 }
 

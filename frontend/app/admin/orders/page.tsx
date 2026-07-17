@@ -31,6 +31,10 @@ import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { usePolling } from "@/lib/hooks/usePolling";
+import {
+  CalculationDetails,
+  OrderMoneyExplanation,
+} from "@/components/admin/CalculationDetails";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -53,6 +57,37 @@ const SOURCE_TABS: { value: OrderSource; label: string; subtitle: string }[] = [
 ];
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// ─── Session persistence — «perfect back-navigation restore» ──────────────────
+// Mirrors components/staff/station/StationConsole.tsx: lazy sessionStorage read +
+// a single mirror-snapshot effect. Safe to lazy-init — this page only ever mounts
+// client-side, behind AdminLayout's useRequireAuth loading gate (no SSR/hydration
+// of the filtered UI). Excludes fetched data + transient modal state (rejectTarget,
+// depositDraft, loading flags) — only the filter/view UI state is persisted.
+interface StoredOrdersState {
+  activeSource?: OrderSource;
+  wholesalerId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  status?: OrderStatus | "";
+  typeFilter?: string;
+  zoneFilter?: EmbroideryZone | "";
+  approvalFilter?: ApprovalFilter;
+  batchId?: string;
+  viewMode?: ViewMode;
+  sortKey?: SortKey;
+  sortDir?: SortDir;
+}
+const STORAGE_KEY = "loloshop-admin-orders";
+
+function readStoredOrdersState(): StoredOrdersState {
+  if (typeof window === "undefined") return {};
+  try {
+    return JSON.parse(sessionStorage.getItem(STORAGE_KEY) || "{}") as StoredOrdersState;
+  } catch {
+    return {};
+  }
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -210,11 +245,13 @@ function daysUntil(dateStr: string | null): number | null {
 
 function BundleCard({
   bundle,
+  source,
   onBundlesChange,
   onApprove,
   onReject,
 }: {
   bundle: AdminBundle;
+  source: OrderSource;
   onBundlesChange: (updater: (prev: AdminBundle[]) => AdminBundle[]) => void;
   onApprove: (cgId: string) => void;
   onReject: (cgId: string) => void;
@@ -255,6 +292,8 @@ function BundleCard({
   const remaining = intake ? bundle.total_price - intake.deposit : null;
   const phone1Int = iqPhone(intake?.phone_primary);
   const phone2Int = iqPhone(intake?.phone_secondary);
+  const countedItems = bundle.items.filter((item) => item.status !== "cancelled");
+  const cancelledCount = bundle.items.length - countedItems.length;
 
   return (
     <article className={`surface-card rounded-2xl p-4 shadow-[var(--shadow-card)] ${isSingle ? "border border-line" : "border-2 border-orange-ink/20"}`}>
@@ -446,7 +485,7 @@ function BundleCard({
         {bundle.items.map((item) => (
           <li
             key={item.order_id}
-            className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 rounded-xl border border-line bg-surface-sink px-3 py-2 text-sm"
+            className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-xl border border-line bg-surface-sink px-3 py-2 text-sm"
           >
             <div className="flex min-w-0 flex-1 items-center gap-2">
               <Link
@@ -465,6 +504,14 @@ function BundleCard({
                 {item.profit != null ? formatIQD(item.profit) : "—"}
               </span>
             </div>
+            <OrderMoneyExplanation
+              price={item.price}
+              cost={item.cost}
+              profit={item.profit}
+              calculation={item.calculation}
+              source={source}
+              className="w-full bg-surface"
+            />
           </li>
         ))}
       </ul>
@@ -490,6 +537,26 @@ function BundleCard({
           </p>
         </div>
       </div>
+      <CalculationDetails summary="كيف حُسب إجمالي الباقة؟" className="mt-2">
+        <div className="space-y-1.5">
+          {countedItems.map((item) => (
+            <div key={item.order_id} className="flex items-center justify-between gap-3">
+              <span className="truncate">{item.product_name}</span>
+              <span className="shrink-0 tabular-nums text-ink" dir="ltr">
+                {formatIQD(item.price)} − {formatIQD(item.cost)} = {formatIQD(item.profit)}
+              </span>
+            </div>
+          ))}
+        </div>
+        <div className="mt-3 space-y-1 rounded-lg bg-ink/[0.04] px-2.5 py-2 text-ink">
+          <p>الإيراد = مجموع أسعار القطع غير الملغاة = <span dir="ltr">{formatIQD(bundle.total_price)}</span></p>
+          <p>{source === "wholesaler" ? "حصة الإدارة" : "التكلفة"} = مجموع تكاليف القطع غير الملغاة = <span dir="ltr">{formatIQD(bundle.total_cost)}</span></p>
+          <p>{source === "wholesaler" ? "ربح الممثل" : "الربح"} = الإيراد − {source === "wholesaler" ? "حصة الإدارة" : "التكلفة"} = <span dir="ltr">{formatIQD(bundle.total_profit)}</span></p>
+        </div>
+        {cancelledCount > 0 && (
+          <p className="mt-2 text-amber-800">تم استبعاد {cancelledCount} قطعة ملغاة من إجمالي الباقة.</p>
+        )}
+      </CalculationDetails>
     </article>
   );
 }
@@ -528,7 +595,7 @@ function OrdersSection({
   sortKey,
   sortDir,
   typeFilter: _typeFilter,
-  activeSource: _activeSource,
+  activeSource,
   onCostInput,
   onSaveCost,
   onSort,
@@ -577,6 +644,7 @@ function OrdersSection({
           <BundleCard
             key={b.checkout_group_id ?? `single-${idx}`}
             bundle={b}
+            source={activeSource}
             onBundlesChange={onBundlesChange}
             onApprove={onApproveBundle}
             onReject={onRejectBundle}
@@ -636,7 +704,17 @@ function OrdersSection({
                     </span>
                   )}
                 </td>
-                <td className="px-4 py-3 text-ink-soft">{order.productName}</td>
+                <td className="min-w-[260px] px-4 py-3 text-ink-soft">
+                  <span>{order.productName}</span>
+                  <OrderMoneyExplanation
+                    price={order.price}
+                    cost={order.cost}
+                    profit={order.profit}
+                    calculation={order.calculation}
+                    source={activeSource}
+                    className="mt-2"
+                  />
+                </td>
                 <td className="px-4 py-3 tabular-nums text-ink-soft" dir="ltr">{formatIQD(order.price)}</td>
                 <td className="px-4 py-3 tabular-nums text-ink-soft" dir="ltr">
                   {order.cost != null ? formatIQD(order.cost) : "—"}
@@ -745,6 +823,14 @@ function OrdersSection({
                 </span>
               </div>
             </div>
+            <OrderMoneyExplanation
+              price={order.price}
+              cost={order.cost}
+              profit={order.profit}
+              calculation={order.calculation}
+              source={activeSource}
+              className="mt-3"
+            />
             <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-ink/10 pt-3">
               <span className="text-sm text-[var(--shop-muted)]">تعديل التكلفة:</span>
               <Input
@@ -813,34 +899,45 @@ function AdminOrdersContent() {
   const requestedWholesaler = searchParams.get("wholesaler") || "";
   const initialWholesaler = UUID_RE.test(requestedWholesaler) ? requestedWholesaler : "";
 
+  // Restore the last UI state — but a URL ?wholesaler= (a fresh incoming link, e.g. from
+  // a rep's student roster) always wins over a stale snapshot: when present, `stored` stays
+  // empty so every field below falls back to its normal default, exactly like today.
+  const [stored] = useState<StoredOrdersState>(() =>
+    initialWholesaler ? {} : readStoredOrdersState()
+  );
+
+  // TRUE after the first successful load — a restored wholesalerId/batchId is only
+  // pruned against FRESH data, never against the empty pre-fetch state.
+  const [loadedOnce, setLoadedOnce] = useState(false);
+
   // Source tab
   const [activeSource, setActiveSource] = useState<OrderSource>(
-    initialWholesaler ? "wholesaler" : "retail"
+    initialWholesaler ? "wholesaler" : stored.activeSource ?? "retail"
   );
 
   // Shared filters (per-source)
-  const [wholesalerId, setWholesalerId] = useState(initialWholesaler);
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const [wholesalerId, setWholesalerId] = useState(initialWholesaler || stored.wholesalerId || "");
+  const [dateFrom, setDateFrom] = useState(stored.dateFrom ?? "");
+  const [dateTo, setDateTo] = useState(stored.dateTo ?? "");
 
   // Item-mode-only
-  const [status, setStatus] = useState<OrderStatus | "">("");
-  const [typeFilter, setTypeFilter] = useState("");
-  const [zoneFilter, setZoneFilter] = useState<EmbroideryZone | "">("");
+  const [status, setStatus] = useState<OrderStatus | "">(stored.status ?? "");
+  const [typeFilter, setTypeFilter] = useState(stored.typeFilter ?? "");
+  const [zoneFilter, setZoneFilter] = useState<EmbroideryZone | "">(stored.zoneFilter ?? "");
 
   // Approval filter (wholesaler source only)
-  const [approvalFilter, setApprovalFilter] = useState<ApprovalFilter>("");
+  const [approvalFilter, setApprovalFilter] = useState<ApprovalFilter>(stored.approvalFilter ?? "");
 
   // Reject reason modal
   const [rejectTarget, setRejectTarget] = useState<string | null>(null);
   const [rejectLoading, setRejectLoading] = useState(false);
 
   // Reps drill-down (ممثلين tab): selected batch + the reps→batches landing grid
-  const [batchId, setBatchId] = useState("");
+  const [batchId, setBatchId] = useState(initialWholesaler ? "" : stored.batchId ?? "");
   const [repsOverview, setRepsOverview] = useState<RepOverview[]>([]);
 
   // View mode
-  const [viewMode, setViewMode] = useState<ViewMode>("item");
+  const [viewMode, setViewMode] = useState<ViewMode>(stored.viewMode ?? "item");
 
   // Data — separate per source
   const [retailOrders, setRetailOrders] = useState<AdminOrderWithApproval[]>([]);
@@ -855,8 +952,8 @@ function AdminOrdersContent() {
   // Item mode extras
   const [costDraftById, setCostDraftById] = useState<Record<string, string>>({});
   const [savingCostId, setSavingCostId] = useState<string | null>(null);
-  const [sortKey, setSortKey] = useState<SortKey>(null);
-  const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [sortKey, setSortKey] = useState<SortKey>(stored.sortKey ?? null);
+  const [sortDir, setSortDir] = useState<SortDir>(stored.sortDir ?? "desc");
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -878,9 +975,11 @@ function AdminOrdersContent() {
           }),
           getAdminOrderBundles({
             wholesalerId: wholesalerId || undefined,
+            batchId: batchId || undefined,
             source: "wholesaler",
             dateFrom: dateFrom || undefined,
             dateTo: dateTo || undefined,
+            approval: approvalFilter || undefined,
           }),
         ]);
         setRetailBundles(retailB);
@@ -917,6 +1016,7 @@ function AdminOrdersContent() {
           )
         );
       }
+      setLoadedOnce(true);
     } catch (e) {
       if (!silent) toast.error(getApiErrorMessage(e, "تعذر تحميل الطلبات"));
       setFetchError(true);
@@ -936,7 +1036,64 @@ function AdminOrdersContent() {
     setActiveSource("wholesaler");
     setWholesalerId(requestedWholesaler);
     setBatchId("");
+    setApprovalFilter("approved");
   }, [requestedWholesaler]);
+
+  // Mirror the UI state so back-navigation (e.g. from an order opened via
+  // /staff/orders/[id]?from=/admin/orders) restores it exactly — single snapshot,
+  // same approach as StationConsole's sessionStorage mirror.
+  useEffect(() => {
+    try {
+      const snapshot: StoredOrdersState = {
+        activeSource,
+        wholesalerId,
+        dateFrom,
+        dateTo,
+        status,
+        typeFilter,
+        zoneFilter,
+        approvalFilter,
+        batchId,
+        viewMode,
+        sortKey,
+        sortDir,
+      };
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+    } catch {
+      /* storage full/unavailable — persistence is best-effort */
+    }
+  }, [
+    activeSource,
+    wholesalerId,
+    dateFrom,
+    dateTo,
+    status,
+    typeFilter,
+    zoneFilter,
+    approvalFilter,
+    batchId,
+    viewMode,
+    sortKey,
+    sortDir,
+  ]);
+
+  // A restored wholesalerId/batchId might no longer exist (rep deleted, data changed
+  // since the snapshot was taken) — degrade gracefully to the all-reps view instead of
+  // an inert filter. Gated on loadedOnce so this never runs against the empty pre-fetch
+  // lists and wipes a legitimately restored selection.
+  useEffect(() => {
+    if (!loadedOnce || !wholesalerId) return;
+    if (!wholesalers.some((w) => w.id === wholesalerId)) {
+      setWholesalerId("");
+      setBatchId("");
+      setApprovalFilter("");
+      return;
+    }
+    const rep = repsOverview.find((r) => r.id === wholesalerId);
+    if (batchId && rep && !rep.batches.some((b) => b.id === batchId)) {
+      setBatchId("");
+    }
+  }, [loadedOnce, wholesalers, repsOverview, wholesalerId, batchId]);
 
   // Live polling — refresh every 12 s silently
   usePolling(() => load(true), 12000);
@@ -1325,6 +1482,28 @@ function AdminOrdersContent() {
               </div>
             </>
           )}
+          <CalculationDetails
+            summary="كيف حُسبت إجماليات هذه الصفحة؟"
+            className="col-span-2 bg-surface sm:col-span-4"
+          >
+            <p>
+              هذه الأرقام هي مجموع كل النتائج المطابقة للمصدر والفلاتر الحالية، وليست أول صفحة فقط.
+              {activeSource === "wholesaler" && approvalFilter === "approved"
+                ? " وتشمل الطلبات الموافق عليها فقط."
+                : activeSource === "wholesaler" && approvalFilter
+                  ? ` وتشمل حالة الموافقة المحددة فقط (${APPROVAL_BADGE[approvalFilter].label}).`
+                  : activeSource === "wholesaler"
+                    ? " وبسبب عدم اختيار حالة موافقة، قد تشمل الموافق عليها والمعلّقة والمُرجعة؛ هذا عرض تشغيلي وليس رصيد تسوية."
+                    : " والطلبات الملغاة مستبعدة افتراضياً ما لم يُختر فلتر الحالة الملغاة."
+              }
+            </p>
+            <div className="mt-2 space-y-1 rounded-lg bg-ink/[0.04] px-2.5 py-2 text-ink">
+              <p>الإيراد = مجموع أسعار {viewMode === "bundle" ? "الباقات" : "الطلبات"} الظاهرة.</p>
+              <p>{activeSource === "wholesaler" ? "حصة الإدارة" : "التكلفة"} = مجموع المبلغ المحاسبي المخزن لكل طلب.</p>
+              <p>{activeSource === "wholesaler" ? "ربح الممثل" : "الربح"} = الإيراد − {activeSource === "wholesaler" ? "حصة الإدارة" : "التكلفة"}.</p>
+              {viewMode === "bundle" && <p>داخل كل باقة، القطع الملغاة ظاهرة للمراجعة لكنها مستبعدة من المبالغ.</p>}
+            </div>
+          </CalculationDetails>
         </div>
       )}
 
@@ -1341,6 +1520,8 @@ function AdminOrdersContent() {
                 onClick={() => {
                   setWholesalerId(rep.id);
                   setBatchId("");
+                  // default to الموافق عليها so admin's count matches what the rep sees (his approved list)
+                  setApprovalFilter("approved");
                 }}
                 className="surface-card card-lift rounded-2xl p-4 text-start transition-colors hover:border-orange-ink/40"
               >
@@ -1377,6 +1558,7 @@ function AdminOrdersContent() {
                 onClick={() => {
                   setWholesalerId("");
                   setBatchId("");
+                  setApprovalFilter("");
                 }}
                 className="inline-flex min-h-9 items-center gap-1 rounded-full border border-line bg-surface px-3 py-1 text-sm font-medium text-ink-soft transition-colors hover:border-orange-ink/40"
               >

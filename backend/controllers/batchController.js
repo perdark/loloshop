@@ -45,11 +45,13 @@ async function listBatches(req, res) {
   const { rows } = await query(
     `SELECT b.id, b.name_ar, b.deadline, b.wholesaler_id, wu.name AS wholesaler_name,
             COALESCE(SUM(o.price), 0)::bigint AS grand_total,
-            COUNT(DISTINCT o.id)::int AS order_count
+            COUNT(DISTINCT COALESCE(o.checkout_group_id, o.id))::int AS order_count
      FROM batches b
      LEFT JOIN wholesalers w ON w.id = b.wholesaler_id
      LEFT JOIN users wu ON wu.id = w.user_id
-     LEFT JOIN orders o ON o.batch_id = b.id AND o.status <> 'cancelled'
+     LEFT JOIN orders o ON o.batch_id = b.id
+       AND o.status <> 'cancelled'
+       AND o.wholesaler_approval = 'approved'
      ${where}
      GROUP BY b.id, wu.name
      ORDER BY b.created_at DESC`,
@@ -78,16 +80,22 @@ async function getBatch(req, res) {
   // students of this batch's wholesaler + their order totals within the batch
   const students = await query(
     `SELECT s.id, u.name, s.full_name_third, s.status,
-            COALESCE(SUM(o.price), 0)::bigint AS total,
-            CASE WHEN COUNT(o.id) FILTER (WHERE o.status <> 'cancelled') = 0
+            COALESCE(SUM(o.price) FILTER (WHERE o.status <> 'cancelled'
+              AND o.wholesaler_approval = 'approved'), 0)::bigint AS total,
+            CASE WHEN COUNT(o.id) FILTER (WHERE o.status <> 'cancelled'
+                   AND o.wholesaler_approval = 'approved') = 0
                  THEN NULL
-                 ELSE COALESCE(SUM(o.cost) FILTER (WHERE o.status <> 'cancelled'), 0)::bigint
+                 ELSE COALESCE(SUM(o.cost) FILTER (WHERE o.status <> 'cancelled'
+                   AND o.wholesaler_approval = 'approved'), 0)::bigint
             END AS cost,
-            CASE WHEN COUNT(o.id) FILTER (WHERE o.status <> 'cancelled') = 0
+            CASE WHEN COUNT(o.id) FILTER (WHERE o.status <> 'cancelled'
+                   AND o.wholesaler_approval = 'approved') = 0
                  THEN NULL
-                 ELSE COALESCE(SUM(o.profit) FILTER (WHERE o.status <> 'cancelled'), 0)::bigint
+                 ELSE COALESCE(SUM(o.profit) FILTER (WHERE o.status <> 'cancelled'
+                   AND o.wholesaler_approval = 'approved'), 0)::bigint
             END AS profit,
-            COUNT(o.id) FILTER (WHERE o.status <> 'cancelled')::int AS order_count
+            COUNT(o.id) FILTER (WHERE o.status <> 'cancelled'
+              AND o.wholesaler_approval = 'approved')::int AS order_count
      FROM students s
      JOIN users u ON u.id = s.user_id
      LEFT JOIN orders o ON o.student_id = s.id AND o.batch_id = $1

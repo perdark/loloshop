@@ -81,15 +81,23 @@ function iconPen() {
   );
 }
 
-function getNavLinks(
-  staffType: StaffType | null | undefined,
-  isAdmin: boolean,
-): NavLink[] {
+// Home-list label per queue role. /staff shows the FIRST such role's queue (mirrors
+// app/staff/page.tsx routing), so the home link is labelled by that first role.
+const HOME_LABELS: Partial<Record<StaffType, string>> = {
+  designer: "مراجعة التصاميم",
+  digitizer: "قائمة التحويل",
+  embroiderer: "قائمة التطريز",
+  presser: "قائمة الكوي",
+  preparer: "قائمة التجهيز",
+};
+
+function getNavLinks(staffTypes: StaffType[], isAdmin: boolean): NavLink[] {
   // Admin gets full manager view over the production area.
-  if (isAdmin || staffType === "manager") {
+  if (isAdmin || staffTypes.includes("manager")) {
     return [
       { href: "/staff", label: "المتابعة", icon: iconBarChart() },
       { href: "/staff/queue", label: "جميع الطلبات", icon: iconClipboard(), prefix: true },
+      { href: "/staff/custom-order", label: "طلب مخصص", icon: iconClipboard(), prefix: true },
       { href: "/staff/tailor", label: "الفصال", icon: iconScissors(), prefix: true },
     ];
   }
@@ -103,47 +111,24 @@ function getNavLinks(
     icon: iconBarChart(),
     prefix: true,
   };
-  switch (staffType) {
-    case "designer":
-      return [
-        { href: "/staff", label: "مراجعة التصاميم", icon: iconClipboard() },
-        consoleLink,
-      ];
-    case "digitizer":
-      return [
-        { href: "/staff", label: "قائمة التحويل", icon: iconClipboard() },
-        consoleLink,
-      ];
-    case "embroiderer":
-      return [
-        { href: "/staff", label: "قائمة التطريز", icon: iconClipboard() },
-        consoleLink,
-      ];
-    case "presser":
-      return [
-        { href: "/staff", label: "قائمة الكوي", icon: iconClipboard() },
-        consoleLink,
-      ];
-    case "preparer":
-      return [
-        { href: "/staff", label: "قائمة التجهيز", icon: iconClipboard() },
-        consoleLink,
-      ];
-    case "tailor":
-      // مفصل (ابو عبدو): his parallel «الفصال» console is the primary screen — a
-      // retail-only tailoring to-do that runs alongside (and never moves) the pipeline.
-      return [
-        { href: "/staff/tailor", label: "الفصال", icon: iconScissors(), prefix: true },
-        consoleLink,
-      ];
-    default:
-      // Fallback: legacy view (also covers مفصل/tailor, whose /staff home has no queue —
-      // the console is their working read-only view of in-production orders).
-      return [
-        { href: "/staff", label: "لوحة الطلبات", icon: iconClipboard() },
-        consoleLink,
-      ];
+  // Merge links across ALL held roles (the staff_types[] union) — a tailor+embroiderer
+  // needs BOTH «قائمة التطريز» and «الفصال», not just the primary role's link.
+  const links: NavLink[] = [];
+  const homeType = staffTypes.find((t) => t in HOME_LABELS);
+  if (homeType) {
+    links.push({ href: "/staff", label: HOME_LABELS[homeType]!, icon: iconClipboard() });
+  } else if (!staffTypes.includes("tailor")) {
+    // Legacy/unknown role: generic board. A PURE tailor skips /staff entirely —
+    // that page redirects them to /staff/tailor, so the link would be a bounce.
+    links.push({ href: "/staff", label: "لوحة الطلبات", icon: iconClipboard() });
   }
+  if (staffTypes.includes("tailor")) {
+    // مفصل (ابو عبدو): the parallel «الفصال» console — a retail-only tailoring to-do
+    // that runs alongside (and never moves) the pipeline. Shown to ANY holder of the role.
+    links.push({ href: "/staff/tailor", label: "الفصال", icon: iconScissors(), prefix: true });
+  }
+  links.push(consoleLink);
+  return links;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -164,17 +149,20 @@ export function StaffSidebar({ user, open, onClose }: StaffSidebarProps) {
   }
 
   const isAdmin = user.role === "admin";
-  const baseLinks = getNavLinks(user.staff_type, isAdmin);
 
-  // Calligraphy tool: admin + manager/designer staff (matches the backend guard
-  // requireStaffType('designer')). Use the multi-role staff_types union so a
-  // designer who ALSO holds another role still sees it; fall back to the primary type.
+  // The multi-role staff_types[] union is the authoritative role set (falls back to the
+  // primary scalar for older payloads) — ALL nav links derive from it, so a multi-role
+  // staffer (e.g. tailor+embroiderer) sees every screen they work, not just the primary's.
   const myTypes: StaffType[] =
     user.staff_types && user.staff_types.length
       ? user.staff_types
       : user.staff_type
         ? [user.staff_type]
         : [];
+  const baseLinks = getNavLinks(myTypes, isAdmin);
+
+  // Calligraphy tool: admin + manager/designer staff (matches the backend guard
+  // requireStaffType('designer')).
   const canCalligraphy =
     isAdmin || myTypes.includes("manager") || myTypes.includes("designer");
   // أيادي التصميم desk — محمد هيثم (manager) leads it from his staff account
@@ -214,8 +202,8 @@ export function StaffSidebar({ user, open, onClose }: StaffSidebarProps) {
   // looking at their usual admin panel.
   const typeLabel = isAdmin
     ? "مدير — متابعة الإنتاج"
-    : user.staff_type
-      ? STAFF_TYPE_LABELS[user.staff_type]
+    : myTypes.length
+      ? myTypes.map((t) => STAFF_TYPE_LABELS[t]).join(" · ")
       : "موظف";
 
   const sidebar = (

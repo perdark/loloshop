@@ -214,7 +214,8 @@ export function FullSetOrderForm({
     baseRows.push({
       label: "روب",
       amount:
-        sashType === "ملكي" || capType === "ملكي"
+        (selectedSash && sashType === "ملكي") ||
+        (selectedCap && capType === "ملكي")
           ? addons.piece_robe_royal
           : addons.piece_robe_normal,
     });

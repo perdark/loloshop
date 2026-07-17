@@ -440,7 +440,7 @@ function OrderMobileCard({ item, canDelete, onDelete }: { item: ProductionQueueI
         <span className={dl.cls}>{dl.text}</span>
       </div>
     </Link>
-    {canDelete && <button type="button" onClick={() => onDelete(item.id)} className="mx-3 mb-3 min-h-11 rounded-full border border-danger/30 px-4 text-xs font-semibold text-danger hover:bg-danger/5">حذف الطلب</button>}
+    {canDelete && <button type="button" onClick={() => onDelete(item.id)} className="mx-3 mb-3 min-h-11 rounded-full border border-danger/30 px-4 text-xs font-semibold text-danger hover:bg-danger/5">حذف القطعة</button>}
     </div>
   );
 }
@@ -693,6 +693,35 @@ function chipCls(active: boolean) {
   ].join(" ");
 }
 
+// ─── Session persistence — «getting back perfectly» (mirrors StationConsole.tsx) ──────
+// The order page's back Link is always a BARE `/staff/queue` with NO query string (see
+// lib/back.ts — `?from=/staff/queue` carries no filters), so stage/source/rep/zone (all
+// URL-driven here) reset on the way back exactly like the local filters would. UI state is
+// mirrored to sessionStorage and restored on mount. `ConsoleContent` only ever mounts
+// client-side behind the /staff layout's auth gate (`useRequireAuth` renders a spinner
+// until resolved — app/staff/layout.tsx), so lazy-reading storage here can never fight
+// SSR/hydration.
+interface StoredConsoleState {
+  stage?: OrderStatus;
+  source?: "retail" | "wholesaler";
+  rep?: string;
+  zone?: EmbroideryZone;
+  batch?: string;
+  search?: string;
+  page?: number;
+  zonesOpen?: boolean;
+}
+const STORAGE_KEY = "loloshop-console:production";
+
+function readStored(): StoredConsoleState {
+  if (typeof window === "undefined") return {};
+  try {
+    return JSON.parse(sessionStorage.getItem(STORAGE_KEY) || "{}") as StoredConsoleState;
+  } catch {
+    return {};
+  }
+}
+
 // ─── Main console content (wrapped in Suspense for useSearchParams) ───────────
 
 function ConsoleContent() {
@@ -701,20 +730,33 @@ function ConsoleContent() {
   const currentUser = getUser();
   const canDelete = currentUser?.role === "admin" || currentUser?.staff_type === "manager" || currentUser?.staff_types?.includes("manager") === true;
 
+  // Restore the last UI state (see StoredConsoleState above).
+  const [stored] = useState<StoredConsoleState>(() => readStored());
+
   // ── URL state ──────────────────────────────────────────────────────────────
   const stage  = (searchParams.get("stage") || undefined) as OrderStatus | undefined;
   const source = (searchParams.get("source") || undefined) as "retail" | "wholesaler" | undefined;
   const repParam = searchParams.get("rep") ?? null;
   const zoneParam = (searchParams.get("zone") || undefined) as EmbroideryZone | undefined;
+  // `?from=/staff/queue` (the order page's return link) is always a BARE path with no query
+  // string, so on the way back this URL is momentarily empty even though the user had a zone
+  // selected. Fall back to the last stored zone ONLY while the URL is still empty — once the
+  // mount effect below rehydrates it, zoneParam itself carries the same value, so
+  // `effectiveZone` never actually changes and `load` is never re-created (no double-fetch).
+  const storedZoneFallback = searchParams.toString() === "" ? stored.zone : undefined;
+  const effectiveZone = zoneParam ?? storedZoneFallback;
 
   // ── Local state ────────────────────────────────────────────────────────────
   const [items,      setItems]      = useState<ProductionQueueItem[]>([]);
   const [loading,    setLoading]    = useState(true);
+  // TRUE after the first successful fetch — restored rep/batch/page validation must not run
+  // (and wrongly wipe restored state) against the EMPTY pre-fetch `items` list.
+  const [loadedOnce, setLoadedOnce] = useState(false);
   const [error,      setError]      = useState(false);
-  const [search,     setSearch]     = useState("");
-  const [page,       setPage]       = useState(1);
-  const [selectedBatch, setSelectedBatch] = useState("");
-  const [zonesOpen,  setZonesOpen]  = useState(false);
+  const [search,     setSearch]     = useState(stored.search ?? "");
+  const [page,       setPage]       = useState(stored.page ?? 1);
+  const [selectedBatch, setSelectedBatch] = useState(stored.batch ?? "");
+  const [zonesOpen,  setZonesOpen]  = useState(stored.zonesOpen ?? false);
 
   // ── Fetch — zone is the only server-side filter ────────────────────────────
   const load = useCallback(
@@ -723,8 +765,9 @@ function ConsoleContent() {
       setError(false);
       try {
         // Pass zone only — stage/source/rep are client-side filters
-        const data = await getQueue(undefined, undefined, zoneParam);
+        const data = await getQueue(undefined, undefined, effectiveZone);
         setItems(data);
+        setLoadedOnce(true);
       } catch (err) {
         toast.error(getApiErrorMessage(err, "تعذر تحميل قائمة الإنتاج"));
         setError(true);
@@ -732,31 +775,77 @@ function ConsoleContent() {
         setLoading(false);
       }
     },
-    [zoneParam]
+    [effectiveZone]
   );
 
   async function handleDelete(orderId: string) {
-    if (!window.confirm("سيُحذف الطلب الكامل وكل قطعه نهائياً. هل أنت متأكد؟")) return;
+    if (!window.confirm("سيُحذف هذه القطعة فقط نهائياً — بقية قطع الطلب (إن وجدت) تبقى كما هي. هل أنت متأكد؟")) return;
     try {
-      const deleted = await deleteProductionOrder(orderId);
-      toast.success(`تم حذف الطلب (${deleted} قطعة)`);
+      await deleteProductionOrder(orderId);
+      toast.success("تم حذف القطعة");
       await load(true);
     } catch (err) {
-      toast.error(getApiErrorMessage(err, "تعذّر حذف الطلب"));
+      toast.error(getApiErrorMessage(err, "تعذّر حذف القطعة"));
     }
   }
 
+  // Rehydrate stage/source/rep/zone into the URL once, IF this visit arrived with an empty
+  // query string (the exact shape the order page's back Link produces). A URL that already
+  // carries its own params (shared link, in-app rail click) is left alone. Runs once on mount.
+  useEffect(() => {
+    if (searchParams.toString() !== "") return;
+    if (stored.stage || stored.source || stored.rep || stored.zone) {
+      router.replace(
+        buildUrl({ stage: stored.stage, source: stored.source, rep: stored.rep, zone: stored.zone })
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Mirror the UI state so back-navigation restores it exactly.
+  useEffect(() => {
+    try {
+      const snapshot: StoredConsoleState = {
+        stage,
+        source,
+        rep: repParam ?? undefined,
+        zone: zoneParam,
+        batch: selectedBatch,
+        search,
+        page,
+        zonesOpen,
+      };
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+    } catch {
+      /* storage full/unavailable — persistence is best-effort */
+    }
+  }, [stage, source, repParam, zoneParam, selectedBatch, search, page, zonesOpen]);
+
+  // `load` only changes identity when `effectiveZone` genuinely changes (the mount-time URL
+  // rehydration above never flips it — see storedZoneFallback), so this still fires exactly
+  // once per real zone change. Skip the very first (mount) run's page reset so a restored page
+  // survives; every later run is a real filter change.
+  const isFirstLoadRef = useRef(true);
   useEffect(() => {
     load();
-    setPage(1);
+    if (isFirstLoadRef.current) {
+      isFirstLoadRef.current = false;
+    } else {
+      setPage(1);
+    }
   }, [load]);
 
   // ── Silent 15 s polling ────────────────────────────────────────────────────
   usePolling(() => load(true), 15000);
 
-  // Reset batch when rep changes
+  // Reset batch when rep changes. Skip while the initial fetch hasn't resolved yet — the
+  // mount-time URL rehydration above can flip repParam from empty to a restored value before
+  // data loads, and that transition must not wipe the also-restored batch chip. `loadedOnce`
+  // is read via closure (not a dep) so this still fires only on a genuine repParam change.
   useEffect(() => {
+    if (!loadedOnce) return;
     setSelectedBatch("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repParam]);
 
   // ── URL helpers ────────────────────────────────────────────────────────────
@@ -825,20 +914,47 @@ function ConsoleContent() {
   );
   const repsOverview = useMemo(() => buildRepsOverview(wholesalerItems), [wholesalerItems]);
 
-  // Batches for selected rep (compiler-memoized plain value).
-  const repBatches: string[] = !repParam
-    ? []
-    : [
-        ...new Set(
-          items
-            .filter((i) => i.source === "wholesaler" && (i.wholesaler_name ?? "—") === repParam)
-            .map((i) => i.batch_name)
-            .filter((b): b is string => Boolean(b))
-        ),
-      ];
+  // Batches for selected rep (memoized — it's a dependency of the prune effect below).
+  const repBatches: string[] = useMemo(
+    () =>
+      !repParam
+        ? []
+        : [
+            ...new Set(
+              items
+                .filter((i) => i.source === "wholesaler" && (i.wholesaler_name ?? "—") === repParam)
+                .map((i) => i.batch_name)
+                .filter((b): b is string => Boolean(b))
+            ),
+          ],
+    [items, repParam]
+  );
+
+  // A restored rep/batch (from a stale sessionStorage snapshot) may no longer have live
+  // orders — degrade to "الكل"/"كل الدفعات" instead of a stuck-empty drill-down. Gated on
+  // loadedOnce so it never runs against the empty pre-fetch list.
+  useEffect(() => {
+    if (!loadedOnce || !repParam) return;
+    const repStillExists = items.some(
+      (i) => i.source === "wholesaler" && (i.wholesaler_name ?? "—") === repParam
+    );
+    if (!repStillExists) {
+      router.replace(buildUrl({ stage, zone: zoneParam }));
+      return;
+    }
+    if (selectedBatch && !repBatches.includes(selectedBatch)) setSelectedBatch("");
+  }, [loadedOnce, items, repParam, selectedBatch, repBatches, stage, zoneParam, router]);
 
   // ── Pagination ────────────────────────────────────────────────────────────
   const pageItems = filtered.slice((page - 1) * PER_PAGE, (page - 1) * PER_PAGE + PER_PAGE);
+
+  // A restored page number may exceed the fresh list's page count — degrade to page 1 instead
+  // of silently rendering an empty slice.
+  useEffect(() => {
+    if (!loadedOnce) return;
+    const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
+    if (page > totalPages) setPage(1);
+  }, [loadedOnce, filtered.length, page]);
 
   // Whether to show rep grid vs table
   const showRepGrid     = source === "wholesaler" && repParam === null;

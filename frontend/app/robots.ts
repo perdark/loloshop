@@ -13,7 +13,6 @@ export default function robots(): MetadataRoute.Robots {
         "/staff",
         "/wholesaler",
         "/login",
-        "/verify-otp",
         "/reset-password",
         "/forgot-password",
         "/join",

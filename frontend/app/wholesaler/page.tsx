@@ -21,6 +21,7 @@ import { PageLoader } from "@/components/ui/Spinner";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { StatCard } from "@/components/ui/StatCard";
 import { Modal } from "@/components/ui/Modal";
+import { CalculationDetails } from "@/components/admin/CalculationDetails";
 
 export default function WholesalerDashboardPage() {
   const [dashboard, setDashboard] = useState<WholesalerDashboard | null>(null);
@@ -185,7 +186,7 @@ export default function WholesalerDashboardPage() {
         <div className="grid grid-cols-3 gap-3">
           <div className="rounded-xl border border-line bg-beige p-4">
             <p className="text-xs text-ink-soft">ما تجمعه من الطلاب</p>
-            <p className="mt-1 text-lg font-bold text-ink" dir="ltr">{formatIQD((dashboard.adminDue ?? 0) + (dashboard.earnedCommission ?? 0))}</p>
+            <p className="mt-1 text-lg font-bold text-ink" dir="ltr">{formatIQD(dashboard.studentTotal ?? 0)}</p>
           </div>
           <div className="rounded-xl border border-orange-ink/20 bg-warm-veil p-4">
             <p className="text-xs text-ink-soft">ما تسلّمه للإدارة</p>
@@ -196,6 +197,14 @@ export default function WholesalerDashboardPage() {
             <p className="mt-1 text-lg font-bold text-emerald-700" dir="ltr">{formatIQD(dashboard.earnedCommission ?? 0)}</p>
           </div>
         </div>
+        <CalculationDetails summary="كيف حُسبت مستحقاتك؟" className="mt-4">
+          <div className="space-y-1">
+            <p>تشمل هذه التسوية الطلبات الموافق عليها وغير الملغاة فقط. الطلبات المعلّقة أو المُرجعة لا تدخل حتى تتم الموافقة عليها.</p>
+            <p className="rounded-lg bg-ink/[0.04] px-2.5 py-2 text-ink">
+              ربحك = ما تجمعه من الطلاب {formatIQD(dashboard.studentTotal ?? 0)} − ما تسلّمه للإدارة {formatIQD(dashboard.adminDue ?? 0)} = {formatIQD(dashboard.earnedCommission ?? 0)}
+            </p>
+          </div>
+        </CalculationDetails>
         {dashboard.pricing && (
           <div className="mt-5">
             <p className="mb-2 text-sm font-bold text-ink">أسعار الطالب</p>
@@ -212,6 +221,10 @@ export default function WholesalerDashboardPage() {
                 ] as const).map(([key,label]) => <PriceViewRow key={key} label={label} selling={dashboard.pricing!.addons[key].selling} />)}
               </div>
             </div>
+            <CalculationDetails summary="كيف تتوزع الأسعار؟" className="mt-3">
+              <p>في الطقم الكامل ربحك هو فرق السعر الأساسي بين سعر الطالب وحصة الإدارة.</p>
+              <p className="mt-1">في الشال الأمريكي تسلّم ٢٠٬٠٠٠ د.ع للإدارة وتحتفظ بالباقي. كل إضافة أخرى وكل قطعة مفردة تُسلّم قيمتها كاملة للإدارة.</p>
+            </CalculationDetails>
           </div>
         )}
       </section>

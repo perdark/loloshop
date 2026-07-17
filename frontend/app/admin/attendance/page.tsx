@@ -27,6 +27,7 @@ import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Modal } from "@/components/ui/Modal";
+import { CalculationDetails } from "@/components/admin/CalculationDetails";
 
 const MODE_OPTIONS: { value: AttendanceVerificationMode; label: string }[] = [
   { value: "none", label: "بدون تحقق" },
@@ -263,6 +264,13 @@ export default function AdminAttendancePage() {
               onChange={(e) => setSettings({ ...settings, deductionPerMinute: Number(e.target.value.replace(/[^\d]/g, "")) || 0 })}
             />
           </div>
+          <CalculationDetails summary="كيف يُحسب مبلغ التأخير؟" className="mt-3">
+            <p>
+              دقائق التأخير = وقت الدخول − وقت الحضور − دقائق السماح، وبحد أدنى صفر.
+              مبلغ التأخير = دقائق التأخير × المبلغ لكل دقيقة. الإعداد الخاص بالموظف، إن وُجد، يتقدم على الإعداد الافتراضي.
+            </p>
+            <p className="mt-1">يُحفظ المبلغ وقت تسجيل الدخول؛ وأي تعديل إداري لاحق على السجل يظهر كمبلغ معتمد بدلاً من الحساب الأصلي.</p>
+          </CalculationDetails>
 
           <div className="mt-4 grid gap-3 md:grid-cols-4">
             <Select

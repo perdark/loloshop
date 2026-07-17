@@ -50,11 +50,70 @@ function isOverdueOrder(o: WholesalerOrderRow): boolean {
 
 type Tab = "orders" | "roster";
 
+// ─── Session persistence — mid-batch back-navigation restore ──────────────────
+// Mirrors components/staff/station/StationConsole.tsx's STORAGE_PREFIX/readStored
+// pattern, adapted for TWO components (this page's tab + OrdersTab's own filters)
+// sharing one per-rep sessionStorage bucket via a read-merge-write helper.
+// NOT a lazy useState initializer: unlike StationConsole (which only ever mounts
+// behind /staff's client-only auth loading gate), this page renders OrdersTab/
+// RosterTab immediately regardless of auth-loading state — so it CAN be part of
+// the initial SSR/prerender HTML. Restoring inside a mount effect (gated by a
+// `restored` flag) avoids reading sessionStorage during the hydration render,
+// which would mismatch the server pass (no `window` there).
+const STORAGE_PREFIX = "loloshop-rep-console:";
+
+interface StoredConsoleState {
+  tab?: Tab;
+  zone?: FullSetZone | "";
+  view?: CompletionView;
+  search?: string;
+  selected?: string[];
+}
+
+function readStored(wholesalerId: string): StoredConsoleState {
+  if (typeof window === "undefined" || !wholesalerId) return {};
+  try {
+    return JSON.parse(sessionStorage.getItem(STORAGE_PREFIX + wholesalerId) || "{}") as StoredConsoleState;
+  } catch {
+    return {};
+  }
+}
+
+function writeStored(wholesalerId: string, patch: Partial<StoredConsoleState>) {
+  if (typeof window === "undefined" || !wholesalerId) return;
+  try {
+    const current = readStored(wholesalerId);
+    sessionStorage.setItem(STORAGE_PREFIX + wholesalerId, JSON.stringify({ ...current, ...patch }));
+  } catch {
+    /* storage full/unavailable — persistence is best-effort */
+  }
+}
+
+function isValidZone(z: unknown): z is FullSetZone | "" {
+  return z === "" || FULLSET_ZONE_ORDER.includes(z as FullSetZone);
+}
+function isValidCompletionView(v: unknown): v is CompletionView {
+  return v === "all" || v === "actionable" || v === "done";
+}
+
 export default function StaffWholesalerStudentsPage() {
   const { wholesalerId } = useParams<{ wholesalerId: string }>();
   const { user } = useRequireAuth(["staff", "admin"]);
   const isAdmin = user?.role === "admin";
   const [tab, setTab] = useState<Tab>("orders");
+  // See "Session persistence" above — restored via a mount effect, not lazy init.
+  const [tabRestored, setTabRestored] = useState(false);
+
+  useEffect(() => {
+    const stored = readStored(wholesalerId);
+    if (stored.tab === "orders" || stored.tab === "roster") setTab(stored.tab);
+    setTabRestored(true);
+  }, [wholesalerId]);
+
+  useEffect(() => {
+    if (!tabRestored) return;
+    writeStored(wholesalerId, { tab });
+  }, [wholesalerId, tab, tabRestored]);
 
   return (
     <div dir="rtl" lang="ar" className="space-y-6 pb-28">
@@ -121,6 +180,29 @@ function OrdersTab({
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkLoading, setBulkLoading] = useState(false);
+  // TRUE once sessionStorage has been read on mount (see "Session persistence" above) —
+  // gates the data fetch (so a restored zone doesn't fetch twice: once with the stale
+  // default then again with the restored value) and the write-back effect below.
+  const [restored, setRestored] = useState(false);
+  // TRUE after the first successful fetch — the restored selection must not be pruned
+  // against the EMPTY pre-fetch order list (mirrors StationConsole's loadedOnce).
+  const [loadedOnce, setLoadedOnce] = useState(false);
+
+  // Restore this rep's last zone/view/search/selection.
+  useEffect(() => {
+    const stored = readStored(wholesalerId);
+    if (isValidZone(stored.zone)) setZone(stored.zone);
+    if (isValidCompletionView(stored.view)) setView(stored.view);
+    if (typeof stored.search === "string") setSearch(stored.search);
+    if (Array.isArray(stored.selected)) setSelected(new Set(stored.selected));
+    setRestored(true);
+  }, [wholesalerId]);
+
+  // Mirror the UI state so back-navigation restores it exactly.
+  useEffect(() => {
+    if (!restored) return;
+    writeStored(wholesalerId, { zone, view, search, selected: [...selected] });
+  }, [wholesalerId, zone, view, search, selected, restored]);
 
   // Zone is the only server-side filter (refetches); completion/search are client-side.
   const load = useCallback(() => {
@@ -130,7 +212,7 @@ function OrdersTab({
     getWholesalerOrders(wholesalerId, { zone: zone || undefined, isAdmin })
       .then((rows) => {
         setOrders(rows);
-        setSelected(new Set()); // selection is invalid after a refetch
+        setLoadedOnce(true);
       })
       .catch((err) => {
         toast.error(getApiErrorMessage(err, "تعذر تحميل الطلبات"));
@@ -140,9 +222,21 @@ function OrdersTab({
   }, [wholesalerId, zone, isAdmin]);
 
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || !restored) return;
     load();
-  }, [ready, load]);
+  }, [ready, restored, load]);
+
+  // Selection can only reference orders that still exist AND are still advanceable
+  // (a reload prunes it). Gated on loadedOnce so a RESTORED selection isn't wiped
+  // against the empty pre-fetch order list.
+  useEffect(() => {
+    if (!loadedOnce) return;
+    setSelected((prev) => {
+      const valid = new Set(orders.filter((o) => o.canAdvance).map((o) => o.id));
+      const next = new Set([...prev].filter((id) => valid.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [orders, loadedOnce]);
 
   const filtered = useMemo(() => {
     let out = orders;
@@ -220,10 +314,10 @@ function OrdersTab({
   }), [filtered]);
 
   // Full "why is it this number" split for the admin. Reconciles exactly to the money tiles:
-  //   admin due  = pkgAdmin + shawlAdmin(20k×n) + otherStudent + pieceStudent
+  //   admin due  = base/historical admin + shawlAdmin(20k×n) + otherStudent + pieceStudent
   //   rep profit = pkgRep (base spread) + shawlRep (شال − 20k) ; add-ons & single pieces → 0.
   const breakdown = useMemo(() => {
-    const a = { pkgCount: 0, pkgStudent: 0, pkgAdmin: 0, shawlCount: 0, shawlStudent: 0, otherStudent: 0, pieceStudent: 0 };
+    const a = { pkgCount: 0, pkgStudent: 0, pkgAdmin: 0, shawlCount: 0, shawlStudent: 0, otherStudent: 0, pieceStudent: 0, unclassifiedStudent: 0 };
     for (const o of filtered) {
       if (o.adminAmount == null) continue;
       a.pkgCount += o.pkgCount;
@@ -232,11 +326,12 @@ function OrdersTab({
       a.shawlStudent += o.shawlStudent;
       a.otherStudent += o.otherStudent;
       a.pieceStudent += o.pieceStudent;
+      a.unclassifiedStudent += o.unclassifiedStudent;
       // package admin share = this order's admin due minus the non-package admin shares
       a.pkgAdmin += (o.adminAmount || 0) - 20000 * o.shawlCount - o.otherStudent - o.pieceStudent;
     }
     const shawlAdmin = 20000 * a.shawlCount;
-    return { ...a, shawlAdmin, pkgRep: a.pkgStudent - a.pkgAdmin, shawlRep: a.shawlStudent - shawlAdmin };
+    return { ...a, shawlAdmin, pkgRep: a.pkgStudent + a.unclassifiedStudent - a.pkgAdmin, shawlRep: a.shawlStudent - shawlAdmin };
   }, [filtered]);
 
   // Opening an order should return to THIS rep's page (not the generic /staff home).
@@ -476,13 +571,23 @@ interface BreakdownData {
   pkgCount: number; pkgStudent: number; pkgAdmin: number; pkgRep: number;
   shawlCount: number; shawlStudent: number; shawlAdmin: number; shawlRep: number;
   otherStudent: number; pieceStudent: number;
+  unclassifiedStudent: number;
 }
 
 /** Full "why these totals" table for the admin: every line traced to admin vs. rep. */
 function MoneyBreakdown({ b, totalStudent, totalAdmin }: { b: BreakdownData; totalStudent: number; totalAdmin: number }) {
   const ar = (n: number) => n.toLocaleString("ar-EG");
   const rows: { label: string; count?: number; student: number; admin: number; rep: number; note?: string }[] = [];
-  if (b.pkgStudent) rows.push({ label: "أطقم كاملة", count: b.pkgCount, student: b.pkgStudent, admin: b.pkgAdmin, rep: b.pkgRep, note: "الممثل يربح فرق السعر الأساسي" });
+  if (b.pkgStudent || b.unclassifiedStudent) rows.push({
+    label: b.unclassifiedStudent ? "السعر الأساسي وبنود تاريخية" : "أطقم كاملة",
+    count: b.pkgCount || undefined,
+    student: b.pkgStudent + b.unclassifiedStudent,
+    admin: b.pkgAdmin,
+    rep: b.pkgRep,
+    note: b.unclassifiedStudent
+      ? "تتضمن بنوداً قديمة غير مصنفة؛ المبلغ النهائي المخزن هو المعتمد"
+      : "الممثل يربح فرق السعر الأساسي",
+  });
   if (b.shawlStudent) rows.push({ label: "شال امريكي", count: b.shawlCount, student: b.shawlStudent, admin: b.shawlAdmin, rep: b.shawlRep, note: "٢٠٬٠٠٠ للإدارة لكل شال، والباقي للممثل" });
   if (b.otherStudent) rows.push({ label: "إضافات أخرى", student: b.otherStudent, admin: b.otherStudent, rep: 0, note: "كاملة للإدارة" });
   if (b.pieceStudent) rows.push({ label: "قطع مفردة (غير طقم)", student: b.pieceStudent, admin: b.pieceStudent, rep: 0, note: "كاملة للإدارة" });
@@ -527,6 +632,7 @@ function MoneyBreakdown({ b, totalStudent, totalAdmin }: { b: BreakdownData; tot
       <p className="mt-2 text-[11px] leading-relaxed text-ink-soft">
         «يجمعه الممثل» = ما يدفعه الطلاب. «حصة الإدارة» = ما يسلّمه الممثل للإدارة. الفرق هو ربح الممثل =
         فرق سعر الطقم الأساسي لكل طقم + (سعر الشال − ٢٠٬٠٠٠) لكل شال امريكي. الإضافات الأخرى والقطع المفردة كاملة للإدارة (ربح الممثل منها صفر).
+        هذه الصفحة تشمل الطلبات الموافق عليها وغير الملغاة فقط.
       </p>
     </div>
   );

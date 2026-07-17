@@ -193,6 +193,30 @@ function CompletedSection() {
 
 type Tab = "active" | "completed";
 
+// ─── Session persistence — mid-batch back-navigation restore ──────────────────
+// Mirrors components/staff/station/StationConsole.tsx's STORAGE_PREFIX / lazy-init
+// pattern. Safe as a LAZY useState initializer here (unlike the rep console page,
+// see app/staff/wholesalers/[wholesalerId]/students/page.tsx): QueueView only ever
+// mounts after StaffPageContent's `if (loading || !user || isPureTailor) return
+// <PageLoader/>` gate clears — purely client-side, well past hydration — so there
+// is no SSR-rendered version of this component for a restored value to mismatch.
+const QUEUE_STORAGE_KEY = "loloshop-staff-home-queue";
+
+interface StoredQueueState {
+  activeTab?: Tab;
+  sourceFilter?: SourceFilter;
+  zoneFilter?: EmbroideryZone | "";
+}
+
+function readStoredQueue(): StoredQueueState {
+  if (typeof window === "undefined") return {};
+  try {
+    return JSON.parse(sessionStorage.getItem(QUEUE_STORAGE_KEY) || "{}") as StoredQueueState;
+  } catch {
+    return {};
+  }
+}
+
 function QueueView({
   staffType,
   showSourceFilter,
@@ -202,12 +226,32 @@ function QueueView({
   showSourceFilter: boolean;
   orderScope?: StaffOrderScope;
 }) {
-  const [activeTab, setActiveTab] = useState<Tab>("active");
+  // Restore the last UI state for this queue (data itself is NOT persisted — refetched fresh).
+  const [stored] = useState<StoredQueueState>(() => readStoredQueue());
+  const [activeTab, setActiveTab] = useState<Tab>(stored.activeTab === "completed" ? "completed" : "active");
   const [items, setItems] = useState<ProductionQueueItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);
-  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("retail");
-  const [zoneFilter, setZoneFilter] = useState<EmbroideryZone | "">("");
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>(
+    stored.sourceFilter === "retail" || stored.sourceFilter === "wholesaler" ? stored.sourceFilter : "retail"
+  );
+  const [zoneFilter, setZoneFilter] = useState<EmbroideryZone | "">(
+    stored.zoneFilter && EMBROIDERY_ZONE_ORDER.includes(stored.zoneFilter as EmbroideryZone)
+      ? stored.zoneFilter
+      : ""
+  );
+
+  // Mirror the UI state so back-navigation restores it exactly.
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(
+        QUEUE_STORAGE_KEY,
+        JSON.stringify({ activeTab, sourceFilter, zoneFilter })
+      );
+    } catch {
+      /* storage full/unavailable — persistence is best-effort */
+    }
+  }, [activeTab, sourceFilter, zoneFilter]);
 
   const meta = QUEUE_META[staffType] ?? {
     title: "قائمة الطلبات",

@@ -46,8 +46,8 @@ export function KpiStrip({ k, moneyVisible = false }: { k: TvSnapshot["kpis"]; m
     // Money cells appear ONLY when revealed — otherwise the board shows zero money.
     ...(moneyVisible
       ? [
-          { label: "إيراد اليوم", value: fmtIQD(k.revenue_today ?? 0), delta: k.revenue_delta, money: true },
-          { label: "ربح اليوم", value: fmtIQD(k.profit_today ?? 0), delta: null, money: true },
+          { label: "إيراد اليوم المعتمد", value: fmtIQD(k.revenue_today ?? 0), delta: k.revenue_delta, money: true },
+          { label: "ربح اليوم = الإيراد − التكلفة", value: fmtIQD(k.profit_today ?? 0), delta: null, money: true },
         ]
       : []),
   ];
@@ -355,7 +355,7 @@ export function Graphs({ g }: { g: TvSnapshot["graphs"] }) {
         </ResponsiveContainer>
       </ChartCard>
 
-      <ChartCard title="الإيراد والربح">
+      <ChartCard title="الإيراد والربح — الموافق عليه وغير الملغى">
         <ResponsiveContainer>
           <LineChart data={data} margin={{ top: 6, right: 8, left: -8, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#F0DCC4" />

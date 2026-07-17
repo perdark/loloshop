@@ -35,11 +35,18 @@ async function dashboard(req, res) {
          SELECT SUM(o.profit)::bigint
          FROM students s JOIN orders o ON o.student_id = s.id
          WHERE s.wholesaler_id = w.id AND o.status <> 'cancelled'
+           AND o.wholesaler_approval = 'approved'
        ), 0) AS earned_commission
        ,COALESCE((
          SELECT SUM(o.cost)::bigint FROM students s JOIN orders o ON o.student_id=s.id
          WHERE s.wholesaler_id=w.id AND o.status <> 'cancelled'
+           AND o.wholesaler_approval = 'approved'
        ),0) AS admin_due
+       ,COALESCE((
+         SELECT SUM(o.price)::bigint FROM students s JOIN orders o ON o.student_id=s.id
+         WHERE s.wholesaler_id=w.id AND o.status <> 'cancelled'
+           AND o.wholesaler_approval = 'approved'
+       ),0) AS student_total
      FROM wholesalers w WHERE w.id = $1`,
     [wId]
   );
@@ -52,6 +59,7 @@ async function dashboard(req, res) {
     commission_rate: Number(r.commission_rate),
     earned_commission: Number(r.earned_commission),
     admin_due: Number(r.admin_due),
+    student_total: Number(r.student_total),
     pricing: {
       admin_base: Number(r.admin_price || 0),
       selling_base: Number(r.wholesaler_price || 0),
@@ -409,7 +417,8 @@ async function listOrdersForApproval(req, res) {
        JOIN students s ON s.id = o.student_id
        JOIN users    u ON u.id = s.user_id
        JOIN products p ON p.id = o.product_id
-      WHERE s.wholesaler_id = $1 AND o.checkout_group_id IS NOT NULL ${clause}
+      WHERE s.wholesaler_id = $1 AND o.checkout_group_id IS NOT NULL
+        AND o.status <> 'cancelled' ${clause}
       GROUP BY o.checkout_group_id, s.id, u.name
       ORDER BY submitted_at DESC`,
     params

@@ -83,7 +83,7 @@ async function wholesalerOrders(req, res) {
      LEFT JOIN designs d ON d.id = o.design_id
      WHERE s.wholesaler_id = $1
        AND o.status::text <> 'cancelled'
-       AND (o.wholesaler_approval IS NULL OR o.wholesaler_approval = 'approved')
+       AND o.wholesaler_approval = 'approved'
        ${zoneClause ? 'AND ' + zoneClause : ''}
      ORDER BY u.name ASC, p.type ASC`,
     [id]
@@ -127,7 +127,13 @@ async function wholesalerOrders(req, res) {
               COUNT(*) FILTER (WHERE oi.label_snapshot ILIKE 'إضافة%شال%')::int AS shawl_count,
               COALESCE(SUM(oi.price_snapshot) FILTER (WHERE oi.label_snapshot ILIKE 'إضافة%شال%'),0)::bigint AS shawl_student,
               COALESCE(SUM(oi.price_snapshot) FILTER (WHERE oi.label_snapshot ILIKE 'إضافة%' AND oi.label_snapshot NOT ILIKE '%شال%'),0)::bigint AS other_student,
-              COALESCE(SUM(oi.price_snapshot) FILTER (WHERE oi.label_snapshot ILIKE 'قطعة:%'),0)::bigint AS piece_student
+              COALESCE(SUM(oi.price_snapshot) FILTER (WHERE oi.label_snapshot ILIKE 'قطعة:%'),0)::bigint AS piece_student,
+              COALESCE(SUM(oi.price_snapshot) FILTER (
+                WHERE oi.price_snapshot <> 0
+                  AND oi.label_snapshot <> 'طقم كامل'
+                  AND oi.label_snapshot NOT ILIKE 'إضافة%'
+                  AND oi.label_snapshot NOT ILIKE 'قطعة:%'
+              ),0)::bigint AS unclassified_student
          FROM order_items oi
         WHERE oi.order_id = ANY($1::uuid[])
         GROUP BY oi.order_id`,
@@ -142,6 +148,7 @@ async function wholesalerOrders(req, res) {
       d.shawl_student = b ? Number(b.shawl_student) : 0;
       d.other_student = b ? Number(b.other_student) : 0;
       d.piece_student = b ? Number(b.piece_student) : 0;
+      d.unclassified_student = b ? Number(b.unclassified_student) : 0;
     }
   }
   res.json({ data });

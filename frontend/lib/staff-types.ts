@@ -118,6 +118,7 @@ export interface StationZone {
 
 /** One item in the `items[]` array on the production order detail */
 export interface ProductionOrderItem {
+  id: string;
   label_snapshot: string;
   price_snapshot: number;
   qty: number;
@@ -274,8 +275,12 @@ export interface ProductionOrderDetail {
     return_to_customer?: boolean;
     /** Matches the final-design upload route guard. */
     can_upload_final_design?: boolean;
-    /** Permanent grouped deletion is manager/admin-only. */
+    /** Permanent single-piece deletion is manager/admin-only. */
     can_delete?: boolean;
+    /** Quick per-field edits (spec-line text, IG, phones) — manager/admin only. */
+    can_edit?: boolean;
+    /** Full طقم edit form — manager/admin, design-less rep/admin-created bundles only. */
+    can_edit_full_set?: boolean;
   };
   /** Backend-driven render layout (single source of truth — the UI never re-derives
    *  role→visibility). 'tailor' = الفصال read-only · 'embroidery' = embroiderer minimal

@@ -307,7 +307,7 @@ async function getQueue(req, res) {
        -- NULL delivered_at (legacy/migrated rows) is kept so a delivered order never just vanishes.
        AND (o.status::text <> 'delivered' OR o.delivered_at IS NULL OR o.delivered_at > NOW() - INTERVAL '90 days')
        -- Wholesaler approval gate: only show approved (or retail, i.e. NULL) orders to staff.
-       AND (o.wholesaler_approval IS NULL OR o.wholesaler_approval = 'approved')
+       AND (s.wholesaler_id IS NULL OR o.wholesaler_approval = 'approved')
        -- «إرجاع للطالب»: an order returned to the student leaves the production queue until resubmitted.
        AND o.returned_to_customer = FALSE
        ${designerPending
@@ -367,9 +367,12 @@ async function getOrder(req, res) {
   // measurements, the whole package). Every OTHER production station gets a "lean" view.
   const frontDesk = mgr || uTypes.includes('preparer');
   const lean = !frontDesk;
+  // المصمم contacts the student to confirm the artwork (user 2026-07-17) — designers get the
+  // full contact + intake context like the أيادي التصميم desk. Money stays front-desk/manager.
+  const designer = uTypes.includes('designer');
   // Capability flags — also returned to the client so the UI never re-derives visibility
   // (single source of truth, mirrors the available_actions pattern).
-  const canSeeContact = frontDesk;
+  const canSeeContact = frontDesk || designer;
   const canSeeMoney = frontDesk;
   // الفصال needs the robe قياسات; المكوجي needs the sizes too (his station shows
   // name + product photo + sizes + design images — user 2026-07-15).
@@ -437,8 +440,8 @@ async function getOrder(req, res) {
     delete order.price;
     if (order.intake) delete order.intake.deposit;
   }
-  // CONTACT VISIBILITY: phone + Instagram are front-desk/manager only. Every production
-  // station (designer, digitizer, embroiderer, presser) works from the design + spec.
+  // CONTACT VISIBILITY: front-desk/manager + designer (he calls the student to confirm the
+  // design). The other stations (digitizer, embroiderer, presser) work from the design + spec.
   if (!canSeeContact) {
     order.student_phone = null;
     order.instagram_username = null;
@@ -487,10 +490,12 @@ async function getOrder(req, res) {
     ]);
     for (const k of Object.keys(order)) if (!ALLOWED.has(k)) delete order[k];
   }
-  // LEAN production (designer / digitizer, no front-desk role): keep the design/work layout but
+  // LEAN production (digitizer, no front-desk role): keep the design/work layout but
   // drop the full-set intake card (phones/address/deposit). Contact, money + measurements are
   // already stripped above; the package siblings are gated by canSeePackage below.
-  if (lean && !presserOnly && !tailorOnly && !embroidererOnly) {
+  // The designer KEEPS the intake (phones/instagram/governorate/event date/notes — he contacts
+  // the student); its deposit was already deleted by the canSeeMoney strip above.
+  if (lean && !presserOnly && !tailorOnly && !embroidererOnly && !designer) {
     order.intake = null;
   }
 
@@ -518,7 +523,7 @@ async function getOrder(req, res) {
   // images now (his station is name + product photo + sizes + design — user 2026-07-15);
   // money/contact stay stripped below.
   const itemsRes = await query(
-    `SELECT label_snapshot, price_snapshot, qty, customer_image_url, customer_text, group_id, option_id
+    `SELECT id, label_snapshot, price_snapshot, qty, customer_image_url, customer_text, group_id, option_id
      FROM order_items WHERE order_id = $1 ORDER BY created_at`,
     [id]
   );
@@ -580,6 +585,21 @@ async function getOrder(req, res) {
   const embroideryIncomplete =
     order.status === 'embroidery' && embroidery_zones.length > 0 && !embroidery_zones.every((z) => z.done);
 
+  // Admin/مدير الإنتاج editing: quick per-field edits on any order; the full طقم form only
+  // for design-less orders of rep-linked or admin-created (name-only) students — never
+  // retail bundles (the form would re-price them with rep pricing).
+  let canEditFullSet = false;
+  if (isManager(u) && !order.design_id) {
+    if (order.source !== 'retail') canEditFullSet = true;
+    else {
+      const st = await query(
+        `SELECT u2.phone FROM students s JOIN users u2 ON u2.id = s.user_id WHERE s.id = $1`,
+        [order.student_id]
+      );
+      canEditFullSet = st.rows.length > 0 && st.rows[0].phone == null;
+    }
+  }
+
   const available_actions = {
     advance: nextTo && canTransition(u, order.status, nextTo) && !(embroideryIncomplete && !isManager(u))
       ? { to: nextTo, label: ADVANCE_LABEL_AR[`${order.status}→${nextTo}`] ?? 'تقدم للمرحلة التالية' }
@@ -606,6 +626,8 @@ async function getOrder(req, res) {
     can_upload_final_design:
       isManager(u) || uTypes.some((type) => ['designer', 'digitizer', 'embroiderer'].includes(type)),
     can_delete: isManager(u),
+    can_edit: isManager(u),
+    can_edit_full_set: canEditFullSet,
   };
 
   res.json({
@@ -1448,32 +1470,37 @@ async function monitor(req, res) {
   });
 }
 
-// Permanent grouped-order deletion from the staff workspace. Managers/admin only.
+// Permanent PIECE deletion from the staff workspace. Managers/admin only.
+// Deletes ONLY the given order row (its order_items cascade); sibling pieces of the
+// bundle survive. The empty checkout_group is removed when the last piece goes.
 async function deleteOrder(req, res) {
-  // The route applies requireStaffType() (manager/admin only). Keep the audit record as a
-  // second line of accountability because this removes the whole checkout-group bundle.
   const id = String(req.params.id || '');
   if (!/^[0-9a-f-]{36}$/i.test(id)) return res.status(400).json({ error: 'طلب غير صحيح', code: 'ERR_VALIDATION' });
   const result = await tx(async (client) => {
     const found = await client.query(`SELECT id,checkout_group_id,student_id FROM orders WHERE id=$1 FOR UPDATE`, [id]);
     if (!found.rows.length) return null;
     const order = found.rows[0];
-    const target = order.checkout_group_id
-      ? await client.query(`SELECT id FROM orders WHERE checkout_group_id=$1`, [order.checkout_group_id])
-      : { rows: [{ id: order.id }] };
-    const ids = target.rows.map((row) => row.id);
-    await client.query(`DELETE FROM staff_activity_log WHERE order_id=ANY($1::uuid[])`, [ids]);
-    await client.query(`DELETE FROM orders WHERE id=ANY($1::uuid[])`, [ids]);
-    if (order.checkout_group_id) await client.query(`DELETE FROM checkout_groups WHERE id=$1`, [order.checkout_group_id]);
+    await client.query(`DELETE FROM staff_activity_log WHERE order_id=$1`, [id]);
+    await client.query(`DELETE FROM orders WHERE id=$1`, [id]);
+    let remaining = [];
+    let groupDeleted = false;
+    if (order.checkout_group_id) {
+      const sib = await client.query(`SELECT id FROM orders WHERE checkout_group_id=$1`, [order.checkout_group_id]);
+      remaining = sib.rows.map((row) => row.id);
+      if (!remaining.length) {
+        await client.query(`DELETE FROM checkout_groups WHERE id=$1`, [order.checkout_group_id]);
+        groupDeleted = true;
+      }
+    }
     await client.query(
       `INSERT INTO audit_log(actor_id,action,entity,entity_id,details) VALUES($1,'delete_order','order',$2,$3)`,
-      [req.user.id, order.id, JSON.stringify({ deleted_order_ids: ids, checkout_group_id: order.checkout_group_id, student_id: order.student_id, source: 'staff_workspace' })]
+      [req.user.id, order.id, JSON.stringify({ piece_only: true, remaining_order_ids: remaining, checkout_group_id: order.checkout_group_id, student_id: order.student_id, source: 'staff_workspace' })]
     );
-    return ids;
+    return { remaining, groupDeleted };
   });
   if (!result) return res.status(404).json({ error: 'الطلب غير موجود', code: 'ERR_NOT_FOUND' });
-  for (const orderId of result) publish({ type: 'order_deleted', orderId });
-  res.json({ data: { deleted: result.length } });
+  publish({ type: 'order_deleted', orderId: id });
+  res.json({ data: { deleted: 1, remaining: result.remaining.length, checkout_group_deleted: result.groupDeleted } });
 }
 
 module.exports = {

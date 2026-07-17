@@ -130,6 +130,46 @@ interface ApiOrderRow {
   working_staff_name?: string | null;
   wholesaler_approval?: WholesalerApproval | null;
   checkout_group_id?: string | null;
+  calculation?: ApiMoneyCalculation;
+}
+
+export interface MoneyCalculationLine {
+  label: string;
+  price: number;
+  adminPrice: number;
+  qty: number;
+}
+
+export interface MoneyCalculation {
+  lines: MoneyCalculationLine[];
+  linePriceTotal: number;
+  lineAdminTotal: number;
+  priceAdjustment: number;
+  costAdjustment: number;
+}
+
+interface ApiMoneyCalculation {
+  lines?: { label: string; price: number; admin_price: number; qty: number }[];
+  line_price_total: number;
+  line_admin_total: number;
+  price_adjustment: number;
+  cost_adjustment: number;
+}
+
+function mapMoneyCalculation(raw?: ApiMoneyCalculation): MoneyCalculation | undefined {
+  if (!raw) return undefined;
+  return {
+    lines: (raw.lines || []).map((line) => ({
+      label: line.label,
+      price: Number(line.price),
+      adminPrice: Number(line.admin_price),
+      qty: Number(line.qty),
+    })),
+    linePriceTotal: Number(raw.line_price_total),
+    lineAdminTotal: Number(raw.line_admin_total),
+    priceAdjustment: Number(raw.price_adjustment),
+    costAdjustment: Number(raw.cost_adjustment),
+  };
 }
 
 interface ApiWholesalerRow {
@@ -185,6 +225,7 @@ function mapAddons(raw?: Partial<WholesalerPricingAddons> | null): WholesalerPri
 export type AdminOrderWithApproval = AdminOrder & {
   wholesalerApproval: WholesalerApproval | null;
   checkoutGroupId: string | null;
+  calculation?: MoneyCalculation;
 };
 
 function mapOrder(row: ApiOrderRow): AdminOrderWithApproval {
@@ -205,6 +246,7 @@ function mapOrder(row: ApiOrderRow): AdminOrderWithApproval {
     workingStaffName: row.working_staff_name ?? null,
     wholesalerApproval: (row.wholesaler_approval as WholesalerApproval) ?? null,
     checkoutGroupId: row.checkout_group_id ?? null,
+    calculation: mapMoneyCalculation(row.calculation),
   };
 }
 
@@ -309,20 +351,33 @@ export async function updateOrderCost(
 export async function getAdminOrders(
   filters: OrdersFilters = {}
 ): Promise<AdminOrderWithApproval[]> {
-  const { data } = await api.get<{ data: ApiOrderRow[] }>("/admin/orders", {
-    params: {
-      wholesaler_id: filters.wholesalerId || undefined,
-      batch_id: filters.batchId || undefined,
-      status: filters.status || undefined,
-      from: filters.dateFrom || undefined,
-      to: filters.dateTo || undefined,
-      source: filters.source || undefined,
-      type: filters.type || undefined,
-      zone: filters.zone || undefined,
-      approval: filters.approval || undefined,
-    },
+  const pageSize = 200;
+  const baseParams = {
+    wholesaler_id: filters.wholesalerId || undefined,
+    batch_id: filters.batchId || undefined,
+    status: filters.status || undefined,
+    from: filters.dateFrom || undefined,
+    to: filters.dateTo || undefined,
+    source: filters.source || undefined,
+    type: filters.type || undefined,
+    zone: filters.zone || undefined,
+    approval: filters.approval || undefined,
+    limit: pageSize,
+  };
+  const first = await api.get<{ data: ApiOrderRow[]; total: number }>("/admin/orders", {
+    params: { ...baseParams, offset: 0 },
   });
-  return (data.data || []).map(mapOrder);
+  const total = Number(first.data.total || 0);
+  const requests: Promise<{ data: { data: ApiOrderRow[] } }>[] = [];
+  for (let offset = pageSize; offset < total; offset += pageSize) {
+    requests.push(api.get("/admin/orders", { params: { ...baseParams, offset } }));
+  }
+  const rest = await Promise.all(requests);
+  const rows = [
+    ...(first.data.data || []),
+    ...rest.flatMap((response) => response.data.data || []),
+  ];
+  return rows.map(mapOrder);
 }
 
 // ─── Bundle (grouped) order types ────────────────────────────────────────────
@@ -336,6 +391,7 @@ export interface AdminBundleItem {
   price: number;
   cost: number;
   profit: number;
+  calculation?: MoneyCalculation;
 }
 
 /** Intake data from the full-set DM form (delivery / contact / event / deposit). */
@@ -376,6 +432,7 @@ interface ApiBundleItem {
   price: number;
   cost: number;
   profit: number;
+  calculation?: ApiMoneyCalculation;
 }
 
 interface ApiBundle {
@@ -419,6 +476,7 @@ function mapBundle(raw: ApiBundle): AdminBundle {
       price: Number(item.price),
       cost: Number(item.cost),
       profit: Number(item.profit),
+      calculation: mapMoneyCalculation(item.calculation),
     })),
     intake: raw.intake
       ? {
@@ -444,15 +502,17 @@ function mapBundle(raw: ApiBundle): AdminBundle {
  * Ungrouped orders appear as single-item bundles (checkout_group_id null).
  */
 export async function getAdminOrderBundles(
-  filters: Pick<OrdersFilters, "wholesalerId" | "source" | "dateFrom" | "dateTo"> = {}
+  filters: Pick<OrdersFilters, "wholesalerId" | "batchId" | "source" | "dateFrom" | "dateTo" | "approval"> = {}
 ): Promise<AdminBundle[]> {
   const { data } = await api.get<{ data: { bundles: ApiBundle[] } }>("/admin/orders", {
     params: {
       group: "bundle",
       wholesaler_id: filters.wholesalerId || undefined,
+      batch_id: filters.batchId || undefined,
       source: filters.source || undefined,
       from: filters.dateFrom || undefined,
       to: filters.dateTo || undefined,
+      approval: filters.approval || undefined,
     },
   });
   return (data.data?.bundles || []).map(mapBundle);
@@ -1091,7 +1151,10 @@ export interface AdminCustomOrderConfig {
 }
 
 export interface AdminCustomOrderPayload extends CreateFullSetPayload {
-  student_name: string;
+  /** طالب جديد mode — required when student_id absent. */
+  student_name?: string;
+  /** طالب موجود mode — takes precedence over student_name. */
+  student_id?: string | null;
   wholesaler_id?: string | null;
 }
 
@@ -1140,6 +1203,16 @@ export async function uploadAdminCustomOrderImage(file: File): Promise<string> {
     data: { url: string };
   };
   return res.data.url;
+}
+
+export async function searchAdminCustomOrderStudents(
+  q: string
+): Promise<import("./staff").StudentSearchHit[]> {
+  const { data } = await api.get<{ data: import("./staff").StudentSearchHit[] }>(
+    "/admin/custom-order/students-search",
+    { params: { q } }
+  );
+  return data.data ?? [];
 }
 
 // ─── Staff Activity ──────────────────────────────────────────────────────────
