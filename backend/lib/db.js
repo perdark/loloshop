@@ -20,7 +20,8 @@ try {
 
 const pool = new Pool({
   connectionString,
-  max: 10,
+  // 25 is safe: prod connects through Neon's pooled (-pooler / PgBouncer) endpoint.
+  max: 25,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 20000,  // Neon free compute cold-starts; default 0/short → ETIMEDOUT
   keepAlive: true,
@@ -62,7 +63,14 @@ async function query(text, params) {
   let lastErr;
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      return await pool.query(text, params);
+      const t0 = Date.now();
+      const result = await pool.query(text, params);
+      const ms = Date.now() - t0;
+      if (ms > 500) {
+        // Developer-only diagnostics (pm2 logs). SQL text only — never params (PII).
+        console.warn(`SLOW QUERY ${ms}ms: ${String(text).replace(/\s+/g, ' ').slice(0, 80)}`);
+      }
+      return result;
     } catch (e) {
       lastErr = e;
       if (!isTransient(e) || attempt === 3) throw e;

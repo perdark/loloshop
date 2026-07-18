@@ -12,7 +12,8 @@ module.exports = {
         NODE_ENV: 'production',
         PORT: 4000,
       },
-      max_memory_restart: '300M',
+      // 300M restart-looped under load (sharp crops spike memory); box has 24GB.
+      max_memory_restart: '800M',
     },
     {
       name: 'loloshop-web',
@@ -23,7 +24,7 @@ module.exports = {
         NODE_ENV: 'production',
         PORT: 3000,
       },
-      max_memory_restart: '500M',
+      max_memory_restart: '1G',
     },
   ],
 };
