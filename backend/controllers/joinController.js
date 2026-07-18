@@ -1,23 +1,30 @@
 const bcrypt = require('bcrypt');
 const { query, tx } = require('../lib/db');
 const { isValidIqMobile } = require('../lib/otp');
+const memoCache = require('../lib/memoCache');
 
 async function getReferral(req, res) {
   const { code } = req.params;
-  const { rows } = await query(
-    `SELECT u.name AS wholesaler_name, w.deadline, w.university_name, w.department
-     FROM wholesalers w JOIN users u ON u.id = w.user_id
-     WHERE w.referral_code = $1`,
-    [code]
-  );
-  if (!rows.length) {
+  // Hot path during a referral wave (a whole cohort opens the same link within
+  // minutes) — cache HITS only for 60s; a miss keeps hitting the DB so a freshly
+  // created rep link works immediately.
+  const data = await memoCache.wrap(`join:${code}`, 60_000, async () => {
+    const { rows } = await query(
+      `SELECT u.name AS wholesaler_name, w.deadline, w.university_name, w.department
+       FROM wholesalers w JOIN users u ON u.id = w.user_id
+       WHERE w.referral_code = $1`,
+      [code]
+    );
+    return rows.length ? rows[0] : undefined; // undefined → not cached
+  });
+  if (!data) {
     return res.status(404).json({ error: 'الرابط غير صالح', code: 'ERR_REFERRAL_INVALID' });
   }
   res.json({
-    wholesaler_name: rows[0].wholesaler_name,
-    deadline: rows[0].deadline,
-    university_name: rows[0].university_name,
-    department: rows[0].department,
+    wholesaler_name: data.wholesaler_name,
+    deadline: data.deadline,
+    university_name: data.university_name,
+    department: data.department,
     valid: true,
   });
 }
