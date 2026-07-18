@@ -118,10 +118,14 @@ VPS→Neon (eu-central-1) network round-trip per read for hot paths.
 - Wins: deploys stop pegging the VPS CPU during peak season; a broken build fails in CI
   instead of taking prod down; local disk pressure (94%) stops mattering for deploys.
 
-## 8. Minimal monitoring
+## 8. Minimal monitoring (developer-only)
 
-- External uptime ping on `/api/health` (free tier, 1–5min interval) alerting the owner
-  (email/Telegram). Manual signup step, documented in the plan.
+**Audience decision (owner, 2026-07-18): monitoring is for the developer ONLY.** No
+admin-facing UI, no dashboard cards, no notifications to admin/staff accounts — alerts
+and logs are visible only to the developer.
+
+- External uptime ping on `/api/health` (free tier, 1–5min interval) alerting the
+  developer's email/Telegram. Manual signup step, documented in the plan.
 - `pm2 install pm2-logrotate` on the VPS (logs currently grow unbounded).
 - `backend/lib/db.js` `query()`: log a warning with the first ~80 chars of SQL + duration
   when a query exceeds **500ms** — identifies the slow query *before* it becomes an
