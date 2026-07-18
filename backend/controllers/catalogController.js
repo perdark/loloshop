@@ -1,8 +1,17 @@
 const { query, tx } = require('../lib/db');
 const { publicUrl } = require('../lib/upload');
 const { publish } = require('../lib/eventBus');
+const memoCache = require('../lib/memoCache');
 
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;
+
+// Storefront reads are cached (cat:* role-keyed, pkg:fullset). EVERY catalog
+// mutation in this file must call this after a successful write, or admins would
+// wait out the TTL to see their own edit on the storefront.
+function clearCatalogCache() {
+  memoCache.del('cat:');
+  memoCache.del('pkg:fullset');
+}
 
 // JSONB arrays must be JSON.stringify'd before binding — pg otherwise serializes a JS
 // array as a Postgres array literal ('{…}') and the jsonb column rejects it.
@@ -588,6 +597,7 @@ async function setPackageProducts(req, res) {
     }
   });
   await auditPackage(req, 'package_set_products', id, { product_ids: ids });
+  clearCatalogCache();
   publish({ type: 'catalog', resource: 'package', id });
   res.json({ data: { package_id: id, products: valid } });
 }
@@ -619,6 +629,7 @@ async function createPackage(req, res) {
     ]
   );
   await auditPackage(req, 'package_create', rows[0].id, { name_ar, is_vip: !!is_vip, is_full_set: !!is_full_set });
+  clearCatalogCache();
   publish({ type: 'catalog', resource: 'package', id: rows[0].id });
   res.status(201).json({ data: { id: rows[0].id } });
 }
@@ -641,6 +652,7 @@ async function updatePackage(req, res) {
   const { rows } = await query(upd.sql, upd.params);
   if (!rows.length) return res.status(404).json({ error: 'غير موجود', code: 'ERR_NOT_FOUND' });
   await auditPackage(req, 'package_update', req.params.id, { fields: Object.keys(req.body) });
+  clearCatalogCache();
   publish({ type: 'catalog', resource: 'package', id: req.params.id });
   res.json({ data: rows[0] });
 }
@@ -651,6 +663,7 @@ async function deletePackage(req, res) {
   );
   if (!rows.length) return res.status(404).json({ error: 'غير موجود', code: 'ERR_NOT_FOUND' });
   await auditPackage(req, 'package_delete', req.params.id, {});
+  clearCatalogCache();
   publish({ type: 'catalog', resource: 'package', id: req.params.id });
   res.json({ data: rows[0] });
 }
@@ -666,6 +679,7 @@ async function setPackageRule(req, res) {
      ON CONFLICT (sash_type_option_id) DO UPDATE SET package_id = EXCLUDED.package_id`,
     [id, sash_type_option_id]
   );
+  clearCatalogCache();
   res.json({ data: { package_id: id, sash_type_option_id } });
 }
 

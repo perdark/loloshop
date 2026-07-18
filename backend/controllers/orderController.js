@@ -3,6 +3,7 @@ const { priceRoleForUser } = require('./catalogController');
 const { publish } = require('../lib/eventBus');
 const { staffScopeAllows, staffTypesOf } = require('../middleware/auth');
 const { persistFullSetOrder, readFullSetOrder, loadWholesalerPricing } = require('../lib/fullSetOrder');
+const memoCache = require('../lib/memoCache');
 
 const ALL_STATUSES = [
   'pending_approval', 'designing', 'design_complete', 'converting',
@@ -1441,13 +1442,20 @@ async function repFullSetContext(req, res) {
   let wholesalerApproval = null;
   let wholesalerRejectReason = null;
   if (isRep) {
-    const pk = await query(
-      `SELECT id, name_ar, price FROM packages
-       WHERE active = TRUE AND is_full_set = TRUE ORDER BY sort, created_at`
-    );
-    packages = pk.rows;
+    // Cached sub-reads (60s): identical for every student of the rep — the waiting
+    // screen polls this endpoint, so these two reads dominate spike load. The
+    // per-student reads below (existing order, approval status) MUST stay live.
+    packages = await memoCache.wrap('pkg:fullset', 60_000, async () => {
+      const pk = await query(
+        `SELECT id, name_ar, price FROM packages
+         WHERE active = TRUE AND is_full_set = TRUE ORDER BY sort, created_at`
+      );
+      return pk.rows;
+    });
     // Rep/student-facing pricing only (base + add-ons) — never the admin-private price.
-    const p = await loadWholesalerPricing(student.wholesaler_id);
+    const p = await memoCache.wrap(`reppricing:${student.wholesaler_id}`, 60_000, () =>
+      loadWholesalerPricing(student.wholesaler_id)
+    );
     pricing = {
       base: p.wholesalerPrice,
       addons: Object.fromEntries(Object.entries(p.addons).map(([key, pair]) => [key, pair.selling])),

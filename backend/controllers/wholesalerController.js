@@ -4,6 +4,7 @@ const { query, tx } = require('../lib/db');
 const { publicUrl } = require('../lib/upload');
 const { persistFullSetOrder, readFullSetOrder, loadWholesalerPricing } = require('../lib/fullSetOrder');
 const { setBundleApproval, notifyUser } = require('../lib/orderApproval');
+const memoCache = require('../lib/memoCache');
 
 async function getWholesalerId(userId) {
   const { rows } = await query(`SELECT id FROM wholesalers WHERE user_id = $1`, [userId]);
@@ -12,8 +13,12 @@ async function getWholesalerId(userId) {
 
 // Rep/student-facing pricing for the full-set form: base طقم price (0 = fall back to the
 // package price client-side) + the add-on surcharges. NEVER exposes the admin-private price.
+// Cached 60s per rep (display only — persistFullSetOrder reads pricing live for money);
+// adminController.updatePricing invalidates `reppricing:<id>` on التسعيرة edits.
 async function publicPricingFor(wholesalerId) {
-  const p = await loadWholesalerPricing(wholesalerId);
+  const p = await memoCache.wrap(`reppricing:${wholesalerId}`, 60_000, () =>
+    loadWholesalerPricing(wholesalerId)
+  );
   return {
     base: p.wholesalerPrice,
     addons: Object.fromEntries(Object.entries(p.addons).map(([key, pair]) => [key, pair.selling])),
@@ -244,10 +249,14 @@ async function uploadImage(req, res) {
 // Active full-set packages the rep can order (الطقم الكامل) + the rep's «التسعيرة».
 async function fullSetPackages(req, res) {
   const wId = await getWholesalerId(req.user.id);
-  const { rows } = await query(
-    `SELECT id, name_ar, price FROM packages
-     WHERE active = TRUE AND is_full_set = TRUE ORDER BY sort, created_at`
-  );
+  // Same list for every rep/student — cached 60s; catalog package mutations invalidate.
+  const rows = await memoCache.wrap('pkg:fullset', 60_000, async () => {
+    const r = await query(
+      `SELECT id, name_ar, price FROM packages
+       WHERE active = TRUE AND is_full_set = TRUE ORDER BY sort, created_at`
+    );
+    return r.rows;
+  });
   res.json({ data: { packages: rows, pricing: await publicPricingFor(wId) } });
 }
 

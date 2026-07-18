@@ -3,6 +3,7 @@ const { query, tx } = require('../lib/db');
 const { DEFAULT_ADDONS, normalizeSettlementAddons } = require('../lib/fullSetOrder');
 const { normalizeIqPhone } = require('../lib/otp');
 const { setBundleApproval, notifyUser } = require('../lib/orderApproval');
+const memoCache = require('../lib/memoCache');
 // Money-gate reveal logic lives in tvBoardController (single source of truth for the
 // 'money_gate' site_settings row + the sha256 compare). No circular dep: tvBoardController
 // requires only lib/*, never adminController.
@@ -413,6 +414,7 @@ async function updatePricing(req, res) {
     [adminPrice, wholesalerPrice, JSON.stringify(pricingAddons), id]
   );
   if (!rows.length) return res.status(404).json({ error: 'غير موجود', code: 'ERR_NOT_FOUND' });
+  memoCache.del(`reppricing:${id}`); // التسعيرة edits must show in the rep form immediately
   await query(
     `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
      VALUES ($1, 'update_pricing', 'wholesaler', $2, $3)`,
