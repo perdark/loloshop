@@ -650,24 +650,45 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
   }
 
   // ── core processing loop (shared by runJob and runQueue) ─────────────────────
+  // The backend enqueues generation on job creation (pg-boss worker) — the browser
+  // only WATCHES progress now. Closing the tab no longer stops generation; reopening
+  // + fetching the job (cal_last_job) shows the finished plates. If the worker is
+  // down (no progress for ~2 min), we fall back to the old client-driven /process
+  // loop so generation never hard-blocks on the worker.
   async function runCreatedJob(job: CalJob) {
     setJobId(job.job_id);
     setPlates(job.plates);
     setTotal(job.total);
     setDone(0);
 
-    let remaining = job.total;
-    while (remaining > 0) {
-      const r = await processCalJob(job.job_id);
-      setDone(r.done);
-      setPlates((prev) =>
-        prev.map((p) => r.plates.find((u) => u.id === p.id) ?? p)
-      );
-      if (r.review) {
-        toast.error("تعذّر تقطيع إحدى الأوراق — راجِعها يدويًا");
+    let stalledPolls = 0;
+    let lastDone = 0;
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 4000));
+      const snap = await getCalJob(job.job_id);
+      setPlates(snap.plates);
+      setDone(snap.done);
+      const finished = snap.plates.every((p) => p.status !== "pending");
+      if (finished) break;
+      stalledPolls = snap.done === lastDone ? stalledPolls + 1 : 0;
+      lastDone = snap.done;
+      if (stalledPolls >= 30) {
+        toast.message("المولّد الخلفي متوقف — نكمل التوليد من المتصفح");
+        let remaining = snap.total - snap.done;
+        while (remaining > 0) {
+          const r = await processCalJob(job.job_id);
+          setDone(r.done);
+          setPlates((prev) =>
+            prev.map((p) => r.plates.find((u) => u.id === p.id) ?? p)
+          );
+          if (r.review) {
+            toast.error("تعذّر تقطيع إحدى الأوراق — راجِعها يدويًا");
+          }
+          if (r.processed === 0 && r.remaining > 0) break; // batch failed; stop
+          remaining = r.remaining;
+        }
+        break;
       }
-      if (r.processed === 0 && r.remaining > 0) break; // batch failed; stop
-      remaining = r.remaining;
     }
     // refresh to capture all final states
     const full = await getCalJob(job.job_id);
