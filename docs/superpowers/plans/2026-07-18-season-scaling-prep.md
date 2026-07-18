@@ -10,6 +10,14 @@
 
 **Spec:** `docs/superpowers/specs/2026-07-18-season-scaling-prep-design.md`
 
+## Scope change (owner, 2026-07-18)
+
+**Task 0 (Neon dev branch) and Task 10 (CI artifact builds) are DROPPED for now.**
+Consequences: e2e testing continues against the shared dev+prod Neon DB using
+self-cleaning scripts (existing project norm); deploys keep building on the VPS.
+Task 11's runbook must not reference GitHub Actions variables. Both tasks can be
+revived later unchanged.
+
 ## Global Constraints
 
 - **NEVER `git push` during this plan.** Push to main auto-deploys prod. Commit locally per task; deploy is the final owner-approved step (Task 11).
