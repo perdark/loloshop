@@ -6,6 +6,62 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
+## 2026-07-18 — Season scaling prep: in-process caching · polling calm-down · pg-boss calligraphy worker · infra dials
+
+**Committed locally on main, NOT pushed (push = prod deploy — owner approves first). No migration** (pg-boss auto-created its
+own `pgboss` schema on the shared Neon DB — additive). Gates: BE `node --check` 0 on every touched file · memoCache unit tests
+5/5 (`node --test backend/test/`) · FE `tsc` 0 / `eslint` 0 errors · **live HTTP e2e on Neon, all self-cleaned**: cache 11/11 +
+catalog 12/12 + engine 9/9 + queue 8/9 (the 1 "fail" was a wrong test expectation about pg-boss singleton semantics — documented
+in `lib/queue.js`, no product defect). Spec: `docs/superpowers/specs/2026-07-18-season-scaling-prep-design.md` · plan:
+`docs/superpowers/plans/2026-07-18-season-scaling-prep.md` · runbook: `docs/ops/2026-07-18-season-rollout.md`.
+
+**Why.** Joining season months 8–10: baseline ~200 users/hour + referral spikes (+1000 students in minutes from one rep link).
+**Owner decisions locked:** rate limits UNCHANGED (DDoS concern — accepted risk: CGNAT can throttle a wave to ~10 joins/hour/IP;
+emergency valve = raise `max` in routes/join.js + routes/auth.js + pm2 reload). No «تحقق الآن» button. Monitoring developer-only.
+Neon dev-branch split + CI artifact builds DROPPED for now (Tasks 0/10 in the plan — revivable unchanged).
+
+**① In-process TTL cache — NEW `backend/lib/memoCache.js`** (get/set/del-prefix/wrap, 500-entry LRU-ish bound, single-process
+only — comment warns re cluster mode). Cached reads: join-code lookup `join:<code>` 60s hits-only (`joinController.getReferral`);
+full-set packages `pkg:fullset` 60s + rep pricing `reppricing:<wid>` 60s (BOTH `orderController.repFullSetContext` — whose
+per-student approval/existing reads stay LIVE — and `wholesalerController.fullSetPackages`/`publicPricingFor`, which cache the
+same `loadWholesalerPricing` result); storefront `cat:shop:<audience>:<role>` + `cat:prod:<id>:<role>:<priv>` 120s +
+`settings:promo` 60s (`catalogController` — getShop/getProductFull bodies extracted to `buildShopFeed`/`buildProductFull`,
+404s/misses never cached). **Invalidation:** `adminController.updatePricing` → del reppricing; `updatePromo` → del settings+cat;
+package mutations call `clearCatalogCache()`; PLUS a **route-level hook** in `routes/catalog.js` (+ the 2 legacy POSTs in
+`routes/products.js`): any non-GET admin request with status <400 clears `cat:`+`pkg:fullset` on res finish — new endpoints can't
+forget. **Money/settlement/approval data is never cached.** `persistFullSetOrder` still reads pricing live (money path untouched).
+
+**② Polling calm-down.** `lib/hooks/usePolling.ts` gained a 4th arg `jitterMs` (setTimeout chain, ±jitter, min 1s; hidden-tab
+skip already existed). `NotificationBell` 30s → **60s±15s**; `/my-order` waiting-screen approval poll 12s → **45s±10s** (was
+~83 req/s at 1000 waiting students; now ~22 with jitter spread). Staff consoles untouched (15s).
+
+**③ pg-boss calligraphy worker.** NEW `backend/lib/queue.js` (lazy shared boss, `enqueueGeneration(jobId)` fire-and-forget,
+singletonKey best-effort, retryLimit 2 backoff, expireInSeconds 20min = per-attempt cap AND crash-recovery window) + NEW
+`backend/worker.js` (PM2 app **loloshop-worker**, drains a job batch-by-batch via the engine, throws on no-progress → pg-boss
+retry). `processNext`'s body extracted VERBATIM to NEW `backend/lib/calligraphyEngine.js` `processNextBatch(jobId, req=null)`
+(returns `{data}` or `{error:{status,message,code},data}`; controller = thin wrapper, response shapes/statuses unchanged; shared
+helpers toPlate/autoLinkPlate/attachOrderContext/jobCounts/jobCost/promptVariant/BATCH re-exported from the engine).
+`lib/upload.js publicUrl` now tolerates `req=null` (worker context → PUBLIC_URL/localhost). `createJob` + `queueGenerate`
+enqueue after insertPlates. **FE `CalligraphyTool.runCreatedJob`**: was a client-driven `/process` loop → now polls `getCalJob`
+every 4s (close the tab, generation continues); **watchdog: ~2 min no progress → toast + falls back to the OLD client loop**
+(worker down ≠ dead feature). Kill-mid-job e2e-proven: first batch survives, `/process` drains the rest.
+
+**④ Infra dials.** `lib/db.js`: pool 10→**25** (prod uses the `-pooler` endpoint — verified) + **SLOW QUERY warn >500ms**
+(SQL first 80 chars, never params). `ecosystem.config.js`: api 300M→**800M**, web 500M→**1G**, + the worker app (500M).
+
+### Open follow-ups
+- **Deploy = push** (owner approves; rides with the other uncommitted 07-17 session work in the tree — coordinate). After
+  deploy walk `docs/ops/2026-07-18-season-rollout.md`: nginx /uploads block, `pm2 install pm2-logrotate` + reload (picks up
+  loloshop-worker), UptimeRobot on /api/health (developer-only), smoke list there.
+- **User browser walkthrough pending** (steps appended to TESTING-WALKTHROUGH.md §2026-07-18): waiting-screen slow poll,
+  bell 60s, catalog invalidation-on-edit, calligraphy generate-with-tab-closed. Dev servers UP: BE :4000 (plain `node
+  server.js`), FE :3000, worker (`node worker.js`, detached).
+- Dropped-not-dead: Neon dev/prod branch split (Task 0) + CI artifact builds (Task 10) — plan tasks intact for later revival.
+- If PM2 **cluster mode** is ever enabled: memoCache + eventBus + express-rate-limit are all single-process — move to a shared
+  store first.
+
+---
+
 ## 2026-07-17 (c) — Navigation batch: sessionStorage state-restore on 5 screens · multi-role sidebar links · orphan pages deleted
 
 **Uncommitted on main** (frontend only). Gates: `tsc` 0 · `eslint` 0 (fixed the 2 hook-deps warnings the agents left). Built via

@@ -1,5 +1,20 @@
 # Progress
 
+## 2026-07-18 — Season scaling prep: caching · polling calm-down · pg-boss calligraphy worker · infra dials
+
+Prep for the months 8–10 joining season (referral spikes of +1000 students in minutes). ① **In-process TTL cache**
+(`backend/lib/memoCache.js`): join-code lookup 60s, full-set packages + rep pricing 60s (approval/existing-order reads stay
+live), storefront shop/product feeds 120s keyed per audience+role, promo setting 60s — with immediate invalidation on admin
+edits (التسعيرة del, promo del, and a route-level hook that clears catalog cache on ANY successful admin catalog mutation).
+Money/settlement is never cached. ② **Polling**: waiting-screen approval poll 12s→45s±10s jitter, bell 30s→60s±15s (hidden
+tabs already skip). ③ **Calligraphy generates server-side**: pg-boss queue on the existing Neon DB + new PM2 `loloshop-worker`;
+the browser only watches progress (close the tab, plates keep generating); 2-min-stall watchdog falls back to the old client
+loop. `processNext` logic extracted verbatim to `lib/calligraphyEngine.js` (shared, behavior unchanged). ④ **Dials**: DB pool
+10→25, SLOW QUERY log >500ms, PM2 memory caps 800M/1G/500M. **Owner decisions:** rate limits UNCHANGED (accepted CGNAT risk +
+documented emergency valve), no «تحقق الآن» button, monitoring developer-only, dev-DB split + CI builds deferred. Gates:
+node --check 0 · unit 5/5 · tsc 0 · eslint 0 · live e2e on Neon 40/41 (1 = wrong test expectation, documented), self-cleaned.
+Runbook: `docs/ops/2026-07-18-season-rollout.md`. NOT pushed. See HANDOFF.
+
 ## 2026-07-17 (d) — حذف = piece-only · admin/مدير الإنتاج order edit (full طقم + quick ✎) · custom order to existing student
 
 ① **Delete now removes ONE piece**, not the whole bundle: both `DELETE /production/orders/:id` and `/admin/orders/:id` delete the
