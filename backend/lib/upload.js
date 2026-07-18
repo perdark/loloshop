@@ -47,11 +47,14 @@ const imageUpload = multer({
 function publicUrl(req, subdir, filename) {
   // In dev, files live on THIS host's disk — using a prod PUBLIC_URL would hand
   // back a 404 link. Only trust PUBLIC_URL in production; otherwise echo the
-  // request host (localhost:4000 in dev).
+  // request host (localhost:4000 in dev). `req` may be null when called from the
+  // queue worker (no HTTP request) — fall back to PUBLIC_URL/localhost.
   const base =
     process.env.NODE_ENV === 'production' && process.env.PUBLIC_URL
       ? process.env.PUBLIC_URL
-      : `${req.protocol}://${req.get('host')}`;
+      : req
+        ? `${req.protocol}://${req.get('host')}`
+        : process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 4000}`;
   return `${base}/uploads/${subdir}/${filename}`;
 }
 
