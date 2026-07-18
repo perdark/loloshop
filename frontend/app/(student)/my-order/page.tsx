@@ -174,7 +174,10 @@ export default function StudentMyOrderPage() {
     }
   }
 
-  usePolling(pollApproval, 12000, isWaiting);
+  // ~45 s ±10 s: during a join wave hundreds of students sit on this screen at
+  // once — the jittered slow poll keeps the approval check from becoming a
+  // synchronized stampede (12 s × 1000 students was ~83 req/s).
+  usePolling(pollApproval, 45000, isWaiting, 10000);
 
   async function handleSubmit(payload: CreateFullSetPayload) {
     setSubmitting(true);

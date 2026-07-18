@@ -78,8 +78,10 @@ export function NotificationBell({ className = "" }: { className?: string }) {
     load();
   }, [load]);
 
-  // Poll every 30 s so new notifications surface without a refresh.
-  usePolling(load, 30000);
+  // Poll every ~60 s (±15 s jitter) so new notifications surface without a refresh.
+  // This runs for EVERY logged-in tab — during a referral wave it is the biggest
+  // background load, hence the long jittered interval (hidden tabs already skip).
+  usePolling(load, 60000, true, 15000);
 
   // Close on outside click + Escape.
   useEffect(() => {
