@@ -50,10 +50,15 @@ async function priceRoleForUser(user, override) {
 // (discounts hidden), so we never accidentally advertise an expired discount.
 async function isPromoLive() {
   try {
-    const { rows } = await query(
-      `SELECT value FROM site_settings WHERE key = 'discount_popup'`
-    );
-    const cfg = rows[0] && rows[0].value;
+    // Setting row cached 60s (null when unset — null IS cached, undefined is not);
+    // adminController.updatePromo invalidates. The active/deadline check stays
+    // per-call so a passing deadline takes effect within the promo TTL.
+    const cfg = await memoCache.wrap('settings:promo', 60_000, async () => {
+      const { rows } = await query(
+        `SELECT value FROM site_settings WHERE key = 'discount_popup'`
+      );
+      return (rows[0] && rows[0].value) || null;
+    });
     if (!cfg || cfg.active !== true) return false;
     if (cfg.deadline && Date.now() >= new Date(cfg.deadline).getTime()) return false;
     return true;
@@ -66,6 +71,25 @@ async function isPromoLive() {
 async function getProductFull(req, res) {
   const { id } = req.params;
   const role = await priceRoleForUser(req.user, req.query.role);
+  // Cache key carries everything the payload depends on: product, price role, and
+  // whether the caller is privileged (admin/staff bypass audience-visibility 404s).
+  // Misses/404s return undefined → never cached (a just-activated product shows
+  // immediately). Admin catalog mutations clear `cat:` via the routes hook.
+  const isPrivileged = !!(req.user && (req.user.role === 'admin' || req.user.role === 'staff'));
+  const cached = await memoCache.wrap(
+    `cat:prod:${id}:${role}:${isPrivileged ? 'priv' : 'pub'}`,
+    120_000,
+    () => buildProductFull(id, role, isPrivileged)
+  );
+  if (!cached) {
+    return res.status(404).json({ error: 'المنتج غير موجود', code: 'ERR_NOT_FOUND' });
+  }
+  res.json({ data: cached });
+}
+
+// Assembles the full configurator payload, or undefined when the product should 404
+// for this caller (missing/inactive, or audience-hidden for non-privileged users).
+async function buildProductFull(id, role, isPrivileged) {
   const prod = await query(
     `SELECT p.id, p.type, p.name_ar, p.description, p.customizable, p.gender_restriction,
             p.image_url, p.image_fit, p.featured, p.parent_id, p.wholesaler_only, p.retail_only,
@@ -78,23 +102,16 @@ async function getProductFull(req, res) {
      WHERE p.id = $1 AND p.active = TRUE`,
     [id, role]
   );
-  if (!prod.rows.length) {
-    return res.status(404).json({ error: 'المنتج غير موجود', code: 'ERR_NOT_FOUND' });
-  }
+  if (!prod.rows.length) return undefined;
   const row = prod.rows[0];
 
   // Hide the discount unless the site-wide promo is live (see isPromoLive).
   if (!(await isPromoLive())) row.compare_at_price = null;
 
   // Enforce audience visibility for non-admin/staff users
-  const isPrivileged = req.user && (req.user.role === 'admin' || req.user.role === 'staff');
   if (!isPrivileged) {
-    if (row.wholesaler_only && role !== 'wholesaler') {
-      return res.status(404).json({ error: 'المنتج غير موجود', code: 'ERR_NOT_FOUND' });
-    }
-    if (row.retail_only && role === 'wholesaler') {
-      return res.status(404).json({ error: 'المنتج غير موجود', code: 'ERR_NOT_FOUND' });
-    }
+    if (row.wholesaler_only && role !== 'wholesaler') return undefined;
+    if (row.retail_only && role === 'wholesaler') return undefined;
   }
 
   const gallery = await query(
@@ -159,7 +176,7 @@ async function getProductFull(req, res) {
     locks.rows.forEach((l) => (lockedByGroup[l.group_id] = l.option_id));
   }
 
-  const data = {
+  return {
     ...row,
     price_role: role,
     images: gallery.rows,
@@ -169,7 +186,6 @@ async function getProductFull(req, res) {
       locked_option_id: lockedByGroup[g.id] || null,
     })),
   };
-  res.json({ data });
 }
 
 // ---------- PUBLIC: shop feed (packages-first, products grouped by type) ----------
@@ -178,6 +194,15 @@ async function getShop(req, res) {
   // Audience drives the funnel: wholesaler-students see only the package form (FE redirect),
   // retail browses products + cart, guests browse anonymously.
   const audience = !req.user ? 'guest' : role === 'wholesaler' ? 'wholesaler_student' : 'retail';
+  // Whole feed cached 120s per (audience, role) — identical for every visitor of the
+  // same class, and the storefront's hottest read. Admin mutations clear `cat:`.
+  const data = await memoCache.wrap(`cat:shop:${audience}:${role}`, 120_000, () =>
+    buildShopFeed(audience, role)
+  );
+  res.json({ data });
+}
+
+async function buildShopFeed(audience, role) {
   // Audience-based visibility filter:
   //   guest / retail  → hide wholesaler_only products
   //   wholesaler_student → hide retail_only products
@@ -229,7 +254,7 @@ async function getShop(req, res) {
     if (!promoLive) p.compare_at_price = null;
     (by_type[p.type] ||= []).push(p);
   });
-  res.json({ data: { price_role: role, audience, packages, full_set_packages, by_type } });
+  return { price_role: role, audience, packages, full_set_packages, by_type };
 }
 
 // ---------- ADMIN: list all products (incl. inactive) for catalog editor ----------
@@ -782,4 +807,5 @@ module.exports = {
   lockGroupOption, unlockGroupOption,
   listPackages, createPackage, updatePackage, deletePackage, setPackageRule, setPackageProducts,
   getPromo, getMaintenance,
+  clearCatalogCache,
 };

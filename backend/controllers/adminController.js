@@ -728,6 +728,11 @@ async function updatePromo(req, res) {
     [JSON.stringify(cfg)]
   );
 
+  // Promo flips must show immediately: the setting itself + the catalog payloads
+  // that baked promoLive into their discount fields.
+  memoCache.del('settings:promo');
+  memoCache.del('cat:');
+
   res.json({ data: cfg });
 }
 

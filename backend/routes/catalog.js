@@ -14,6 +14,17 @@ router.get('/maintenance', c.getMaintenance);                      // maintenanc
 // Everything below is admin-only
 router.use(authRequired, requireRole('admin'));
 
+// Storefront reads (getShop/getProductFull/promo) are cached in-process. ANY successful
+// admin mutation below invalidates them via this one hook — new endpoints can't forget.
+router.use((req, res, next) => {
+  if (req.method !== 'GET') {
+    res.on('finish', () => {
+      if (res.statusCode < 400) c.clearCatalogCache();
+    });
+  }
+  next();
+});
+
 router.get('/hero/all', c.listHeroSlidesAdmin);
 router.post('/hero', c.createHeroSlide);
 router.patch('/hero/:id', c.updateHeroSlide);
