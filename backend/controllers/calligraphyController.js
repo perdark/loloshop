@@ -10,6 +10,7 @@ const {
   processNextBatch, toPlate, autoLinkPlate, attachOrderContext,
   jobCounts, jobCost, promptVariant, BATCH,
 } = require('../lib/calligraphyEngine');
+const { enqueueGeneration } = require('../lib/queue');
 
 const FRONT_LABEL    = 'تطريز الوشاح من الأمام';
 const BACK_LABEL     = 'تطريز الوشاح من الخلف';
@@ -179,6 +180,7 @@ async function createJob(req, res) {
   const out = await insertPlates(jobId, items.map((it) => ({ ...it, wholesaler_id })), {
     source, model: pickModel(model), createdBy: req.user.id,
   });
+  enqueueGeneration(jobId); // server-side generation (worker); FE just polls getJob
   res.status(201).json({ data: { job_id: jobId, total: out.length, dropped, plates: await attachOrderContext(out) } });
 }
 
@@ -320,6 +322,7 @@ async function queueGenerate(req, res) {
   const plates = await insertPlates(jobId, selected.map((it) => ({ ...it })), {
     source: 'wholesaler', model: MODELS.standard, createdBy: req.user.id,
   });
+  enqueueGeneration(jobId); // server-side generation (worker); FE just polls getJob
   res.status(201).json({ data: { job_id: jobId, total: plates.length, dropped: [], plates: await attachOrderContext(plates) } });
 }
 

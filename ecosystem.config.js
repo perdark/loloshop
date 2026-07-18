@@ -26,5 +26,16 @@ module.exports = {
       },
       max_memory_restart: '1G',
     },
+    {
+      // pg-boss consumer: server-side calligraphy generation (close the browser,
+      // plates keep generating). Jobs persist in Postgres if this process is down.
+      name: 'loloshop-worker',
+      cwd: './backend',
+      script: 'worker.js',
+      env: {
+        NODE_ENV: 'production',
+      },
+      max_memory_restart: '500M', // sharp cropping spikes
+    },
   ],
 };
