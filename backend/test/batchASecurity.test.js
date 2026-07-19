@@ -29,29 +29,26 @@ test('policy rejects passwords below the minimum', () => {
   assert.ok(assertPasswordOk('Qx7#mLp2', 'privileged'));
 });
 
-test('length alone is not enough — repeated and sequential runs are refused', () => {
-  // These clear the 8-character bar but are trivially guessable.
-  assert.throws(() => assertPasswordOk('aaaaaaaa', 'customer'), /ضعيفة/);
-  assert.throws(() => assertPasswordOk('11111111', 'customer'), /ضعيفة/);
-  // NB '12345678' is separately on the banned list, so it fails as "common" — use a run
-  // that isn't, to prove the sequence rule itself is doing the work.
-  assert.throws(() => assertPasswordOk('23456789', 'customer'), /ضعيفة/);
-  assert.throws(() => assertPasswordOk('abcdefgh', 'customer'), /ضعيفة/);
-  assert.throws(() => assertPasswordOk('87654321', 'customer'), /ضعيفة/);
-  // A password that merely CONTAINS a run is fine — only a whole-string run is refused.
-  assert.ok(assertPasswordOk('abc12xyz', 'customer'));
+test('easy passwords are deliberately ALLOWED (owner decision)', () => {
+  // The rule is length + our own shipped defaults, nothing else. A student on a phone
+  // keyboard must not be fought with shape rules.
+  for (const ok of ['abcdefgh', 'qwertyui', 'erererer', 'asdfghjk', '12345678', 'aaaaaaaa']) {
+    assert.ok(assertPasswordOk(ok, 'customer'), `"${ok}" must be accepted`);
+  }
 });
 
 test('policy rejects the seeded/default credentials', () => {
-  // Exact-match by design: this list exists to stop a shipped default (admin123/staff123)
-  // being re-entered verbatim, not to score passwords. 'admin123xxxx' is a different
-  // password and is deliberately NOT caught here — length + the banned list is the whole
-  // contract. All of these are long enough to clear CUSTOMER_MIN on their own, so it is
-  // the ban that must reject them, not the length rule.
-  for (const bad of ['admin123', 'staff123', 'password', 'Password', 'lolo2026', 'PASSWORD123']) {
+  // Exact-match by design and scoped to credentials THIS REPO shipped: anyone who reads
+  // the source knows them. Generic weak passwords are intentionally not listed — see the
+  // 'easy passwords are deliberately ALLOWED' test. 'admin123xxxx' is a different password
+  // and is deliberately NOT caught.
+  // Long enough to clear the length rule, so it is the BAN that must reject these.
+  for (const bad of ['admin123', 'staff123', 'ADMIN123', 'test1234', 'lolo2026']) {
     assert.throws(() => assertPasswordOk(bad, 'customer'), /شائعة/,
       `"${bad}" must be refused as a known-default password`);
   }
+  // 'cust123' is 7 characters, so length catches it first — still refused, just earlier.
+  assert.throws(() => assertPasswordOk('cust123', 'customer'), /أحرف/);
 });
 
 test('policy rejects missing/non-string and over-long values', () => {

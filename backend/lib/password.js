@@ -17,11 +17,13 @@
 const CUSTOMER_MIN = 8;
 const PRIVILEGED_MIN = 8;
 
-// Passwords that are trivially guessable regardless of length. Kept deliberately short —
-// this is a footgun guard for seeded/default credentials, not a breach corpus.
+// ONLY the credentials this repo has itself shipped as defaults. Owner decision
+// (2026-07-19): keep the rule easy — `abcdefgh`, `qwertyui`, `12345678` are all fine for a
+// student signing up on a phone. What must never be re-enterable is a password that was
+// literally printed in our own source, because anyone who reads the repo knows it.
+// Brute-force over the network is handled by rate limiting, not by password shape.
 const BANNED = new Set([
-  'admin123', 'staff123', 'password', 'password123', '12345678', '123456789',
-  '1234567890', 'qwertyui', 'iloveyou', 'lolo1234', 'loloshop', 'lolo2026',
+  'admin123', 'staff123', 'cust123', 'test1234', 'lolo2026',
 ]);
 
 function fail(message) {
@@ -54,18 +56,10 @@ function assertPasswordOk(password, tier = 'customer') {
   if (BANNED.has(password.toLowerCase())) {
     fail('كلمة المرور شائعة جداً، اختر كلمة أقوى');
   }
-  // With an 8-character floor, "aaaaaaaa" and "12345678" technically pass the length rule
-  // while being trivially guessable — so a length rule alone isn't a real floor. Reject a
-  // single repeated character, and runs of consecutive digits/letters in either direction.
-  const chars = [...password];
-  if (new Set(chars).size === 1) {
-    fail('كلمة المرور ضعيفة — لا تكرّر الحرف نفسه');
-  }
-  const isRun = (step) => chars.every((c, i) =>
-    i === 0 || c.codePointAt(0) - chars[i - 1].codePointAt(0) === step);
-  if (isRun(1) || isRun(-1)) {
-    fail('كلمة المرور ضعيفة — لا تستخدم أحرفاً أو أرقاماً متسلسلة');
-  }
+  // Deliberately NO shape rules beyond this (owner decision, 2026-07-19): no
+  // repeated-character or sequence check, so `abcdefgh`, `qwertyui` and `erererer` all
+  // pass. Every extra rule is another student who fails signup on a phone keyboard during
+  // joining season, and the accounts these protect hold an order, not the business.
   return password;
 }
 
