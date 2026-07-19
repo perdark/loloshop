@@ -15,8 +15,35 @@ clients whose response was lost on a flaky network), metered by a new `sends` co
 **Also closed** (found by the critic pass, same threat model): phone-OTP password reset used a stale deny-list, so `worker` and
 `design_helper` — added by migrations 060/062 — could be taken over with one intercepted OTP; it's now an allow-list
 (`retail`, `wholesaler` only). Side benefit: the unauthenticated "send a WhatsApp to any number" primitive is gone, which was a
-Zentramsg sender-ban vector. Gates: `node --check` 0 · **backend tests 25/25** (20 new, six-role matrix) · **live HTTP e2e
-14/14 on Neon, self-cleaned** · tsc 0 · eslint 0. **Not pushed; browser walkthrough pending.** See HANDOFF.
+Zentramsg sender-ban vector.
+
+**Same session — batch 2.** **LS-04** the `?role=` catalog override was honoured for anyone, leaking the rep price book to
+anonymous callers and (via `getShop`'s `audience`) wholesaler-only products to retail accounts → now admin + production
+**managers** only, deliberately not every `role='staff'` since presser/tailor/embroiderer are denied money everywhere else.
+**LS-10** NEW `backend/lib/password.js` applied at every `bcrypt.hash` site: **8-character minimum for everyone** (owner
+decision — the audit's 12 for privileged accounts was rejected as too much friction), banned defaults, and no all-repeated or
+all-sequential values. **Enforced only when a password is SET — existing short passwords still log in** (test covers it).
+`admin123`/`staff123`/`cust123`/`test1234` removed from all seed files; live DB scanned → **0 weak passwords across all 7
+privileged accounts**. **LS-14** `getDesignByStudent` now enforces `staffScopeAllows` + strips the student phone for
+non-designers (NB the endpoint has no frontend caller — the `designs` table is dead). **LS-15** health no longer returns raw
+driver errors. **LS-16** `poweredByHeader: false` + anti-framing/nosniff/referrer/permissions headers; **CSP + HSTS left for
+nginx** with the server move.
+
+**Email removed entirely** (owner): SMTP was never configured in prod so the flow was already dead, and it carried a
+reset-token endpoint + nodemailer (3 of the audit's high-severity advisories) for nothing. Registration and referral join no
+longer take an email; `/auth/forgot-password`, `/auth/reset-password`, `lib/email.js` and `/reset-password/[token]` are gone.
+Privileged accounts are reset by an admin or with the NEW `npm run set-password` — that script is why removing email doesn't
+strand the admin account. **Registration errors now name the failing field** (`{error, code, field}` → the form pins the
+message under the right input) instead of a blanket «تعذّر إنشاء الحساب».
+
+Gates: `node --check` 0 · **backend tests 38/38** (23 new, six-role matrix + legacy-password login) · **live HTTP e2e 14/14 on
+Neon, self-cleaned** · anonymous catalog payloads byte-identical · health verified against a dead DB · tsc 0 · eslint 0.
+Committed to branch `security-fixes` (`7571497`). **NOT pushed — prod is still fully vulnerable until it is.** Browser
+walkthrough pending. See HANDOFF.
+
+**Sequencing note:** LS-03 (DB TLS) and the nginx half of LS-06 are deliberately deferred to the server migration (~2026-07-21,
+DB moves to the new box — the Neon-CA fix would be wrong there), and **LS-02 secrets rotation should ride with it** since env
+vars are being re-created anyway. That move is also the chance to finally split dev from prod (they share one Neon DB today).
 
 ## 2026-07-18 — Season scaling prep: caching · polling calm-down · pg-boss calligraphy worker · infra dials
 
