@@ -11,7 +11,8 @@
     "seed:orders": "node seed-mock-orders.js",
     "migrate": "node migrate.js",
     "migrate:file": "node migrate.js",
-    "seed:fullset": "node seed-full-set.js"
+    "seed:fullset": "node seed-full-set.js",
+    "set-password": "node scripts/set-password.js"
   },
   "keywords": [],
   "author": "",
@@ -27,7 +28,6 @@
     "helmet": "^8.2.0",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.1.1",
-    "nodemailer": "^8.0.8",
     "pg": "^8.21.0",
     "pg-boss": "^10.4.2",
     "sharp": "^0.35.2"

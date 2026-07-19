@@ -130,3 +130,10 @@ export const ORDER_STATUS_OPTIONS: OrderStatus[] = [
   "delivered",
   "cancelled",
 ];
+
+// Password policy — MIRRORS backend/lib/password.js. Keep the two in sync; the backend is
+// the one that actually enforces it, these only give the user a message before they submit.
+// Customers (students) get a lower bar than privileged accounts on purpose — see the
+// backend file for the reasoning.
+export const PASSWORD_MIN_CUSTOMER = 8;
+export const PASSWORD_MIN_PRIVILEGED = 8;

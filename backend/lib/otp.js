@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { query } = require('./db');
+const { secretMatches } = require('./secretCompare');
 
 // Normalise a typed phone to the canonical local Iraqi form `07XXXXXXXXX`.
 // Users sometimes omit the leading 0 (e.g. type `7713644460` instead of
@@ -61,7 +62,13 @@ function generateCode() {
   return String(crypto.randomInt(100000, 1000000));
 }
 
-async function createOtp(phone, purpose = 'verify') {
+// Challenge ids are UUIDs handed to the client. Validate the shape before it reaches a
+// ::uuid cast so a malformed value is a clean "wrong code" rather than a 500.
+const CHALLENGE_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// `opts.userId` pins the account this code may authenticate. Always pass it for flows
+// that end in a token (login/verify); verification refuses to mint one without it.
+async function createOtp(phone, purpose = 'verify', opts = {}) {
   // Backstop validation: never generate/send an OTP for a number that isn't a real Iraqi
   // mobile. Controllers validate too (for nicer errors); this guarantees NO code path can
   // ever blast WhatsApp at a garbage number and get the sender banned.
@@ -94,12 +101,13 @@ async function createOtp(phone, purpose = 'verify') {
     `UPDATE otp_codes SET used = TRUE WHERE phone = $1 AND purpose = $2 AND used = FALSE`,
     [phone, purpose]
   );
-  await query(
-    `INSERT INTO otp_codes (phone, code, expires_at, purpose) VALUES ($1, $2, $3, $4)`,
-    [phone, code, expiresAt, purpose]
+  const inserted = await query(
+    `INSERT INTO otp_codes (phone, code, expires_at, purpose, user_id)
+     VALUES ($1, $2, $3, $4, $5) RETURNING challenge_id`,
+    [phone, code, expiresAt, purpose, opts.userId || null]
   );
   await sendViaZentramsg(phone, code);
-  return { expires_in: TTL };
+  return { expires_in: TTL, challenge_id: inserted.rows[0].challenge_id };
 }
 
 // Master OTP bypass so dev/testing doesn't require reading the code from
@@ -123,28 +131,47 @@ const DEV_MASTER_OTP = (() => {
   return null;
 })();
 
-async function verifyOtp(phone, code, purpose = 'verify') {
-  if (DEV_MASTER_OTP && code === DEV_MASTER_OTP) {
-    console.log(`[OTP DEV] master code accepted for ${phone} (${purpose})`);
-    return true;
-  }
-  // Find the latest still-valid code for this phone+purpose, regardless of whether
-  // the submitted code matches — so we can count wrong guesses against it.
+// Consume an OTP addressed BY CHALLENGE. The caller supplies only a challenge id it was
+// given by a prior server flow plus the code — never a phone or a purpose — so it cannot
+// choose which account it is authenticating. Returns { ok, phone, user_id } on success and
+// { ok: false } for every failure (missing/expired/consumed challenge, wrong purpose,
+// wrong code, attempts exhausted) so callers can't distinguish the cases and probe.
+async function verifyOtpByChallenge(challengeId, code, purpose) {
+  if (!challengeId || !CHALLENGE_RE.test(String(challengeId))) return { ok: false };
+  // Scoped by purpose too: a 'reset' code can never be replayed against a login challenge.
   const { rows } = await query(
-    `SELECT id, code, attempts FROM otp_codes
-     WHERE phone = $1 AND purpose = $2 AND used = FALSE AND expires_at > NOW()
-     ORDER BY created_at DESC LIMIT 1`,
-    [phone, purpose]
+    `SELECT id, phone, code, attempts, user_id FROM otp_codes
+     WHERE challenge_id = $1 AND purpose = $2 AND used = FALSE AND expires_at > NOW()`,
+    [challengeId, purpose]
   );
-  if (!rows.length) return false;
+  if (!rows.length) return { ok: false };
   const otp = rows[0];
 
-  // Too many wrong guesses on this code → burn it (forces requesting a new one).
+  // Refuse a code that isn't pinned to an account — and do it WITHOUT consuming the row.
+  // Two reasons it must not burn: codes written by the previously-deployed backend have
+  // user_id NULL, and burning one would make the user's retry with the correct digits fail
+  // too; and a future createOtp caller that forgets opts.userId then fails visibly here
+  // instead of silently minting codes that can never verify.
+  if (!otp.user_id) return { ok: false };
+
+  // Too many wrong guesses on this code → burn it (forces requesting a new one). Checked
+  // before the master-code branch so dev can't sail past the cap the cap is there to test.
   if (otp.attempts >= MAX_OTP_ATTEMPTS) {
     await query(`UPDATE otp_codes SET used = TRUE WHERE id = $1`, [otp.id]);
-    return false;
+    return { ok: false };
   }
-  if (otp.code !== code) {
+
+  // The dev master code still requires a real challenge, so even in development it can no
+  // longer mint a token for an arbitrary phone — it only short-circuits typing the digits.
+  if (DEV_MASTER_OTP && code === DEV_MASTER_OTP) {
+    console.log(`[OTP DEV] master code accepted for ${otp.phone} (${purpose})`);
+    await query(`UPDATE otp_codes SET used = TRUE WHERE id = $1`, [otp.id]);
+    return { ok: true, phone: otp.phone, user_id: otp.user_id };
+  }
+
+  // Constant-time: a 6-digit code is short enough that a byte-wise early exit is worth
+  // denying, and the helper is already here.
+  if (!secretMatches(String(code), otp.code)) {
     // Atomic gate+increment: the `attempts < cap` predicate is evaluated under the
     // row lock, so concurrent wrong guesses can't slip past the cap (no TOCTOU).
     await query(
@@ -152,7 +179,7 @@ async function verifyOtp(phone, code, purpose = 'verify') {
        WHERE id = $1 AND attempts < $2`,
       [otp.id, MAX_OTP_ATTEMPTS]
     );
-    return false;
+    return { ok: false };
   }
   // Single-use: only the request that flips used FALSE→TRUE wins (guards a race
   // where the same correct code is submitted twice concurrently).
@@ -160,7 +187,46 @@ async function verifyOtp(phone, code, purpose = 'verify') {
     `UPDATE otp_codes SET used = TRUE WHERE id = $1 AND used = FALSE RETURNING id`,
     [otp.id]
   );
-  return consumed.rows.length > 0;
+  if (!consumed.rows.length) return { ok: false };
+  return { ok: true, phone: otp.phone, user_id: otp.user_id };
+}
+
+// Re-send the code for an existing challenge, IN PLACE — same row, same challenge id, fresh
+// code and expiry. Keeping the id stable is deliberate: rotating it meant a resend whose
+// response was lost left the client holding a superseded id while the user read out a code
+// belonging to the new one, which could never verify. Returns null when there's nothing
+// resendable, so the caller can't tell a bad id from an already-consumed one.
+//
+// Requires used = FALSE: an already-consumed challenge must never be revived (that would
+// let a completed login be replayed). Expired-but-unused is fine — that's the normal case.
+// Bounded to the last hour so an old id isn't a permanent send-to-this-number handle.
+async function refreshOtp(challengeId) {
+  if (!challengeId || !CHALLENGE_RE.test(String(challengeId))) return null;
+  const { rows } = await query(
+    `SELECT id, phone, sends FROM otp_codes
+     WHERE challenge_id = $1 AND used = FALSE AND created_at > NOW() - INTERVAL '1 hour'`,
+    [challengeId]
+  );
+  if (!rows.length) return null;
+  const row = rows[0];
+  // Same budget createOtp enforces. Re-using the row bypasses the row-count check, so the
+  // cap has to be applied explicitly here or resend becomes an unmetered WhatsApp pump —
+  // which is exactly what gets the sender device banned.
+  if (row.sends >= MAX_OTP_REQUESTS_PER_HOUR) {
+    const err = new Error('تم طلب عدد كبير من الرموز. يرجى المحاولة بعد قليل.');
+    err.status = 429;
+    err.code = 'ERR_OTP_RATE';
+    err.expose = true;
+    throw err;
+  }
+  const code = generateCode();
+  await query(
+    `UPDATE otp_codes SET code = $1, expires_at = $2, attempts = 0, sends = sends + 1
+     WHERE id = $3`,
+    [code, new Date(Date.now() + TTL * 1000), row.id]
+  );
+  await sendViaZentramsg(row.phone, code);
+  return { expires_in: TTL, challenge_id: challengeId };
 }
 
 // Defensive URL resolver: guards against the common misconfiguration where the
@@ -251,4 +317,7 @@ async function sendViaZentramsg(phone, code) {
   }
 }
 
-module.exports = { createOtp, verifyOtp, toIntlDigits, normalizeIqPhone, normalizePhoneBody, isValidIqMobile, isDemoLoginPhone };
+// NB: the old phone-addressed `verifyOtp(phone, code, purpose)` is deliberately GONE.
+// Re-adding it re-opens LS-01 — any caller that can name a phone could mint that
+// account's session. Verification must stay addressed by challenge.
+module.exports = { createOtp, verifyOtpByChallenge, refreshOtp, toIntlDigits, normalizeIqPhone, normalizePhoneBody, isValidIqMobile, isDemoLoginPhone };

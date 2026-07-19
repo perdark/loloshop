@@ -18,15 +18,31 @@ Register retail student (not via referral) OR initial step.
 // req
 { "name": "محمد علي حسين", "phone": "07701234567", "email": "m@x.com", "password": "...", "role": "retail" }
 // res 201
-{ "data": { "user_id": "uuid", "otp_required": true } }
+{ "data": { "user_id": "uuid", "otp_required": true, "challenge_id": "uuid" } }
 ```
+
+> **OTP flows are challenge-bound.** A `challenge_id` is a secret issued only by a server
+> flow that already proved something (a correct password for login, a just-created account
+> for registration). Every verify endpoint is addressed **by challenge, never by phone**, so
+> a caller can't choose which account it authenticates. Sending `{phone, code}` is no longer
+> a login. See migration `066` / security finding LS-01.
 
 ### POST `/auth/login`
 ```json
 // req
-{ "phone": "07701234567", "password": "..." }
-// res 200
+{ "phone": "07701234567", "password": "...", "device_token": "optional" }
+// res 200 — trusted device / rep-linked student / demo phone: straight in
 { "token": "jwt...", "user": { "id": "uuid", "name": "...", "role": "admin|staff|wholesaler|retail", "phone_verified": true } }
+// res 200 — otherwise: OTP sent, second factor required
+{ "otp_required": true, "phone": "07701234567", "challenge_id": "uuid" }
+```
+
+### POST `/auth/login-verify`
+```json
+// req — no phone: the challenge determines the account
+{ "challenge_id": "uuid", "code": "123456" }
+// res 200
+{ "token": "jwt...", "device_token": "...", "user": { "id": "uuid", "name": "...", "role": "...", "phone_verified": true } }
 ```
 
 ### GET `/auth/me`
@@ -37,18 +53,25 @@ Header: `Authorization: Bearer <jwt>`
 ```
 
 ### POST `/auth/verify-otp`
+Finishes **registration** only. Refuses (403) any account whose role isn't `retail`, so it
+can never hand back a privileged session.
 ```json
 // req
-{ "phone": "07701234567", "code": "123456" }
+{ "challenge_id": "uuid", "code": "123456" }
 // res 200
-{ "verified": true, "token": "jwt..." }
+{ "verified": true, "token": "jwt...", "device_token": "..." }
 ```
 
 ### POST `/auth/resend-otp`
+Re-sends the code for an **existing** challenge; phone and purpose are read from that
+challenge, not from the caller. The code and expiry are refreshed **in place** — the
+`challenge_id` is unchanged, so a lost response can't strand the client on a dead id.
+Counts against the same per-phone hourly send budget (`429 ERR_OTP_RATE`). An already-used
+or unknown challenge returns 400 rather than being revived.
 ```json
-{ "phone": "07701234567" }
-// res 200
-{ "sent": true, "expires_in": 300 }
+{ "challenge_id": "uuid" }
+// res 200 — same id back
+{ "sent": true, "expires_in": 300, "challenge_id": "uuid" }
 ```
 
 ### POST `/auth/forgot-password`
@@ -63,6 +86,28 @@ Header: `Authorization: Bearer <jwt>`
 { "token": "...", "password": "newpass" }
 // res 200
 { "reset": true }
+```
+
+### POST `/auth/forgot-password-phone`
+Only `retail` and `wholesaler` may reset by phone OTP (allow-list). Everyone else —
+`admin`, `staff`, `worker`, `design_helper` — uses the emailed token, since one intercepted
+WhatsApp message would otherwise be full account takeover.
+A `challenge_id` comes back for **any** number (a decoy when there's no eligible account),
+so this response alone doesn't reveal registration. It is **not** a general enumeration
+defence — `/auth/register` still answers that with `409 ERR_PHONE_TAKEN`.
+```json
+{ "phone": "07701234567" }
+// res 200 (always — don't leak existence)
+{ "sent": true, "challenge_id": "uuid" }
+```
+
+### POST `/auth/reset-password-phone`
+```json
+{ "challenge_id": "uuid", "code": "123456", "password": "newpass" }
+// res 200
+{ "reset": true }
+// res 403 — privileged role (defence in depth alongside forgot-password-phone)
+{ "error": "غير مصرح", "code": "ERR_FORBIDDEN" }
 ```
 
 ---

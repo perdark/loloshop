@@ -10,6 +10,17 @@ const crypto = require('crypto');
 const bcrypt = require('bcrypt');
 const { query, tx } = require('./lib/db');
 
+// Per-run throwaway password for seeded accounts, printed once by the caller.
+let __seedPw = null;
+function seedPassword() {
+  if (!__seedPw) {
+    __seedPw = process.env.SEED_PASSWORD || require('crypto').randomBytes(9).toString('base64url');
+    console.log(`[seed] account password for this run: ${__seedPw}`);
+  }
+  return __seedPw;
+}
+
+
 const REP_CODE = 'TESTREP';
 const PREFIX = '0772';
 const N = 100;
@@ -71,7 +82,9 @@ async function cleanMocks() {
   )).rows) if (!byType[p.type]) byType[p.type] = p.id;
   if (!byType.sash || !byType.robe || !byType.cap) { console.error('package products incomplete'); process.exit(1); }
 
-  const hash = await bcrypt.hash('test1234', 10);
+  // No shipped default: dev and prod share one database, so a seeded password IS a
+  // production credential. Generated per run and printed once. (LS-10)
+  const hash = await bcrypt.hash(seedPassword(), 10);
   const users = [], students = [], cgs = [], orders = [], items = [];
   const phaseCounts = {};
 

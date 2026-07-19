@@ -31,6 +31,9 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
+  // Server-issued OTP challenge — handed back only once the password checked out, and the
+  // only thing /auth/login-verify accepts. Resending rotates it, so keep it in state.
+  const [challengeId, setChallengeId] = useState("");
 
   function finishLogin(token: string, user: User) {
     setToken(token);
@@ -61,6 +64,7 @@ export default function LoginPage() {
         finishLogin(res.token, res.user);
         return;
       }
+      setChallengeId(res.challengeId);
       setStep("otp");
     } catch (err) {
       toast.error(getApiErrorMessage(err, "بيانات الدخول غير صحيحة"));
@@ -73,8 +77,14 @@ export default function LoginPage() {
     // loginVerifyOtp already throws Error with Arabic message on failure;
     // OtpVerifyForm catches it, shows it, clears digits, refocuses. It also stores the
     // returned device_token so this device skips the OTP next time.
-    const { token, user } = await loginVerifyOtp(phone.trim(), code);
+    const { token, user } = await loginVerifyOtp(challengeId, code);
     finishLogin(token, user);
+  }
+
+  // The backend refreshes the code in place and hands back the same id; adopting it keeps
+  // this correct regardless.
+  async function resendOtp() {
+    setChallengeId(await resendLoginOtp(challengeId));
   }
 
   return (
@@ -172,7 +182,7 @@ export default function LoginPage() {
             <OtpVerifyForm
               phone={phone}
               onVerify={verifyOtp}
-              onResend={() => resendLoginOtp(phone.trim())}
+              onResend={resendOtp}
               onBack={() => setStep("credentials")}
               submitLabel="تحقق ودخول"
               backLabel="← تغيير الرقم"

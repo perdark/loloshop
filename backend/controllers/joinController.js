@@ -2,6 +2,7 @@ const bcrypt = require('bcrypt');
 const { query, tx } = require('../lib/db');
 const { isValidIqMobile } = require('../lib/otp');
 const memoCache = require('../lib/memoCache');
+const { assertPasswordOk } = require('../lib/password');
 
 async function getReferral(req, res) {
   const { code } = req.params;
@@ -35,7 +36,6 @@ async function joinReferral(req, res) {
     name,
     full_name_third,
     phone,
-    email,
     password,
     university_name,
     department,
@@ -52,7 +52,7 @@ async function joinReferral(req, res) {
   }
   // Cap free-text so a large JSON body can't stuff multi-MB junk into columns.
   const MAX_FIELD_LEN = 120;
-  const overLong = [studentName, email, university_name, department, instagram_username]
+  const overLong = [studentName, university_name, department, instagram_username]
     .some((v) => v != null && String(v).length > MAX_FIELD_LEN);
   if (overLong || String(phone).length > 32) {
     return res.status(400).json({ error: 'قيمة طويلة جداً في أحد الحقول', code: 'ERR_VALIDATION' });
@@ -86,21 +86,27 @@ async function joinReferral(req, res) {
     (wRows[0].department && String(wRows[0].department).trim()) ||
     (department ? String(department).trim() : null);
   const exists = await query(
-    `SELECT phone, email FROM users WHERE phone = $1 OR (email IS NOT NULL AND email = $2)`,
-    [phone, email || null]
+    `SELECT phone FROM users WHERE phone = $1`,
+    [phone]
   );
   if (exists.rows.length) {
-    const taken = exists.rows[0];
-    if (taken.phone === phone) {
-      return res.status(409).json({ error: 'رقم الهاتف مستخدم مسبقاً', code: 'ERR_PHONE_TAKEN' });
-    }
-    return res.status(409).json({ error: 'البريد الإلكتروني مستخدم مسبقاً', code: 'ERR_EMAIL_TAKEN' });
+    return res.status(409).json({
+      error: 'رقم الهاتف مستخدم مسبقاً — سجّل الدخول أو استعد كلمة المرور',
+      code: 'ERR_PHONE_TAKEN',
+      field: 'phone',
+    });
+  }
+  try {
+    assertPasswordOk(password, 'customer');
+  } catch (e) {
+    // Name the field so the join form can show it under the password box.
+    return res.status(400).json({ error: e.message, code: e.code || 'ERR_WEAK_PASSWORD', field: 'password' });
   }
   const hash = await bcrypt.hash(password, 10);
   const result = await tx(async (client) => {
     const u = await client.query(
-      `INSERT INTO users (name, phone, email, password_hash, role) VALUES ($1, $2, $3, $4, 'retail') RETURNING id`,
-      [studentName, phone, email || null, hash]
+      `INSERT INTO users (name, phone, password_hash, role) VALUES ($1, $2, $3, 'retail') RETURNING id`,
+      [studentName, phone, hash]
     );
     const s = await client.query(
       `INSERT INTO students (user_id, wholesaler_id, full_name_third, university_name, department, gender, study_type, instagram_username, status)

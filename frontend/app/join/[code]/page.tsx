@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { AuthCard } from "@/components/auth/AuthCard";
 import { GradCapLoader } from "@/components/ui/GradCapLoader";
-import { STUDY_TYPE_LABELS } from "@/lib/constants";
+import { STUDY_TYPE_LABELS, PASSWORD_MIN_CUSTOMER } from "@/lib/constants";
 
 // Inline checkmark — warm brick on cream surface, no emoji, no gradient fill.
 function CheckIcon() {
@@ -43,7 +43,6 @@ export default function JoinPage() {
   const [form, setForm] = useState({
     full_name_third: "",
     phone: "",
-    email: "",
     password: "",
     confirmPassword: "",
     study_type: "" as "" | "morning" | "evening",
@@ -71,8 +70,8 @@ export default function JoinPage() {
     const e: Record<string, string> = {};
     if (!form.full_name_third.trim()) e.full_name_third = "الاسم الثلاثي مطلوب";
     if (!form.phone.trim()) e.phone = "رقم الهاتف مطلوب";
-    if (!form.password || form.password.length < 6)
-      e.password = "كلمة المرور ٦ أحرف على الأقل";
+    if (!form.password || form.password.length < PASSWORD_MIN_CUSTOMER)
+      e.password = `كلمة المرور ${PASSWORD_MIN_CUSTOMER} أحرف على الأقل`;
     if (form.password !== form.confirmPassword)
       e.confirmPassword = "كلمتا المرور غير متطابقتين";
     if (!form.study_type) e.study_type = "الدراسة الصباحية أو المسائية مطلوبة";
@@ -90,7 +89,6 @@ export default function JoinPage() {
       await joinWithCode(code, {
         full_name_third: form.full_name_third.trim(),
         phone: form.phone.trim(),
-        email: form.email.trim(),
         password: form.password,
         // الجامعة/القسم تُورَّث من ممثل الجامعة تلقائياً — لا يُدخلها الطالب.
         study_type: form.study_type as "morning" | "evening",
@@ -209,14 +207,6 @@ export default function JoinPage() {
           )}
         </div>
 
-        <Input
-          label="البريد الإلكتروني (اختياري)"
-          type="email"
-          value={form.email}
-          onChange={(e) => setForm({ ...form, email: e.target.value })}
-          error={errors.email}
-          autoComplete="email"
-        />
         <Input
           label="كلمة المرور"
           type="password"

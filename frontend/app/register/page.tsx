@@ -14,10 +14,11 @@ import {
   resendVerifyOtp,
   fetchMe,
   getApiErrorMessage,
+  FieldError,
 } from "@/lib/auth-api";
 import { setToken, setUser } from "@/lib/auth";
 import type { UserRole } from "@/lib/types";
-import { STUDY_TYPE_LABELS } from "@/lib/constants";
+import { STUDY_TYPE_LABELS, PASSWORD_MIN_CUSTOMER } from "@/lib/constants";
 
 const ROLE_REDIRECT: Record<UserRole, string> = {
   admin: "/admin",
@@ -33,10 +34,11 @@ export default function RegisterPage() {
   const [step, setStep] = useState<"form" | "otp">("form");
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  // OTP challenge pinned to the account register() just created; resending rotates it.
+  const [challengeId, setChallengeId] = useState("");
   const [form, setForm] = useState({
     name: "",
     phone: "",
-    email: "",
     password: "",
     university_name: "",
     department: "",
@@ -49,8 +51,8 @@ export default function RegisterPage() {
     const e: Record<string, string> = {};
     if (!form.name.trim()) e.name = "الاسم مطلوب";
     if (!form.phone.trim()) e.phone = "رقم الهاتف مطلوب";
-    if (!form.password || form.password.length < 6)
-      e.password = "كلمة المرور ٦ أحرف على الأقل";
+    if (!form.password || form.password.length < PASSWORD_MIN_CUSTOMER)
+      e.password = `كلمة المرور ${PASSWORD_MIN_CUSTOMER} أحرف على الأقل`;
     if (!form.university_name.trim()) e.university_name = "اسم الجامعة مطلوب";
     if (!form.department.trim()) e.department = "القسم / التخصص مطلوب";
     if (!form.study_type) e.study_type = "الدراسة الصباحية أو المسائية مطلوبة";
@@ -64,21 +66,27 @@ export default function RegisterPage() {
     if (!validate()) return;
     setLoading(true);
     try {
-      await apiRegister({
+      const created = await apiRegister({
         name: form.name.trim(),
         phone: form.phone.trim(),
         password: form.password,
-        email: form.email.trim() || undefined,
         gender: form.gender || undefined,
         university_name: form.university_name.trim(),
         department: form.department.trim(),
         study_type: form.study_type as "morning" | "evening",
         instagram_username: form.instagram_username.trim().replace(/^@+/, ""),
       });
+      setChallengeId(created.challenge_id);
       toast.success("تم إرسال رمز التحقق عبر واتساب");
       setStep("otp");
     } catch (err) {
-      toast.error(getApiErrorMessage(err, "تعذّر إنشاء الحساب"));
+      // The backend names the field that failed (رقم مستخدم، كلمة مرور قصيرة، …). Pin the
+      // message under that input so the student can see what to fix instead of a blanket
+      // «تعذّر إنشاء الحساب».
+      const message = getApiErrorMessage(err, "تعذّر إنشاء الحساب");
+      const field = err instanceof FieldError ? err.field : undefined;
+      if (field) setErrors((prev) => ({ ...prev, [field]: message }));
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -87,7 +95,7 @@ export default function RegisterPage() {
   async function verifyOtp(code: string) {
     // verifyRegistrationOtp already throws Error with Arabic message on failure;
     // OtpVerifyForm catches it, shows it, clears digits, refocuses.
-    const { token } = await verifyRegistrationOtp(form.phone.trim(), code);
+    const { token } = await verifyRegistrationOtp(challengeId, code);
     setToken(token);
     const user = await fetchMe();
     setUser(user);
@@ -142,13 +150,6 @@ export default function RegisterPage() {
             )}
           </div>
 
-          <Input
-            label="البريد الإلكتروني (اختياري)"
-            type="email"
-            value={form.email}
-            onChange={(e) => setForm({ ...form, email: e.target.value })}
-            autoComplete="email"
-          />
           <Input
             label="كلمة المرور"
             type="password"
@@ -274,7 +275,7 @@ export default function RegisterPage() {
         <OtpVerifyForm
           phone={form.phone}
           onVerify={verifyOtp}
-          onResend={() => resendVerifyOtp(form.phone.trim())}
+          onResend={async () => setChallengeId(await resendVerifyOtp(challengeId))}
           onBack={() => setStep("form")}
           submitLabel="تأكيد ودخول"
           backLabel="← رجوع"

@@ -8,6 +8,7 @@ const memoCache = require('../lib/memoCache');
 // 'money_gate' site_settings row + the sha256 compare). No circular dep: tvBoardController
 // requires only lib/*, never adminController.
 const { moneyRevealOk, moneyGateConfigured, setMoneyGate } = require('./tvBoardController');
+const { assertPasswordOk } = require('../lib/password');
 
 const SALT_ROUNDS = 10;
 
@@ -300,6 +301,7 @@ async function createWholesaler(req, res) {
   if (codeExists.rows.length) {
     return res.status(409).json({ error: 'الرمز مستخدم', code: 'ERR_VALIDATION' });
   }
+  assertPasswordOk(password, 'privileged');
   const hash = await bcrypt.hash(password, 10);
   const result = await tx(async (client) => {
     const u = await client.query(
@@ -587,6 +589,7 @@ async function createStaff(req, res) {
   }
   const primaryType = staffTypes[0] || null;
   const typesParam = staffTypes.length ? staffTypes : null;
+  assertPasswordOk(password, 'privileged');
   const hash = await bcrypt.hash(password, SALT_ROUNDS);
   const { rows } = await query(
     `INSERT INTO users (name, phone, email, password_hash, role, staff_type, staff_types, order_scope, phone_verified)
@@ -649,9 +652,7 @@ async function updateStaffType(req, res) {
 async function updateStaffPassword(req, res) {
   const { id } = req.params;
   const { password } = req.body;
-  if (!password || String(password).length < 6) {
-    return res.status(400).json({ error: 'كلمة المرور قصيرة', code: 'ERR_VALIDATION' });
-  }
+  assertPasswordOk(password, 'privileged');
   const hash = await bcrypt.hash(password, SALT_ROUNDS);
   const { rows } = await query(
     `UPDATE users

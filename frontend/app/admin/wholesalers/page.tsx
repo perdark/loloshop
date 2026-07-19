@@ -27,6 +27,7 @@ import { PageLoader } from "@/components/ui/Spinner";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { CalculationDetails } from "@/components/admin/CalculationDetails";
 import Link from "next/link";
+import { PASSWORD_MIN_PRIVILEGED } from "@/lib/constants";
 
 const SLUG_RE = /^[a-z0-9-]+$/;
 const PRICING_LABELS: Record<keyof WholesalerPricingAddons, string> = {
@@ -104,8 +105,8 @@ export default function AdminWholesalersPage() {
     const e: Record<string, string> = {};
     if (!name.trim()) e.name = "الاسم مطلوب";
     if (!phone.trim()) e.phone = "رقم الهاتف مطلوب";
-    if (!password || password.length < 6)
-      e.password = "كلمة المرور ٦ أحرف على الأقل";
+    if (!password || password.length < PASSWORD_MIN_PRIVILEGED)
+      e.password = `كلمة المرور ${PASSWORD_MIN_PRIVILEGED} أحرف على الأقل`;
     if (!referralCode.trim()) e.referralCode = "رمز الدعوة مطلوب";
     else if (!SLUG_RE.test(referralCode))
       e.referralCode = "أحرف إنجليزية صغيرة وأرقام وشرطة فقط";

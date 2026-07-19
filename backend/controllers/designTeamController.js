@@ -10,6 +10,7 @@ const { signToken } = require('../middleware/auth');
 const { publish } = require('../lib/eventBus');
 const { secretMatches } = require('../lib/secretCompare');
 const { publicUrl } = require('../lib/upload');
+const { assertPasswordOk } = require('../lib/password');
 
 const SALT_ROUNDS = 10;
 const TEAM_ID = true;
@@ -51,10 +52,8 @@ function requiredName(value) {
 }
 
 function requiredPassword(value) {
-  if (!value || String(value).length < 6) {
-    throw httpError(400, 'كلمة المرور يجب أن تكون 6 أحرف على الأقل', 'ERR_VALIDATION');
-  }
-  return String(value);
+  // design_helper accounts are privileged staff — see lib/password.js for the tiers.
+  return assertPasswordOk(typeof value === 'string' ? value : String(value ?? ''), 'privileged');
 }
 
 function portalKeyOk(provided) {

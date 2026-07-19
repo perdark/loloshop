@@ -1,6 +1,8 @@
 require('dotenv').config();
 const bcrypt = require('bcrypt');
+const crypto = require('crypto');
 const { query, pool } = require('./lib/db');
+const { assertPasswordOk } = require('./lib/password');
 
 async function ensureAdmin() {
   const phone = '07783571996';
@@ -9,13 +11,21 @@ async function ensureAdmin() {
     console.log('Admin exists.');
     return;
   }
-  const hash = await bcrypt.hash('admin123', 10);
+  // No baked-in password. `admin123` shipped in this file for months and is exactly the
+  // kind of default that survives into production. Supply SEED_ADMIN_PASSWORD, or take the
+  // generated one printed once below. (LS-10)
+  const password = process.env.SEED_ADMIN_PASSWORD || crypto.randomBytes(12).toString('base64url');
+  assertPasswordOk(password, 'privileged');
+  const hash = await bcrypt.hash(password, 10);
   await query(
     `INSERT INTO users (name, phone, email, password_hash, role, phone_verified)
      VALUES ($1, $2, $3, $4, 'admin', TRUE)`,
     ['Admin', phone, 'admin@loloshop.com', hash]
   );
-  console.log('Admin created: 07783571996 / admin123');
+  console.log(`Admin created: ${phone}`);
+  if (!process.env.SEED_ADMIN_PASSWORD) {
+    console.log(`Generated admin password (shown once, store it now): ${password}`);
+  }
 }
 
 async function ensureProducts() {

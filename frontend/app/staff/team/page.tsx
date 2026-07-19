@@ -10,7 +10,7 @@ import { Modal } from "@/components/ui/Modal";
 import { getApiErrorMessage } from "@/lib/api";
 import { Select } from "@/components/ui/Select";
 import type { SalaryTxnType, StaffActivity, StaffGoal, StaffOrderScope, StaffSalary, StaffType, User } from "@/lib/types";
-import { ORDER_SCOPE_LABELS, SALARY_TXN_LABELS, STAFF_TYPE_LABELS } from "@/lib/constants";
+import { ORDER_SCOPE_LABELS, SALARY_TXN_LABELS, STAFF_TYPE_LABELS, PASSWORD_MIN_PRIVILEGED } from "@/lib/constants";
 import { formatDateShort, formatIQD } from "@/lib/format";
 import {
   addStaffBonus,
@@ -673,8 +673,8 @@ export default function AdminStaffPage() {
   }, [load]);
 
   async function handleCreate() {
-    if (!name.trim() || password.length < 6) {
-      toast.error("يرجى إدخال الاسم وكلمة مرور ٦ أحرف على الأقل");
+    if (!name.trim() || password.length < PASSWORD_MIN_PRIVILEGED) {
+      toast.error(`يرجى إدخال الاسم وكلمة مرور ${PASSWORD_MIN_PRIVILEGED} أحرف على الأقل`);
       return;
     }
     setSubmitting(true);
@@ -723,8 +723,8 @@ export default function AdminStaffPage() {
   }
 
   async function handleResetPassword() {
-    if (!selected || newPassword.length < 6) {
-      toast.error("كلمة المرور ٦ أحرف على الأقل");
+    if (!selected || newPassword.length < PASSWORD_MIN_PRIVILEGED) {
+      toast.error(`كلمة المرور ${PASSWORD_MIN_PRIVILEGED} أحرف على الأقل`);
       return;
     }
     setSubmitting(true);

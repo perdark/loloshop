@@ -3,6 +3,7 @@ const bcrypt = require('bcrypt');
 const { query, tx } = require('../lib/db');
 const { signToken } = require('../middleware/auth');
 const { secretMatches } = require('../lib/secretCompare');
+const { assertPasswordOk } = require('../lib/password');
 
 const SALT_ROUNDS = 10;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -181,7 +182,7 @@ async function createWorker(req, res) {
     return res.status(201).json({ id: ins.rows[0].id });
   }
   if (!name?.trim()) return res.status(400).json({ error: 'الاسم مطلوب', code: 'ERR_VALIDATION' });
-  if (String(password || '').length < 6) return res.status(400).json({ error: 'كلمة المرور 6 أحرف على الأقل', code: 'ERR_VALIDATION' });
+  assertPasswordOk(String(password || ''), 'privileged');
   const hash = await bcrypt.hash(String(password), SALT_ROUNDS);
   const result = await tx(async (client) => {
     const u = await client.query(`INSERT INTO users(name,password_hash,role) VALUES($1,$2,'worker') RETURNING id`, [name.trim(), hash]);
@@ -200,10 +201,14 @@ async function updateWorker(req, res) {
   for (const field of ['is_lead', 'active']) {
     if (typeof req.body[field] === 'boolean') { values.push(req.body[field]); sets.push(`${field}=$${values.length}`); }
   }
+  // Validate BEFORE any write: the name/roster updates below commit immediately, so a
+  // rejected password used to leave a half-applied edit behind.
+  if (cur.rows[0].role === 'worker' && req.body.password) {
+    assertPasswordOk(String(req.body.password), 'privileged');
+  }
   if (sets.length) { values.push(id); await query(`UPDATE workshop_workers SET ${sets.join(',')} WHERE id=$${values.length}`, values); }
   if (cur.rows[0].role === 'worker' && req.body.name?.trim()) await query(`UPDATE users SET name=$1,updated_at=NOW() WHERE id=$2`, [req.body.name.trim(), cur.rows[0].user_id]);
   if (cur.rows[0].role === 'worker' && req.body.password) {
-    if (String(req.body.password).length < 6) return res.status(400).json({ error: 'كلمة المرور 6 أحرف على الأقل', code: 'ERR_VALIDATION' });
     await query(`UPDATE users SET password_hash=$1,updated_at=NOW() WHERE id=$2`, [await bcrypt.hash(String(req.body.password), SALT_ROUNDS), cur.rows[0].user_id]);
   }
   res.json({ ok: true });

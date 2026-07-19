@@ -1,5 +1,23 @@
 # Progress
 
+## 2026-07-19 — Security fix LS-01: OTP is no longer a login on its own (branch `security-fixes`)
+
+First item of the `SECURITY_AUDIT_REPORT_2026-07-16.md` plan. **The hole:** `POST /auth/resend-otp` was unauthenticated and let
+the caller pick `{phone, purpose}`, and `login-verify`/`verify-otp` minted a JWT from `{phone, code}` with **no password check
+and no role restriction** — so anyone who could read a victim's WhatsApp OTP logged in as them, admin included. Password+OTP
+collapsed to OTP-only. **The fix:** the OTP row now carries a secret `challenge_id` + `user_id` (migration **066**, applied to
+Neon, additive and backward compatible with the deployed old code). A challenge is issued only by a flow that already proved
+something (correct bcrypt password for login; a just-created account for registration), and verification is addressed **by
+challenge, never by phone** — the caller can't name the account it wants a token for. The phone-addressed
+`verifyOtp(phone,code,purpose)` was deleted outright so no legacy path remains. Registration-verify additionally hard-refuses
+any non-`retail` role. Resend now takes only a challenge and refreshes that row **in place** (same id — rotating it stranded
+clients whose response was lost on a flaky network), metered by a new `sends` counter so it can't pump WhatsApp messages.
+**Also closed** (found by the critic pass, same threat model): phone-OTP password reset used a stale deny-list, so `worker` and
+`design_helper` — added by migrations 060/062 — could be taken over with one intercepted OTP; it's now an allow-list
+(`retail`, `wholesaler` only). Side benefit: the unauthenticated "send a WhatsApp to any number" primitive is gone, which was a
+Zentramsg sender-ban vector. Gates: `node --check` 0 · **backend tests 25/25** (20 new, six-role matrix) · **live HTTP e2e
+14/14 on Neon, self-cleaned** · tsc 0 · eslint 0. **Not pushed; browser walkthrough pending.** See HANDOFF.
+
 ## 2026-07-18 — Season scaling prep: caching · polling calm-down · pg-boss calligraphy worker · infra dials
 
 Prep for the months 8–10 joining season (referral spikes of +1000 students in minutes). ① **In-process TTL cache**

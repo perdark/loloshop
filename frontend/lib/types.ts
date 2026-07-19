@@ -220,7 +220,6 @@ export interface PendingStudent {
 export interface JoinPayload {
   full_name_third: string;
   phone: string;
-  email: string;
   password: string;
   /**
    * جامعة/قسم are inherited from the wholesaler's referral link (the student no longer

@@ -2,6 +2,17 @@ require('dotenv').config();
 const bcrypt = require('bcrypt');
 const { query, pool } = require('./lib/db');
 
+// Per-run throwaway password for seeded accounts, printed once by the caller.
+let __seedPw = null;
+function seedPassword() {
+  if (!__seedPw) {
+    __seedPw = process.env.SEED_PASSWORD || require('crypto').randomBytes(9).toString('base64url');
+    console.log(`[seed] account password for this run: ${__seedPw}`);
+  }
+  return __seedPw;
+}
+
+
 // ───────────────────────────────────────────────────────────────────────────
 // Mock production-pipeline seed.
 //
@@ -12,7 +23,6 @@ const { query, pool } = require('./lib/db');
 //
 //   npm run seed:mock
 //
-// Login for every staff account:  password = staff123
 //   designer     0771000001   approves the design          design_complete → converting
 //   digitizer    0771000002   advances                     converting      → embroidery
 //   embroiderer  0771000003   advances                     embroidery      → pressing
@@ -33,7 +43,9 @@ const STAFF = [
 const CUSTOMER_PHONE = '0771999999'; // retail student who "placed" the mock order
 
 async function ensureStaff() {
-  const hash = await bcrypt.hash('staff123', 10);
+  // No shipped default: dev and prod share one database, so a seeded password IS a
+  // production credential. Generated per run and printed once. (LS-10)
+  const hash = await bcrypt.hash(seedPassword(), 10);
   for (const s of STAFF) {
     const existing = await query(`SELECT id FROM users WHERE phone = $1`, [s.phone]);
     if (existing.rows.length) {
@@ -85,7 +97,9 @@ async function ensureCustomerAndStudent() {
   if (u.rows.length) {
     userId = u.rows[0].id;
   } else {
-    const hash = await bcrypt.hash('cust123', 10);
+    // No shipped default: dev and prod share one database, so a seeded password IS a
+  // production credential. Generated per run and printed once. (LS-10)
+  const hash = await bcrypt.hash(seedPassword(), 10);
     const ins = await query(
       `INSERT INTO users (name, phone, password_hash, role, phone_verified)
        VALUES ('طالب تجريبي', $1, $2, 'retail', TRUE) RETURNING id`,
@@ -181,7 +195,6 @@ async function main() {
   const orderId = await resetMockOrder(studentId, product);
   console.log('\nDone.');
   console.log(`Mock order: ${orderId}`);
-  console.log('Staff login password: staff123   (phones above)');
   console.log('Start at /staff as the designer → approve → walk the line.');
   await pool.end();
 }

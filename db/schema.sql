@@ -96,19 +96,34 @@ CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
 -- OTP CODES — phone verification via Zentramsg WhatsApp
 -- =====================================================
 CREATE TABLE IF NOT EXISTS otp_codes (
-  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  phone      TEXT NOT NULL,
-  code       TEXT NOT NULL,
-  purpose    TEXT NOT NULL DEFAULT 'verify',
-  expires_at TIMESTAMPTZ NOT NULL,
-  used       BOOLEAN NOT NULL DEFAULT FALSE,
-  attempts   INTEGER NOT NULL DEFAULT 0,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  phone        TEXT NOT NULL,
+  code         TEXT NOT NULL,
+  purpose      TEXT NOT NULL DEFAULT 'verify',
+  -- Secret handed back only by a server flow that already proved something (correct
+  -- password for 'login', a just-created account for 'verify'). Verification looks the
+  -- row up BY THIS, never by phone, so a caller can't pick the target account/purpose.
+  -- See migration 066 + security finding LS-01.
+  challenge_id UUID NOT NULL DEFAULT gen_random_uuid(),
+  -- Pins which account this code may authenticate.
+  user_id      UUID REFERENCES users(id) ON DELETE CASCADE,
+  expires_at   TIMESTAMPTZ NOT NULL,
+  used         BOOLEAN NOT NULL DEFAULT FALSE,
+  attempts     INTEGER NOT NULL DEFAULT 0,
+  -- Resend refreshes this row in place instead of inserting a new one, so this counter (not
+  -- the row count) is what holds the per-phone hourly send budget.
+  sends        INTEGER NOT NULL DEFAULT 1,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 -- Brute-force guard column for pre-existing DBs (idempotent).
 ALTER TABLE otp_codes ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0;
+-- Challenge binding for pre-existing DBs (idempotent) — mirrors migration 066.
+ALTER TABLE otp_codes ADD COLUMN IF NOT EXISTS challenge_id UUID NOT NULL DEFAULT gen_random_uuid();
+ALTER TABLE otp_codes ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id) ON DELETE CASCADE;
+ALTER TABLE otp_codes ADD COLUMN IF NOT EXISTS sends INTEGER NOT NULL DEFAULT 1;
 CREATE INDEX IF NOT EXISTS idx_otp_phone ON otp_codes(phone, used);
 CREATE INDEX IF NOT EXISTS idx_otp_phone_purpose ON otp_codes(phone, purpose, used);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_otp_challenge ON otp_codes(challenge_id);
 
 -- Migrate existing rows if column was added to a live DB:
 -- ALTER TABLE otp_codes ADD COLUMN IF NOT EXISTS purpose TEXT NOT NULL DEFAULT 'verify';

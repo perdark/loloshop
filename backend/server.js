@@ -56,12 +56,13 @@ app.get('/api/health', async (req, res) => {
     payload.db = true;
     res.json(payload);
   } catch (err) {
+    // Detail stays in the server log only. Driver errors name hosts, schema, and
+    // connection state, and this endpoint is public (uptime monitoring hits it). (LS-15)
     console.error('Health DB check failed:', err.message);
     res.status(503).json({
       ok: false,
       db: false,
-      error: err.message,
-      hint: 'Check DATABASE_URL in backend/.env',
+      code: 'ERR_DB_UNAVAILABLE',
       time: payload.time,
     });
   }

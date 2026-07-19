@@ -10,11 +10,37 @@ function extractMessage(e: unknown, fallback: string): string {
   return fallback;
 }
 
+/**
+ * Carries the backend's `field` alongside the message so a form can show the error under
+ * the input that actually failed, instead of a generic "couldn't create the account".
+ */
+export class FieldError extends Error {
+  field?: string;
+  code?: string;
+  constructor(message: string, field?: string, code?: string) {
+    super(message);
+    this.name = "FieldError";
+    this.field = field;
+    this.code = code;
+  }
+}
+
+function fieldError(e: unknown, fallback: string): FieldError {
+  const data = axios.isAxiosError(e) ? e.response?.data : undefined;
+  return new FieldError(extractMessage(e, fallback), data?.field, data?.code);
+}
+
+// The OTP step is bound to a server-issued `challenge_id`. The backend hands one back only
+// after it has already proved something (a correct password here, a fresh account on
+// register) and the verify call is addressed by that id — never by phone. Callers must
+// therefore keep the id and pass it along; sending a phone + code is no longer a login.
+// See backend migration 066 / security finding LS-01.
+
 // login() now has two possible outcomes:
 //  • trusted device → backend skips the OTP and returns { token, user } (logged in)
-//  • otherwise      → backend sends a WhatsApp OTP and returns { otp_required, phone }
+//  • otherwise      → backend sends a WhatsApp OTP and returns { otp_required, challenge_id }
 export type LoginResult =
-  | { otp_required: true; phone: string }
+  | { otp_required: true; phone: string; challengeId: string }
   | { token: string; user: User };
 
 export async function login(
@@ -22,26 +48,29 @@ export async function login(
   password: string
 ): Promise<LoginResult> {
   try {
-    const { data } = await api.post<Partial<LoginResponse> & { otp_required?: true }>(
-      "/auth/login",
-      { phone, password, device_token: getDeviceToken() || undefined }
-    );
+    const { data } = await api.post<
+      Partial<LoginResponse> & { otp_required?: true; challenge_id?: string }
+    >("/auth/login", {
+      phone,
+      password,
+      device_token: getDeviceToken() || undefined,
+    });
     if (data.token && data.user) {
       return { token: data.token, user: data.user };
     }
-    return { otp_required: true, phone };
+    return { otp_required: true, phone, challengeId: data.challenge_id || "" };
   } catch (e) {
     throw new Error(extractMessage(e, "بيانات الدخول غير صحيحة"));
   }
 }
 
 export async function loginVerifyOtp(
-  phone: string,
+  challengeId: string,
   code: string
 ): Promise<LoginResponse> {
   try {
     const { data } = await api.post<LoginResponse>("/auth/login-verify", {
-      phone,
+      challenge_id: challengeId,
       code,
     });
     // Trust this device so future logins skip the OTP.
@@ -63,45 +92,47 @@ export async function fetchMe(): Promise<User> {
   }
 }
 
-export async function forgotPassword(email: string): Promise<void> {
-  await api.post("/auth/forgot-password", { email });
-}
-
-export async function resetPassword(
-  token: string,
-  password: string
-): Promise<void> {
-  await api.post("/auth/reset-password", { token, password });
-}
-
-// Phone-based reset: send a WhatsApp OTP, then reset with phone + code + new password.
-export async function forgotPasswordByPhone(phone: string): Promise<void> {
+// Phone-based reset: send a WhatsApp OTP, then reset with the challenge + code + new
+// password. An id comes back even for an unregistered number (a decoy that matches no
+// row), so the response can't be used to test whether a phone has an account.
+export async function forgotPasswordByPhone(phone: string): Promise<string> {
   try {
-    await api.post("/auth/forgot-password-phone", { phone });
+    const { data } = await api.post<{ sent: boolean; challenge_id: string }>(
+      "/auth/forgot-password-phone",
+      { phone }
+    );
+    return data.challenge_id;
   } catch (e) {
     throw new Error(extractMessage(e, "تعذّر إرسال الرمز"));
   }
 }
 
 export async function resetPasswordByPhone(
-  phone: string,
+  challengeId: string,
   code: string,
   password: string
 ): Promise<void> {
   try {
-    await api.post("/auth/reset-password-phone", { phone, code, password });
+    await api.post("/auth/reset-password-phone", {
+      challenge_id: challengeId,
+      code,
+      password,
+    });
   } catch (e) {
     throw new Error(extractMessage(e, "تعذّر إعادة تعيين كلمة المرور"));
   }
 }
 
-export async function verifyOtp(phone: string, code: string): Promise<void> {
-  await api.post("/auth/verify-otp", { phone, code });
-}
-
-export async function resendLoginOtp(phone: string): Promise<void> {
+// The backend refreshes the code in place, so the id that comes back is the same one that
+// went in. Callers still adopt the returned value — it costs nothing and keeps them correct
+// if that ever changes.
+export async function resendLoginOtp(challengeId: string): Promise<string> {
   try {
-    await api.post("/auth/resend-otp", { phone, purpose: "login" });
+    const { data } = await api.post<{ sent: boolean; challenge_id: string }>(
+      "/auth/resend-otp",
+      { challenge_id: challengeId }
+    );
+    return data.challenge_id;
   } catch (e) {
     throw new Error(extractMessage(e, "تعذّر إرسال الرمز"));
   }
@@ -113,33 +144,35 @@ export async function register(body: {
   name: string;
   phone: string;
   password: string;
-  email?: string;
   gender?: "male" | "female";
   university_name: string;
   department: string;
   study_type: "morning" | "evening";
   instagram_username: string;
-}): Promise<{ user_id: string; otp_required: boolean }> {
+}): Promise<{ user_id: string; otp_required: boolean; challenge_id: string }> {
   try {
     const { data } = await api.post<{
-      data: { user_id: string; otp_required: boolean };
+      data: { user_id: string; otp_required: boolean; challenge_id: string };
     }>("/auth/register", body);
     return data.data;
   } catch (e) {
-    throw new Error(extractMessage(e, "تعذّر إنشاء الحساب"));
+    // Keep the backend's `field` so the form can point at the offending input rather than
+    // showing a blanket "couldn't create the account".
+    throw fieldError(e, "تعذّر إنشاء الحساب");
   }
 }
 
-// Confirms the post-register OTP (purpose 'verify') and returns the auth token
-// so the caller can auto-login. Mirrors verifyOtp but surfaces the token.
+// Confirms the post-register OTP (purpose 'verify') and returns the auth token so the
+// caller can auto-login. The challenge is pinned to the account register() just created,
+// so this path can only ever finish that signup.
 export async function verifyRegistrationOtp(
-  phone: string,
+  challengeId: string,
   code: string
 ): Promise<{ token: string }> {
   try {
     const { data } = await api.post<{ verified: boolean; token: string; device_token?: string }>(
       "/auth/verify-otp",
-      { phone, code }
+      { challenge_id: challengeId, code }
     );
     // Trust this device so the first real login skips the OTP.
     if (data.device_token) setDeviceToken(data.device_token);
@@ -149,9 +182,14 @@ export async function verifyRegistrationOtp(
   }
 }
 
-export async function resendVerifyOtp(phone: string): Promise<void> {
+// See resendLoginOtp — refreshed in place, same id back.
+export async function resendVerifyOtp(challengeId: string): Promise<string> {
   try {
-    await api.post("/auth/resend-otp", { phone, purpose: "verify" });
+    const { data } = await api.post<{ sent: boolean; challenge_id: string }>(
+      "/auth/resend-otp",
+      { challenge_id: challengeId }
+    );
+    return data.challenge_id;
   } catch (e) {
     throw new Error(extractMessage(e, "تعذّر إرسال الرمز"));
   }

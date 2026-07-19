@@ -33,6 +33,7 @@ import {
   type DesignTeamSession,
 } from "@/lib/design-team";
 import { formatDateShort } from "@/lib/format";
+import { PASSWORD_MIN_PRIVILEGED } from "@/lib/constants";
 
 type Tab = "jobs" | "team";
 
@@ -393,8 +394,8 @@ function AddMemberModal({
   const [password, setPassword] = useState("");
 
   async function save() {
-    if (!name.trim() || password.length < 6) {
-      toast.error("أدخل الاسم وكلمة مرور من ٦ أحرف على الأقل");
+    if (!name.trim() || password.length < PASSWORD_MIN_PRIVILEGED) {
+      toast.error(`أدخل الاسم وكلمة مرور من ${PASSWORD_MIN_PRIVILEGED} أحرف على الأقل`);
       return;
     }
     if (await onCreate(name.trim(), password)) onClose();
@@ -458,8 +459,8 @@ function LeadSetup({
         className="mt-4"
         loading={loading}
         onClick={() => {
-          if (!name.trim() || password.length < 6) {
-            toast.error("أدخل الاسم وكلمة مرور من ٦ أحرف على الأقل");
+          if (!name.trim() || password.length < PASSWORD_MIN_PRIVILEGED) {
+            toast.error(`أدخل الاسم وكلمة مرور من ${PASSWORD_MIN_PRIVILEGED} أحرف على الأقل`);
             return;
           }
           onCreate(name.trim(), password);

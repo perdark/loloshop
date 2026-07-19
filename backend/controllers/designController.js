@@ -1,6 +1,7 @@
 const { query, tx } = require('../lib/db');
 const { publicUrl } = require('../lib/upload');
 const { publish } = require('../lib/eventBus');
+const { staffScopeAllows, staffTypesOf } = require('../middleware/auth');
 
 async function getStudentByUserId(userId) {
   const { rows } = await query(
@@ -145,11 +146,15 @@ async function completeDesign(req, res) {
   res.json({ data: { id: result, completed: true } });
 }
 
-// Staff/admin view of any student's design
+// Staff/admin view of any student's design.
+// The route checks staff TYPE (designer/embroiderer/preparer) but used to skip the
+// order_scope control every other staff surface applies, so a retail-scoped worker could
+// pull any wholesaler student's design — and their phone — by UUID. (LS-14)
 async function getDesignByStudent(req, res) {
   const { studentId } = req.params;
   const { rows } = await query(
-    `SELECT d.*, u.name AS student_name, u.phone, s.university_name, s.department
+    `SELECT d.*, u.name AS student_name, u.phone, s.university_name, s.department,
+            s.wholesaler_id
      FROM designs d
      JOIN students s ON s.id = d.student_id
      JOIN users u ON u.id = s.user_id
@@ -158,7 +163,23 @@ async function getDesignByStudent(req, res) {
     [studentId]
   );
   if (!rows.length) return res.status(404).json({ error: 'التصميم غير موجود', code: 'ERR_NOT_FOUND' });
-  res.json({ data: rows[0] });
+  const design = rows[0];
+
+  // A student with no wholesaler_id is a retail order. Same rule the order screens use.
+  if (!staffScopeAllows(req.user, !design.wholesaler_id)) {
+    return res.status(403).json({ error: 'غير مصرح', code: 'ERR_FORBIDDEN' });
+  }
+
+  // Field minimisation per role: designers contact students to confirm artwork, so they
+  // keep the phone (owner decision, 2026-07-15/17). التطريز/التجهيز only need the design
+  // itself — they get no contact details, matching every other station screen.
+  const types = staffTypesOf(req.user);
+  const canSeeContact =
+    req.user.role === 'admin' || types.includes('manager') || types.includes('designer');
+  if (!canSeeContact) delete design.phone;
+  delete design.wholesaler_id; // internal scoping field, not part of the payload
+
+  res.json({ data: design });
 }
 
 // Designer / manager / admin: approve an individual design → its sash order enters التطريز

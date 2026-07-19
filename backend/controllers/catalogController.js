@@ -2,6 +2,7 @@ const { query, tx } = require('../lib/db');
 const { publicUrl } = require('../lib/upload');
 const { publish } = require('../lib/eventBus');
 const memoCache = require('../lib/memoCache');
+const { staffTypesOf } = require('../middleware/auth');
 
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;
 
@@ -30,7 +31,23 @@ async function auditPackage(req, action, id, details) {
 
 // --- Price role: rep-linked students pay 'wholesaler' prices, others 'retail' ---
 async function priceRoleForUser(user, override) {
-  if (override === 'wholesaler' || override === 'retail') return override;
+  // The ?role= override used to be honoured for ANYONE, including anonymous callers, so
+  // `?role=wholesaler` handed out the entire rep price book — and because getShop derives
+  // its `audience` from this value, a logged-in retail account additionally saw
+  // wholesaler-only products. (LS-04)
+  //
+  // Admin + production managers only — deliberately NOT every `role='staff'` account:
+  // presser/tailor/embroiderer/preparer are denied money on every other surface (the
+  // minimal per-role staff view), so they don't get the rep price book here either.
+  const privileged = !!user && (user.role === 'admin' || staffTypesOf(user).includes('manager'));
+  if (override === 'wholesaler') {
+    if (privileged) return 'wholesaler';
+    // Fall through and derive the caller's real role — a rep-linked student still gets
+    // wholesaler pricing here because they genuinely are one, just not by asking for it.
+  } else if (override === 'retail') {
+    // Downgrade to the public book: reveals nothing, and the VIP package list relies on it.
+    return 'retail';
+  }
   if (!user) return 'retail';
   if (user.role === 'admin' || user.role === 'staff') return 'retail';
   const { rows } = await query(
@@ -75,7 +92,9 @@ async function getProductFull(req, res) {
   // whether the caller is privileged (admin/staff bypass audience-visibility 404s).
   // Misses/404s return undefined → never cached (a just-activated product shows
   // immediately). Admin catalog mutations clear `cat:` via the routes hook.
-  const isPrivileged = !!(req.user && (req.user.role === 'admin' || req.user.role === 'staff'));
+  // Same narrowing as priceRoleForUser: this flag bypasses the audience-visibility 404, so
+  // a broad `role==='staff'` test let a presser open wholesaler-only products. (LS-04)
+  const isPrivileged = !!(req.user && (req.user.role === 'admin' || staffTypesOf(req.user).includes('manager')));
   const cached = await memoCache.wrap(
     `cat:prod:${id}:${role}:${isPrivileged ? 'priv' : 'pub'}`,
     120_000,
