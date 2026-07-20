@@ -6,6 +6,41 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
+## 2026-07-20 (b) — ✅ SHIPPED: security batch committed + merged + DEPLOYED to prod · post-deploy runbook executed
+
+**Everything that was uncommitted/unpushed is now live on prod** (`main` @ `ff8a47e`, 19 commits pushed — the 07-16→07-19
+sessions AND the whole security-fixes branch). CI green (audits now FAIL on moderate+; both apps at 0 vulns), deploy job ran
+`deploy.sh` (migrate → build → pm2 reload) in 1m33s. **loloshop-worker is running in prod for the first time.**
+
+**Pre-deploy checks that passed:** prod `.env` satisfies every new fail-closed check (JWT_SECRET 128B; all four portal keys
+≥16B and — verified via `git log -S` — the current WORKSHOP_PORTAL_KEY appears NOWHERE in git history, so the 4e4cba8
+rotation was already done on 07-15; MONEY_GATE_SECRET absent is fine, DB `site_settings` row is the source). Migrations
+067/068 pre-applied to droplet + laptop DBs (idempotent; schema.sql also carries them). Local gates: backend syntax 0,
+`tsc` 0, **backend tests 52/52** (first run ever against the isolated dev DB — no shared-Neon danger), `npm audit` 0/0.
+New nginx config installed BEFORE the push: redacted portal paths in access log, HSTS, `server_tokens off`, /uploads
+`private, no-store` — verified live (`server: nginx`, HSTS present).
+
+**Post-deploy runbook executed:** converting drain = **0 rows** (nothing left). `cost>price` scan = 0.
+**Duplicate scan found 3 NEW same-type sash pairs** (the exact class 07-16 predicted prod would keep creating) — but a new
+shape: identical `created_at` to the microsecond = double-INSERT in one transaction (two sash product ids resolved in one
+payload), not edit-forks. Repaired per the 07-16 runbook in one tx (audit rows `repair_duplicate_sash` ×3, actor NULL):
+kept the latest-updated row per pair, cancelled `58a490f2`/`34397d69`/`3fa8ed8b`, label-matched NULL-fill image migration
+recovered 1 sash-color photo onto kept `208e8181` (imgs 3→4). Re-scan: **0 duplicates**. No zone progress was lost (all
+`embroidery_zones = {}`). `pm2-logrotate` installed. Smoke: site/api/catalog 200, login path returns proper
+`ERR_INVALID_CREDENTIALS` 401, worker log shows «consuming calligraphy-generate».
+
+### Open follow-ups
+- **Old JWTs from before the deploy remain valid until expiry (≤7d)** — token_version starts at 0 for everyone; revocation
+  begins working on the first password change. Nothing to do.
+- The identical-created_at double-insert is a NEW bug shape (one request inserted two sash rows). The deployed pin+self-heal
+  should prevent recurrence; if the scan ever shows a fresh pair with identical created_at again, hunt the creation path
+  (payload carrying two sash product ids).
+- HSTS header is currently sent twice (nginx + helmet) — harmless, tidy later.
+- Consider changing the money-gate passphrase (`lolo2026` per memory) now that the DB is settled — owner decision.
+- LS-02 secrets rotation + the Contabo move remain the standing deferred items.
+
+---
+
 ## 2026-07-20 — ✅ CUTOVER DONE: prod DB moved Neon → droplet-local PostgreSQL 17 · dev split to laptop-local PG · nightly backups
 
 **Owner said «the shop is quiet» → cutover executed same night, ~40s downtime, ZERO data gap** (Neon froze at 1785 orders,
