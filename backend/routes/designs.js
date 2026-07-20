@@ -1,6 +1,6 @@
 const router = require('express').Router();
 const { authRequired, requireRole, requireStaffType } = require('../middleware/auth');
-const { logoUpload, imageUpload } = require('../lib/upload');
+const { logoUpload, imageUpload, imageUploadLimit, validateUploadedImage } = require('../lib/upload');
 const c = require('../controllers/designController');
 
 router.get('/me', authRequired, requireRole('retail'), c.getMyDesign);
@@ -22,8 +22,8 @@ function uploadMiddleware(uploader) {
   };
 }
 
-router.post('/uploads/logo', authRequired, requireRole('retail'), uploadMiddleware(logoUpload), c.uploadLogo);
-router.post('/uploads/image', authRequired, requireRole('retail'), uploadMiddleware(imageUpload), c.uploadImage);
+router.post('/uploads/logo', authRequired, requireRole('retail'), imageUploadLimit, uploadMiddleware(logoUpload), validateUploadedImage, c.uploadLogo);
+router.post('/uploads/image', authRequired, requireRole('retail'), imageUploadLimit, uploadMiddleware(imageUpload), validateUploadedImage, c.uploadImage);
 
 // Full design (canvas) — every staff_type EXCEPT presser (المكوجي never sees the design).
 router.get('/student/:studentId', authRequired, requireStaffType('designer', 'embroiderer', 'preparer'), c.getDesignByStudent);

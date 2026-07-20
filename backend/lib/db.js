@@ -6,7 +6,18 @@ require('dotenv').config();
 dns.setDefaultResultOrder('ipv4first');
 
 const rawUrl = process.env.DATABASE_URL || '';
-const useSsl = rawUrl.includes('neon.tech') || process.env.NODE_ENV === 'production';
+if (rawUrl.includes('neon.tech') && process.env.NODE_ENV !== 'production') {
+  throw new Error(
+    'Refusing to connect a non-production process to the shared Neon database. ' +
+    'Use an isolated local/development database.'
+  );
+}
+let dbHost = '';
+try { dbHost = new URL(rawUrl).hostname.toLowerCase(); } catch { /* validated by pg */ }
+const isLocalDb = !dbHost || ['localhost', '127.0.0.1', '::1'].includes(dbHost);
+// Same-host PostgreSQL does not need network TLS. Every remote production database does,
+// and its certificate must validate; Neon uses the normal public trust chain.
+const useSsl = rawUrl.includes('neon.tech') || (process.env.NODE_ENV === 'production' && !isLocalDb);
 
 // Strip sslmode/channel_binding from the URL (we set ssl explicitly below);
 // avoids the pg-connection-string "SSL modes treated as verify-full" deprecation warning.
@@ -26,7 +37,9 @@ const pool = new Pool({
   connectionTimeoutMillis: 20000,  // Neon free compute cold-starts; default 0/short → ETIMEDOUT
   keepAlive: true,
   keepAliveInitialDelayMillis: 5000,
-  ssl: useSsl ? { rejectUnauthorized: false } : false,
+  // Authenticate the database certificate. `rejectUnauthorized:false` encrypted traffic
+  // but still allowed a network attacker to impersonate the database (LS-03).
+  ssl: useSsl ? { rejectUnauthorized: true } : false,
 });
 
 pool.on('error', (err) => {

@@ -3,10 +3,35 @@ const { query } = require('../lib/db');
 
 function signToken(user) {
   return jwt.sign(
-    { sub: user.id, role: user.role, name: user.name },
+    {
+      sub: user.id,
+      role: user.role,
+      name: user.name,
+      ver: Number(user.token_version || 0),
+    },
     process.env.JWT_SECRET,
-    { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+    { algorithm: 'HS256', expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
   );
+}
+
+// EventSource cannot attach an Authorization header. Give it a narrowly-scoped,
+// short-lived ticket instead of putting the seven-day account JWT in server/proxy logs.
+function signSseTicket(user) {
+  return jwt.sign(
+    {
+      sub: user.id,
+      role: user.role,
+      ver: Number(user.token_version || 0),
+    },
+    process.env.JWT_SECRET,
+    { algorithm: 'HS256', audience: 'production-sse', expiresIn: '60s' }
+  );
+}
+
+function tokenVersionMatches(payload, user) {
+  // Tokens issued before migration 067 have no `ver`; they represent version zero and
+  // become invalid as soon as that user's password increments token_version.
+  return Number(payload.ver || 0) === Number(user.token_version || 0);
 }
 
 async function authRequired(req, res, next) {
@@ -14,12 +39,18 @@ async function authRequired(req, res, next) {
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
   if (!token) return res.status(401).json({ error: 'غير مصرح', code: 'ERR_AUTH' });
   try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    const payload = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
+    if (payload.aud) throw new Error('Scoped token cannot be used as an API access token');
     const { rows } = await query(
-      `SELECT id, name, phone, email, role, staff_type, staff_types, order_scope, phone_verified FROM users WHERE id = $1`,
+      `SELECT id, name, phone, email, role, staff_type, staff_types, order_scope,
+              phone_verified, token_version
+       FROM users WHERE id = $1`,
       [payload.sub]
     );
     if (!rows.length) return res.status(401).json({ error: 'المستخدم غير موجود', code: 'ERR_AUTH' });
+    if (!tokenVersionMatches(payload, rows[0])) {
+      return res.status(401).json({ error: 'الجلسة منتهية', code: 'ERR_AUTH' });
+    }
     req.user = rows[0];
     next();
   } catch (e) {
@@ -29,24 +60,27 @@ async function authRequired(req, res, next) {
 
 /**
  * Auth for EventSource/SSE streams. The browser EventSource API can't send an
- * Authorization header, so the JWT arrives as `?token=`. Same verification as
- * authRequired otherwise. SECURITY: the token rides in the URL (may land in
- * access logs) — only used for the read-only events stream.
+ * Authorization header, so a 60-second, SSE-only ticket arrives as `?ticket=`.
+ * The normal account JWT is deliberately rejected here.
  */
 async function authQuery(req, res, next) {
-  const token =
-    (typeof req.query.token === 'string' && req.query.token) ||
-    (req.headers.authorization?.startsWith('Bearer ')
-      ? req.headers.authorization.slice(7)
-      : null);
+  const token = typeof req.query.ticket === 'string' ? req.query.ticket : null;
   if (!token) return res.status(401).json({ error: 'غير مصرح', code: 'ERR_AUTH' });
   try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    const payload = jwt.verify(token, process.env.JWT_SECRET, {
+      algorithms: ['HS256'],
+      audience: 'production-sse',
+    });
     const { rows } = await query(
-      `SELECT id, name, phone, email, role, staff_type, staff_types, order_scope, phone_verified FROM users WHERE id = $1`,
+      `SELECT id, name, phone, email, role, staff_type, staff_types, order_scope,
+              phone_verified, token_version
+       FROM users WHERE id = $1`,
       [payload.sub]
     );
     if (!rows.length) return res.status(401).json({ error: 'المستخدم غير موجود', code: 'ERR_AUTH' });
+    if (!tokenVersionMatches(payload, rows[0])) {
+      return res.status(401).json({ error: 'الجلسة منتهية', code: 'ERR_AUTH' });
+    }
     req.user = rows[0];
     next();
   } catch {
@@ -118,16 +152,19 @@ async function optionalAuth(req, res, next) {
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
   if (!token) return next();
   try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    const payload = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
+    if (payload.aud) throw new Error('Scoped token cannot be used as an API access token');
     const { rows } = await query(
-      `SELECT id, name, phone, email, role, staff_type, staff_types, order_scope, phone_verified FROM users WHERE id = $1`,
+      `SELECT id, name, phone, email, role, staff_type, staff_types, order_scope,
+              phone_verified, token_version
+       FROM users WHERE id = $1`,
       [payload.sub]
     );
-    if (rows.length) req.user = rows[0];
+    if (rows.length && tokenVersionMatches(payload, rows[0])) req.user = rows[0];
   } catch {
     /* ignore — retail pricing for shop/configurator */
   }
   next();
 }
 
-module.exports = { signToken, authRequired, authQuery, requireRole, requireStaffType, staffScopeAllows, staffTypesOf, optionalAuth };
+module.exports = { signToken, signSseTicket, authRequired, authQuery, requireRole, requireStaffType, staffScopeAllows, staffTypesOf, optionalAuth };

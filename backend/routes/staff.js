@@ -4,7 +4,7 @@ const c = require('../controllers/staffController');
 const attendance = require('../controllers/attendanceController');
 const customOrders = require('../controllers/adminCustomOrderController');
 const edit = require('../controllers/orderEditController');
-const { imageUpload } = require('../lib/upload');
+const { imageUpload, imageUploadLimit, validateUploadedImage } = require('../lib/upload');
 
 router.use(authRequired, requireRole('staff'));
 
@@ -20,7 +20,7 @@ router.get('/wholesalers/:id/orders', c.wholesalerOrders);
 // (admin role uses the /api/admin mounts; requireRole('staff') above blocks admin).
 router.get('/custom-order/config', requireStaffType(), customOrders.customOrderConfig);
 router.post('/custom-order', requireStaffType(), customOrders.createCustomOrder);
-router.post('/custom-order/uploads/image', requireStaffType(), imageUpload.single('file'), customOrders.uploadImage);
+router.post('/custom-order/uploads/image', requireStaffType(), imageUploadLimit, imageUpload.single('file'), validateUploadedImage, customOrders.uploadImage);
 router.get('/custom-order/students-search', requireStaffType(), edit.studentsSearch);
 
 module.exports = router;

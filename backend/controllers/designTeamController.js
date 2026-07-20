@@ -200,7 +200,7 @@ async function portalLogin(req, res) {
     return res.status(401).json({ error: 'بيانات خاطئة', code: 'ERR_INVALID_CREDENTIALS' });
   }
   const { rows } = await query(
-    `SELECT u.id, u.name, u.role, u.password_hash
+    `SELECT u.id, u.name, u.role, u.password_hash, u.token_version
        FROM users u
        JOIN design_team_members m ON m.user_id = u.id
       WHERE u.id = $1
@@ -413,6 +413,7 @@ async function updateMember(req, res) {
 
       const userSets = [];
       const userValues = [];
+      let passwordChanged = false;
       if (Object.prototype.hasOwnProperty.call(req.body || {}, 'name')) {
         userValues.push(requiredName(req.body.name));
         userSets.push(`name = $${userValues.length}`);
@@ -426,8 +427,10 @@ async function updateMember(req, res) {
       if (Object.prototype.hasOwnProperty.call(req.body || {}, 'password')) {
         userValues.push(await bcrypt.hash(requiredPassword(req.body.password), SALT_ROUNDS));
         userSets.push(`password_hash = $${userValues.length}`);
+        passwordChanged = true;
       }
       if (userSets.length) {
+        if (passwordChanged) userSets.push('token_version = token_version + 1');
         userValues.push(userId);
         await client.query(
           `UPDATE users SET ${userSets.join(', ')} WHERE id = $${userValues.length}`,

@@ -7,13 +7,37 @@ const path = require('path');
 
 const isProd = process.env.NODE_ENV === 'production';
 
-if (isProd && (!process.env.JWT_SECRET || /change-me/i.test(process.env.JWT_SECRET))) {
-  console.error('FATAL: JWT_SECRET is missing or default in production. Set a strong secret.');
+if (isProd) {
+  try {
+    const publicUrl = new URL(process.env.PUBLIC_URL || '');
+    if (publicUrl.protocol !== 'https:' || publicUrl.username || publicUrl.password) throw new Error();
+  } catch {
+    console.error('FATAL: PUBLIC_URL must be an absolute HTTPS URL in production.');
+    process.exit(1);
+  }
+}
+
+// JWT security cannot depend on NODE_ENV being labelled correctly. This project has run
+// production services with development settings before; a missing/default/short key must
+// therefore fail closed in every environment that starts the API.
+const jwtSecret = process.env.JWT_SECRET || '';
+if (Buffer.byteLength(jwtSecret, 'utf8') < 32 || /change-me|replace-me|example/i.test(jwtSecret)) {
+  console.error('FATAL: JWT_SECRET must be a non-default secret of at least 32 bytes.');
   process.exit(1);
 }
 
+for (const name of ['STAFF_PORTAL_KEY', 'WORKSHOP_PORTAL_KEY', 'DESIGN_TEAM_PORTAL_KEY', 'TV_BOARD_KEY']) {
+  const value = process.env[name];
+  if (value && (Buffer.byteLength(value, 'utf8') < 16 || /change-me|replace-me|example/i.test(value))) {
+    console.error(`FATAL: ${name} must be a non-default secret of at least 16 bytes, or left empty to disable it.`);
+    process.exit(1);
+  }
+}
+
 const app = express();
-app.set('trust proxy', 1);
+// Trust only a reverse proxy on this host by default. Numeric `1` trusted a forged
+// X-Forwarded-For header whenever Node was reachable directly, bypassing IP limits.
+app.set('trust proxy', process.env.TRUST_PROXY || 'loopback');
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 
 const corsOrigins = (process.env.CORS_ORIGIN || '')
@@ -39,11 +63,14 @@ app.use(express.json({ limit: '5mb' }));
 app.use(
   '/uploads',
   express.static(path.join(__dirname, '..', 'uploads'), {
-    maxAge: '7d',
+    maxAge: 0,
     etag: true,
     setHeaders: (res) => {
       res.setHeader('Content-Disposition', 'attachment');
       res.setHeader('X-Content-Type-Options', 'nosniff');
+      // Upload URLs can contain customer artwork/PII. Do not leave them in shared
+      // browser, proxy, or service-worker caches after logout.
+      res.setHeader('Cache-Control', 'private, no-store');
     },
   })
 );

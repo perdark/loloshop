@@ -1,6 +1,6 @@
 const router = require('express').Router();
 const { authRequired, requireRole } = require('../middleware/auth');
-const { imageUpload } = require('../lib/upload');
+const { imageUpload, imageUploadLimit, validateUploadedImage } = require('../lib/upload');
 const c = require('../controllers/wholesalerController');
 
 router.use(authRequired, requireRole('wholesaler'));
@@ -31,6 +31,6 @@ router.post('/quick-full-set-order', c.quickFullSetOrder);
 router.get('/students/:studentId', c.getStudent);
 router.get('/students/:studentId/full-set-order', c.getStudentOrder);
 router.post('/students/:studentId/full-set-order', c.createFullSetOrder);
-router.post('/uploads/image', imageUpload.single('file'), c.uploadImage);
+router.post('/uploads/image', imageUploadLimit, imageUpload.single('file'), validateUploadedImage, c.uploadImage);
 
 module.exports = router;

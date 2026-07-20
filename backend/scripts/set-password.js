@@ -46,7 +46,12 @@ async function main() {
   }
 
   const hash = await bcrypt.hash(password, 10);
-  await query(`UPDATE users SET password_hash = $1 WHERE id = $2`, [hash, user.id]);
+  await query(
+    `UPDATE users
+     SET password_hash = $1, token_version = token_version + 1
+     WHERE id = $2`,
+    [hash, user.id]
+  );
   // Match the in-app reset flows: a password change drops every trusted device, so a
   // stolen 90-day device token can't outlive the reset.
   await revokeUserDevices(user.id);

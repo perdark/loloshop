@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const rateLimit = require('express-rate-limit');
 const { authRequired, requireRole } = require('../middleware/auth');
+const { accountLoginLimit } = require('../lib/accountLoginLimit');
 const c = require('../controllers/workshopController');
 
 // The workshop portal is a public, key-gated (WORKSHOP_PORTAL_KEY) login — no OTP.
@@ -8,7 +9,7 @@ const portalLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 30 });
 const loginLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 20 });
 
 router.get('/portal/members', portalLimit, c.portalMembers);
-router.post('/portal-login', loginLimit, c.portalLogin);
+router.post('/portal-login', loginLimit, accountLoginLimit, c.portalLogin);
 
 // Everything below requires a JWT; attachWorker adds req.worker (the caller's roster row).
 router.use(authRequired, c.attachWorker);

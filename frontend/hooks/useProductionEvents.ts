@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { getToken } from "@/lib/auth";
+import { api } from "@/lib/api";
 
 const baseURL =
   process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ||
@@ -21,9 +21,9 @@ export interface ProductionEvent {
  * every server push — presence changes, order status moves, new orders — so any
  * page (staff queue, manager monitor, admin dashboard) can react in real time.
  *
- * EventSource reconnects automatically if the connection drops, so there's no
- * manual retry logic. The callback is held in a ref, so passing a fresh closure
- * each render does NOT re-open the stream.
+ * The callback is held in a ref, so passing a fresh closure each render does NOT
+ * re-open the stream. Reconnects obtain a fresh short-lived stream ticket; the
+ * long-lived account JWT never appears in the URL or proxy access logs.
  */
 export function useProductionEvents(
   onEvent: (event: ProductionEvent) => void,
@@ -36,20 +36,38 @@ export function useProductionEvents(
 
   useEffect(() => {
     if (!enabled || typeof window === "undefined") return;
-    const token = getToken();
-    if (!token) return;
+    let stopped = false;
+    let es: EventSource | null = null;
+    let retry: ReturnType<typeof setTimeout> | null = null;
 
-    const es = new EventSource(
-      `${baseURL}/api/production/events?token=${encodeURIComponent(token)}`
-    );
-    es.onmessage = (ev) => {
+    const connect = async () => {
       try {
-        cbRef.current(JSON.parse(ev.data) as ProductionEvent);
+        const { data } = await api.post<{ ticket: string }>("/production/events-ticket");
+        if (stopped) return;
+        es = new EventSource(
+          `${baseURL}/api/production/events?ticket=${encodeURIComponent(data.ticket)}`
+        );
+        es.onmessage = (ev) => {
+          try {
+            cbRef.current(JSON.parse(ev.data) as ProductionEvent);
+          } catch {
+            // keep-alive comments / malformed frames — ignore
+          }
+        };
+        es.onerror = () => {
+          es?.close();
+          es = null;
+          if (!stopped) retry = setTimeout(connect, 3000);
+        };
       } catch {
-        // keep-alive comments / malformed frames — ignore
+        if (!stopped) retry = setTimeout(connect, 3000);
       }
     };
-    // EventSource auto-reconnects on error; nothing to do here.
-    return () => es.close();
+    void connect();
+    return () => {
+      stopped = true;
+      if (retry) clearTimeout(retry);
+      es?.close();
+    };
   }, [enabled]);
 }

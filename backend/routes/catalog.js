@@ -1,6 +1,6 @@
 const router = require('express').Router();
 const { authRequired, requireRole, optionalAuth } = require('../middleware/auth');
-const { imageUpload } = require('../lib/upload');
+const { imageUpload, imageUploadLimit, validateUploadedImage } = require('../lib/upload');
 const c = require('../controllers/catalogController');
 
 // Public-ish (auth optional for role pricing)
@@ -49,7 +49,7 @@ router.patch('/options/:id', c.updateOption);
 router.delete('/options/:id', c.deleteOption);
 router.put('/options/:id/price-role', c.setOptionPriceRole);
 
-router.post('/uploads/image', imageUpload.single('file'), c.uploadImage);
+router.post('/uploads/image', imageUploadLimit, imageUpload.single('file'), validateUploadedImage, c.uploadImage);
 
 // Package CRUD (admin) — GET uses public route above (with ?role= override)
 router.post('/packages', c.createPackage);

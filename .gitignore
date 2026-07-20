@@ -45,3 +45,17 @@ frontend/.impeccable/
 # local DB dumps / backups (contain real customer PII — NEVER commit/push)
 *_db_backup_*.json
 prod_db_backup*.json
+backups/
+*_backup_*.sql
+*_backup_*.sql.gz
+*_backup_*.dump
+*_backup_*.tar
+*_backup_*.tar.gz
+*_backup_*.zip
+
+# Local-only session/docs artifacts — never commit
+TESTING-WALKTHROUGH.md
+SECURITY_AUDIT_REPORT_*.md
+STAFF_ADMIN_READINESS.md
+design-mockups/
+voice_*

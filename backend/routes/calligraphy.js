@@ -4,6 +4,7 @@ const rateLimit = require('express-rate-limit');
 const multer = require('multer');
 const { authRequired, staffTypesOf } = require('../middleware/auth');
 const { query } = require('../lib/db');
+const { imageUploadLimit } = require('../lib/upload');
 const c = require('../controllers/calligraphyController');
 
 const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -73,7 +74,7 @@ router.post('/queue/generate', genLimit, c.queueGenerate);
 router.get('/recent', c.recentPlates);
 
 // Compositor endpoints
-router.post('/plates/:id/compose', memUpload.single('image'), c.composePlate);
+router.post('/plates/:id/compose', imageUploadLimit, memUpload.single('image'), c.composePlate);
 router.post('/element', genLimit, c.generateElement);
 
 module.exports = router;

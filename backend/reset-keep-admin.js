@@ -30,7 +30,7 @@ const WIPE_ALWAYS = [
   'designs', 'students', 'wholesalers',
   'notifications', 'batches',
   'staff_salary_transactions', 'staff_salaries', 'staff_activity_log', 'staff_goals',
-  'otp_codes', 'password_resets', 'audit_log',
+  'otp_send_events', 'otp_codes', 'password_resets', 'audit_log',
 ];
 
 // Catalog tables — kept by default, wiped only when KEEP=none.

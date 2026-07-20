@@ -3,12 +3,31 @@ const fs = require('fs');
 const path = require('path');
 const { Pool } = require('pg');
 
-const url = process.env.DATABASE_URL;
-if (!url) { console.error('DATABASE_URL not set'); process.exit(1); }
+const rawUrl = process.env.DATABASE_URL;
+if (!rawUrl) { console.error('DATABASE_URL not set'); process.exit(1); }
+if (rawUrl.includes('neon.tech') && process.env.NODE_ENV !== 'production') {
+  console.error('Refusing to migrate the shared Neon database from a non-production environment.');
+  process.exit(1);
+}
+
+// `pg` lets SSL query parameters override the explicit TLS object. Remove them
+// so certificate verification below is authoritative, matching lib/db.js.
+let connectionString = rawUrl;
+try {
+  const u = new URL(rawUrl);
+  u.searchParams.delete('sslmode');
+  u.searchParams.delete('channel_binding');
+  connectionString = u.toString();
+} catch { /* leave as-is if not a valid URL */ }
+
+let dbHost = '';
+try { dbHost = new URL(rawUrl).hostname.toLowerCase(); } catch { /* validated by pg */ }
+const isLocalDb = !dbHost || ['localhost', '127.0.0.1', '::1'].includes(dbHost);
+const useSsl = rawUrl.includes('neon.tech') || (process.env.NODE_ENV === 'production' && !isLocalDb);
 
 const pool = new Pool({
-  connectionString: url,
-  ssl: url.includes('neon') || url.includes('sslmode') ? { rejectUnauthorized: false } : false,
+  connectionString,
+  ssl: useSsl ? { rejectUnauthorized: true } : false,
 });
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

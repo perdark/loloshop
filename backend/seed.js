@@ -6,9 +6,28 @@ const { assertPasswordOk } = require('./lib/password');
 
 async function ensureAdmin() {
   const phone = '07783571996';
-  const exists = await query(`SELECT id FROM users WHERE phone = $1`, [phone]);
+  const exists = await query(`SELECT id, password_hash FROM users WHERE phone = $1`, [phone]);
   if (exists.rows.length) {
-    console.log('Admin exists.');
+    // Older installs may still carry the historical shipped default. Rotate only
+    // that known value; never overwrite a real administrator password on re-seed.
+    const hasShippedDefault = await bcrypt.compare('admin123', exists.rows[0].password_hash);
+    if (!hasShippedDefault) {
+      console.log('Admin exists.');
+      return;
+    }
+    const password = process.env.SEED_ADMIN_PASSWORD || crypto.randomBytes(12).toString('base64url');
+    assertPasswordOk(password, 'privileged');
+    const hash = await bcrypt.hash(password, 10);
+    await query(
+      `UPDATE users
+          SET password_hash = $2, token_version = token_version + 1
+        WHERE id = $1`,
+      [exists.rows[0].id, hash]
+    );
+    console.log(`Rotated insecure admin password: ${phone}`);
+    if (!process.env.SEED_ADMIN_PASSWORD) {
+      console.log(`Generated admin password (shown once, store it now): ${password}`);
+    }
     return;
   }
   // No baked-in password. `admin123` shipped in this file for months and is exactly the

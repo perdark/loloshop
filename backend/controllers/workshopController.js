@@ -64,7 +64,7 @@ async function portalLogin(req, res) {
     return res.status(401).json({ error: 'بيانات خاطئة', code: 'ERR_INVALID_CREDENTIALS' });
   }
   const { rows } = await query(
-    `SELECT u.id, u.name, u.role, u.password_hash FROM users u
+    `SELECT u.id, u.name, u.role, u.password_hash, u.token_version FROM users u
      JOIN workshop_workers w ON w.user_id = u.id
      WHERE u.id = $1 AND u.role = 'worker' AND w.active = TRUE`, [worker_id]
   );
@@ -209,7 +209,12 @@ async function updateWorker(req, res) {
   if (sets.length) { values.push(id); await query(`UPDATE workshop_workers SET ${sets.join(',')} WHERE id=$${values.length}`, values); }
   if (cur.rows[0].role === 'worker' && req.body.name?.trim()) await query(`UPDATE users SET name=$1,updated_at=NOW() WHERE id=$2`, [req.body.name.trim(), cur.rows[0].user_id]);
   if (cur.rows[0].role === 'worker' && req.body.password) {
-    await query(`UPDATE users SET password_hash=$1,updated_at=NOW() WHERE id=$2`, [await bcrypt.hash(String(req.body.password), SALT_ROUNDS), cur.rows[0].user_id]);
+    await query(
+      `UPDATE users
+       SET password_hash=$1, token_version=token_version+1, updated_at=NOW()
+       WHERE id=$2`,
+      [await bcrypt.hash(String(req.body.password), SALT_ROUNDS), cur.rows[0].user_id]
+    );
   }
   res.json({ ok: true });
 }

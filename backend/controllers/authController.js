@@ -105,6 +105,7 @@ async function login(req, res) {
   }
   const { rows } = await query(
     `SELECT u.id, u.name, u.phone, u.email, u.role, u.password_hash, u.phone_verified,
+            u.token_version,
             EXISTS (
               SELECT 1 FROM students s
               WHERE s.user_id = u.id AND s.wholesaler_id IS NOT NULL
@@ -176,7 +177,7 @@ async function loginVerifyOtp(req, res) {
   // Completing login OTP proves phone ownership — mark verified and return token.
   const { rows } = await query(
     `UPDATE users SET phone_verified = TRUE WHERE id = $1
-     RETURNING id, name, phone, email, role, phone_verified`,
+     RETURNING id, name, phone, email, role, phone_verified, token_version`,
     [result.user_id]
   );
   if (!rows.length) return res.status(404).json({ error: 'المستخدم غير موجود', code: 'ERR_NOT_FOUND' });
@@ -226,7 +227,8 @@ async function staffPortalLogin(req, res) {
     return res.status(401).json({ error: 'بيانات خاطئة', code: 'ERR_INVALID_CREDENTIALS' });
   }
   const { rows } = await query(
-    `SELECT id, name, role, password_hash FROM users WHERE id = $1 AND role = 'staff'`,
+    `SELECT id, name, role, password_hash, token_version
+     FROM users WHERE id = $1 AND role = 'staff'`,
     [staff_id]
   );
   if (!rows.length) {
@@ -269,7 +271,7 @@ async function postVerifyOtp(req, res) {
   // Belt-and-braces alongside the challenge binding above (LS-01 remediation step 5).
   const { rows } = await query(
     `UPDATE users SET phone_verified = TRUE WHERE id = $1 AND role = 'retail'
-     RETURNING id, name, phone, email, role, phone_verified`,
+     RETURNING id, name, phone, email, role, phone_verified, token_version`,
     [result.user_id]
   );
   if (!rows.length) return res.status(403).json({ error: 'غير مصرح', code: 'ERR_FORBIDDEN' });
@@ -296,8 +298,9 @@ async function resendOtp(req, res) {
 
 // Phone-based reset (WhatsApp OTP) — students log in by phone and may not recall
 // their email. Mirrors forgotPassword but uses an OTP with purpose 'reset'.
-// Privileged accounts (admin/staff) cannot reset via phone OTP — they must use
-// the email token path. We still return { sent: true } to avoid enumeration leaks.
+// Privileged accounts cannot reset via phone OTP. An administrator must reset
+// them through the authenticated admin flow or the server-side set-password tool.
+// We still return { sent: true } to avoid enumeration leaks.
 async function forgotPasswordPhone(req, res) {
   const { phone } = req.body;
   if (!phone) return res.status(400).json({ error: 'بيانات ناقصة', code: 'ERR_VALIDATION' });
@@ -338,7 +341,10 @@ async function resetPasswordPhone(req, res) {
   const hash = await bcrypt.hash(password, SALT_ROUNDS);
   // Defence-in-depth: even if the OTP somehow reached a privileged account, refuse the reset here.
   const { rows } = await query(
-    `UPDATE users SET password_hash = $1 WHERE id = $2 AND role = ANY($3) RETURNING id`,
+    `UPDATE users
+     SET password_hash = $1, token_version = token_version + 1
+     WHERE id = $2 AND role = ANY($3)
+     RETURNING id`,
     [hash, result.user_id, PHONE_RESET_ROLES]
   );
   if (!rows.length) return res.status(403).json({ error: 'غير مصرح', code: 'ERR_FORBIDDEN' });

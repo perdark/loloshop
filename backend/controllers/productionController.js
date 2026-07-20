@@ -1,10 +1,15 @@
 const { query, tx } = require('../lib/db');
 const { canStaffTransition, STATUS_LABEL_AR, TRANSITIONS, orderZoneClause } = require('./orderController');
-const { staffScopeAllows, staffTypesOf } = require('../middleware/auth');
+const { signSseTicket, staffScopeAllows, staffTypesOf } = require('../middleware/auth');
 const { imageUpload, publicUrl } = require('../lib/upload');
 const { addClient, publish } = require('../lib/eventBus');
 
 // ---------- SSE stream: live presence + order events for staff/admin ----------
+function issueEventsTicket(req, res) {
+  res.set('Cache-Control', 'no-store');
+  res.json({ ticket: signSseTicket(req.user), expires_in: 60 });
+}
+
 function streamEvents(req, res) {
   res.set({
     'Content-Type': 'text/event-stream',
@@ -1539,7 +1544,7 @@ async function deleteOrder(req, res) {
 
 module.exports = {
   getQueue, getOrder, advance, advanceBulk, deliver, revert, returnToCustomer, claim, release, completed, uploadFinalDesign, monitor,
-  streamEvents, nextStageFor, markEmbroideryZone, markEmbroideryZoneBulk,
+  issueEventsTicket, streamEvents, nextStageFor, markEmbroideryZone, markEmbroideryZoneBulk,
   tailorQueue, tailorComplete, tailorReopen, tailorCompleteBulk, tailorSummary,
   deleteOrder,
   // Shared with the calligraphy workbench («تحويل للتطريز» reuses the real state machine).

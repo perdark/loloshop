@@ -74,24 +74,11 @@ or unknown challenge returns 400 rather than being revived.
 { "sent": true, "expires_in": 300, "challenge_id": "uuid" }
 ```
 
-### POST `/auth/forgot-password`
-```json
-{ "email": "m@x.com" }
-// res 200 (always — don't leak existence)
-{ "sent": true }
-```
-
-### POST `/auth/reset-password`
-```json
-{ "token": "...", "password": "newpass" }
-// res 200
-{ "reset": true }
-```
-
 ### POST `/auth/forgot-password-phone`
 Only `retail` and `wholesaler` may reset by phone OTP (allow-list). Everyone else —
-`admin`, `staff`, `worker`, `design_helper` — uses the emailed token, since one intercepted
-WhatsApp message would otherwise be full account takeover.
+`admin`, `staff`, `worker`, `design_helper` — must be reset by an administrator or with
+the server-side `npm run set-password` tool, since one intercepted WhatsApp message would
+otherwise be full account takeover.
 A `challenge_id` comes back for **any** number (a decoy when there's no eligible account),
 so this response alone doesn't reveal registration. It is **not** a general enumeration
 defence — `/auth/register` still answers that with `409 ERR_PHONE_TAKEN`.

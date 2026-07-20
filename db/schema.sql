@@ -87,9 +87,13 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   role          user_role NOT NULL,
   phone_verified BOOLEAN NOT NULL DEFAULT FALSE,
+  -- Embedded in every JWT and checked on every authenticated request. Incrementing this
+  -- value invalidates every previously-issued token for the account.
+  token_version INTEGER NOT NULL DEFAULT 0,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
 
 -- =====================================================
@@ -110,8 +114,7 @@ CREATE TABLE IF NOT EXISTS otp_codes (
   expires_at   TIMESTAMPTZ NOT NULL,
   used         BOOLEAN NOT NULL DEFAULT FALSE,
   attempts     INTEGER NOT NULL DEFAULT 0,
-  -- Resend refreshes this row in place instead of inserting a new one, so this counter (not
-  -- the row count) is what holds the per-phone hourly send budget.
+  -- Lifetime telemetry for this challenge; the rolling rate limit uses otp_send_events.
   sends        INTEGER NOT NULL DEFAULT 1,
   created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -124,6 +127,16 @@ ALTER TABLE otp_codes ADD COLUMN IF NOT EXISTS sends INTEGER NOT NULL DEFAULT 1;
 CREATE INDEX IF NOT EXISTS idx_otp_phone ON otp_codes(phone, used);
 CREATE INDEX IF NOT EXISTS idx_otp_phone_purpose ON otp_codes(phone, purpose, used);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_otp_challenge ON otp_codes(challenge_id);
+
+-- One row per OTP delivery attempt. A separate event table makes the rolling one-hour
+-- budget accurate even though resends retain the original challenge/created_at.
+CREATE TABLE IF NOT EXISTS otp_send_events (
+  id         BIGSERIAL PRIMARY KEY,
+  phone      TEXT NOT NULL,
+  sent_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_otp_send_events_phone_time
+  ON otp_send_events(phone, sent_at DESC);
 
 -- Migrate existing rows if column was added to a live DB:
 -- ALTER TABLE otp_codes ADD COLUMN IF NOT EXISTS purpose TEXT NOT NULL DEFAULT 'verify';

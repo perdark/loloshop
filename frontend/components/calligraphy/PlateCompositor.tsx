@@ -19,13 +19,7 @@ import { ORNAMENT_CATEGORIES, ornamentDataUrl } from "@/lib/ornaments";
 import { absUrl, composePlate, generateElement, type CalPlate } from "@/lib/calligraphy";
 import { Button } from "@/components/ui/Button";
 import { getApiErrorMessage } from "@/lib/api";
-
-// ─── Fabric v6 lazy loader (mirrors the repo's pattern) ──────────────────────
-
-async function loadFabric() {
-  // The repo uses a lazy import to avoid SSR issues with Fabric (it references window).
-  return import("fabric") as Promise<typeof import("fabric")>;
-}
+import { getFabric } from "@/lib/fabric-loader";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -77,7 +71,7 @@ export function PlateCompositor({ plate, onSaved, onClose }: Props) {
     let disposed = false;
 
     (async () => {
-      const fabric = await loadFabric();
+      const fabric = await getFabric();
       if (disposed || !canvasElRef.current) return;
 
       // Determine display size: fit within viewport width and max constant.
@@ -126,6 +120,10 @@ export function PlateCompositor({ plate, onSaved, onClose }: Props) {
         img.set({
           left: 0,
           top: 0,
+          // Fabric 7 changed the default origin to center; this layer is positioned from
+          // its top-left corner and must keep the v6 geometry.
+          originX: "left",
+          originY: "top",
           scaleX: scale,
           scaleY: scale,
           selectable: false,
@@ -162,7 +160,7 @@ export function PlateCompositor({ plate, onSaved, onClose }: Props) {
     url: string,
     opts: { crossOrigin?: "anonymous" } = {}
   ) {
-    const fabric = await loadFabric();
+    const fabric = await getFabric();
     const canvas = fabricRef.current;
     if (!canvas) return;
 
@@ -184,6 +182,8 @@ export function PlateCompositor({ plate, onSaved, onClose }: Props) {
       scaleY: scale,
       left: (canvasW - natW * scale) / 2,
       top: (canvas.getHeight() - natH * scale) / 2,
+      originX: "left",
+      originY: "top",
       selectable: true,
       evented: true,
     });

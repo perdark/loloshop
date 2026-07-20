@@ -6,7 +6,7 @@ const salary = require('../controllers/salaryController');
 const staff = require('../controllers/staffController');
 const attendance = require('../controllers/attendanceController');
 const customOrders = require('../controllers/adminCustomOrderController');
-const { imageUpload } = require('../lib/upload');
+const { imageUpload, imageUploadLimit, validateUploadedImage } = require('../lib/upload');
 
 router.use(authRequired, requireRole('admin'));
 
@@ -15,7 +15,7 @@ router.get('/accounting', c.accounting);
 router.get('/orders', orders.listOrders);
 router.get('/custom-order/config', customOrders.customOrderConfig);
 router.post('/custom-order', customOrders.createCustomOrder);
-router.post('/custom-order/uploads/image', imageUpload.single('file'), customOrders.uploadImage);
+router.post('/custom-order/uploads/image', imageUploadLimit, imageUpload.single('file'), validateUploadedImage, customOrders.uploadImage);
 router.get('/custom-order/students-search', require('../controllers/orderEditController').studentsSearch);
 router.patch('/orders/:id/cost', c.updateOrderCost);
 router.delete('/orders/:id', c.deleteOrder);

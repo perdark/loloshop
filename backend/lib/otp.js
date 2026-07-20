@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { query } = require('./db');
+const { query, tx } = require('./db');
 const { secretMatches } = require('./secretCompare');
 
 // Normalise a typed phone to the canonical local Iraqi form `07XXXXXXXXX`.
@@ -32,12 +32,20 @@ function isValidIqMobile(phone) {
 // Demo-login allow-list: phones listed in DEMO_LOGIN_PHONES (comma-separated) skip the
 // WhatsApp OTP on login. This exists to give an app-store reviewer (Google Play / App Store)
 // a working sign-in without a real WhatsApp OTP they can't receive on an Iraqi number they
-// don't own. Empty/unset → NO phone bypasses (fail-safe). The login handler additionally
-// requires role==='retail', so a mistakenly-listed admin/staff number can never skip OTP.
+// don't own. Empty/unset/expired → NO phone bypasses (fail-safe), and the required deadline
+// may be at most 30 days away. The login handler additionally requires role==='retail', so
+// a mistakenly-listed admin/staff number can never skip OTP.
 // The password is still bcrypt-verified, so this is an OTP skip, not a passwordless backdoor.
 function isDemoLoginPhone(phone) {
   const raw = process.env.DEMO_LOGIN_PHONES;
   if (!raw || !phone) return false;
+  // Reviewer bypasses must expire. An allow-list without a valid near-term deadline is
+  // inert, preventing a temporary App Store review exception from becoming permanent.
+  const expiresAt = Date.parse(process.env.DEMO_LOGIN_EXPIRES_AT || '');
+  const remaining = expiresAt - Date.now();
+  if (!Number.isFinite(expiresAt) || remaining <= 0 || remaining > 30 * 24 * 60 * 60 * 1000) {
+    return false;
+  }
   const list = raw.split(',').map((p) => normalizeIqPhone(p.trim())).filter(Boolean);
   return list.includes(normalizeIqPhone(phone));
 }
@@ -57,6 +65,15 @@ const TTL = parseInt(process.env.OTP_TTL_SECONDS || '300', 10);
 // gets around the per-IP express-rate-limit. Counts ALL codes for the phone in the
 // trailing hour regardless of purpose.
 const MAX_OTP_REQUESTS_PER_HOUR = parseInt(process.env.OTP_MAX_PER_HOUR || '5', 10);
+const OTP_PURPOSES = new Set(['verify', 'login', 'reset']);
+
+function otpRateError() {
+  const err = new Error('تم طلب عدد كبير من الرموز. يرجى المحاولة بعد قليل.');
+  err.status = 429;
+  err.code = 'ERR_OTP_RATE';
+  err.expose = true;
+  return err;
+}
 
 function generateCode() {
   return String(crypto.randomInt(100000, 1000000));
@@ -79,57 +96,54 @@ async function createOtp(phone, purpose = 'verify', opts = {}) {
     err.expose = true;
     throw err;
   }
-  // Per-phone hourly cap — ALWAYS enforced. (Was gated on NODE_ENV==='production', which
-  // silently disabled it the whole time prod ran in development mode.) IP-independent: stops
-  // one number from being blasted with codes (brute-force reset + sender-ban protection).
-  const recent = await query(
-    `SELECT COUNT(*)::int AS n FROM otp_codes
-     WHERE phone = $1 AND created_at > NOW() - INTERVAL '1 hour'`,
-    [phone]
-  );
-  if (recent.rows[0].n >= MAX_OTP_REQUESTS_PER_HOUR) {
-    const err = new Error('تم طلب عدد كبير من الرموز. يرجى المحاولة بعد قليل.');
-    err.status = 429;
-    err.code = 'ERR_OTP_RATE';
-    err.expose = true;
-    throw err;
+  if (!OTP_PURPOSES.has(purpose)) {
+    throw new Error(`Unsupported OTP purpose: ${purpose}`);
   }
+  if (!opts.userId) throw new Error('createOtp requires opts.userId');
+
   const code = generateCode();
   const expiresAt = new Date(Date.now() + TTL * 1000);
-  // Invalidate prior unused codes for this phone+purpose only.
-  await query(
-    `UPDATE otp_codes SET used = TRUE WHERE phone = $1 AND purpose = $2 AND used = FALSE`,
-    [phone, purpose]
-  );
-  const inserted = await query(
-    `INSERT INTO otp_codes (phone, code, expires_at, purpose, user_id)
-     VALUES ($1, $2, $3, $4, $5) RETURNING challenge_id`,
-    [phone, code, expiresAt, purpose, opts.userId || null]
-  );
+  const challengeId = await tx(async (client) => {
+    // Serialize every create/resend operation for one phone. Without this lock, parallel
+    // requests can all observe a remaining send slot and exceed the hourly budget.
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [phone]);
+
+    // A programming mistake must not send a code to one phone while binding it to another
+    // account. Every authenticating challenge is required to match the user's stored phone.
+    const bound = await client.query(
+      `SELECT 1 FROM users WHERE id = $1 AND phone = $2`,
+      [opts.userId, phone]
+    );
+    if (!bound.rows.length) throw new Error('OTP user/phone binding mismatch');
+
+    // Count actual send attempts in a trailing window. `otp_codes.created_at` cannot do
+    // this because resends reuse an old row; a resend at minute 59 must still count until
+    // minute 119.
+    const recent = await client.query(
+      `SELECT COUNT(*)::int AS n FROM otp_send_events
+       WHERE phone = $1 AND sent_at > NOW() - INTERVAL '1 hour'`,
+      [phone]
+    );
+    if (recent.rows[0].n >= MAX_OTP_REQUESTS_PER_HOUR) throw otpRateError();
+
+    // Invalidate + insert atomically so a failed insert never destroys a working code.
+    await client.query(
+      `UPDATE otp_codes SET used = TRUE WHERE phone = $1 AND purpose = $2 AND used = FALSE`,
+      [phone, purpose]
+    );
+    const inserted = await client.query(
+      `INSERT INTO otp_codes (phone, code, expires_at, purpose, user_id)
+       VALUES ($1, $2, $3, $4, $5) RETURNING challenge_id`,
+      [phone, code, expiresAt, purpose, opts.userId]
+    );
+    await client.query(`INSERT INTO otp_send_events (phone) VALUES ($1)`, [phone]);
+    return inserted.rows[0].challenge_id;
+  });
   await sendViaZentramsg(phone, code);
-  return { expires_in: TTL, challenge_id: inserted.rows[0].challenge_id };
+  return { expires_in: TTL, challenge_id: challengeId };
 }
 
-// Master OTP bypass so dev/testing doesn't require reading the code from
-// logs/WhatsApp — defaults to 111111 in dev. HARD-DISABLED in production: a master
-// code logs in as ANY phone (incl. admin/staff) and gates password reset, so it is
-// never honored when NODE_ENV==='production', even if DEV_MASTER_OTP is set in env.
 const MAX_OTP_ATTEMPTS = 5; // wrong guesses before the code is burned
-// In prod the master code is a full-account-takeover backdoor, so it stays OFF
-// unless BOTH an explicit opt-in flag and a NON-default code are set in env.
-// There is NO baked-in default any more (the old 111111 is gone): a master code is
-// honored ONLY when DEV_MASTER_OTP is explicitly set in env. With it unset, dev reads
-// the real code from the backend console (or WhatsApp once Zentramsg creds are set).
-const DEV_MASTER_OTP = (() => {
-  if (process.env.NODE_ENV !== 'production') {
-    return process.env.DEV_MASTER_OTP || null;
-  }
-  if (process.env.ALLOW_PROD_MASTER_OTP === 'true' && process.env.DEV_MASTER_OTP) {
-    console.warn('[OTP] PROD master OTP ENABLED via ALLOW_PROD_MASTER_OTP — backdoor active.');
-    return process.env.DEV_MASTER_OTP;
-  }
-  return null;
-})();
 
 // Consume an OTP addressed BY CHALLENGE. The caller supplies only a challenge id it was
 // given by a prior server flow plus the code — never a phone or a purpose — so it cannot
@@ -138,57 +152,42 @@ const DEV_MASTER_OTP = (() => {
 // wrong code, attempts exhausted) so callers can't distinguish the cases and probe.
 async function verifyOtpByChallenge(challengeId, code, purpose) {
   if (!challengeId || !CHALLENGE_RE.test(String(challengeId))) return { ok: false };
-  // Scoped by purpose too: a 'reset' code can never be replayed against a login challenge.
-  const { rows } = await query(
-    `SELECT id, phone, code, attempts, user_id FROM otp_codes
-     WHERE challenge_id = $1 AND purpose = $2 AND used = FALSE AND expires_at > NOW()`,
-    [challengeId, purpose]
-  );
-  if (!rows.length) return { ok: false };
-  const otp = rows[0];
+  if (!OTP_PURPOSES.has(purpose)) return { ok: false };
 
-  // Refuse a code that isn't pinned to an account — and do it WITHOUT consuming the row.
-  // Two reasons it must not burn: codes written by the previously-deployed backend have
-  // user_id NULL, and burning one would make the user's retry with the correct digits fail
-  // too; and a future createOtp caller that forgets opts.userId then fails visibly here
-  // instead of silently minting codes that can never verify.
-  if (!otp.user_id) return { ok: false };
-
-  // Too many wrong guesses on this code → burn it (forces requesting a new one). Checked
-  // before the master-code branch so dev can't sail past the cap the cap is there to test.
-  if (otp.attempts >= MAX_OTP_ATTEMPTS) {
-    await query(`UPDATE otp_codes SET used = TRUE WHERE id = $1`, [otp.id]);
-    return { ok: false };
-  }
-
-  // The dev master code still requires a real challenge, so even in development it can no
-  // longer mint a token for an arbitrary phone — it only short-circuits typing the digits.
-  if (DEV_MASTER_OTP && code === DEV_MASTER_OTP) {
-    console.log(`[OTP DEV] master code accepted for ${otp.phone} (${purpose})`);
-    await query(`UPDATE otp_codes SET used = TRUE WHERE id = $1`, [otp.id]);
-    return { ok: true, phone: otp.phone, user_id: otp.user_id };
-  }
-
-  // Constant-time: a 6-digit code is short enough that a byte-wise early exit is worth
-  // denying, and the helper is already here.
-  if (!secretMatches(String(code), otp.code)) {
-    // Atomic gate+increment: the `attempts < cap` predicate is evaluated under the
-    // row lock, so concurrent wrong guesses can't slip past the cap (no TOCTOU).
-    await query(
-      `UPDATE otp_codes SET attempts = attempts + 1
-       WHERE id = $1 AND attempts < $2`,
-      [otp.id, MAX_OTP_ATTEMPTS]
+  // Keep the row locked through compare + consume. The old SELECT-then-UPDATE sequence let
+  // many concurrent guesses all compare before any of their increments became visible,
+  // and it raced resends so a superseded code could still consume a freshly-refreshed row.
+  return tx(async (client) => {
+    const { rows } = await client.query(
+      `SELECT id, phone, code, attempts, user_id FROM otp_codes
+       WHERE challenge_id = $1 AND purpose = $2 AND used = FALSE AND expires_at > NOW()
+       FOR UPDATE`,
+      [challengeId, purpose]
     );
-    return { ok: false };
-  }
-  // Single-use: only the request that flips used FALSE→TRUE wins (guards a race
-  // where the same correct code is submitted twice concurrently).
-  const consumed = await query(
-    `UPDATE otp_codes SET used = TRUE WHERE id = $1 AND used = FALSE RETURNING id`,
-    [otp.id]
-  );
-  if (!consumed.rows.length) return { ok: false };
-  return { ok: true, phone: otp.phone, user_id: otp.user_id };
+    if (!rows.length) return { ok: false };
+    const otp = rows[0];
+
+    // Legacy rows written before challenge binding remain untouched and unusable.
+    if (!otp.user_id) return { ok: false };
+    if (otp.attempts >= MAX_OTP_ATTEMPTS) {
+      await client.query(`UPDATE otp_codes SET used = TRUE WHERE id = $1`, [otp.id]);
+      return { ok: false };
+    }
+
+    if (!secretMatches(String(code), otp.code)) {
+      await client.query(
+        `UPDATE otp_codes
+         SET attempts = attempts + 1,
+             used = (attempts + 1 >= $2)
+         WHERE id = $1`,
+        [otp.id, MAX_OTP_ATTEMPTS]
+      );
+      return { ok: false };
+    }
+
+    await client.query(`UPDATE otp_codes SET used = TRUE WHERE id = $1`, [otp.id]);
+    return { ok: true, phone: otp.phone, user_id: otp.user_id };
+  });
 }
 
 // Re-send the code for an existing challenge, IN PLACE — same row, same challenge id, fresh
@@ -202,30 +201,44 @@ async function verifyOtpByChallenge(challengeId, code, purpose) {
 // Bounded to the last hour so an old id isn't a permanent send-to-this-number handle.
 async function refreshOtp(challengeId) {
   if (!challengeId || !CHALLENGE_RE.test(String(challengeId))) return null;
-  const { rows } = await query(
-    `SELECT id, phone, sends FROM otp_codes
-     WHERE challenge_id = $1 AND used = FALSE AND created_at > NOW() - INTERVAL '1 hour'`,
-    [challengeId]
-  );
-  if (!rows.length) return null;
-  const row = rows[0];
-  // Same budget createOtp enforces. Re-using the row bypasses the row-count check, so the
-  // cap has to be applied explicitly here or resend becomes an unmetered WhatsApp pump —
-  // which is exactly what gets the sender device banned.
-  if (row.sends >= MAX_OTP_REQUESTS_PER_HOUR) {
-    const err = new Error('تم طلب عدد كبير من الرموز. يرجى المحاولة بعد قليل.');
-    err.status = 429;
-    err.code = 'ERR_OTP_RATE';
-    err.expose = true;
-    throw err;
-  }
   const code = generateCode();
-  await query(
-    `UPDATE otp_codes SET code = $1, expires_at = $2, attempts = 0, sends = sends + 1
-     WHERE id = $3`,
-    [code, new Date(Date.now() + TTL * 1000), row.id]
-  );
-  await sendViaZentramsg(row.phone, code);
+  const phone = await tx(async (client) => {
+    // Read the phone first without locking, then take the same per-phone advisory lock as
+    // createOtp before locking the row. Consistent lock order avoids deadlocks.
+    const found = await client.query(
+      `SELECT phone FROM otp_codes
+       WHERE challenge_id = $1 AND used = FALSE AND created_at > NOW() - INTERVAL '1 hour'`,
+      [challengeId]
+    );
+    if (!found.rows.length) return null;
+    const candidatePhone = found.rows[0].phone;
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [candidatePhone]);
+
+    const locked = await client.query(
+      `SELECT id, phone FROM otp_codes
+       WHERE challenge_id = $1 AND used = FALSE AND created_at > NOW() - INTERVAL '1 hour'
+       FOR UPDATE`,
+      [challengeId]
+    );
+    if (!locked.rows.length) return null;
+
+    const recent = await client.query(
+      `SELECT COUNT(*)::int AS n FROM otp_send_events
+       WHERE phone = $1 AND sent_at > NOW() - INTERVAL '1 hour'`,
+      [locked.rows[0].phone]
+    );
+    if (recent.rows[0].n >= MAX_OTP_REQUESTS_PER_HOUR) throw otpRateError();
+
+    await client.query(
+      `UPDATE otp_codes SET code = $1, expires_at = $2, attempts = 0, sends = sends + 1
+       WHERE id = $3`,
+      [code, new Date(Date.now() + TTL * 1000), locked.rows[0].id]
+    );
+    await client.query(`INSERT INTO otp_send_events (phone) VALUES ($1)`, [locked.rows[0].phone]);
+    return locked.rows[0].phone;
+  });
+  if (!phone) return null;
+  await sendViaZentramsg(phone, code);
   return { expires_in: TTL, challenge_id: challengeId };
 }
 
@@ -261,10 +274,6 @@ function toIntlDigits(phone) {
 }
 
 async function sendViaZentramsg(phone, code) {
-  // Always surface the code on dev so local testing works even when Zentramsg
-  // creds are present (no more blind OTP loops in development).
-  if (process.env.NODE_ENV !== 'production') console.log(`[OTP DEV] ${phone} -> ${code}`);
-
   // Final hard guard (belt & suspenders behind createOtp): never POST to WhatsApp for a
   // non-Iraqi-mobile recipient. Sending to invalid numbers is what gets the sender banned.
   const ids = toIntlDigits(phone);

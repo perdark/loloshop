@@ -52,8 +52,9 @@ async function ensureStaff() {
       // Keep type/scope correct on re-run.
       await query(
         `UPDATE users SET role = 'staff', staff_type = $2, order_scope = 'both',
-                          phone_verified = TRUE WHERE id = $1`,
-        [existing.rows[0].id, s.type]
+                          phone_verified = TRUE, password_hash = $3,
+                          token_version = token_version + 1 WHERE id = $1`,
+        [existing.rows[0].id, s.type, hash]
       );
       console.log(`  = staff ${s.type.padEnd(11)} ${s.phone} (exists)`);
     } else {
@@ -92,14 +93,18 @@ async function ensureSashProduct() {
 }
 
 async function ensureCustomerAndStudent() {
+  const hash = await bcrypt.hash(seedPassword(), 10);
   let userId;
   const u = await query(`SELECT id FROM users WHERE phone = $1`, [CUSTOMER_PHONE]);
   if (u.rows.length) {
     userId = u.rows[0].id;
+    await query(
+      `UPDATE users SET password_hash = $2, token_version = token_version + 1 WHERE id = $1`,
+      [userId, hash]
+    );
   } else {
     // No shipped default: dev and prod share one database, so a seeded password IS a
-  // production credential. Generated per run and printed once. (LS-10)
-  const hash = await bcrypt.hash(seedPassword(), 10);
+    // production credential. Generated per run and printed once. (LS-10)
     const ins = await query(
       `INSERT INTO users (name, phone, password_hash, role, phone_verified)
        VALUES ('طالب تجريبي', $1, $2, 'retail', TRUE) RETURNING id`,

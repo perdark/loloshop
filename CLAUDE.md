@@ -36,7 +36,7 @@ Two separate apps, no shared package. Frontend talks to backend over HTTP.
 - `server.js` mounts routers under `/api/*` (auth, join, admin, orders, batches, staff, wholesaler, notifications, products, catalog, designs, fonts). Hardened with `helmet` + `express-rate-limit`.
 - `routes/*` → `controllers/*` (logic) → `lib/db.js` (`query` + `tx` transaction helper, use `tx` for order creation; both retry Neon cold-start failures).
 - `middleware/auth.js`: `authRequired` (JWT Bearer → loads `req.user` from DB), `requireRole(...roles)`, `optionalAuth` (token optional → anon allowed, used by public catalog/configurator for retail pricing), `signToken`. JWT carries `{sub, role, name}`; passwords hashed with `bcrypt`.
-- `lib/`: `otp.js` (Zentramsg WhatsApp OTP), `email.js` (nodemailer SMTP), `upload.js` (multer → `/uploads/{logos,images,fonts}`).
+- `lib/`: `otp.js` (Zentramsg WhatsApp OTP), `upload.js` (multer → `/uploads/{logos,images,fonts}`). Email recovery was removed; privileged password recovery is admin/server-side.
 - All error responses: `{ error: <Arabic msg>, code: 'ERR_*' }`. Uploads served static at `/uploads`.
 
 **Frontend** (`frontend/`) — App Router, route folders by role:

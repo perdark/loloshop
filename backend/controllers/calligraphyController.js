@@ -1,6 +1,7 @@
 // backend/controllers/calligraphyController.js
 const crypto = require('crypto');
 const archiver = require('archiver');
+const sharp = require('sharp');
 const { query } = require('../lib/db');
 const { generateImage, MODELS } = require('../lib/openrouter');
 const { cropSheet } = require('../lib/sheetCrop');
@@ -343,6 +344,17 @@ async function composePlate(req, res) {
   const { rows: pr } = await query(`SELECT * FROM calligraphy_plates WHERE id=$1`, [id]);
   if (!pr.length) return bad(res, 'الصورة غير موجودة', 'ERR_NOT_FOUND', 404);
   if (!req.file || !req.file.buffer) return bad(res, 'لم يتم استلام الصورة');
+  // Multer's MIME is client-controlled. Decode the payload before storing it as `.png`
+  // and cap total pixels to avoid arbitrary-file storage and image decompression bombs.
+  let metadata;
+  try {
+    metadata = await sharp(req.file.buffer, { limitInputPixels: 40_000_000 }).metadata();
+  } catch {
+    return bad(res, 'ملف الصورة غير صالح', 'ERR_INVALID_IMAGE');
+  }
+  if (metadata.format !== 'png' || !metadata.width || !metadata.height) {
+    return bad(res, 'يجب رفع صورة PNG صالحة', 'ERR_INVALID_IMAGE');
+  }
   const saved = saveBufferToUploads(req, 'calligraphy/plates', req.file.buffer, 'png');
   const { rows } = await query(
     `UPDATE calligraphy_plates SET plate_path=$2, linked_at=NULL, status='done' WHERE id=$1 RETURNING *`,

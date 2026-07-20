@@ -9,6 +9,7 @@ const memoCache = require('../lib/memoCache');
 // requires only lib/*, never adminController.
 const { moneyRevealOk, moneyGateConfigured, setMoneyGate } = require('./tvBoardController');
 const { assertPasswordOk } = require('../lib/password');
+const { revokeUserDevices } = require('../lib/trustedDevice');
 
 const SALT_ROUNDS = 10;
 
@@ -656,12 +657,13 @@ async function updateStaffPassword(req, res) {
   const hash = await bcrypt.hash(password, SALT_ROUNDS);
   const { rows } = await query(
     `UPDATE users
-     SET password_hash = $1
+     SET password_hash = $1, token_version = token_version + 1
      WHERE id = $2 AND role = 'staff'
      RETURNING id`,
     [hash, id]
   );
   if (!rows.length) return res.status(404).json({ error: 'غير موجود', code: 'ERR_NOT_FOUND' });
+  await revokeUserDevices(rows[0].id);
   await query(
     `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
      VALUES ($1, 'reset_staff_password', 'user', $2, $3)`,

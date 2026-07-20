@@ -2,6 +2,8 @@ const multer = require('multer');
 const path = require('path');
 const crypto = require('crypto');
 const fs = require('fs');
+const sharp = require('sharp');
+const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 
 const ROOT = path.join(__dirname, '..', '..', 'uploads');
 
@@ -11,7 +13,11 @@ function makeStorage(subdir) {
   return multer.diskStorage({
     destination: (req, file, cb) => cb(null, dir),
     filename: (req, file, cb) => {
-      const ext = path.extname(file.originalname).toLowerCase();
+      // Never preserve an attacker-controlled extension. Multer's MIME value is
+      // also client supplied, but the strict MIME/extension pair in imageFilter
+      // prevents obvious HTML/script uploads and this keeps the served suffix
+      // aligned with the accepted media type.
+      const ext = IMAGE_TYPES.get(String(file.mimetype).toLowerCase())?.[0] || '.bin';
       const name = crypto.randomBytes(16).toString('hex') + ext;
       cb(null, name);
     },
@@ -20,17 +26,67 @@ function makeStorage(subdir) {
 
 // SVG intentionally excluded — it can carry inline <script> (stored-XSS if ever
 // rendered inline). Raster formats only for customer/logo uploads.
-const IMAGE_TYPES = /^image\/(png|jpe?g|webp|heic|heif)$/i;
-const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.heic', '.heif']);
+const IMAGE_TYPES = new Map([
+  ['image/png', ['.png']],
+  ['image/jpeg', ['.jpg', '.jpeg']],
+  ['image/jpg', ['.jpg', '.jpeg']],
+  ['image/webp', ['.webp']],
+  ['image/heic', ['.heic']],
+  ['image/heif', ['.heif']],
+]);
 
 function imageFilter(req, file, cb) {
   const ext = path.extname(file.originalname || '').toLowerCase();
-  if (IMAGE_TYPES.test(file.mimetype) || IMAGE_EXT.has(ext)) {
+  const allowedExtensions = IMAGE_TYPES.get(String(file.mimetype).toLowerCase());
+  if (allowedExtensions?.includes(ext)) {
     cb(null, true);
     return;
   }
   cb(new Error('نوع الملف غير مدعوم (PNG, JPG, WEBP)'));
 }
+
+function uploadValidationError(message) {
+  const err = new Error(message);
+  err.status = 400;
+  err.code = 'ERR_INVALID_IMAGE';
+  err.expose = true;
+  return err;
+}
+
+// File extensions and multipart MIME values are caller-controlled. After Multer writes
+// the bounded file, make libvips parse its real header and enforce the expected format and
+// pixel count. Invalid files are removed before any controller can publish their URL.
+async function validateUploadedImage(req, _res, next) {
+  if (!req.file?.path) return next();
+  try {
+    const metadata = await sharp(req.file.path, { limitInputPixels: 40_000_000 }).metadata();
+    const expected = {
+      'image/png': 'png',
+      'image/jpeg': 'jpeg',
+      'image/jpg': 'jpeg',
+      'image/webp': 'webp',
+      'image/heic': 'heif',
+      'image/heif': 'heif',
+    }[String(req.file.mimetype).toLowerCase()];
+    if (!expected || metadata.format !== expected || !metadata.width || !metadata.height) {
+      throw uploadValidationError('ملف الصورة لا يطابق نوعه');
+    }
+    next();
+  } catch (err) {
+    try { await fs.promises.unlink(req.file.path); } catch { /* already gone */ }
+    next(err?.expose ? err : uploadValidationError('ملف الصورة غير صالح'));
+  }
+}
+
+// Bound authenticated storage abuse as well as individual file size. Account-based keys
+// also stop simple IP rotation; the IP fallback only applies if a route is mis-ordered.
+const imageUploadLimit = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user?.id ? `user:${req.user.id}` : `ip:${ipKeyGenerator(req.ip)}`,
+});
 
 const logoUpload = multer({
   storage: makeStorage('logos'),
@@ -68,12 +124,30 @@ function saveBufferToUploads(req, subdir, buffer, ext = 'png') {
   return { filename, url: publicUrl(req, subdir, filename), absPath };
 }
 
-// Resolve a /uploads/... public URL (or bare path) to an absolute disk path, or null.
+// Resolve a /uploads/... public URL to an absolute disk path, or null.
 function absFromUrl(url) {
   if (!url) return null;
-  const m = String(url).match(/\/uploads\/(.+)$/);
-  if (!m) return null;
-  return path.join(ROOT, m[1]);
+  try {
+    const parsed = new URL(String(url), 'http://local.invalid');
+    if (!parsed.pathname.startsWith('/uploads/')) return null;
+    const relative = decodeURIComponent(parsed.pathname.slice('/uploads/'.length));
+    if (!relative || relative.includes('\0')) return null;
+    const resolved = path.resolve(ROOT, relative);
+    // `path.join(ROOT, "../../backend/.env")` escapes ROOT. Resolve first and require
+    // the result to remain below the upload directory before archive/read callers use it.
+    if (!resolved.startsWith(`${path.resolve(ROOT)}${path.sep}`)) return null;
+    return resolved;
+  } catch {
+    return null;
+  }
 }
 
-module.exports = { logoUpload, imageUpload, publicUrl, saveBufferToUploads, absFromUrl };
+module.exports = {
+  logoUpload,
+  imageUpload,
+  imageUploadLimit,
+  validateUploadedImage,
+  publicUrl,
+  saveBufferToUploads,
+  absFromUrl,
+};

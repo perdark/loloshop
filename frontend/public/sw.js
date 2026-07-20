@@ -1,4 +1,4 @@
-const CACHE_VERSION = "loloshop-v2";
+const CACHE_VERSION = "loloshop-v3";
 const OFFLINE_URL = "/offline.html";
 const PRECACHE_URLS = [
   OFFLINE_URL,
@@ -32,6 +32,11 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
+
+  // Customer artwork may have an image extension but is not a static asset. Never
+  // persist API/upload responses in the offline cache; v3 activation also deletes the
+  // previous cache that may already contain them.
+  if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/uploads/")) return;
 
   // Never cache local development chunks. Next's dev chunk URLs can remain stable
   // while their contents change, which otherwise leaves localhost showing an old UI.
