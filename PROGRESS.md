@@ -1,5 +1,50 @@
 # Progress
 
+## 2026-07-20 — Order editing repaired: priced spec lines were uneditable · student academic info had no edit path
+
+**Branch `security-fixes`, committed, NOT pushed. No migration for this fix.** Reported by the owner as "editing on order for
+retail has issues, and the student info on the order can't be edited". Both were confirmed against live Neon data before any
+code changed. **Separately, migrations 067 (`users.token_version`) + 068 (`otp_send_events`) WERE applied to Neon this session**
+— not for this fix, but because `middleware/auth.js` on this branch selects `token_version` on every authenticated request, so
+the backend 500s on the old schema. That was already on the deploy checklist; it is now done rather than pending.
+
+**① Priced spec lines were silently hidden from the editor.** `editContext` + `patchOrderDetails` filtered editable lines with
+`COALESCE(price_snapshot,0) = 0`, intended as "never touch price rows". That conflated a line *carrying* a price with an edit
+*changing* one — the UPDATE only ever writes `customer_text`, so the price was never reachable either way. Live impact:
+**208 typed lines across 166 retail orders were uneditable**, exactly the embroidery texts staff need to fix — «القبعة من
+الجانب» ٩٧، «القبعة من الأعلى» ٤٤، «تطريز ردن الروب» ٥٩، «ردن الروب» ٨. Verified on a real order (نبأ علي عبود): the old query
+returned `[]` (the UI showed «لا توجد بنود نصية قابلة للتعديل»), the new one returns both ردن الروب lines. **Fix:** drop the
+price condition, keep `customer_text IS NOT NULL`. Money safety is unchanged — the UPDATE sets only `customer_text` and is
+scoped by `order_id`.
+
+**② الجامعة / القسم / نوع الدراسة / الاسم had no edit path anywhere in the app** — the order page rendered them read-only and
+`/edit` didn't offer them; only انستغرام had a ✎. **Fix:** new `university_name` / `department` / `study_type` branches in
+`applyStudentInfo` (students-table only — no checkout_groups mirror), inline ✎ on all four rows of «بيانات الطالب», and the
+same fields on the `/edit` page. `study_type` is a Postgres enum, so it gets a `<Select>` (صباحي/مسائي/غير محدد).
+
+**③ Hardening found by the critic pass.** (a) A refactor to a computed payload key had broken the *existing* انستغرام edit —
+`kind: "instagram"` serialised to a key the backend ignores, so it returned a success toast on a write that never happened.
+The quick-edit `kind` is now typed as `keyof QuickEditPayload["student"]`, so a key that the backend doesn't accept **fails to
+compile** (proven: reintroducing the old value produces TS2345). (b) `applyStudentInfo` validated *inline*, so a bad
+`study_type` returned 400 **after** name/university/department were already committed → validation is now a separate
+`validateStudentInfo()` pass that runs before any write. (c) `patchOrderDetails` committed item texts, then wrote student info
+outside that transaction → item texts, student info, notes and the audit row now all land in **one** transaction.
+(d) `saveFullSetOrder` could 400 after the طقم was already persisted, skipping the audit row → it validates before persisting.
+(e) name `maxLength` was 160 client-side vs `clean(…,120)` server-side (silent truncation) → both 120 now.
+
+**Gates:** BE `node --check` 0 · **NEW `backend/test/orderEditStudentInfo.test.js` 14/14** (offline — points DATABASE_URL at
+localhost so the Neon guard stays intact; includes a spy proving **zero** UPDATEs run when validation fails) · FE `tsc` 0 ·
+`eslint` 0 · live-data verification read-only inside a `SET TRANSACTION READ ONLY` block. The 2 pre-existing failures in
+`test/authOtpChallenge.test.js` + `test/batchASecurity.test.js` are unrelated — they're DB-backed and die at `lib/db.js:10` on
+require (the shared-Neon guard).
+
+**Verified end-to-end over real HTTP against Neon** (admin JWT, order احلام صبحي `82c8946f`): `edit-context` returns both
+previously-hidden 3000-price cap lines; `PATCH .../details` on one of them returns `items_changed: 1` — the identical call
+returned 400 «عنصر غير قابل للتعديل» before the fix — with `price_snapshot` still **3000** afterwards, confirming money is
+untouched. A student-info PATCH returns `student_info_fields: ["instagram_username"]`, i.e. the key is actually applied (it was
+`[]` under the computed-key regression). Both write tests used the row's OWN current value, so no live data changed. Browser
+renders all five ✎ affordances as admin. **Owner's own click-through still pending.**
+
 ## 2026-07-19 — Security fix LS-01: OTP is no longer a login on its own (branch `security-fixes`)
 
 First item of the `SECURITY_AUDIT_REPORT_2026-07-16.md` plan. **The hole:** `POST /auth/resend-otp` was unauthenticated and let
@@ -21,8 +66,8 @@ Zentramsg sender-ban vector.
 anonymous callers and (via `getShop`'s `audience`) wholesaler-only products to retail accounts → now admin + production
 **managers** only, deliberately not every `role='staff'` since presser/tailor/embroiderer are denied money everywhere else.
 **LS-10** NEW `backend/lib/password.js` applied at every `bcrypt.hash` site: **8-character minimum for everyone** (owner
-decision — the audit's 12 for privileged accounts was rejected as too much friction), banned defaults, and no all-repeated or
-all-sequential values. **Enforced only when a password is SET — existing short passwords still log in** (test covers it).
+decision — the audit's 12 for privileged accounts was rejected as too much friction) and banned shipped defaults.
+**Enforced only when a password is SET — existing short passwords still log in** (test covers it).
 `admin123`/`staff123`/`cust123`/`test1234` removed from all seed files; live DB scanned → **0 weak passwords across all 7
 privileged accounts**. **LS-14** `getDesignByStudent` now enforces `staffScopeAllows` + strips the student phone for
 non-designers (NB the endpoint has no frontend caller — the `designs` table is dead). **LS-15** health no longer returns raw

@@ -28,8 +28,10 @@ import {
   releaseOrder,
   approveDesign,
   rejectDesign,
+  type QuickEditPayload,
 } from "@/lib/staff";
 import { Input } from "@/components/ui/Input";
+import { Select } from "@/components/ui/Select";
 import { getApiErrorMessage } from "@/lib/api";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 import type { ProductionOrderDetail, ProductionOrderItem } from "@/lib/staff-types";
@@ -123,6 +125,52 @@ function iqPhone(raw: string | null | undefined): string | null {
   if (!raw) return null;
   const d = raw.replace(/\D/g, "");
   return d ? (d.startsWith("0") ? `964${d.slice(1)}` : d) : null;
+}
+
+/** The student-info keys the PATCH .../details endpoint accepts — the quick-edit `kind`
+ *  is exactly this, so the payload key can never drift from the discriminant. */
+type StudentQuickEditField = keyof NonNullable<QuickEditPayload["student"]>;
+
+/** Modal title + field label per quick-edit kind («item» titles itself from the spec line).
+ *  Keyed by field so a new editable field must supply both strings to type-check. */
+const QUICK_EDIT_TITLE_AR: Record<StudentQuickEditField, string> = {
+  instagram_username: "تعديل يوزر الانستا",
+  name: "تعديل اسم الطالب",
+  university_name: "تعديل الجامعة",
+  department: "تعديل القسم",
+  study_type: "تعديل نوع الدراسة",
+};
+const QUICK_EDIT_FIELD_LABEL_AR: Record<StudentQuickEditField | "item", string> = {
+  item: "النص",
+  instagram_username: "يوزر الانستا (بدون @)",
+  name: "اسم الطالب",
+  university_name: "الجامعة",
+  department: "القسم",
+  study_type: "نوع الدراسة",
+};
+/** Server-side `clean()` limit per field — keep in sync with orderEditController.js. */
+const QUICK_EDIT_MAXLEN: Record<StudentQuickEditField | "item", number> = {
+  item: 200,
+  instagram_username: 100,
+  name: 120,
+  university_name: 160,
+  department: 160,
+  study_type: 10,
+};
+
+/** ✎ affordance next to an inline-editable field (manager/admin only). */
+function QuickEditButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-line text-ink-soft transition-colors hover:border-orange-ink/50 hover:text-orange-ink"
+    >
+      ✎
+    </button>
+  );
 }
 
 /** Countdown chip shared between intake card and Instagram copy. */
@@ -640,10 +688,15 @@ function ProductionOrderDetailContent() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
 
-  // «تعديل سريع» — admin/manager inline edit of a typed spec line or يوزر الانستا
+  // «تعديل سريع» — admin/manager inline edit of a typed spec line or a student-info field.
+  // The non-item `kind` IS the PATCH .../details `student` payload key: it is typed as
+  // `StudentQuickEditField` (= keyof the payload's student object), so a kind that the
+  // backend does not accept fails to compile. Do NOT reintroduce a friendly alias here —
+  // an earlier version used `kind: "instagram"`, which serialised to an unknown key the
+  // backend silently ignored, so the UI reported a successful save that never happened.
   const [quickEdit, setQuickEdit] = useState<
     | { kind: "item"; itemId: string; label: string; value: string }
-    | { kind: "instagram"; value: string }
+    | { kind: StudentQuickEditField; value: string }
     | null
   >(null);
   const [quickEditSaving, setQuickEditSaving] = useState(false);
@@ -786,8 +839,14 @@ function ProductionOrderDetailContent() {
   async function handleQuickEditSave() {
     if (!detail || !quickEdit) return;
     const value = quickEdit.value.trim();
+    // A spec line and the student's name must stay non-empty (the backend 400s either way);
+    // the optional student fields accept "" as an explicit "clear it".
     if (quickEdit.kind === "item" && !value) {
       toast.error("النص مطلوب");
+      return;
+    }
+    if (quickEdit.kind === "name" && !value) {
+      toast.error("اسم الطالب مطلوب");
       return;
     }
     setQuickEditSaving(true);
@@ -796,7 +855,7 @@ function ProductionOrderDetailContent() {
         detail.order.id,
         quickEdit.kind === "item"
           ? { items: [{ item_id: quickEdit.itemId, customer_text: value }] }
-          : { student: { instagram_username: value } }
+          : { student: { [quickEdit.kind]: value } }
       );
       toast.success("تم حفظ التعديل");
       setQuickEdit(null);
@@ -1643,6 +1702,20 @@ function ProductionOrderDetailContent() {
           <article className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
             <h2 className="font-display-ar text-lg font-bold text-ink">بيانات الطالب</h2>
             <dl className="mt-4 space-y-2.5 text-sm">
+              {/* The name is also the page title, but it only became CORRECTABLE here — an
+                  admin fixing a misspelled name previously had to go to the /edit page. */}
+              {canEdit && (
+                <div className="flex justify-between gap-4 border-b border-line pb-2.5">
+                  <dt className="text-muted">الاسم</dt>
+                  <dd className="flex min-w-0 items-center gap-1.5">
+                    <span className="min-w-0 break-words text-end font-medium text-ink">{order.student_name}</span>
+                    <QuickEditButton
+                      label="تعديل اسم الطالب"
+                      onClick={() => setQuickEdit({ kind: "name", value: order.student_name || "" })}
+                    />
+                  </dd>
+                </div>
+              )}
               {/* Contact rows render only when the backend supplies them (front-desk/manager/designer).
                   Lean production roles get them stripped server-side → rows simply disappear. */}
               {order.student_phone && (
@@ -1672,36 +1745,65 @@ function ProductionOrderDetailContent() {
                       <span className="inline-flex min-h-11 items-center text-muted">—</span>
                     )}
                     {canEdit && (
-                      <button
-                        type="button"
+                      <QuickEditButton
+                        label="تعديل يوزر الانستا"
                         onClick={() =>
-                          setQuickEdit({ kind: "instagram", value: order.instagram_username || "" })
+                          setQuickEdit({
+                            kind: "instagram_username",
+                            value: order.instagram_username || "",
+                          })
                         }
-                        className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-line text-ink-soft transition-colors hover:border-orange-ink/50 hover:text-orange-ink"
-                        aria-label="تعديل يوزر الانستا"
-                      >
-                        ✎
-                      </button>
+                      />
                     )}
                   </dd>
                 </div>
               )}
               <div className="flex justify-between gap-4 border-b border-line pb-2.5">
                 <dt className="text-muted">الجامعة</dt>
-                <dd className="font-medium text-ink">{order.university_name || "—"}</dd>
+                <dd className="flex min-w-0 items-center gap-1.5">
+                  <span className="min-w-0 break-words text-end font-medium text-ink">{order.university_name || "—"}</span>
+                  {canEdit && (
+                    <QuickEditButton
+                      label="تعديل الجامعة"
+                      onClick={() =>
+                        setQuickEdit({ kind: "university_name", value: order.university_name || "" })
+                      }
+                    />
+                  )}
+                </dd>
               </div>
               <div className="flex justify-between gap-4 border-b border-line pb-2.5">
                 <dt className="text-muted">القسم</dt>
-                <dd className="font-medium text-ink">{order.department || "—"}</dd>
+                <dd className="flex min-w-0 items-center gap-1.5">
+                  <span className="min-w-0 break-words text-end font-medium text-ink">{order.department || "—"}</span>
+                  {canEdit && (
+                    <QuickEditButton
+                      label="تعديل القسم"
+                      onClick={() =>
+                        setQuickEdit({ kind: "department", value: order.department || "" })
+                      }
+                    />
+                  )}
+                </dd>
               </div>
               <div className="flex justify-between gap-4 border-b border-line pb-2.5">
                 <dt className="text-muted">نوع الدراسة</dt>
-                <dd className="font-medium text-ink">
-                  {order.study_type === "morning"
-                    ? "صباحي"
-                    : order.study_type === "evening"
-                      ? "مسائي"
-                      : "—"}
+                <dd className="flex min-w-0 items-center gap-1.5">
+                  <span className="min-w-0 break-words text-end font-medium text-ink">
+                    {order.study_type === "morning"
+                      ? "صباحي"
+                      : order.study_type === "evening"
+                        ? "مسائي"
+                        : "—"}
+                  </span>
+                  {canEdit && (
+                    <QuickEditButton
+                      label="تعديل نوع الدراسة"
+                      onClick={() =>
+                        setQuickEdit({ kind: "study_type", value: order.study_type || "" })
+                      }
+                    />
+                  )}
                 </dd>
               </div>
               {order.batch_name && (
@@ -2163,13 +2265,19 @@ function ProductionOrderDetailContent() {
         </p>
       </Modal>
 
-      {/* ── «تعديل سريع» modal — spec-line text / يوزر الانستا (manager/admin) ──
+      {/* ── «تعديل سريع» modal — spec-line text / student-info field (manager/admin) ──
           Mobile-first: full-width equal-split footer buttons (easy to hit with a
           thumb, never cramped) + a 16px input (iOS won't zoom the page on focus). */}
       <Modal
         open={!!quickEdit}
         onClose={() => setQuickEdit(null)}
-        title={quickEdit?.kind === "instagram" ? "تعديل يوزر الانستا" : `تعديل — ${quickEdit?.kind === "item" ? quickEdit.label : ""}`}
+        title={
+          quickEdit
+            ? quickEdit.kind === "item"
+              ? `تعديل — ${quickEdit.label}`
+              : QUICK_EDIT_TITLE_AR[quickEdit.kind]
+            : ""
+        }
         footer={
           <>
             <Button variant="ghost" className="flex-1" onClick={() => setQuickEdit(null)}>
@@ -2181,17 +2289,34 @@ function ProductionOrderDetailContent() {
           </>
         }
       >
-        <Input
-          label={quickEdit?.kind === "instagram" ? "يوزر الانستا (بدون @)" : "النص"}
-          value={quickEdit?.value ?? ""}
-          onChange={(e) =>
-            setQuickEdit((prev) => (prev ? { ...prev, value: e.target.value } : prev))
-          }
-          maxLength={quickEdit?.kind === "instagram" ? 100 : 200}
-          dir={quickEdit?.kind === "instagram" ? "ltr" : undefined}
-          className="text-base"
-          autoFocus
-        />
+        {quickEdit?.kind === "study_type" ? (
+          <Select
+            label="نوع الدراسة"
+            value={quickEdit.value}
+            onChange={(e) =>
+              setQuickEdit((prev) => (prev ? { ...prev, value: e.target.value } : prev))
+            }
+            className="text-base"
+            options={[
+              { value: "", label: "— غير محدد —" },
+              { value: "morning", label: "صباحي" },
+              { value: "evening", label: "مسائي" },
+            ]}
+            autoFocus
+          />
+        ) : (
+          <Input
+            label={quickEdit ? QUICK_EDIT_FIELD_LABEL_AR[quickEdit.kind] : ""}
+            value={quickEdit?.value ?? ""}
+            onChange={(e) =>
+              setQuickEdit((prev) => (prev ? { ...prev, value: e.target.value } : prev))
+            }
+            maxLength={quickEdit ? QUICK_EDIT_MAXLEN[quickEdit.kind] : undefined}
+            dir={quickEdit?.kind === "instagram_username" ? "ltr" : undefined}
+            className="text-base"
+            autoFocus
+          />
+        )}
       </Modal>
 
       {/* ── «إرجاع للطالب» modal — hand a retail order back to the student to edit ── */}

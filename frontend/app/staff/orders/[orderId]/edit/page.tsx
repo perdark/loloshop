@@ -13,10 +13,12 @@ import {
   uploadProductionImage,
   type OrderEditContext,
 } from "@/lib/staff";
+import type { StudyType } from "@/lib/types";
 import type { CreateFullSetPayload } from "@/lib/wholesaler";
 import { FullSetOrderForm } from "@/components/wholesaler/FullSetOrderForm";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { Select } from "@/components/ui/Select";
 import { PageLoader } from "@/components/ui/Spinner";
 import { EmptyState } from "@/components/ui/EmptyState";
 
@@ -38,6 +40,9 @@ export default function StaffOrderEditPage() {
   const [instagram, setInstagram] = useState("");
   const [phonePrimary, setPhonePrimary] = useState("");
   const [phoneSecondary, setPhoneSecondary] = useState("");
+  const [universityName, setUniversityName] = useState("");
+  const [department, setDepartment] = useState("");
+  const [studyType, setStudyType] = useState<StudyType | "">("");
 
   // Limited (quick) editor — retail orders, one text value per editable spec line.
   const [itemTexts, setItemTexts] = useState<Record<string, string>>({});
@@ -55,6 +60,9 @@ export default function StaffOrderEditPage() {
         setInstagram(data.group?.instagram_username || data.student.instagram_username || "");
         setPhonePrimary(data.group?.phone_primary || data.student.phone || "");
         setPhoneSecondary(data.group?.phone_secondary || "");
+        setUniversityName(data.student.university_name || "");
+        setDepartment(data.student.department || "");
+        setStudyType(data.student.study_type || "");
         const seed: Record<string, string> = {};
         (data.editable_items || []).forEach((it) => {
           seed[it.id] = it.text || "";
@@ -86,7 +94,13 @@ export default function StaffOrderEditPage() {
         .map(([item_id, value]) => ({ item_id, customer_text: value.trim() }));
       await patchOrderDetails(orderId, {
         items,
-        student: { name: name.trim(), instagram_username: instagram.trim() },
+        student: {
+          name: name.trim(),
+          instagram_username: instagram.trim(),
+          university_name: universityName.trim(),
+          department: department.trim(),
+          study_type: studyType,
+        },
         group: { phone_primary: phonePrimary.trim(), phone_secondary: phoneSecondary.trim() },
       });
       toast.success("تم حفظ التعديلات");
@@ -113,6 +127,9 @@ export default function StaffOrderEditPage() {
           instagram_username: instagram.trim(),
           phone_primary: phonePrimary.trim(),
           phone_secondary: phoneSecondary.trim(),
+          university_name: universityName.trim(),
+          department: department.trim(),
+          study_type: studyType,
         },
       });
       toast.success("تم حفظ التعديلات");
@@ -186,6 +203,28 @@ export default function StaffOrderEditPage() {
             onChange={(e) => setPhoneSecondary(e.target.value)}
             maxLength={20}
             dir="ltr"
+          />
+          <Input
+            label="الجامعة"
+            value={universityName}
+            onChange={(e) => setUniversityName(e.target.value)}
+            maxLength={160}
+          />
+          <Input
+            label="القسم"
+            value={department}
+            onChange={(e) => setDepartment(e.target.value)}
+            maxLength={160}
+          />
+          <Select
+            label="نوع الدراسة"
+            value={studyType}
+            onChange={(e) => setStudyType(e.target.value as StudyType | "")}
+            options={[
+              { value: "", label: "— غير محدد —" },
+              { value: "morning", label: "صباحي" },
+              { value: "evening", label: "مسائي" },
+            ]}
           />
         </div>
       </section>

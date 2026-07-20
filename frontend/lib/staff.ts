@@ -13,6 +13,7 @@ import type {
   StaffAttendanceSettings,
   StaffGoal,
   StaffSalary,
+  StudyType,
 } from "./types";
 import {
   mapApiOrderRow,
@@ -174,6 +175,7 @@ export interface OrderEditStudent {
   instagram_username: string | null;
   university_name: string | null;
   department: string | null;
+  study_type: StudyType | null;
   wholesaler_id: string | null;
   rep_name: string | null;
 }
@@ -210,6 +212,10 @@ export interface StudentInfoPayload {
   instagram_username?: string;
   phone_primary?: string;
   phone_secondary?: string;
+  university_name?: string;
+  department?: string;
+  /** "" clears it back to NULL. */
+  study_type?: StudyType | "";
 }
 
 export async function saveStudentFullSetOrder(
@@ -225,7 +231,14 @@ export async function saveStudentFullSetOrder(
 
 export interface QuickEditPayload {
   items?: { item_id: string; customer_text: string }[];
-  student?: { name?: string; instagram_username?: string };
+  student?: {
+    name?: string;
+    instagram_username?: string;
+    university_name?: string;
+    department?: string;
+    /** "" clears it back to NULL. */
+    study_type?: StudyType | "";
+  };
   group?: { phone_primary?: string; phone_secondary?: string; notes?: string };
 }
 
