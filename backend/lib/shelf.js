@@ -393,11 +393,31 @@ async function buildBoard() {
   }
 
   // ---- Inbox: arrived at التجهيز but not on the shelf («وصلت توّا» / «بلا خانة») ----
+  // Suggestions are computed against a RUNNING copy of the bins, reserving each one as it is
+  // handed out. Computing them all against the same snapshot would tell five different
+  // students to use A01 — the server would reject all but the first, but the screen would
+  // have lied. Reserving as we go also makes the «بلا خانة» count truthful: it shows how many
+  // pieces genuinely have nowhere to go once the shelf is full.
+  const projected = openBins.map((b) => ({ ...b }));
   const inbox = rows
     .filter((r) => r.status === 'preparing' && !r.shelf_code)
     .map((r) => {
       const section = sections.find((s) => s.piece_type === r.piece_type);
-      const suggestion = section ? suggestSlot(section, r.student_id, openBins) : null;
+      const suggestion = section ? suggestSlot(section, r.student_id, projected) : null;
+      if (suggestion) {
+        const existing = projected.find(
+          (b) =>
+            b.shelf_code === suggestion.shelf_code && b.slot_index === suggestion.slot_index
+        );
+        if (existing) existing.live_count += 1;
+        else
+          projected.push({
+            shelf_code: suggestion.shelf_code,
+            slot_index: suggestion.slot_index,
+            student_id: section.mode === 'shared' ? null : r.student_id,
+            live_count: 1,
+          });
+      }
       return {
         order_id: r.id,
         student_id: r.student_id,
