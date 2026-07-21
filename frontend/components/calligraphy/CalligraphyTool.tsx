@@ -337,6 +337,11 @@ interface StoredCalligraphyState {
   queueWid?: string;
   searchText?: string;
   controlsOpen?: boolean;
+  /** Window scroll offset. The plates grid is a long, page-scrolled list with no
+   *  overlay to restore (unlike StationConsole's student sheet), so landing back
+   *  at the top is the most disorienting part of returning from an order page —
+   *  both hops are `<Link>` pushes, which Next always scrolls to top. */
+  scrollY?: number;
 }
 const STORAGE_KEY = "loloshop-calligraphy";
 
@@ -478,12 +483,16 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
   useEffect(() => {
     setWLoading(true);
     getCalWholesalers()
-      .then(setWholesalers)
-      .catch(() => toast.error("تعذر تحميل الممثلين"))
-      .finally(() => {
-        setWLoading(false);
+      .then((rows) => {
+        setWholesalers(rows);
+        // Only a SUCCESSFUL fetch may unlock the prune effect below. Marking this
+        // in .finally() meant a 403/network blip left `wholesalers` empty while
+        // claiming it had loaded — so the prune saw an empty id set and silently
+        // reset the restored ممثل filters to «الكل».
         setWholesalersLoaded(true);
-      });
+      })
+      .catch(() => toast.error("تعذر تحميل الممثلين"))
+      .finally(() => setWLoading(false));
   }, []);
 
   // A restored ممثل filter (plates grid or auto-generation queue) may reference a
@@ -500,20 +509,47 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
   // Mirror the UI state so back-navigation restores it exactly (sessionStorage key
   // above). Fetched data/progress/modals/drafts are deliberately excluded — see the
   // StoredCalligraphyState comment.
-  useEffect(() => {
+  // Held in a ref so the scroll listener can persist the FULL snapshot without
+  // re-subscribing every time a filter or search keystroke changes.
+  const snapshotRef = useRef<StoredCalligraphyState>(stored);
+  const persistSnapshot = useCallback(() => {
     try {
-      const snapshot: StoredCalligraphyState = {
-        gridFilter,
-        gridWid,
-        queueWid,
-        searchText,
-        controlsOpen,
-      };
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(snapshotRef.current));
     } catch {
       /* storage full/unavailable — persistence is best-effort */
     }
-  }, [gridFilter, gridWid, queueWid, searchText, controlsOpen]);
+  }, []);
+
+  useEffect(() => {
+    snapshotRef.current = {
+      ...snapshotRef.current, // keep the live scrollY written by the listener below
+      gridFilter,
+      gridWid,
+      queueWid,
+      searchText,
+      controlsOpen,
+    };
+    persistSnapshot();
+  }, [gridFilter, gridWid, queueWid, searchText, controlsOpen, persistSnapshot]);
+
+  // Mirror the scroll offset too. rAF-throttled + passive so a long plates grid
+  // never turns scrolling into a sessionStorage write per frame.
+  useEffect(() => {
+    let raf = 0;
+    const onScroll = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        snapshotRef.current.scrollY = window.scrollY;
+        persistSnapshot();
+      });
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [persistSnapshot]);
 
   // ── fetch names when wholesaler selected ─────────────────────────────────────
   const loadGrab = useCallback(async (wid: string) => {
@@ -633,6 +669,37 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
 
     restore();
   }, [stored.controlsOpen]);
+
+  // Restore the scroll offset — but only ONCE the grid has plates to scroll over.
+  // `restore()` above fetches asynchronously, so scrolling on mount would target a
+  // still-empty page and land at 0. Re-applied across a few frames because plate
+  // images size in progressively and keep growing the document under us.
+  const scrollRestoredRef = useRef(false);
+  useEffect(() => {
+    if (scrollRestoredRef.current) return;
+    const target = stored.scrollY ?? 0;
+    if (!target) {
+      scrollRestoredRef.current = true; // nothing to restore — don't fight the user
+      return;
+    }
+    if (!plates.length) return; // wait for the grid
+    scrollRestoredRef.current = true;
+
+    let frames = 0;
+    let raf = 0;
+    const settle = () => {
+      window.scrollTo(0, target);
+      // Stop early once we're there; cap the retries so a shorter page (fewer
+      // plates than last time) can never spin.
+      if (++frames < 12 && Math.abs(window.scrollY - target) > 2) {
+        raf = requestAnimationFrame(settle);
+      }
+    };
+    raf = requestAnimationFrame(settle);
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [plates.length, stored.scrollY]);
 
   // ── read .txt file ───────────────────────────────────────────────────────────
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
