@@ -95,11 +95,22 @@ export interface ShelfInboxItem {
   suggestion: ShelfSuggestion | null;
 }
 
+/** Collecting advances the piece to «جاهز» and it leaves the shelf — this is the undo surface. */
+export interface ShelfRecentItem {
+  order_id: string;
+  student_name: string;
+  piece_type: PieceType;
+  piece_label: string;
+  slot_code: string | null;
+  collected_at: string;
+}
+
 export interface ShelfBoard {
   sections: ShelfSection[];
   shelves: Shelf[];
   sets: ShelfSet[];
   inbox: ShelfInboxItem[];
+  recent: ShelfRecentItem[];
 }
 
 export interface PlaceResult {

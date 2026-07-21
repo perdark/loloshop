@@ -18,6 +18,12 @@ import {
   type ShelfSlot,
 } from "@/lib/shelf";
 import { getApiErrorMessage } from "@/lib/api";
+// Undo + send-back both go through the ORDINARY revert endpoint. The shelf never decides
+// where a piece may move — the backend state machine owns that, and mirroring it here
+// would produce buttons that 409.
+import { revertOrder } from "@/lib/staff";
+import { ORDER_STATUS_LABELS } from "@/lib/constants";
+import type { OrderStatus } from "@/lib/types";
 import { usePolling } from "@/lib/hooks/usePolling";
 import { PlaceSheet } from "./PlaceSheet";
 import { ShelfMap } from "./ShelfMap";
@@ -112,6 +118,24 @@ export function ShelfConsole() {
       await load();
     } catch (e) {
       flash(getApiErrorMessage(e, "تعذّر الجمع"));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  // One step back through the ordinary revert endpoint. Used for both «تراجع» (undo a
+  // mis-tapped جمعها: ready → التجهيز) and «إرجاع» (send a piece on the shelf back to
+  // الكوي/التطريز). The backend picks the target and refuses when there is nowhere to go —
+  // e.g. a plain robe already at الكوي, whose first stage that is.
+  async function doRevert(orderId: string, label: string) {
+    setBusyId(orderId);
+    try {
+      const res = await revertOrder(orderId);
+      const where = ORDER_STATUS_LABELS[res.status as OrderStatus] ?? res.status;
+      flash(`${label} — رجعت إلى «${where}»`);
+      await load();
+    } catch (e) {
+      flash(getApiErrorMessage(e, "تعذّر الإرجاع"));
     } finally {
       setBusyId(null);
     }
@@ -287,6 +311,42 @@ export function ShelfConsole() {
         )}
       </section>
 
+      {/* ── جُمعت توّا — the undo surface ────────────────────────── */}
+      {(board?.recent?.length ?? 0) > 0 ? (
+        <section className="mb-6">
+          <h2 className="mb-2 text-base font-black text-[#1A1A1A]">
+            جُمعت توّا{" "}
+            <span className="text-xs font-normal text-[#6b6356]">
+              — ضغطت «جمعها» غلط؟ رجّعها
+            </span>
+          </h2>
+          <div className="flex flex-wrap gap-2">
+            {board!.recent.map((r) => (
+              <div
+                key={r.order_id}
+                className="flex items-center gap-2 rounded-full border border-[#ded6c8] bg-white py-1 pe-1 ps-3"
+              >
+                <span className="text-xs font-bold text-[#1A1A1A]">{r.student_name}</span>
+                <span className="text-xs text-[#6b6356]">{r.piece_label}</span>
+                {r.slot_code ? (
+                  <span className="font-mono text-[10px] text-[#bdb3a3]" dir="ltr">
+                    {r.slot_code}
+                  </span>
+                ) : null}
+                <button
+                  type="button"
+                  disabled={busyId === r.order_id}
+                  onClick={() => doRevert(r.order_id, r.piece_label)}
+                  className="min-h-9 rounded-full bg-[#1A1A1A] px-3 text-xs font-bold text-white disabled:opacity-40"
+                >
+                  {busyId === r.order_id ? "…" : "تراجع"}
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       {/* ── Zone 3: الرف ─────────────────────────────────────────── */}
       <section>
         <div className="mb-3">
@@ -345,17 +405,32 @@ export function ShelfConsole() {
                       </p>
                       <p className="text-xs text-[#6b6356]">{p.piece_label}</p>
                     </div>
-                    <button
-                      type="button"
-                      disabled={busyId === p.order_id}
-                      onClick={async () => {
-                        await doCollect(p.order_id, p.piece_label);
-                        setOpenSlot(null);
-                      }}
-                      className="min-h-11 flex-none rounded-full bg-[#F47B42] px-4 text-sm font-bold text-white disabled:opacity-40"
-                    >
-                      جمعها
-                    </button>
+                    <div className="flex flex-none gap-2">
+                      <button
+                        type="button"
+                        disabled={busyId === p.order_id}
+                        onClick={async () => {
+                          await doCollect(p.order_id, p.piece_label);
+                          setOpenSlot(null);
+                        }}
+                        className="min-h-11 rounded-full bg-[#F47B42] px-4 text-sm font-bold text-white disabled:opacity-40"
+                      >
+                        جمعها
+                      </button>
+                      {/* Send back up the line — الكوي or التطريز, whichever the backend
+                          says is one step back for this piece. Frees the خانة. */}
+                      <button
+                        type="button"
+                        disabled={busyId === p.order_id}
+                        onClick={async () => {
+                          await doRevert(p.order_id, p.piece_label);
+                          setOpenSlot(null);
+                        }}
+                        className="min-h-11 rounded-full border border-[#bdb3a3] bg-white px-3 text-xs font-bold text-[#6b6356] disabled:opacity-40"
+                      >
+                        إرجاع
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ul>
