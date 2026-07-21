@@ -1,6 +1,6 @@
 import { api } from "@/lib/api";
 
-export type CalSource = "typed" | "wholesaler" | "txt";
+export type CalSource = "typed" | "wholesaler" | "retail";
 export type CalVariant = "front" | "back" | "cap" | "cap_side";
 
 export const VARIANT_LABEL: Record<CalVariant, string> = {
@@ -240,6 +240,51 @@ export async function generateFromQueue(
     mode,
     wholesaler_id: wholesalerId || null,
   });
+  return data.data;
+}
+
+// ─── Retail («تجزئة») review board ───────────────────────────────────────────
+// Rep students are generated in bulk and reviewed after; retail students are reviewed
+// BEFORE generation, because their customer_text is free-form instruction rather than a
+// clean name. The designer rewrites it into the text to actually render — that cleaned
+// text lives only on the plate and never touches the order.
+
+export interface CalRetailZone {
+  order_item_id: string;
+  zone_key: string;
+  zone_label: string;
+  label_snapshot: string;
+  raw_text: string;
+  customer_image_url: string | null;
+  has_plate: boolean;
+}
+
+export interface CalRetailOrder {
+  order_id: string;
+  order_status: string;
+  created_at: string;
+  notes: string | null;
+  final_design_url: string | null;
+  student_id: string;
+  student_name: string;
+  instagram_username: string | null;
+  university_name: string | null;
+  department: string | null;
+  product_name: string;
+  product_type: string;
+  zones: CalRetailZone[];
+  images: string[];
+}
+
+export interface CalRetailQueue {
+  orders: CalRetailOrder[];
+  pending_orders: number;
+  pending_zones: number;
+}
+
+export async function getCalRetailQueue(search?: string): Promise<CalRetailQueue> {
+  const qs = search ? `?search=${encodeURIComponent(search)}` : "";
+  const { data } = await api.get<{ data: CalRetailQueue }>(`/calligraphy/retail-queue${qs}`);
   return data.data;
 }
 

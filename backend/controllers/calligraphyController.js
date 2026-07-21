@@ -103,6 +103,116 @@ async function insertPlates(jobId, items, { source, model, createdBy }) {
 }
 
 // ---------------------------------------------------------------------------
+// RETAIL (تجزئة) zone detection.
+//
+// The rep full-set form emits four EXACT labels (LABEL_VARIANT above) — that is what
+// poolFor() and the automatic queue match on. Retail orders never do: they carry their
+// own option labels ('تطريز يمين: تطريز يمين', 'القبعة من الجانب: بكتابة', …), so retail
+// was invisible to the whole calligraphy tool and designers hand-copied every name into
+// «لصق أسماء» (producing orphan plates with no order_item_id).
+//
+// Matching here is heuristic, deliberately mirroring productionController's ZONE_DEFS —
+// the same regexes the embroidery checklist already trusts — so a zone the embroiderer
+// sees is a zone the designer can plate. First match wins, like ZONE_DEFS.
+//
+// NOTE there is no variant mapping. Retail customer_text is free-form instruction
+// ("تطريز من اليمين الدكتورة بان مع حرف ح"), not a clean name, so BOTH the text and the
+// ornament variant are decided by the designer per zone in the workbench. Owner rule:
+// ممثل = generate in bulk then review · تجزئة = review first, then generate.
+// ---------------------------------------------------------------------------
+const RETAIL_ZONES = [
+  { key: 'sash_right', label: 'الوشاح — جهة اليمين', test: (l) => /يمين|اليمن/.test(l) },
+  { key: 'sash_left',  label: 'الوشاح — جهة اليسار', test: (l) => /يسار|اليسر/.test(l) },
+  { key: 'sash_back',  label: 'الوشاح — من الخلف',   test: (l) => /خلف/.test(l) },
+  { key: 'sash_front', label: 'الوشاح — من الأمام',  test: (l) => /وشاح/.test(l) && /أمام/.test(l) },
+  { key: 'cap_top',    label: 'القبعة — من الأعلى',  test: (l) => /أعلى|اعلى/.test(l) },
+  { key: 'cap_side',   label: 'القبعة — من الجانب',  test: (l) => /جانب/.test(l) },
+];
+function retailZoneFor(label) {
+  const l = String(label || '');
+  if (/ردن/.test(l)) return null; // robe sleeves are not a calligraphy variant
+  return RETAIL_ZONES.find((z) => z.test(l)) || null;
+}
+
+// GET /retail-queue — تجزئة students awaiting a calligraphy review («مراجعة قبل التوليد»).
+// One card per retail order at «بانتظار التصميم» that carries embroidery text, with every
+// detected zone, its RAW order text (reference only — never rewritten), any customer photo,
+// and whether a plate already exists. Read-only: nothing is generated here.
+async function retailQueue(req, res) {
+  const search = String((req.query.search || '')).trim();
+  const { rows } = await query(
+    `SELECT o.id AS order_id, o.status::text AS order_status, o.created_at, o.notes,
+            o.final_design_url,
+            s.id AS student_id, s.instagram_username, s.university_name, s.department,
+            u.name AS student_name,
+            p.name_ar AS product_name, p.type AS product_type,
+            oi.id AS order_item_id, oi.label_snapshot, oi.customer_text, oi.customer_image_url,
+            EXISTS (SELECT 1 FROM calligraphy_plates cp
+                     WHERE cp.order_item_id = oi.id AND cp.status = 'done') AS has_plate
+       FROM orders o
+       JOIN products p  ON p.id = o.product_id AND p.type IN ('sash','cap')
+       JOIN students s  ON s.id = o.student_id AND s.wholesaler_id IS NULL
+       JOIN users u     ON u.id = s.user_id
+       JOIN order_items oi ON oi.order_id = o.id
+      WHERE o.status::text = 'design_complete'
+        AND o.returned_to_customer = FALSE
+        AND ($1 = '' OR u.name ILIKE '%' || $1 || '%'
+                     OR COALESCE(s.university_name,'') ILIKE '%' || $1 || '%'
+                     OR COALESCE(s.instagram_username,'') ILIKE '%' || $1 || '%')
+      ORDER BY o.created_at DESC, oi.created_at`,
+    [search]);
+
+  const byOrder = new Map();
+  for (const r of rows) {
+    let card = byOrder.get(r.order_id);
+    if (!card) {
+      card = {
+        order_id: r.order_id,
+        order_status: r.order_status,
+        created_at: r.created_at,
+        notes: r.notes || null,
+        final_design_url: r.final_design_url || null,
+        student_id: r.student_id,
+        student_name: r.student_name,
+        instagram_username: r.instagram_username || null,
+        university_name: r.university_name || null,
+        department: r.department || null,
+        product_name: r.product_name,
+        product_type: r.product_type,
+        zones: [],
+        images: [],
+      };
+      byOrder.set(r.order_id, card);
+    }
+    if (r.customer_image_url && !card.images.includes(r.customer_image_url)) {
+      card.images.push(r.customer_image_url);
+    }
+    const zone = retailZoneFor(r.label_snapshot);
+    // A zone only needs a plate if the student actually wrote something for it.
+    if (!zone || !String(r.customer_text || '').trim()) continue;
+    if (card.zones.some((z) => z.zone_key === zone.key)) continue; // first match wins
+    card.zones.push({
+      order_item_id: r.order_item_id,
+      zone_key: zone.key,
+      zone_label: zone.label,
+      label_snapshot: r.label_snapshot,
+      raw_text: r.customer_text,
+      customer_image_url: r.customer_image_url || null,
+      has_plate: r.has_plate,
+    });
+  }
+  // Orders with no embroidery text at all are not calligraphy work — drop them.
+  const orders = [...byOrder.values()].filter((c) => c.zones.length);
+  res.json({
+    data: {
+      orders,
+      pending_orders: orders.filter((c) => c.zones.some((z) => !z.has_plate)).length,
+      pending_zones: orders.reduce((n, c) => n + c.zones.filter((z) => !z.has_plate).length, 0),
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Pool helper — un-plated embroidery names for a given zone variant.
 // "Needs a plate" = order_item with the zone label + non-empty customer_text
 // + no 'done' plate already. Applies isRealName junk-guard before returning.
@@ -146,7 +256,9 @@ async function createJob(req, res) {
   const { source, wholesaler_id = null, model = 'standard' } = req.body || {};
   const jobVariant = VARIANTS.includes(req.body && req.body.variant) ? req.body.variant : 'front';
   let items = Array.isArray(req.body && req.body.items) ? req.body.items : [];
-  if (!['typed', 'wholesaler', 'txt'].includes(source)) return bad(res, 'مصدر غير صالح');
+  // 'txt' (upload a .txt of names) was removed from the UI 2026-07-21 and no caller remains;
+  // 0 plates ever used it. The enum VALUE stays in the DB for safety, it is just not accepted.
+  if (!['typed', 'wholesaler', 'retail'].includes(source)) return bad(res, 'مصدر غير صالح');
   items = items
     .map((it) => ({
       render_text: String((it && it.render_text) || '').trim(),
@@ -166,12 +278,34 @@ async function createJob(req, res) {
   if (!items.length) return bad(res, 'لا توجد أسماء صالحة — يجب أن يحتوي الاسم على حروف عربية');
   if (items.length > 1000) return bad(res, 'الحد الأقصى 1000 اسم لكل مهمة');
 
+  // Retail: the workbench sends a designer-cleaned render_text per order_item, so the TEXT is
+  // trusted (that's the whole point) but the TARGET is not. Re-resolve every order_item_id
+  // against the DB and keep only lines that really belong to a retail order — otherwise a
+  // crafted call could staple arbitrary artwork onto a rep's order via autoLinkPlate().
+  // student_id is taken from the DB too, never from the caller.
+  if (source === 'retail') {
+    const ids = [...new Set(items.map((it) => it.order_item_id).filter((id) => UUID_RE.test(String(id || ''))))];
+    if (!ids.length) return bad(res, 'لا توجد مناطق صالحة');
+    const { rows: owned } = await query(
+      `SELECT oi.id AS order_item_id, s.id AS student_id
+         FROM order_items oi
+         JOIN orders o   ON o.id = oi.order_id AND o.status::text <> 'cancelled'
+         JOIN products p ON p.id = o.product_id AND p.type IN ('sash','cap')
+         JOIN students s ON s.id = o.student_id AND s.wholesaler_id IS NULL
+        WHERE oi.id = ANY($1)`, [ids]);
+    const studentByItem = new Map(owned.map((r) => [r.order_item_id, r.student_id]));
+    items = items
+      .filter((it) => studentByItem.has(it.order_item_id))
+      .map((it) => ({ ...it, student_id: studentByItem.get(it.order_item_id) }));
+    if (!items.length) return bad(res, 'لا توجد مناطق صالحة');
+  }
+
   // Dedup:
-  //   wholesaler → by order_item_id (each zone row is already unique per student)
-  //   typed/txt  → by variant::render_text (same name may appear as both front and back)
+  //   wholesaler/retail → by order_item_id (each zone row is already unique per student)
+  //   typed/txt         → by variant::render_text (same name may appear as both front and back)
   const seen = new Set();
   items = items.filter((it) => {
-    const key = source === 'wholesaler'
+    const key = (source === 'wholesaler' || source === 'retail')
       ? (it.order_item_id || it.render_text)
       : `${it.variant}::${it.render_text}`;
     if (seen.has(key)) return false; seen.add(key); return true;
@@ -450,5 +584,5 @@ async function generateElement(req, res) {
 module.exports = {
   listWholesalers, wholesalerNames, createJob, processNext, getJob, reroll, downloadZip,
   getQueue, queueGenerate, recentPlates, composePlate, generateElement,
-  ordersZones, sendOrder, platesZip,
+  ordersZones, sendOrder, platesZip, retailQueue,
 };

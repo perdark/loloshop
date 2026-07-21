@@ -6,6 +6,106 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
+## 2026-07-21 — Calligraphy: «تجزئة» review-before-generate board · retail made visible at all · draft no longer lost on navigation
+
+**Uncommitted on main.** Migration **069 applied to the laptop dev DB** (`ALTER TYPE calligraphy_source ADD VALUE 'retail'`,
+additive + backward compatible) and mirrored into `db/schema.sql` — **prod needs `npm run migrate` BEFORE the pm2 reload**.
+Gates: BE `node --check` 0 ×2 · FE `tsc` 0 / `eslint` 0 · **live HTTP e2e on the dev DB, self-cleaned (0 leftovers)** ·
+**browser-verified as designer مضر محمد**. A concurrent session was working on التجهيز (`productionController.js`,
+`lib/shelf.js`, `routes/production.js`) — this batch touches NONE of those files (productionController was read only).
+
+**The report.** «Designer copies a retail student's name in مراجعة التصاميم → goes to الخط العربي → pastes → goes back to copy
+the next one → the previous name is gone.» Two independent causes behind one symptom:
+
+**① The draft was thrown away on every navigation.** `CalligraphyTool`'s sessionStorage mirror deliberately EXCLUDED
+textarea drafts (only filters/search/scroll were restored), so every route change reset `typedText` to `""` **and** `mode`
+back to «تلقائي» — losing both the accumulated list and the tab. Now `mode` + `typedVariant` + `typedText` are mirrored
+(bounded to 40k chars so a pathological paste can't blow the quota and take the filter snapshot down with it). `txtLines`
+stays excluded on purpose — a `File` can't be restored, so a restored list would claim a file that is no longer picked.
+Browser-verified: 3 names + «الوجه الخلفي» → `/staff` → back → names, tab and variant all intact.
+
+**② Retail was structurally invisible to the whole calligraphy tool — THAT is why they were copy-pasting.** `poolFor()`
+matches four EXACT rep-form labels (`تطريز الوشاح من الأمام` …); retail orders emit their own (`تطريز يمين: تطريز يمين`,
+`القبعة من الجانب: بكتابة` …). Measured on the dev snapshot: **1000 rep zones in the pool, 0 retail**, while **232 retail
+orders / 482 zones** sat at «بانتظار التصميم» with embroidery text. And **142/142 `source='typed'` plates had
+`order_item_id = NULL`** — every hand-typed retail plate was an orphan that could never auto-link or be «تحويل للتطريز».
+
+**Owner rule locked (2026-07-21):** ممثل students = generate in bulk, review AFTER · تجزئة students = review BEFORE, then
+generate. The DB shows exactly why: rep text is clean (structured form), retail `customer_text` is free-form instruction —
+`"في الاعلى (كلية التقنيات)، اسفل هذه العبارة لوغو الجامعة…"`, `"تطريز من اليمين الدكتورة بان مع حرف ح"`. A human must read
+it and decide what actually gets stitched («الدكتورة بان ح») before a paid generation runs.
+
+**What shipped.**
+- **NEW `GET /calligraphy/retail-queue`** (`calligraphyController.retailQueue`): retail orders (`students.wholesaler_id IS
+  NULL`) at `design_complete`, not returned, product `sash|cap`. Zone detection is **heuristic, mirroring
+  productionController's `ZONE_DEFS` regexes** (the pattern already trusted by the embroiderer checklist) instead of exact
+  labels — so a zone the embroiderer sees is a zone the designer can plate. `ردن` skipped (robe sleeve is not a calligraphy
+  variant). Returns per zone: raw text, customer photo, `has_plate`; per order: student, university/department, instagram,
+  notes. Read-only.
+- **NEW `components/calligraphy/RetailReviewBoard.tsx`** + a **«تجزئة» tab** (first among the manual modes — it is a real
+  daily queue, not a fallback). Per zone: **«نص الطالب كما كتبه (لا يتغيّر)»** read-only + photo, an editable
+  **«النص المطلوب توليده»** pre-filled with the raw text, and a variant picker with **NO default** (owner's choice).
+- **Selection is GLOBAL, generation is ONE batch (owner correction mid-session).** The first cut had a «توليد» button per
+  student card; owner: «our sheet 10 names … it is bad to check and generate just order — make it just a checkbox then
+  generate all, then designer checks again, then next phase (per piece)». A sheet holds `MIN_BATCH`=10 names and costs the
+  same for 1 or 10, so per-student generation burns a sheet on 2-3 zones. Now: tick zones across as many students as you
+  like → one sticky bar («N منطقة محدّدة» + per-variant breakdown) → one «توليد المحدّد». **Sheets are single-VARIANT**, so
+  the bar warns per variant, not on the total, and an under-filled batch raises a confirm («توليد بأوراق غير ممتلئة؟»,
+  listing «أمامي — 3 من 10») — allowed, never silent. Ticked count also shows on each collapsed card.
+- **`source='retail'` in `createJob`.** Dedup by `order_item_id` like the wholesaler path. **The render text is trusted,
+  the target is NOT:** every `order_item_id` is re-resolved against the DB and dropped unless it belongs to a retail order,
+  and `student_id` is taken from the DB, never the caller — otherwise a crafted call could staple artwork onto a rep's
+  order via `autoLinkPlate`. e2e: rep item under `source='retail'` → 400 · random uuid → 400 · spoofed `student_id` →
+  overridden to the real owner.
+- **The two hard rules are enforced server-side, not just in UI:** the cleaned text lives ONLY on the plate (verified: order
+  `customer_text` stayed `"التخديرية أية علي"` after generating `"اية علي"`), and plates carry `order_item_id` so
+  auto-link + «تحويل للتطريز» work exactly like the rep flow. Drafts/variant picks/open card survive navigation too
+  (`loloshop-calligraphy-retail`), guarded by `loadedOnce` so the prune never wipes restored state against the pre-fetch list.
+- **The automatic queue is UNCHANGED** — `poolFor` still can't see retail, so retail can never be bulk-generated. That is
+  the rule, not an oversight.
+- **Dead UI deleted (owner, same session).** ① Grid chips **«مُرسلة» + «بدون طلب» removed** — measured on live plates:
+  بانتظار الإرسال **16** (the real to-do: plate done, order not yet pushed), مُرسلة **94** (archive, no action possible),
+  بدون طلب **222** (orphans from the old copy-paste flow). Only «الكل» + «بانتظار الإرسال» survive. ② **«ملف TXT» mode
+  deleted end-to-end** — tab, file input, `FileReader`, `txtLines`/`fileRef`, the `buildItems` branch, `CalSource`
+  member, and `'txt'` dropped from `createJob`'s accepted sources (**0 plates ever used it**; the enum VALUE stays in the
+  DB for safety). ③ The **«مراجعة قبل التوليد» explainer banner deleted** — the screen teaches itself (student's words sit
+  directly above the field you type into) and the sheet-economics warning lives in the batch bar where it matters.
+- **أيادي التصميم gets all of it free** (same shared component on `/design-support/calligraphy`). Verified with a
+  `design_helper` token (temp membership created + deleted, 1 row before/after): `/retail-queue` → 200/232 orders,
+  `orders/:id/send` → **403** — محمد هيثم's approval flow untouched. They don't get «فتح الطلب» (`canOpenOrders` is
+  admin/staff), which is fine: the board carries the text + photo + notes inline.
+
+### Open follow-ups
+- **Deploy = push, and `npm run migrate` must run BEFORE the pm2 reload** (069 adds the enum value the new code writes).
+  Rides with the concurrent التجهيز session's work — coordinate the push.
+- **⚠️ 069 is SPLIT across two sessions' work:** the `db/schema.sql` mirror was swept into the concurrent session's commit
+  `2c189ab feat(shelf): migration 070` (it staged schema.sql while my edit was already in the working tree), while
+  `db/migrations/069_calligraphy_retail_source.sql` is still **untracked**. Harmless (both halves are additive +
+  idempotent) but commit the migration FILE before deploy, or the numbered-migration history has a hole.
+- **User browser walkthrough pending.** Dev servers left UP: BE :4000 (plain `node server.js`), FE :3000 (`next dev`);
+  browser open on `/staff/calligraphy` → «تجزئة» as designer مضر محمد.
+- **NOT built:** the per-zone «توليد الخط» button on the order page (offered as option 2; owner picked the tab). Roll it
+  later if designers want to generate without leaving the order.
+- **Pre-existing data oddity found while testing (NOT fixed):** two accounts named **محمد هيثم** — `4df44c57…`
+  (`role='staff'`, the active `design_team_members` lead) and `f89640d3…` (`role='design_helper'`, **no membership row**).
+  As it stands the design_helper account is 403'd by `allowCalligraphyUser`. Check against prod — if he logs in with that
+  account, the calligraphy tool is closed to him today.
+- Retail orders at `embroidery`/`ready` (64/2 on the snapshot) are deliberately out of the board — they're past the
+  designer. Widen `JOB_WHERE` if that turns out to be wrong.
+- **222 orphan plates (`order_item_id IS NULL`) are now invisible** — the «بدون طلب» chip that surfaced them is gone. They
+  were already unusable (nothing links them to an order), and the new تجزئة flow can't create more, but if they should be
+  purged or reconciled that is a separate decision. Query: `SELECT * FROM calligraphy_plates WHERE order_item_id IS NULL`.
+- **Two self-inflicted bugs caught in the browser and fixed — worth remembering:** (1) I used **`bg-card`**, which does
+  **not exist** in this Tailwind v4 `@theme` (`app/globals.css` defines `--color-cream/beige/surface/surface-sink`, no
+  `card`) — all 6 usages rendered fully transparent (`rgba(0,0,0,0)`) and only looked fine over a light page. It is used
+  nowhere else in the repo; use **`bg-surface`**. (2) The confirm dialog used bare `position: fixed` and was trapped by an
+  ancestor containing block (the tool's card has a backdrop-filter), rendering as a floating rectangle mid-page — now
+  `createPortal` to `document.body` behind a `mounted` guard, same as the plate preview / StudentSheet.
+- The board still lists one card **per piece** (a student with a وشاح + قبعة appears twice, each with its own zones). With
+  a global batch bar that reads fine, but grouping the cards by student is the obvious next polish if it feels noisy.
+
+---
+
 ## 2026-07-20 (b) — ✅ SHIPPED: security batch committed + merged + DEPLOYED to prod · post-deploy runbook executed
 
 **Everything that was uncommitted/unpushed is now live on prod** (`main` @ `ff8a47e`, 19 commits pushed — the 07-16→07-19

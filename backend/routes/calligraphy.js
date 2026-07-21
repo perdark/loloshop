@@ -69,6 +69,9 @@ router.get('/orders-zones', c.ordersZones);
 router.post('/orders/:orderId/send', requireDesignerOrAdmin, c.sendOrder);
 
 // Queue endpoints
+// /retail-queue is the «تجزئة» review board — read-only; generation goes through POST /jobs
+// with source='retail' once the designer has cleaned the text and picked a variant per zone.
+router.get('/retail-queue', c.retailQueue);
 router.get('/queue', c.getQueue);
 router.post('/queue/generate', genLimit, c.queueGenerate);
 router.get('/recent', c.recentPlates);

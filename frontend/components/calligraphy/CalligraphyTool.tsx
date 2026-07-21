@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
+import { RetailReviewBoard } from "@/components/calligraphy/RetailReviewBoard";
 import { getApiErrorMessage } from "@/lib/api";
 import { isAuthenticated, getUser } from "@/lib/auth";
 import {
@@ -42,9 +43,12 @@ import { PlateCompositor } from "@/components/calligraphy/PlateCompositor";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-type InputMode = "queue" | "typed" | "wholesaler" | "txt";
+type InputMode = "queue" | "retail" | "typed" | "wholesaler";
 type ModelMode = "standard" | "premium";
-type GridFilter = "all" | "awaiting" | "sent" | "no_order";
+// «مُرسلة» (archive — nothing left to do) and «بدون طلب» (orphan plates from the old
+// copy-paste flow) were dropped 2026-07-21: neither led to an action. «بانتظار الإرسال»
+// stays — it IS the designer's to-do list (plates generated, order not yet pushed to التطريز).
+type GridFilter = "all" | "awaiting";
 
 // ─── Status pill colours ─────────────────────────────────────────────────────
 
@@ -327,16 +331,24 @@ function QueueZoneCard({
 // collapse, then taps a student's name (→ /staff/orders/[id]?from=<path>); on back
 // this component remounts and must land exactly where they left off. Only display/
 // filter state is mirrored — fetched data (jobs/plates/queue), in-flight generation,
-// modals, and textarea drafts (typed/txt/wholesaler-grab inputs + the download-folder
-// handle) are deliberately excluded. Safe to lazy-init: all three mounts (admin
-// layout, /staff/calligraphy, /design-support/calligraphy) gate behind a client-side
-// auth loading check, so this component never renders during SSR/prerender.
+// modals, and the download-folder handle are deliberately excluded. Safe to lazy-init:
+// all three mounts (admin layout, /staff/calligraphy, /design-support/calligraphy) gate
+// behind a client-side auth loading check, so this component never renders during
+// SSR/prerender.
+//
+// The «لصق أسماء» draft IS mirrored (mode + variant + textarea). Designers build that
+// list one name at a time — review a retail order on مراجعة التصاميم, copy the name,
+// come back, paste, repeat — and dropping the draft on every remount silently threw
+// away everything they had accumulated (the tab reset to «تلقائي» too).
 interface StoredCalligraphyState {
   gridFilter?: GridFilter;
   gridWid?: string;
   queueWid?: string;
   searchText?: string;
   controlsOpen?: boolean;
+  mode?: InputMode;
+  typedVariant?: CalVariant;
+  typedText?: string;
   /** Window scroll offset. The plates grid is a long, page-scrolled list with no
    *  overlay to restore (unlike StationConsole's student sheet), so landing back
    *  at the top is the most disorienting part of returning from an order page —
@@ -355,8 +367,21 @@ function readStoredCalligraphy(): StoredCalligraphyState {
 }
 
 function validGridFilter(v: GridFilter | undefined): GridFilter {
-  return v === "awaiting" || v === "sent" || v === "no_order" ? v : "all";
+  return v === "awaiting" ? v : "all";
 }
+
+function validMode(v: InputMode | undefined): InputMode {
+  return v === "typed" || v === "wholesaler" || v === "retail" ? v : "queue";
+}
+
+function validVariant(v: CalVariant | undefined): CalVariant {
+  return v === "back" || v === "cap" || v === "cap_side" ? v : "front";
+}
+
+/** Bound the mirrored draft so a pathological paste can never blow the sessionStorage
+ *  quota and take the (more important) filter/scroll snapshot down with it. ~40k chars
+ *  is far past any real batch — a 500-name list is ~10k. */
+const MAX_DRAFT_CHARS = 40000;
 
 // ─── Main tool ─────────────────────────────────────────────────────────────────
 // Shared by the admin page (`/admin/calligraphy`) and the designer/staff page
@@ -390,16 +415,14 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
   const [stored] = useState<StoredCalligraphyState>(() => readStoredCalligraphy());
 
   // ── mode + model ────────────────────────────────────────────────────────────
-  const [mode, setMode] = useState<InputMode>("queue");
+  const [mode, setMode] = useState<InputMode>(validMode(stored.mode));
   const model: ModelMode = "standard";
 
-  // ── variant (typed + txt modes) ─────────────────────────────────────────────
-  const [typedVariant, setTypedVariant] = useState<CalVariant>("front");
+  // ── variant (typed mode) ────────────────────────────────────────────────────
+  const [typedVariant, setTypedVariant] = useState<CalVariant>(validVariant(stored.typedVariant));
 
-  // ── typed / txt inputs ──────────────────────────────────────────────────────
-  const [typedText, setTypedText] = useState("");
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [txtLines, setTxtLines] = useState<string[]>([]);
+  // ── typed input ─────────────────────────────────────────────────────────────
+  const [typedText, setTypedText] = useState(stored.typedText ?? "");
 
   // ── wholesaler grab ─────────────────────────────────────────────────────────
   const [wholesalers, setWholesalers] = useState<CalWholesaler[]>([]);
@@ -528,9 +551,22 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
       queueWid,
       searchText,
       controlsOpen,
+      mode,
+      typedVariant,
+      typedText: typedText.slice(0, MAX_DRAFT_CHARS),
     };
     persistSnapshot();
-  }, [gridFilter, gridWid, queueWid, searchText, controlsOpen, persistSnapshot]);
+  }, [
+    gridFilter,
+    gridWid,
+    queueWid,
+    searchText,
+    controlsOpen,
+    mode,
+    typedVariant,
+    typedText,
+    persistSnapshot,
+  ]);
 
   // Mirror the scroll offset too. rAF-throttled + passive so a long plates grid
   // never turns scrolling into a sessionStorage write per frame.
@@ -701,21 +737,6 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
     };
   }, [plates.length, stored.scrollY]);
 
-  // ── read .txt file ───────────────────────────────────────────────────────────
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const lines = String(ev.target?.result ?? "")
-        .split(/\r?\n/)
-        .map((l) => l.trim())
-        .filter(Boolean);
-      setTxtLines(lines);
-    };
-    reader.readAsText(file, "utf-8");
-  }
-
   // ── core processing loop (shared by runJob and runQueue) ─────────────────────
   // The backend enqueues generation on job creation (pg-boss worker) — the browser
   // only WATCHES progress now. Closing the tab no longer stops generation; reopening
@@ -821,22 +842,6 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
         });
       } else {
         allItems = lines.map((t) => ({ render_text: t, variant: typedVariant }));
-      }
-    } else if (mode === "txt") {
-      if (!txtLines.length) {
-        toast.error("اختر ملف .txt يحتوي على أسماء");
-        return null;
-      }
-      base = { source: "txt", model, variant: typedVariant };
-      if (isCapLike(typedVariant)) {
-        allItems = txtLines.map((line) => {
-          const [namePart, ...rest] = line.split("|");
-          const text = namePart.trim();
-          const element = rest.join("|").trim();
-          return { render_text: text, variant: typedVariant, ...(element ? { element_text: element } : {}) };
-        });
-      } else {
-        allItems = txtLines.map((t) => ({ render_text: t, variant: typedVariant }));
       }
     } else {
       // wholesaler mode
@@ -973,8 +978,6 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
     return groups.filter((g) => {
       const z = g.orderId ? orderZones[g.orderId] : null;
       if (gridFilter === "awaiting" && !(z?.can_send)) return false;
-      if (gridFilter === "sent" && !(g.orderId && z && !z.can_send && z.order_status !== "design_complete")) return false;
-      if (gridFilter === "no_order" && g.orderId !== null) return false;
       if (gridWid && g.wholesalerId !== gridWid) return false;
       if (q) {
         const hay = `${g.studentName ?? ""} ${g.plates.map((p) => p.render_text).join(" ")}`;
@@ -1082,10 +1085,12 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
   const progress = total > 0 ? Math.round((done / total) * 100) : 0;
 
   // Manual inputs stay available, but the automatic queue is the daily primary flow.
+  // «تجزئة» sits first among them: it is a real daily queue (retail students are invisible
+  // to the automatic one — their order labels don't match the rep form's), not a fallback.
   const manualModes = [
+    { id: "retail" as InputMode, label: "تجزئة" },
     { id: "typed" as InputMode, label: "لصق أسماء" },
     { id: "wholesaler" as InputMode, label: "طلبات ممثل" },
-    { id: "txt" as InputMode, label: "ملف TXT" },
   ] as const;
   const queuePendingTotal = queue
     ? (["front", "back", "cap"] as CalVariant[]).reduce(
@@ -1129,8 +1134,6 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
                 [
                   { id: "all" as const, label: "الكل" },
                   { id: "awaiting" as const, label: "بانتظار الإرسال" },
-                  { id: "sent" as const, label: "مُرسلة" },
-                  { id: "no_order" as const, label: "بدون طلب" },
                 ]
               ).map((f) => (
                 <button
@@ -1295,8 +1298,8 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
           </div>
         )}
 
-        {/* variant segmented control — typed + txt modes only */}
-        {(mode === "typed" || mode === "txt") && (
+        {/* variant segmented control — typed mode only */}
+        {mode === "typed" && (
           <div className="mb-5">
             <p className="mb-2 text-xs font-semibold text-ink-soft">نوع التطريز</p>
             <div className="flex flex-wrap gap-2">
@@ -1504,33 +1507,20 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
           </div>
         )}
 
-        {/* txt file */}
-        {mode === "txt" && (
-          <div className="mb-4 space-y-2">
-            <label className="mb-1.5 block text-xs font-semibold text-ink-soft">
-              ملف .txt (اسم واحد في كل سطر، ترميز UTF-8)
-            </label>
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".txt,text/plain"
-              disabled={running}
-              onChange={handleFileChange}
-              className="block min-h-11 w-full text-sm text-ink file:me-3 file:min-h-11 file:cursor-pointer file:rounded-full file:border-0 file:bg-orange-ink file:px-4 file:text-xs file:font-semibold file:text-white hover:file:opacity-90 disabled:opacity-60"
-            />
-            {txtLines.length > 0 && (
-              <>
-                <p className="text-xs text-ink-soft">
-                  تم قراءة {txtLines.length} سطر من الملف
-                </p>
-                <NameCountHint lines={txtLines} />
-              </>
-            )}
-          </div>
+        {/* «تجزئة» — review-before-generate board. Generation is per student/zone inside
+            the board (each needs its own cleaned text + variant), so the shared footer
+            button below is deliberately not shown for this mode. */}
+        {mode === "retail" && (
+          <RetailReviewBoard
+            canOpenOrders={canOpenOrders}
+            fromPath={pathname}
+            running={running}
+            onGenerate={runJob}
+          />
         )}
 
         {/* generate button — manual modes only */}
-        {mode !== "queue" && (
+        {mode !== "queue" && mode !== "retail" && (
           <Button
             onClick={handleGenerate}
             loading={running}
