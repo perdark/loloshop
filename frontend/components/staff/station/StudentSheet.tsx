@@ -168,7 +168,7 @@ function PieceCard({
         <p className="min-w-0 truncate text-[15px] font-bold text-ink">{piece.productName}</p>
         <Link
           href={`/staff/orders/${piece.id}?from=${encodeURIComponent(fromPath)}`}
-          className="shrink-0 rounded-full border border-line bg-beige px-3 py-1 text-[11px] font-semibold text-ink transition-colors hover:border-orange/40 hover:text-orange-ink"
+          className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-full border border-line bg-beige px-5 text-sm font-bold text-ink transition-colors hover:border-orange/40 hover:text-orange-ink"
         >
           التفاصيل
         </Link>
