@@ -14,6 +14,7 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  Legend,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -79,10 +80,11 @@ function Empty() {
 
 export interface DashboardChartsProps {
   daily: { date: string; count: number }[];
-  ordersByStatus: Record<string, number>;
+  /** Stage funnel in BOTH units — see backend/lib/counts.js. */
+  funnel: { stage: string; pieces: number; students: number }[];
 }
 
-export function DashboardCharts({ daily, ordersByStatus }: DashboardChartsProps) {
+export function DashboardCharts({ daily, funnel }: DashboardChartsProps) {
   // 1) Orders trend — daily counts as a soft area (money-free).
   const trend = daily.map((d) => ({
     label: formatDateShort(d.date),
@@ -90,11 +92,16 @@ export function DashboardCharts({ daily, ordersByStatus }: DashboardChartsProps)
   }));
   const trendTotal = daily.reduce((sum, d) => sum + d.count, 0);
 
-  // 2) Production pipeline — order counts per status, biggest first.
-  const pipeline = Object.entries(ordersByStatus)
-    .map(([status, value]) => ({
-      name: ORDER_STATUS_LABELS[status as OrderStatus] ?? status,
-      value,
+  // 2) Production pipeline. UNITS MATTER HERE (2026-07-21): only PIECES have a
+  // stage — 76% of orders span 2-3 stages at once, so a per-stage ORDER count would
+  // overcount by ~79% and could never sum to the order total. `value` is pieces and
+  // sums exactly; `students` rides along as a per-stage MEMBERSHIP count (a student
+  // with pieces in two stages appears in both) and is labelled so it is never summed.
+  const pipeline = funnel
+    .map((f) => ({
+      name: ORDER_STATUS_LABELS[f.stage as OrderStatus] ?? f.stage,
+      value: f.pieces,
+      students: f.students,
     }))
     .filter((s) => s.value > 0)
     .sort((a, b) => b.value - a.value);
@@ -166,12 +173,12 @@ export function DashboardCharts({ daily, ordersByStatus }: DashboardChartsProps)
       {/* Production pipeline */}
       <ChartCard
         title="مراحل الإنتاج"
-        hint={inPipeline ? `${toArabic(inPipeline)} طلب` : undefined}
+        hint={inPipeline ? `${toArabic(inPipeline)} قطعة` : undefined}
       >
         {pipeline.length ? (
           <div
             className="w-full"
-            style={{ height: `${Math.max(pipeline.length * 34 + 16, 160)}px` }}
+            style={{ height: `${Math.max(pipeline.length * 42 + 16, 170)}px` }}
           >
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
@@ -198,13 +205,32 @@ export function DashboardCharts({ daily, ordersByStatus }: DashboardChartsProps)
                 <Tooltip
                   contentStyle={TIP}
                   cursor={{ fill: "rgba(244,123,66,.08)" }}
-                  formatter={(v) => [toArabic(Number(v)), "طلبات"]}
+                  formatter={(v, n) => [toArabic(Number(v)), String(n)]}
                 />
-                <Bar dataKey="value" name="طلبات" radius={[0, 8, 8, 0]} barSize={18}>
+                {/* Named on sight — the thin bar is a membership count, and the
+                    legend says so, so it is never read as a share of the total. */}
+                <Legend
+                  verticalAlign="top"
+                  align="right"
+                  height={26}
+                  iconSize={9}
+                  wrapperStyle={{ fontSize: 12, color: SUB, paddingBottom: 4 }}
+                />
+                <Bar dataKey="value" name="قطع" radius={[0, 8, 8, 0]} barSize={14}>
                   {pipeline.map((s, i) => (
                     <Cell key={s.name} fill={STAGE_TINTS[i % STAGE_TINTS.length]} />
                   ))}
                 </Bar>
+                {/* Membership count, NOT a share of a total — the series name says so
+                    outright, so the two bars can never be mistakenly added together. */}
+                <Bar
+                  dataKey="students"
+                  name="طلاب لديهم قطعة هنا"
+                  radius={[0, 8, 8, 0]}
+                  barSize={6}
+                  fill={INK}
+                  fillOpacity={0.28}
+                />
               </BarChart>
             </ResponsiveContainer>
           </div>

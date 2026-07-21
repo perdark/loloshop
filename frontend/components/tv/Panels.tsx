@@ -26,6 +26,7 @@ import {
   type TvStaff,
   type TvTickerItem,
 } from "@/lib/tv";
+import { Count } from "@/components/ui/Count";
 
 const SUB = "#9a6a3a";
 
@@ -42,7 +43,7 @@ function Delta({ v }: { v: number }) {
 export function KpiStrip({ k, moneyVisible = false }: { k: TvSnapshot["kpis"]; moneyVisible?: boolean }) {
   const cells = [
     { label: "طلبات اليوم", value: fmtNum(k.orders_today), delta: k.orders_delta, money: false },
-    { label: "تم التسليم اليوم", value: fmtNum(k.delivered_today), delta: k.delivered_delta, money: false },
+    { label: "قطع اليوم", value: fmtNum(k.pieces_today), delta: null, money: false },
     // Money cells appear ONLY when revealed — otherwise the board shows zero money.
     ...(moneyVisible
       ? [
@@ -163,15 +164,20 @@ export function GoalRing({ done, target }: { done: number; target: number | null
           />
         </svg>
         <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <span className="font-[Cairo] text-4xl font-extrabold text-[#5a3210]">{fmtNum(done)}</span>
+          <Count
+            value={done}
+            unit="piece"
+            className="font-[Cairo] text-4xl font-extrabold text-[#5a3210]"
+            unitClassName="text-lg font-bold opacity-70"
+          />
           <span className="text-base text-[#9a6a3a]">
-            {target ? `من ${fmtNum(target)}` : "بدون هدف"}
+            {target ? `من ${fmtNum(target)} قطعة` : "بدون هدف"}
           </span>
         </div>
       </div>
       {target ? (
         <p className="mt-3 text-lg font-bold text-[#F47B42]">
-          {pct >= 100 ? "🎯 تحقق الهدف!" : `متبقٍ ${fmtNum(Math.max(0, target - done))}`}
+          {pct >= 100 ? "🎯 تحقق الهدف!" : `متبقٍ ${fmtNum(Math.max(0, target - done))} قطعة`}
         </p>
       ) : (
         <p className="mt-3 text-sm text-[#b59673]">حدِّد هدفاً من الإعدادات</p>
@@ -332,7 +338,7 @@ export function Graphs({ g }: { g: TvSnapshot["graphs"] }) {
   // height so the bottom charts never clip.
   return (
     <div className="grid h-full grid-cols-2 grid-rows-2 gap-4">
-      <ChartCard title="الطلبات: وارد مقابل مُسلَّم">
+      <ChartCard title="الطلبات الواردة">
         <ResponsiveContainer>
           <AreaChart data={data} margin={{ top: 6, right: 8, left: -16, bottom: 0 }}>
             <defs>
@@ -340,17 +346,12 @@ export function Graphs({ g }: { g: TvSnapshot["graphs"] }) {
                 <stop offset="0%" stopColor="#F47B42" stopOpacity={0.5} />
                 <stop offset="100%" stopColor="#F47B42" stopOpacity={0} />
               </linearGradient>
-              <linearGradient id="gDone" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#16A34A" stopOpacity={0.5} />
-                <stop offset="100%" stopColor="#16A34A" stopOpacity={0} />
-              </linearGradient>
             </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="#F0DCC4" />
             <XAxis dataKey="label" tick={AXIS} tickLine={false} />
             <YAxis tick={AXIS} tickLine={false} width={28} />
             <Tooltip />
             <Area type="monotone" dataKey="orders_in" name="وارد" stroke="#F47B42" fill="url(#gIn)" strokeWidth={2} />
-            <Area type="monotone" dataKey="done" name="مُسلَّم" stroke="#16A34A" fill="url(#gDone)" strokeWidth={2} />
           </AreaChart>
         </ResponsiveContainer>
       </ChartCard>
@@ -488,7 +489,9 @@ export function DeadlineWall({ items }: { items: TvSnapshot["deadlines"] }) {
             >
               ⏳ {c.txt}
             </div>
-            <div className="text-sm text-[#9a6a3a]">{b.open_orders} طلب مفتوح</div>
+            <div className="text-sm text-[#9a6a3a]">
+              <Count value={b.open_orders} unit="order" className="inline" /> مفتوح
+            </div>
           </div>
         );
       })}
@@ -536,7 +539,7 @@ function HeaderKpis({
 }) {
   const chips = [
     { label: "طلبات اليوم", value: fmtNum(kpis.orders_today), delta: kpis.orders_delta, icon: "🧾" },
-    { label: "تم التسليم اليوم", value: fmtNum(kpis.delivered_today), delta: kpis.delivered_delta, icon: "✅" },
+    { label: "قطع اليوم", value: fmtNum(kpis.pieces_today), delta: null, icon: "🧵" },
     { label: "يشاهدون الآن", value: fmtNum(audienceNow), delta: null, icon: "👁", live: true },
     { label: "دفعات نشطة", value: fmtNum(activeBatches), delta: null, icon: "🎓" },
   ];
@@ -755,7 +758,7 @@ export function Sidebar({
         <div className="mb-5 space-y-3 border-t border-[#F0DCC4] pt-4">
           <div className="text-sm font-bold text-[#9a6a3a]">الإعدادات</div>
           <label className="block text-[#5a3210]">
-            هدف اليوم
+            هدف اليوم (قطعة)
             <input
               type="number"
               min={0}
@@ -766,7 +769,7 @@ export function Sidebar({
             />
           </label>
           <label className="block text-[#5a3210]">
-            حد الاختناق (عدد الطلبات)
+            حد الاختناق (عدد القطع)
             <input
               type="number"
               min={1}

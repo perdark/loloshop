@@ -27,6 +27,7 @@ import {
   ymToAr,
   type TvSnapshot,
 } from "@/lib/tv";
+import { Count, unitLabel, type CountUnit } from "@/components/ui/Count";
 import { IraqMap } from "@/components/tv/IraqMap";
 import { DeadlineWall, StaffWatch, Spotlight } from "@/components/tv/Panels";
 
@@ -129,8 +130,8 @@ export function PulseScene({ data }: { data: TvSnapshot }) {
       <div className="grid h-full grid-cols-[1.5fr_1fr] gap-6">
         <div className="grid grid-rows-2 gap-6">
           {[
-            { label: "طلبات اليوم", value: k.orders_today, delta: k.orders_delta, tint: "from-[#FFF8F0] to-[#FFE7CE]", accent: ACCENT },
-            { label: "تم التسليم اليوم", value: k.delivered_today, delta: k.delivered_delta, tint: "from-[#FBFDF7] to-[#E6F5E3]", accent: GREEN },
+            { label: "طلبات اليوم", value: k.orders_today, delta: k.orders_delta, tint: "from-[#FFF8F0] to-[#FFE7CE]", accent: ACCENT, unit: "order" as const },
+            { label: "قطع اليوم", value: k.pieces_today, delta: null, tint: "from-[#FBFDF7] to-[#E6F5E3]", accent: GREEN, unit: "piece" as const },
           ].map((c) => (
             <div
               key={c.label}
@@ -142,8 +143,9 @@ export function PulseScene({ data }: { data: TvSnapshot }) {
                   <DeltaPill v={c.delta} />
                 </div>
               </div>
-              <span style={{ color: c.accent }}>
+              <span style={{ color: c.accent }} className="flex items-baseline gap-2">
                 <CountUp value={c.value} className="font-[Cairo] text-[8rem] font-black leading-none tabular-nums" />
+                <span className="text-3xl font-bold opacity-70">{unitLabel(c.value, c.unit)}</span>
               </span>
             </div>
           ))}
@@ -169,13 +171,18 @@ export function PulseScene({ data }: { data: TvSnapshot }) {
                 />
               </svg>
               <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="font-[Cairo] text-5xl font-black text-[#5a3210]">{fmtNum(goal.done_today)}</span>
-                <span className="text-base text-[#9a6a3a]">{goal.target ? `من ${fmtNum(goal.target)}` : "بدون هدف"}</span>
+                <Count
+                  value={goal.done_today}
+                  unit="piece"
+                  className="font-[Cairo] text-5xl font-black text-[#5a3210]"
+                  unitClassName="text-xl font-bold opacity-70"
+                />
+                <span className="text-base text-[#9a6a3a]">{goal.target ? `من ${fmtNum(goal.target)} قطعة` : "بدون هدف"}</span>
               </div>
             </div>
             {goal.target ? (
               <p className="text-lg font-bold text-[#F47B42]">
-                {pct >= 100 ? "🎯 تحقق الهدف!" : `متبقٍ ${fmtNum(Math.max(0, goal.target - goal.done_today))}`}
+                {pct >= 100 ? "🎯 تحقق الهدف!" : `متبقٍ ${fmtNum(Math.max(0, goal.target - goal.done_today))} قطعة`}
               </p>
             ) : (
               <p className="text-sm text-[#b59673]">حدِّد هدفاً من الإعدادات</p>
@@ -218,7 +225,7 @@ export function PipelineScene({ data }: { data: TvSnapshot }) {
           </div>
         ) : (
           <div>
-            <span className="font-[Cairo] text-5xl font-black tabular-nums text-[#F47B42]">{fmtNum(total)}</span>
+            <Count value={total} unit="piece" bare className="font-[Cairo] text-5xl font-black tabular-nums text-[#F47B42]" />
             <span className="ms-2 text-lg font-semibold text-[#9a6a3a]">قطعة قيد العمل</span>
           </div>
         )
@@ -263,20 +270,20 @@ export function TrendScene({ data }: { data: TvSnapshot }) {
   const series = data.graphs.series;
   const rangeLabel = data.range === "today" ? "اليوم (بالساعة)" : data.range === "7" ? "آخر ٧ أيام" : "آخر ٣٠ يوم";
   const totalIn = series.reduce((a, p) => a + (p.orders_in || 0), 0);
-  const totalDone = series.reduce((a, p) => a + (p.done || 0), 0);
   return (
     <SceneFrame
       kicker="التدفّق"
-      title="الطلبات: وارد مقابل مُسلَّم"
+      title="الطلبات الواردة"
       right={
         <div className="flex items-center gap-6">
           <div>
             <div className="text-base font-semibold text-[#9a6a3a]">وارد</div>
-            <div className="font-[Cairo] text-4xl font-black tabular-nums text-[#F47B42]">{fmtNum(totalIn)}</div>
-          </div>
-          <div>
-            <div className="text-base font-semibold text-[#9a6a3a]">مُسلَّم</div>
-            <div className="font-[Cairo] text-4xl font-black tabular-nums text-[#16A34A]">{fmtNum(totalDone)}</div>
+            <Count
+              value={totalIn}
+              unit="order"
+              className="font-[Cairo] text-4xl font-black tabular-nums text-[#F47B42]"
+              unitClassName="text-lg font-bold opacity-70"
+            />
           </div>
           <span className="rounded-full bg-[#FFE4C4] px-3 py-1 text-sm font-bold text-[#7a4e22]">{rangeLabel}</span>
         </div>
@@ -291,17 +298,12 @@ export function TrendScene({ data }: { data: TvSnapshot }) {
                   <stop offset="0%" stopColor={ACCENT} stopOpacity={0.55} />
                   <stop offset="100%" stopColor={ACCENT} stopOpacity={0} />
                 </linearGradient>
-                <linearGradient id="scDone" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={GREEN} stopOpacity={0.5} />
-                  <stop offset="100%" stopColor={GREEN} stopOpacity={0} />
-                </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
               <XAxis dataKey="label" tick={AXIS} tickLine={false} />
               <YAxis tick={AXIS} tickLine={false} width={34} />
               <Tooltip contentStyle={TIP} />
               <Area type="monotone" dataKey="orders_in" name="وارد" stroke={ACCENT} fill="url(#scIn)" strokeWidth={3} dot={false} />
-              <Area type="monotone" dataKey="done" name="مُسلَّم" stroke={GREEN} fill="url(#scDone)" strokeWidth={3} dot={false} />
             </AreaChart>
           </ResponsiveContainer>
         ) : (
@@ -352,11 +354,15 @@ export function ReachScene({ data }: { data: TvSnapshot }) {
   const lt = data.lifetime;
   const rank = data.rank;
   const rec = data.records;
-  const brag = lt
+  // delivered_total was dropped: 0 orders have ever been delivered, so that tile
+  // was a permanent zero (spec §1.2) — deleted rather than relabelled. total_pieces
+  // is surfaced here instead, right next to total_orders (the shop makes 1727
+  // قطعة for 578 طلب — both numbers are worth bragging about).
+  const brag: { label: string; value: number; icon: string; unit?: CountUnit }[] = lt
     ? [
         { label: "خريج تخرّج معنا", value: lt.graduates, icon: "🎓" },
-        { label: "طلب على الإطلاق", value: lt.total_orders, icon: "🧾" },
-        { label: "طلب مُسلَّم", value: lt.delivered_total, icon: "📦" },
+        { label: "على الإطلاق", value: lt.total_orders, icon: "🧾", unit: "order" },
+        { label: "صُنعت حتى الآن", value: lt.total_pieces, icon: "🧵", unit: "piece" },
         { label: "جامعة وصلنا إليها", value: lt.universities_count, icon: "🏛️" },
       ]
     : [];
@@ -379,7 +385,10 @@ export function ReachScene({ data }: { data: TvSnapshot }) {
           {brag.map((b) => (
             <div key={b.label} className="tv-panel flex flex-col items-center justify-center gap-2 bg-gradient-to-b from-[#FFFAF3] to-[#FFF0DD] px-4 text-center">
               <span className="text-4xl">{b.icon}</span>
-              <CountUp value={b.value} className="font-[Cairo] text-[4.5rem] font-black leading-none tabular-nums text-[#F47B42]" />
+              <span className="flex items-baseline gap-1.5 text-[#F47B42]">
+                <CountUp value={b.value} className="font-[Cairo] text-[4.5rem] font-black leading-none tabular-nums" />
+                {b.unit && <span className="text-xl font-bold opacity-70">{unitLabel(b.value, b.unit)}</span>}
+              </span>
               <span className="text-lg font-semibold text-[#9a6a3a]">{b.label}</span>
             </div>
           ))}
@@ -394,7 +403,7 @@ export function ReachScene({ data }: { data: TvSnapshot }) {
                   <span className="font-[Amiri] text-2xl font-bold text-[#5a3210]">الرتبة: {rank.label}</span>
                   {rank.next_label ? (
                     <span className="text-lg font-semibold text-[#9a6a3a]">
-                      المتبقّي لرتبة «{rank.next_label}»: {fmtNum(rank.to_next)} طلب
+                      المتبقّي لرتبة «{rank.next_label}»: <Count value={rank.to_next} unit="order" className="inline" /> تجزئة
                     </span>
                   ) : (
                     <span className="text-lg font-bold text-[#F47B42]">أعلى رتبة 🏆</span>

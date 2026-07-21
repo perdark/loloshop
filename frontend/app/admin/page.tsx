@@ -17,6 +17,7 @@ import { MoneyMask } from "@/components/MoneyMask";
 import { MoneyRevealTrigger } from "@/components/MoneyRevealTrigger";
 import { setMoneyGate } from "@/lib/money-gate";
 import { CalculationDetails } from "@/components/admin/CalculationDetails";
+import { Count } from "@/components/ui/Count";
 
 const DashboardCharts = dynamic(
   () =>
@@ -357,6 +358,80 @@ export default function AdminDashboardPage() {
         </button>
       </header>
 
+      {/* Hero — what is still ON you, not what you have ever sold. «قيد التنفيذ»
+          = طلب with at least one piece not yet «جاهز»: a student cannot collect his
+          طقم while the قبعة is unfinished, so the whole order stays open.
+          The three units are named outright; none of them is the bare word «طلب». */}
+      <section className="mb-8 rounded-2xl border border-ink/10 bg-beige px-6 py-5">
+        <p className="text-sm font-semibold text-ink-soft">قيد التنفيذ</p>
+        <p className="mt-1 font-display text-4xl font-bold leading-none text-ink lg:text-5xl">
+          <Count value={data.headline.inProgress} unit="order" unitClassName="text-[0.45em] font-bold opacity-60" />
+        </p>
+        <p className="mt-2 text-sm text-ink-soft">
+          من <Count value={data.headline.bundles} unit="order" /> ·{" "}
+          <Count value={data.headline.pieces} unit="piece" /> ·{" "}
+          <Count value={data.headline.students} unit="student" />
+        </p>
+      </section>
+
+      {/* Rank ladder — the long game. Climbs on RETAIL طلب (direct students, no rep),
+          final rung 3000. Identical ladder + rung to the TV board: both read
+          adminController/tvBoardController's shared rankFor(), so they cannot disagree. */}
+      <section className="mb-8 rounded-2xl border border-orange/25 bg-gradient-to-l from-orange/[0.07] to-transparent px-6 py-5">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-ink-soft">الرتبة</p>
+            <p className="mt-0.5 font-display text-2xl font-bold text-ink">{data.rank.label}</p>
+          </div>
+          <p className="text-sm text-ink-soft">
+            <Count value={data.rank.total} unit="order" /> تجزئة
+          </p>
+        </div>
+
+        <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-ink/10">
+          <div
+            className="h-full rounded-full bg-gradient-to-l from-[#FFB100] to-[#F47B42] transition-[width] duration-700"
+            style={{ width: `${Math.min(100, Math.max(2, data.rank.progress))}%` }}
+          />
+        </div>
+
+        <p className="mt-2 text-sm text-ink-soft">
+          {data.rank.nextLabel ? (
+            <>
+              المتبقّي لرتبة «{data.rank.nextLabel}»:{" "}
+              <strong className="text-ink">
+                <Count value={data.rank.toNext} unit="order" /> تجزئة
+              </strong>
+            </>
+          ) : (
+            "أعلى رتبة — الهدف مكتمل"
+          )}
+        </p>
+
+        {/* The whole ladder, so the 3000 goal is visible from rung one. */}
+        <ol className="mt-3 flex flex-wrap gap-1.5">
+          {data.rank.ladder.map((r) => {
+            const reached = data.rank.total >= r.min;
+            const current = r.key === data.rank.key;
+            return (
+              <li
+                key={r.key}
+                className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
+                  current
+                    ? "border-orange bg-orange text-white"
+                    : reached
+                      ? "border-orange/30 bg-orange/10 text-orange-ink"
+                      : "border-ink/10 bg-ink/[0.03] text-ink-soft"
+                }`}
+                title={`${r.label} — ${toArabicDigits(r.min)}`}
+              >
+                {r.label}
+              </li>
+            );
+          })}
+        </ol>
+      </section>
+
       {/* Headline ledger — the four figures that define the business.
           The three money figures mask behind the gate; the order count is
           never sensitive and always shows. */}
@@ -387,7 +462,11 @@ export default function AdminDashboardPage() {
           accent
           hint={showMoney ? margin : undefined}
         />
-        <Figure label="عدد الطلبات / الباقات" value={String(data.orderCount)} />
+        {/* SCOPE, not unit: this figure sits in the MONEY ledger, so it counts only
+            settled طلبات (retail + rep-approved) — deliberately fewer than the
+            operational total in the hero above. The label says which, so the two
+            numbers can never look like a contradiction. */}
+        <Figure label="طلبات محتسبة" value={`${toArabicDigits(data.orderCount)} طلب`} />
       </dl>
       <CalculationDetails summary="كيف حُسبت أرقام لوحة التحكم؟" className="mt-3 bg-surface">
         <p>
@@ -453,14 +532,9 @@ export default function AdminDashboardPage() {
           the old daily-orders bar + status figure-grid with richer visuals. */}
       <section className="mt-14">
         <SectionHead title="نظرة تحليلية" meta="بيانات الطلبات" />
-        <DashboardCharts
-          daily={data.dailyOrders}
-          ordersByStatus={data.ordersByStatus}
-        />
+        <DashboardCharts daily={data.dailyOrders} funnel={data.funnel} />
         <CalculationDetails summary="كيف حُسبت الرسوم؟" className="mt-4 bg-surface">
           <p>
-            الرسم اليومي يعد الطلبات المنطقية: الباقة متعددة القطع تظهر مرة واحدة في يوم إنشائها.
-            رسم الحالات يعد القطع داخل الطلبات، لأن كل قطعة قد تكون في مرحلة إنتاج مختلفة.
             النطاق المحاسبي نفسه مطبق هنا: لا ملغى، ولا طلب ممثل معلّق أو مُرجع.
           </p>
         </CalculationDetails>

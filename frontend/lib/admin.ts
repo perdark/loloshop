@@ -108,6 +108,16 @@ interface ApiAnalytics {
     orders: number;
   };
   by_status: Record<string, number>;
+  /** Stage funnel in BOTH units. `pieces` sums to the piece total; `students` is a
+   *  MEMBERSHIP count (a student with pieces in two stages appears in both rows)
+   *  and deliberately does NOT sum. See backend/lib/counts.js. */
+  funnel: { stage: string; pieces: number; students: number }[];
+  headline: { pieces: number; bundles: number; students: number; in_progress: number };
+  rank: {
+    key: string; label: string; next_label: string | null; next_at: number | null;
+    to_next: number; progress: number; total: number;
+    ladder: { key: string; label: string; min: number }[];
+  };
   daily: { date: string; orders: number; revenue: number }[];
   top_wholesalers: { id: string; name: string; order_count: number }[];
 }
@@ -279,6 +289,27 @@ function mapAnalytics(raw: ApiAnalytics): AdminAnalytics {
     totalProfit: Number(raw.totals.profit),
     orderCount: Number(raw.totals.orders),
     ordersByStatus: raw.by_status,
+    funnel: (raw.funnel ?? []).map((f) => ({
+      stage: f.stage,
+      pieces: Number(f.pieces),
+      students: Number(f.students),
+    })),
+    headline: {
+      pieces: Number(raw.headline?.pieces ?? 0),
+      bundles: Number(raw.headline?.bundles ?? 0),
+      students: Number(raw.headline?.students ?? 0),
+      inProgress: Number(raw.headline?.in_progress ?? 0),
+    },
+    rank: {
+      key: raw.rank?.key ?? "start",
+      label: raw.rank?.label ?? "",
+      nextLabel: raw.rank?.next_label ?? null,
+      nextAt: raw.rank?.next_at ?? null,
+      toNext: Number(raw.rank?.to_next ?? 0),
+      progress: Number(raw.rank?.progress ?? 0),
+      total: Number(raw.rank?.total ?? 0),
+      ladder: (raw.rank?.ladder ?? []).map((r) => ({ key: r.key, label: r.label, min: r.min })),
+    },
     dailyOrders: raw.daily.map((d) => ({
       date: String(d.date).slice(0, 10),
       count: d.orders,

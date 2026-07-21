@@ -24,12 +24,23 @@ const PRESENCE_TTL_SECONDS = 90;
 const TOTAL_PROVINCES = 18; // Iraq governorates — the conquest denominator
 const OWNER_TITLE_DEFAULT = 'صاحب لولو شوب';
 
-// Owner rank ladder (ego). Climbs on LIFETIME non-cancelled orders. Thresholds
-// are deliberately tunable — adjust to the real lifetime volume if they feel off.
+// Owner rank ladder (ego). Climbs on lifetime RETAIL طلب — direct student orders
+// (bundles, not pieces), which is the growth the owner is actually chasing. The
+// final rung is the stated goal of 3000 retail orders (owner, 2026-07-21).
+//
+// It used to be fed COUNT(*) pieces, which inflated the rank ~3× and made
+// «المتبقّي لرتبة X» a number that was neither orders nor achievable as stated.
 const RANKS = [
-  { key: 'merchant', label: 'تاجر', min: 0 },
-  { key: 'lord', label: 'سيّد الأوشحة', min: 200 },
+  { key: 'start', label: 'البداية', min: 0 },
+  { key: 'merchant', label: 'تاجر', min: 50 },
+  { key: 'trusted', label: 'تاجر موثوق', min: 100 },
+  { key: 'lord', label: 'سيّد الأوشحة', min: 250 },
+  { key: 'master', label: 'أستاذ التخرّج', min: 500 },
+  { key: 'noble', label: 'وجيه الجامعات', min: 750 },
   { key: 'king', label: 'مَلِك التخرّج', min: 1000 },
+  { key: 'emperor', label: 'إمبراطور الأوشحة', min: 1500 },
+  { key: 'titan', label: 'عملاق الموسم', min: 2000 },
+  { key: 'myth', label: 'أيقونة العراق', min: 2500 },
   { key: 'legend', label: 'أسطورة', min: 3000 },
 ];
 function rankFor(total) {
@@ -194,16 +205,24 @@ async function buildLegend(source) {
   const [lifeR, uniR, recDayR, recMonR, datesR, nowR, growR, growSeriesR] = await Promise.all([
     // Lifetime totals.
     query(
+      // UNITS (2026-07-21): total_orders is BUNDLES (طلب) — it used to be COUNT(*)
+      // pieces under an «طلب» label, which read ~3× the real order count and
+      // contradicted /admin. total_pieces is exposed separately as قطعة.
+      // retail_orders (bundles from students with no rep) feeds the rank ladder.
+      // delivered_total was dropped: 0 rows have ever been delivered, so the panel
+      // it fed was a permanent zero (see spec §1.2).
       `SELECT
          COUNT(DISTINCT o.student_id) FILTER (WHERE o.status::text<>'cancelled')::int AS graduates,
-         COUNT(*) FILTER (WHERE o.status::text<>'cancelled')::int AS total_orders,
-         COUNT(*) FILTER (WHERE o.status::text='delivered')::int AS delivered_total,
+         COUNT(DISTINCT COALESCE(o.checkout_group_id, o.id)) FILTER (WHERE o.status::text<>'cancelled')::int AS total_orders,
+         COUNT(*) FILTER (WHERE o.status::text<>'cancelled')::int AS total_pieces,
+         COUNT(DISTINCT COALESCE(o.checkout_group_id, o.id))
+           FILTER (WHERE o.status::text<>'cancelled' AND s.wholesaler_id IS NULL)::int AS retail_orders,
          COALESCE(SUM(o.price) FILTER (WHERE o.status::text<>'cancelled' AND ${SETTLED_MONEY_SQL}),0)::bigint AS revenue_total
        FROM orders o JOIN students s ON s.id=o.student_id WHERE TRUE ${src}`
     ),
     // Universities served — list (trophy wall) + implicit count.
     query(
-      `SELECT s.university_name AS name, COUNT(*)::int AS c
+      `SELECT s.university_name AS name, COUNT(DISTINCT COALESCE(o.checkout_group_id, o.id))::int AS c
        FROM orders o JOIN students s ON s.id=o.student_id
        WHERE o.status::text<>'cancelled' AND s.university_name IS NOT NULL AND s.university_name<>'' ${src}
        GROUP BY s.university_name ORDER BY c DESC LIMIT 40`
@@ -211,7 +230,7 @@ async function buildLegend(source) {
     // Best historical DAY (strictly before today) by order count → record to beat.
     query(
       `SELECT d::text AS d, cnt, rev FROM (
-         SELECT (o.created_at AT TIME ZONE '${TZ}')::date AS d, COUNT(*)::int AS cnt,
+         SELECT (o.created_at AT TIME ZONE '${TZ}')::date AS d, COUNT(DISTINCT COALESCE(o.checkout_group_id, o.id))::int AS cnt,
                 COALESCE(SUM(o.price) FILTER (WHERE ${SETTLED_MONEY_SQL}),0)::bigint AS rev
          FROM orders o JOIN students s ON s.id=o.student_id
          WHERE o.status::text<>'cancelled'
@@ -222,7 +241,7 @@ async function buildLegend(source) {
     // Best MONTH by order count.
     query(
       `SELECT to_char(m,'YYYY-MM') AS ym, cnt FROM (
-         SELECT date_trunc('month', o.created_at AT TIME ZONE '${TZ}') AS m, COUNT(*)::int AS cnt
+         SELECT date_trunc('month', o.created_at AT TIME ZONE '${TZ}') AS m, COUNT(DISTINCT COALESCE(o.checkout_group_id, o.id))::int AS cnt
          FROM orders o JOIN students s ON s.id=o.student_id
          WHERE o.status::text<>'cancelled' ${src}
          GROUP BY m
@@ -241,12 +260,13 @@ async function buildLegend(source) {
     query(
       `WITH t AS (SELECT (NOW() AT TIME ZONE '${TZ}') AS now_local)
        SELECT
-         COUNT(*) FILTER (WHERE z.yr = EXTRACT(YEAR FROM t.now_local))::int AS this_year,
-         COUNT(*) FILTER (WHERE z.yr = EXTRACT(YEAR FROM t.now_local) - 1)::int AS last_year,
+         COUNT(DISTINCT z.bkey) FILTER (WHERE z.yr = EXTRACT(YEAR FROM t.now_local))::int AS this_year,
+         COUNT(DISTINCT z.bkey) FILTER (WHERE z.yr = EXTRACT(YEAR FROM t.now_local) - 1)::int AS last_year,
          COALESCE(SUM(z.price) FILTER (WHERE z.billable AND z.yr = EXTRACT(YEAR FROM t.now_local)),0)::bigint AS this_year_rev,
          COALESCE(SUM(z.price) FILTER (WHERE z.billable AND z.yr = EXTRACT(YEAR FROM t.now_local) - 1),0)::bigint AS last_year_rev
        FROM (
-         SELECT o.price, EXTRACT(YEAR FROM (o.created_at AT TIME ZONE '${TZ}'))::int AS yr,
+         SELECT o.price, COALESCE(o.checkout_group_id, o.id) AS bkey,
+                EXTRACT(YEAR FROM (o.created_at AT TIME ZONE '${TZ}'))::int AS yr,
                 EXTRACT(DOY FROM (o.created_at AT TIME ZONE '${TZ}'))::int AS doy,
                 ${SETTLED_MONEY_SQL} AS billable
          FROM orders o JOIN students s ON s.id=o.student_id
@@ -258,7 +278,7 @@ async function buildLegend(source) {
     query(
       `SELECT EXTRACT(YEAR FROM (o.created_at AT TIME ZONE '${TZ}'))::int AS yr,
               EXTRACT(MONTH FROM (o.created_at AT TIME ZONE '${TZ}'))::int AS mon,
-              COUNT(*)::int AS cnt
+              COUNT(DISTINCT COALESCE(o.checkout_group_id, o.id))::int AS cnt
        FROM orders o JOIN students s ON s.id=o.student_id
        WHERE o.status::text<>'cancelled' ${src}
          AND o.created_at >= (date_trunc('year', NOW() AT TIME ZONE '${TZ}') - INTERVAL '1 year')
@@ -270,8 +290,9 @@ async function buildLegend(source) {
   const universities = uniR.rows.map((r) => ({ name: r.name, count: r.c }));
   const lifetime = {
     graduates: lf.graduates || 0,
-    total_orders: lf.total_orders || 0,
-    delivered_total: lf.delivered_total || 0,
+    total_orders: lf.total_orders || 0,   // طلب  (bundles)
+    total_pieces: lf.total_pieces || 0,   // قطعة (order rows)
+    retail_orders: lf.retail_orders || 0, // طلب تجزئة — feeds the rank ladder
     revenue_total: Number(lf.revenue_total || 0),
     universities_count: universities.length,
     universities, // trophy-wall list
@@ -316,7 +337,8 @@ async function buildLegend(source) {
     series: MONTHS_AR.map((m, i) => ({ label: m, this_year: thisArr[i], last_year: lastArr[i] })),
   };
 
-  const data = { lifetime, records, growth, rank: rankFor(lifetime.total_orders) };
+  // Rank climbs on RETAIL طلب (owner goal: 3000), not on total pieces.
+  const data = { lifetime, records, growth, rank: rankFor(lifetime.retail_orders) };
   _legendCache.set(ck, { at: Date.now(), data });
   return data;
 }
@@ -335,19 +357,18 @@ async function buildSnapshot(source, range) {
     query(
       `WITH t AS (SELECT (NOW() AT TIME ZONE '${TZ}')::date AS d)
        SELECT
-         COUNT(*) FILTER (WHERE cl = (SELECT d FROM t))::int AS orders_today,
+         COUNT(DISTINCT bkey) FILTER (WHERE cl = (SELECT d FROM t))::int AS orders_today,
+         COUNT(*) FILTER (WHERE cl = (SELECT d FROM t))::int AS pieces_today,
          COALESCE(SUM(price) FILTER (WHERE cl = (SELECT d FROM t)),0)::bigint AS revenue_today,
          COALESCE(SUM(profit) FILTER (WHERE cl = (SELECT d FROM t)),0)::bigint AS profit_today,
-         COUNT(*) FILTER (WHERE cl = (SELECT d FROM t) - 1)::int AS orders_yday,
-         COALESCE(SUM(revenue_yday_price) ,0)::bigint AS revenue_yday,
-         COUNT(*) FILTER (WHERE dl = (SELECT d FROM t))::int AS delivered_today,
-         COUNT(*) FILTER (WHERE dl = (SELECT d FROM t) - 1)::int AS delivered_yday
+         COUNT(DISTINCT bkey) FILTER (WHERE cl = (SELECT d FROM t) - 1)::int AS orders_yday,
+         COALESCE(SUM(revenue_yday_price) ,0)::bigint AS revenue_yday
        FROM (
          SELECT
+                COALESCE(o.checkout_group_id, o.id) AS bkey,
                 CASE WHEN ${SETTLED_MONEY_SQL} THEN o.price ELSE 0 END AS price,
                 CASE WHEN ${SETTLED_MONEY_SQL} THEN o.profit ELSE 0 END AS profit,
                 (o.created_at AT TIME ZONE '${TZ}')::date AS cl,
-                (o.delivered_at AT TIME ZONE '${TZ}')::date AS dl,
                 CASE WHEN ${SETTLED_MONEY_SQL}
                        AND (o.created_at AT TIME ZONE '${TZ}')::date = (NOW() AT TIME ZONE '${TZ}')::date - 1
                      THEN o.price ELSE 0 END AS revenue_yday_price
@@ -405,7 +426,7 @@ async function buildSnapshot(source, range) {
     ),
     // Conquest map — orders per governorate.
     query(
-      `SELECT cg.governorate, COUNT(*)::int AS c
+      `SELECT cg.governorate, COUNT(DISTINCT COALESCE(o.checkout_group_id, o.id))::int AS c
        FROM orders o JOIN students s ON s.id = o.student_id
        JOIN checkout_groups cg ON cg.id = o.checkout_group_id
        WHERE cg.governorate IS NOT NULL AND o.status::text <> 'cancelled' ${src}
@@ -414,7 +435,8 @@ async function buildSnapshot(source, range) {
     // Deadline wall (source-agnostic — batches are cohort-level).
     query(
       `SELECT b.id, b.name_ar, b.deadline,
-              COUNT(o.id) FILTER (WHERE o.status::text NOT IN ('delivered','cancelled'))::int AS open_orders
+              COUNT(DISTINCT COALESCE(o.checkout_group_id, o.id))
+                FILTER (WHERE o.status::text NOT IN ('delivered','cancelled'))::int AS open_orders
        FROM batches b
        LEFT JOIN orders o ON o.batch_id = b.id
        WHERE b.deadline IS NOT NULL
@@ -446,20 +468,16 @@ async function buildSnapshot(source, range) {
     ),
     // Graph: orders-in vs delivered, bucketed.
     query(
-      `SELECT bucket, kind, COUNT(*)::int AS c FROM (
-         SELECT 'in' AS kind, ${byHour
+      // الطلبات الواردة, counted in BUNDLES (طلب). The old query also emitted a
+      // 'done' series keyed on delivered_at — permanently empty (0 rows have ever
+      // been delivered), so it was dropped rather than shipped as a flat zero line.
+      `SELECT bucket, kind, COUNT(DISTINCT bkey)::int AS c FROM (
+         SELECT 'in' AS kind, COALESCE(o.checkout_group_id, o.id) AS bkey, ${byHour
         ? `to_char(o.created_at AT TIME ZONE '${TZ}','YYYY-MM-DD"T"HH24:00')`
         : `(o.created_at AT TIME ZONE '${TZ}')::date::text`} AS bucket
          FROM orders o JOIN students s ON s.id = o.student_id
          WHERE o.status::text <> 'cancelled'
            AND o.created_at >= (NOW() AT TIME ZONE '${TZ}')::date - INTERVAL '${days - 1} days' ${src}
-         UNION ALL
-         SELECT 'done' AS kind, ${byHour
-        ? `to_char(o.delivered_at AT TIME ZONE '${TZ}','YYYY-MM-DD"T"HH24:00')`
-        : `(o.delivered_at AT TIME ZONE '${TZ}')::date::text`} AS bucket
-         FROM orders o JOIN students s ON s.id = o.student_id
-         WHERE o.delivered_at IS NOT NULL
-           AND o.delivered_at >= (NOW() AT TIME ZONE '${TZ}')::date - INTERVAL '${days - 1} days' ${src}
        ) z GROUP BY bucket, kind`
     ),
     // Graph: revenue / profit, bucketed (on created_at).
@@ -511,8 +529,7 @@ async function buildSnapshot(source, range) {
     revenue_today: Number(k.revenue_today || 0),
     revenue_delta: pct(Number(k.revenue_today || 0), Number(k.revenue_yday || 0)),
     profit_today: Number(k.profit_today || 0),
-    delivered_today: k.delivered_today || 0,
-    delivered_delta: pct(k.delivered_today || 0, k.delivered_yday || 0),
+    pieces_today: k.pieces_today || 0,
   };
 
   // --- pipeline + bottleneck ---
@@ -564,10 +581,10 @@ async function buildSnapshot(source, range) {
     // last `days` dates ending today (Baghdad) — computed in JS from server clock is unsafe across TZ,
     // so derive labels from the data union below instead.
   }
-  const inMap = {}, doneMap = {}, revMap = {}, profMap = {}, prodMap = {};
+  const inMap = {}, revMap = {}, profMap = {}, prodMap = {};
   gIn.rows.forEach((r) => {
     const label = byHour ? r.bucket.slice(11, 13) : r.bucket;
-    if (r.kind === 'in') inMap[label] = r.c; else doneMap[label] = r.c;
+    if (r.kind === 'in') inMap[label] = r.c;
   });
   gMoney.rows.forEach((r) => {
     const label = byHour ? r.bucket.slice(11, 13) : r.bucket;
@@ -581,12 +598,11 @@ async function buildSnapshot(source, range) {
   const labels = byHour
     ? buckets
     : Array.from(new Set([
-        ...Object.keys(inMap), ...Object.keys(doneMap), ...Object.keys(revMap), ...Object.keys(prodMap),
+        ...Object.keys(inMap), ...Object.keys(revMap), ...Object.keys(prodMap),
       ])).sort();
   const series = labels.map((lb) => ({
     label: lb,
     orders_in: inMap[lb] || 0,
-    done: doneMap[lb] || 0,
     revenue: revMap[lb] || 0,
     profit: profMap[lb] || 0,
     productivity: prodMap[lb] || 0,
@@ -625,7 +641,9 @@ async function buildSnapshot(source, range) {
       actor: r.actor_name, student: r.student_name, product: r.product_name, source: r.source,
     })),
     graphs: { byHour, series, universities: gUni.rows.map((r) => ({ name: r.name, count: r.c })) },
-    goal: { target: dailyGoal, done_today: kpis.delivered_today },
+    // done_today = قطع أُنجزت اليوم (status_change actions), NOT deliveries: 0 orders
+    // have ever been marked مُسلَّم, so the old delivered-based bar could never move.
+    goal: { target: dailyGoal, done_today: staff.reduce((n, r) => n + (r.done_today || 0), 0) },
     settings: {
       daily_goal: dailyGoal,
       bottleneck_threshold: threshold,
@@ -705,4 +723,6 @@ module.exports = {
   keyGate, snapshot, events, updateSettings,
   // money-gate helpers (shared with adminController; do NOT expose money themselves)
   moneyRevealOk, moneyGateConfigured, setMoneyGate, MONEY_GATE_KEY,
+  // rank ladder — shared so /admin shows the SAME rung as the TV (owner, 2026-07-21)
+  RANKS, rankFor,
 };

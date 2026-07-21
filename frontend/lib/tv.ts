@@ -8,6 +8,8 @@ export type Source = "all" | "wholesaler" | "retail";
 export type Range = "today" | "7" | "30";
 
 export interface TvKpis {
+  // orders_today is BUNDLES (checkout_group_id) — a human's "order". pieces_today
+  // is the raw orders-row count (قطعة). Both are worth showing side by side.
   orders_today: number;
   orders_delta: number;
   // Money fields are STRIPPED to null by the backend unless a correct reveal
@@ -16,8 +18,7 @@ export interface TvKpis {
   revenue_today: number | null;
   revenue_delta: number | null;
   profit_today: number | null;
-  delivered_today: number;
-  delivered_delta: number;
+  pieces_today: number;
 }
 export interface TvStaff {
   id: string;
@@ -33,8 +34,10 @@ export interface TvStaff {
 }
 export interface TvSeriesPoint {
   label: string;
+  // Bundles (طلب) created in this bucket. There is no "done"/delivered series —
+  // 0 orders have ever reached `delivered`, so that line was permanently zero
+  // and was dropped rather than shipped as a flat line (spec §1.2).
   orders_in: number;
-  done: number;
   revenue: number | null; // null unless money_visible
   profit: number | null; // null unless money_visible
   productivity: number;
@@ -77,8 +80,9 @@ export interface TvSnapshot {
   audience?: { now: number };
   lifetime?: {
     graduates: number;
-    total_orders: number;
-    delivered_total: number;
+    total_orders: number; // bundles (طلب) — a checkout_group_id
+    total_pieces: number; // raw order rows (قطعة)
+    retail_orders: number; // retail bundles (طلب تجزئة) — feeds the rank ladder
     revenue_total: number | null; // null unless money_visible
     universities_count: number;
     universities: { name: string; count: number }[];

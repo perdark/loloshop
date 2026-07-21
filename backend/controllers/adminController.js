@@ -4,10 +4,11 @@ const { DEFAULT_ADDONS, normalizeSettlementAddons } = require('../lib/fullSetOrd
 const { normalizeIqPhone } = require('../lib/otp');
 const { setBundleApproval, notifyUser } = require('../lib/orderApproval');
 const memoCache = require('../lib/memoCache');
+const counts = require('../lib/counts');
 // Money-gate reveal logic lives in tvBoardController (single source of truth for the
 // 'money_gate' site_settings row + the sha256 compare). No circular dep: tvBoardController
 // requires only lib/*, never adminController.
-const { moneyRevealOk, moneyGateConfigured, setMoneyGate } = require('./tvBoardController');
+const { moneyRevealOk, moneyGateConfigured, setMoneyGate, rankFor, RANKS } = require('./tvBoardController');
 const { assertPasswordOk } = require('../lib/password');
 const { revokeUserDevices } = require('../lib/trustedDevice');
 
@@ -68,12 +69,19 @@ async function analytics(req, res) {
   // active order (incl. pending/rejected rep bundles awaiting approval) so WIP isn't
   // understated. Only the MONEY aggregates (totals/topWholesalers/accounting) stay on
   // billableOrderSql — this is the one place that deliberately does NOT gate on approval.
-  const byStatus = await query(
-    `SELECT o.status, COUNT(*)::int AS count
-     FROM orders o
-     WHERE o.status <> 'cancelled'
-     GROUP BY o.status`
-  );
+  //
+  // UNITS (2026-07-21): the funnel is counted in PIECES (قطعة) because only pieces have a
+  // stage — 76% of bundles span 2-3 statuses at once, so a bundle funnel overcounted by 79%.
+  // `students` rides along as a MEMBERSHIP count (a student with pieces in two stages is in
+  // both rows); it deliberately does NOT sum to totals.students. See lib/counts.js.
+  const scope = counts.buildScope();
+  const [funnel, headline, retailOrders] = await Promise.all([
+    counts.stageFunnel(scope),
+    counts.summary(scope),
+    // The rank ladder climbs on RETAIL طلب (owner goal: 3000). Same ladder the TV
+    // board shows, so the two screens can never disagree about the current rung.
+    counts.countBundles(counts.buildScope({ source: 'retail' })),
+  ]);
   const daily = await query(
     `SELECT DATE(o.created_at AT TIME ZONE 'Asia/Baghdad') AS date,
             COUNT(DISTINCT COALESCE(o.checkout_group_id, o.id))::int AS orders,
@@ -95,11 +103,16 @@ async function analytics(req, res) {
      GROUP BY w.id, u.name
      ORDER BY order_count DESC LIMIT 5`
   );
+  // by_status stays for backward compatibility (pieces, as it always was); `funnel`
+  // is the new dual-unit shape the dashboard renders.
   const status = {};
-  byStatus.rows.forEach((r) => (status[r.status] = r.count));
+  funnel.forEach((r) => (status[r.stage] = r.pieces));
   res.json({
     totals: totals.rows[0],
     by_status: status,
+    funnel,
+    headline,
+    rank: { ...rankFor(retailOrders), ladder: RANKS },
     daily: daily.rows,
     top_wholesalers: topWholesalers.rows,
   });

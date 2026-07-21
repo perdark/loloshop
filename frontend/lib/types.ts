@@ -73,8 +73,31 @@ export interface AdminAnalytics {
   totalRevenue: number;
   totalCost: number;
   totalProfit: number;
+  /** طلب — bundles (checkout groups), NOT order rows. */
   orderCount: number;
+  /** Pieces per stage. Kept for backward compatibility; prefer `funnel`. */
   ordersByStatus: Record<string, number>;
+  /** Stage funnel in both units. `pieces` sums to headline.pieces; `students` is a
+   *  membership count per stage and deliberately does NOT sum to headline.students. */
+  funnel: { stage: string; pieces: number; students: number }[];
+  headline: {
+    pieces: number;    // قطعة
+    bundles: number;   // طلب
+    students: number;  // طالب
+    inProgress: number; // طلب with at least one piece not yet جاهز
+  };
+  /** Owner rank ladder — climbs on RETAIL طلب, final rung 3000. Same ladder the
+   *  TV board renders, so the two screens can never show a different rung. */
+  rank: {
+    key: string;
+    label: string;
+    nextLabel: string | null;
+    nextAt: number | null;
+    toNext: number;
+    progress: number;
+    total: number;
+    ladder: { key: string; label: string; min: number }[];
+  };
   dailyOrders: { date: string; count: number; revenue: number }[];
   topWholesalers: {
     id: string;
