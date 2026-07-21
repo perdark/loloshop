@@ -27,6 +27,10 @@ import {
   type TailorOrderRow,
 } from "@/lib/staff";
 import type { ProductionQueueItem, StationZone } from "@/lib/staff-types";
+// رف التجهيز: after الكوي pushes a piece to التجهيز, offer its خانة immediately (D6).
+// The advance has ALREADY succeeded when this opens — shelving is never a blocker.
+import { getShelfBoard, placePiece, type ShelfBoard, type ShelfInboxItem } from "@/lib/shelf";
+import { PlaceSheet } from "@/components/staff/shelf/PlaceSheet";
 import { PRODUCT_TYPE_LABELS, STUDY_TYPE_LABELS } from "@/lib/constants";
 import { usePolling } from "@/lib/hooks/usePolling";
 import { useProductionEvents } from "@/hooks/useProductionEvents";
@@ -214,6 +218,10 @@ export function StationConsole({
   );
   const [busyKeys, setBusyKeys] = useState<Set<string>>(new Set());
   const [bulkLoading, setBulkLoading] = useState(false);
+  // رف التجهيز hand-off state (الكوي only — stays null for التطريز/الفصال).
+  const [shelfPrompt, setShelfPrompt] = useState<ShelfInboxItem | null>(null);
+  const [shelfBoard, setShelfBoard] = useState<ShelfBoard | null>(null);
+  const [shelfBusy, setShelfBusy] = useState(false);
   const [reopeningId, setReopeningId] = useState<string | null>(null);
   const [advanced, setAdvanced] = useState<Map<string, AdvancedGhost>>(new Map());
   const [openStudentKey, setOpenStudentKey] = useState<string | null>(
@@ -457,6 +465,36 @@ export function StationConsole({
     }
   }
 
+  // ── رف التجهيز hand-off (الكوي only) ──────────────────────────────────────
+  // Fetches the board so the sheet can show the suggested خانة and let the worker pick
+  // a different one. A failure here is silent on purpose: the advance already worked, and
+  // an un-shelved piece is not lost — it lands in التجهيز's «وصلت توّا» inbox (D4/D6).
+  async function offerShelfPlacement(orderId: string) {
+    try {
+      const board = await getShelfBoard();
+      const item = board.inbox.find((i) => i.order_id === orderId);
+      if (!item) return;
+      setShelfBoard(board);
+      setShelfPrompt(item);
+    } catch {
+      /* shelving is optional — never block the presser */
+    }
+  }
+
+  async function confirmShelfPlacement(target?: { shelf_code: string; slot_index: number }) {
+    if (!shelfPrompt) return;
+    setShelfBusy(true);
+    try {
+      const res = await placePiece(shelfPrompt.order_id, target);
+      toast.success(`${shelfPrompt.piece_label} → الخانة ${res.slot_code}`);
+      setShelfPrompt(null);
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "تعذر تسكين القطعة"));
+    } finally {
+      setShelfBusy(false);
+    }
+  }
+
   async function completePiece(piece: StationPiece) {
     markBusy(piece.id, true);
     try {
@@ -468,6 +506,12 @@ export function StationConsole({
         const res = await advanceOrder(piece.id);
         finishPiece(piece, advancedLabelFor(res.status));
         toast.success(`«${piece.productName}» — ${advancedLabelFor(res.status)}`);
+        // الكوي → التجهيز: the piece now needs a خانة. Ask where to put it while the
+        // worker still has it in hand. Retail-only, so a rep piece simply won't appear
+        // in the board's inbox and no sheet opens.
+        if (kind === "pressing" && res.status === "preparing") {
+          void offerShelfPlacement(piece.id);
+        }
       }
     } catch (err) {
       toast.error(getApiErrorMessage(err, "تعذر إكمال القطعة"));
@@ -941,6 +985,20 @@ export function StationConsole({
       {lightbox && (
         <Lightbox url={lightbox.url} title={lightbox.title} onClose={() => setLightbox(null)} />
       )}
+
+      {/* رف التجهيز — «وين نحطها؟» right after الكوي pushes the piece to التجهيز. */}
+      <PlaceSheet
+        open={!!shelfPrompt}
+        pieceLabel={shelfPrompt?.piece_label ?? ""}
+        studentName={shelfPrompt?.student_name ?? ""}
+        pieceType={shelfPrompt?.piece_type ?? ""}
+        suggestion={shelfPrompt?.suggestion ?? null}
+        board={shelfBoard}
+        busy={shelfBusy}
+        onConfirm={confirmShelfPlacement}
+        onSkip={() => setShelfPrompt(null)}
+        onClose={() => setShelfPrompt(null)}
+      />
     </div>
   );
 }
