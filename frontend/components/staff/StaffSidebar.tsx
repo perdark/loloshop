@@ -99,6 +99,7 @@ function getNavLinks(staffTypes: StaffType[], isAdmin: boolean): NavLink[] {
       { href: "/staff/queue", label: "جميع الطلبات", icon: iconClipboard(), prefix: true },
       { href: "/staff/custom-order", label: "طلب مخصص", icon: iconClipboard(), prefix: true },
       { href: "/staff/tailor", label: "الفصال", icon: iconScissors(), prefix: true },
+      { href: "/staff/shelf", label: "رف التجهيز", icon: iconClipboard(), prefix: true },
     ];
   }
   // Every production-role staffer also gets the live production console — the same
@@ -121,6 +122,16 @@ function getNavLinks(staffTypes: StaffType[], isAdmin: boolean): NavLink[] {
     // Legacy/unknown role: generic board. A PURE tailor skips /staff entirely —
     // that page redirects them to /staff/tailor, so the link would be a bounce.
     links.push({ href: "/staff", label: "لوحة الطلبات", icon: iconClipboard() });
+  }
+  // رف التجهيز — the preparer packs from it; the presser shelves into it right after الكوي.
+  // Shown to either role (the backend scopes the board itself).
+  if (staffTypes.includes("preparer") || staffTypes.includes("presser")) {
+    links.push({
+      href: "/staff/shelf",
+      label: "رف التجهيز",
+      icon: iconClipboard(),
+      prefix: true,
+    });
   }
   if (staffTypes.includes("tailor")) {
     // مفصل (ابو عبدو): the parallel «الفصال» console — a retail-only tailoring to-do
