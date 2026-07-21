@@ -6,6 +6,74 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
+## 2026-07-21 (b) — ✅ PUSHED: قطعة · طلب · طالب — one unit vocabulary · TV board rebuilt · dead delivery panels deleted
+
+**Pushed to main (`303c9f0`) → auto-deploys.** No new migration (069+070 ride along from the earlier sessions;
+`scripts/deploy.sh` runs `npm run migrate` at line 17 BEFORE `pm2 reload` at line 23, so the ordering hazard is
+handled automatically). Gates: **backend tests 72/72** (7 new) · `tsc` 0 · `eslint` 0 errors · live HTTP against
+`/api/admin/analytics` + `/api/tv/snapshot` · browser-verified on `/admin` and `/tv`.
+Spec: `docs/superpowers/specs/2026-07-21-counts-units-design.md`.
+
+**The report.** «The numbers for admin/wholesaler/staff and at TV have bad UI/UX and bad logic — nobody understands
+how many students or orders or pieces they have. I don't want to add a clarify, I want to debug and solve it.»
+
+**What was actually wrong (measured on the dev DB, not guessed).** An `orders` row is one PIECE; the bundle
+(`checkout_group_id`) is what a human calls an order. Both were labelled «طلب»: **1727 pieces / 578 bundles /
+553 students** — the same shop read as 1727 «طلب» on the TV and 578 on `/admin`. An audit of **56 counts found
+~25 label/SQL mismatches**.
+
+**The structural error: a bundle has no status.** 76% of bundles span 2-3 statuses at once (وشاح at التطريز while
+the قبعة is still بانتظار التصميم), so per-stage bundle counts summed to **1035 against a real 578 — a 79%
+overcount** that could never reconcile. Pieces sum exactly (1023+475+107+107+9+6 = 1727).
+
+**The second finding — the pipeline has no exit.** 1727 pieces created since 2026-06-23, **6** reached «جاهز»,
+**0** ever marked «مُسلَّم** (0 audit rows; `delivered_at`/`delivered_by` never written). Every TV panel measuring
+delivery was a permanent zero **including the هدف اليوم goal bar, which could never move**.
+
+**Owner decisions locked (2026-07-21):** «طلب» = the bundle · «قطعة» = the piece · «طالب» = the person, never
+interchangeable (note «طقم» was rejected — it already means the full-set package). Funnel shows both columns.
+Hero = work-remaining per role. **«جاهز» is the finish line for now**; dead مُسلَّم panels are DELETED, not
+relabelled. Rank ladder measures **retail طلب** with the owner's **3000 goal**. Thresholds keep their stored
+values as pieces. **Scope this pass = admin + TV only.**
+
+**What shipped.**
+- **NEW `backend/lib/counts.js`** — sole owner of every order count (`countPieces/Bundles/Students`,
+  `countBundlesInProgress`, `stageFunnel`, `summary`, parameterised `buildScope`). `COALESCE(checkout_group_id, id)`
+  now lives in ONE file instead of the ~15 it was copy-pasted across. **Money/settlement queries deliberately untouched.**
+- **NEW `frontend/components/ui/Count.tsx`** — `unit` is a **required** prop, so a new screen physically cannot
+  render a unitless number and invent a fourth meaning. Handles Arabic singular/dual/plural.
+- **`/admin`:** hero «طلب قيد التنفيذ» (any piece not yet جاهز) + secondary «إجمالاً · قطعة · طالب»; stage chart
+  relabelled to قطعة with a second thin bar «طلاب لديهم قطعة هنا» **named in the legend** so it can never be summed;
+  **the disclaimer at the old `page.tsx:462-463` — which documented the mismatch instead of fixing it — is deleted**;
+  money-ledger count relabelled **«طلبات محتسبة»** to name its settlement scope (492) against the operational hero (578).
+- **`/tv`:** ~17 counts re-sourced to bundles (lifetime, KPIs, best day/month, YoY, universities, governorate,
+  deadlines, orders-in graph); `pipeline.wip` left as pieces (it was already correct). Delivered tiles + the
+  always-empty «مُسلَّم» series **removed**. **Goal bar now measures pieces advanced today (status_change actions),
+  so it actually moves** — was hard-wired to deliveries and stuck at 0 forever.
+- **Rank ladder rebuilt:** was fed `COUNT(*)` pieces, inflating the rank ~3×. Now retail bundles, **11 rungs
+  (البداية → أسطورة) topping out at the owner's 3000**, and **mirrored onto `/admin`** via a shared exported
+  `rankFor()` so the two screens can never disagree. Live: تاجر موثوق, 218 retail, 32 to سيّد الأوشحة, 79%.
+- Also fixed: the station sheet's «التفاصيل» link was a ~24px tap target (`text-[11px]`/`py-1`) on the iPad+phone
+  the stations run on — now `min-h-11` (`86e1d28`).
+
+### Open follow-ups
+- **Pass 2 — rep + staff screens still use the old wording.** Until then «طلب» means the bundle on `/admin` and
+  something looser on `/staff`. Worst known case: admin says a rep has 40 «طلب» (bundles, `adminController.js:540`)
+  while `app/staff/queue/page.tsx:599` says 118 «طلب» (pieces) for the same rep.
+- **Known limitation (documented in spec §6c):** date-bucketed bundle counts (best day, best month, YoY graph)
+  count a bundle once per bucket its pieces fall into, so the monthly series sums to **592 vs a true 578** (~2.4%).
+  Fix = date each bundle by its first piece (`DISTINCT ON … ORDER BY created_at`) across 4 queries. Headline
+  figures unaffected.
+- **The delivery step is still not part of anyone's workflow.** `FINISHED_STATUSES` in `lib/counts.js` already
+  includes `delivered`; if the رف collect flow becomes the real handover, point «قيد التنفيذ» at it. Until then
+  the hero reads 577/578 because almost nothing is ever closed — **honest, but not yet actionable.**
+- Latent, untouched: `batchController.js` ships `order_count` twice with different units (`:48` bundles, `:97`
+  pieces) in one response; `wholesalerController.js:36` `pending_count` counts students but reads as orders.
+- **`frontend/public/dev-login.html` is deliberately left UNTRACKED** — it is a dev localStorage-token helper and
+  `public/` is served in prod. Do not commit it.
+
+---
+
 ## 2026-07-21 — Calligraphy: «تجزئة» review-before-generate board · retail made visible at all · draft no longer lost on navigation
 
 **Uncommitted on main.** Migration **069 applied to the laptop dev DB** (`ALTER TYPE calligraphy_source ADD VALUE 'retail'`,
