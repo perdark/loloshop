@@ -95,14 +95,21 @@ export interface ShelfInboxItem {
   suggestion: ShelfSuggestion | null;
 }
 
-/** Collecting advances the piece to «جاهز» and it leaves the shelf — this is the undo surface. */
-export interface ShelfRecentItem {
+/** A piece taken off the shelf. Collecting advances it to «جاهز», so it leaves every other list. */
+export interface ShelfCollectedItem {
   order_id: string;
+  set_key: string;
+  student_id: string;
   student_name: string;
   piece_type: PieceType;
   piece_label: string;
+  /** The خانة it came out of. */
   slot_code: string | null;
   collected_at: string;
+  status: string;
+  stage_ar: string;
+  /** Undo is only offered before the piece is handed over (still at ready). */
+  can_undo: boolean;
 }
 
 export interface ShelfBoard {
@@ -110,7 +117,7 @@ export interface ShelfBoard {
   shelves: Shelf[];
   sets: ShelfSet[];
   inbox: ShelfInboxItem[];
-  recent: ShelfRecentItem[];
+  collected: ShelfCollectedItem[];
 }
 
 export interface PlaceResult {

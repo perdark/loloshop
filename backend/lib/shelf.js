@@ -540,37 +540,45 @@ async function buildBoard() {
     return { code, sections: shelfSections, slots };
   });
 
-  // ---- Recently collected («جُمعت توّا») ----
-  // Collecting advances the piece to «جاهز للاستلام», which removes it from the shelf and
-  // from every list above — so without this there is NO way to undo a mis-tap. These rows
-  // are the undo surface: still at ready, collected in the last 12h. Undo itself goes
-  // through the ordinary revert endpoint (the state machine stays the single source).
-  const recentRes = await query(
-    `SELECT o.id, o.status, p.type AS piece_type, u.name AS student_name,
+  // ---- Collected («جُمعت») ----
+  // Everything ever taken off this shelf, newest first, grouped per student by the caller.
+  // Collecting advances the piece to «جاهز للاستلام» so it leaves the shelf and every list
+  // above — without this there would be no record of it and no way back from a mis-tap.
+  // Undo goes through the ordinary revert endpoint (the state machine stays the single
+  // source), so it is only offered while the piece is still at ready — once handed to the
+  // student (delivered) it is history, not a mistake to correct.
+  const collectedRes = await query(
+    `SELECT o.id, o.status, o.checkout_group_id, o.student_id,
+            p.type AS piece_type, u.name AS student_name,
             sp.collected_at, so.shelf_code, so.slot_index
        FROM shelf_placements sp
-       JOIN orders o   ON o.id = sp.order_id
+       JOIN orders o    ON o.id  = sp.order_id
        JOIN students st ON st.id = o.student_id
-       JOIN products p ON p.id = o.product_id
+       JOIN products p  ON p.id  = o.product_id
        LEFT JOIN users u ON u.id = st.user_id
        LEFT JOIN shelf_slot_occupancy so ON so.id = sp.occupancy_id
       WHERE sp.collected_at IS NOT NULL
-        AND sp.collected_at >= now() - interval '12 hours'
-        AND o.status = 'ready'
         AND st.wholesaler_id IS NULL
+        AND o.status NOT IN ('cancelled')
       ORDER BY sp.collected_at DESC
-      LIMIT 30`
+      LIMIT 300`
   );
-  const recent = recentRes.rows.map((r) => ({
+  const collected = collectedRes.rows.map((r) => ({
     order_id: r.id,
+    set_key: setKeyOf(r),
+    student_id: r.student_id,
     student_name: r.student_name || 'طالب',
     piece_type: r.piece_type,
     piece_label: PIECE_LABEL_AR[r.piece_type] || r.piece_type,
     slot_code: r.shelf_code ? slotCode(r.shelf_code, Number(r.slot_index)) : null,
     collected_at: r.collected_at,
+    status: r.status,
+    stage_ar: STAGE_AR[r.status] || (r.status === 'delivered' ? 'تم التسليم' : r.status),
+    // Undo is only meaningful before the piece leaves the building.
+    can_undo: r.status === 'ready',
   }));
 
-  return { sections, shelves, sets, inbox, recent };
+  return { sections, shelves, sets, inbox, collected };
 }
 
 module.exports = {

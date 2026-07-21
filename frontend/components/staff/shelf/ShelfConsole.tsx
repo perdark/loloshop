@@ -35,6 +35,17 @@ interface Persisted {
   showAllInbox?: boolean;
 }
 
+/** Short Arabic relative time — a collected list is scanned, not read. */
+function timeAgo(iso: string): string {
+  const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 1) return "الآن";
+  if (mins < 60) return `قبل ${mins} د`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `قبل ${hrs} س`;
+  const days = Math.round(hrs / 24);
+  return `قبل ${days} ي`;
+}
+
 function readPersisted(): Persisted {
   if (typeof window === "undefined") return {};
   try {
@@ -87,6 +98,39 @@ export function ShelfConsole() {
     [board],
   );
   const waitingCount = (board?.sets ?? []).length - readySets.length;
+
+  // Collected pieces grouped per student (bundle), newest group first. Grouping matters:
+  // a student's robe/cap/شال were collected seconds apart, and three separate rows would
+  // read as three separate events instead of one packed طرد.
+  const collectedGroups = useMemo(() => {
+    const groups = new Map<
+      string,
+      {
+        set_key: string;
+        student_name: string;
+        pieces: NonNullable<typeof board>["collected"];
+        allDelivered: boolean;
+        latest: number;
+      }
+    >();
+    for (const c of board?.collected ?? []) {
+      let g = groups.get(c.set_key);
+      if (!g) {
+        g = {
+          set_key: c.set_key,
+          student_name: c.student_name,
+          pieces: [],
+          allDelivered: true,
+          latest: 0,
+        };
+        groups.set(c.set_key, g);
+      }
+      g.pieces.push(c);
+      if (c.status !== "delivered") g.allDelivered = false;
+      g.latest = Math.max(g.latest, new Date(c.collected_at).getTime());
+    }
+    return [...groups.values()].sort((a, b) => b.latest - a.latest);
+  }, [board]);
 
   const inbox = board?.inbox ?? [];
   const shownInbox = showAllInbox ? inbox : inbox.slice(0, 12);
@@ -311,42 +355,6 @@ export function ShelfConsole() {
         )}
       </section>
 
-      {/* ── جُمعت توّا — the undo surface ────────────────────────── */}
-      {(board?.recent?.length ?? 0) > 0 ? (
-        <section className="mb-6">
-          <h2 className="mb-2 text-base font-black text-[#1A1A1A]">
-            جُمعت توّا{" "}
-            <span className="text-xs font-normal text-[#6b6356]">
-              — ضغطت «جمعها» غلط؟ رجّعها
-            </span>
-          </h2>
-          <div className="flex flex-wrap gap-2">
-            {board!.recent.map((r) => (
-              <div
-                key={r.order_id}
-                className="flex items-center gap-2 rounded-full border border-[#ded6c8] bg-white py-1 pe-1 ps-3"
-              >
-                <span className="text-xs font-bold text-[#1A1A1A]">{r.student_name}</span>
-                <span className="text-xs text-[#6b6356]">{r.piece_label}</span>
-                {r.slot_code ? (
-                  <span className="font-mono text-[10px] text-[#bdb3a3]" dir="ltr">
-                    {r.slot_code}
-                  </span>
-                ) : null}
-                <button
-                  type="button"
-                  disabled={busyId === r.order_id}
-                  onClick={() => doRevert(r.order_id, r.piece_label)}
-                  className="min-h-9 rounded-full bg-[#1A1A1A] px-3 text-xs font-bold text-white disabled:opacity-40"
-                >
-                  {busyId === r.order_id ? "…" : "تراجع"}
-                </button>
-              </div>
-            ))}
-          </div>
-        </section>
-      ) : null}
-
       {/* ── Zone 3: الرف ─────────────────────────────────────────── */}
       <section>
         <div className="mb-3">
@@ -360,6 +368,74 @@ export function ShelfConsole() {
         </div>
         <ShelfMap shelves={board!.shelves} search={search} onSlotClick={setOpenSlot} />
       </section>
+
+      {/* ── جُمعت — everything taken off the shelf, grouped per student ──────── */}
+      {collectedGroups.length > 0 ? (
+        <section className="mt-8 border-t border-[#ded6c8] pt-6">
+          <header className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-xl font-black text-[#1A1A1A]">
+              جُمعت <span className="text-[#256347]">{board!.collected.length}</span>
+            </h2>
+            <p className="text-xs text-[#6b6356]">
+              {collectedGroups.length} طالب · الأحدث أولاً
+            </p>
+          </header>
+
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            {collectedGroups.map((g) => (
+              <article
+                key={g.set_key}
+                className="rounded-2xl border border-[#ded6c8] bg-[#FFF8F0] p-3"
+              >
+                <div className="mb-2 flex items-baseline justify-between gap-2">
+                  <h3 className="truncate text-sm font-extrabold text-[#1A1A1A]">
+                    {g.student_name}
+                  </h3>
+                  <span
+                    className={[
+                      "flex-none rounded-full px-2 py-0.5 text-[10px] font-bold",
+                      g.allDelivered
+                        ? "bg-[#e5f0e9] text-[#256347]"
+                        : "bg-[#FFDAB9] text-[#632d17]",
+                    ].join(" ")}
+                  >
+                    {g.allDelivered ? "تم التسليم" : "جاهز للاستلام"}
+                  </span>
+                </div>
+
+                <ul className="space-y-1.5">
+                  {g.pieces.map((p) => (
+                    <li
+                      key={p.order_id}
+                      className="flex items-center gap-2 rounded-lg bg-white px-2 py-1.5"
+                    >
+                      <span className="flex-none rounded bg-[#f2ede4] px-1.5 py-0.5 font-mono text-[10px] font-bold text-[#6b6356]" dir="ltr">
+                        {p.slot_code ?? "—"}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-xs font-bold text-[#1A1A1A]">
+                        {p.piece_label}
+                      </span>
+                      <span className="flex-none text-[10px] text-[#bdb3a3]">
+                        {timeAgo(p.collected_at)}
+                      </span>
+                      {p.can_undo ? (
+                        <button
+                          type="button"
+                          disabled={busyId === p.order_id}
+                          onClick={() => doRevert(p.order_id, p.piece_label)}
+                          className="min-h-9 flex-none rounded-full border border-[#bdb3a3] bg-white px-2.5 text-[11px] font-bold text-[#6b6356] transition hover:border-[#1A1A1A] hover:text-[#1A1A1A] disabled:opacity-40"
+                        >
+                          {busyId === p.order_id ? "…" : "تراجع"}
+                        </button>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {/* Slot detail */}
       {openSlot ? (
