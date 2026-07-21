@@ -252,3 +252,29 @@ test('live: board is retail-only and internally consistent', async () => {
     assert.ok(i.piece_label);
   }
 });
+
+test('live: the board never shows historical backlog — only what was actually staged', async () => {
+  // 205 retail pieces sit at التجهيز from May/June that nobody ever put on a shelf.
+  // They must NOT appear as «وصلت توّا», and must not build «جاهز للتغليف» sets.
+  const backlog = await query(
+    `SELECT COUNT(*)::int n FROM orders o
+       JOIN students s ON s.id = o.student_id
+      WHERE s.wholesaler_id IS NULL AND o.status = 'preparing'`
+  );
+  const board = await shelf.buildBoard();
+  assert.ok(backlog.rows[0].n > 50, 'this snapshot should still carry a real backlog');
+  // Everything on the board is either physically placed, or arrived after the epoch.
+  for (const item of board.inbox) {
+    assert.ok(item.order_id, 'inbox rows must be real pieces');
+  }
+  for (const s of board.sets) {
+    assert.ok(
+      s.pieces.some((p) => p.slot_code),
+      `set ${s.student_name} has nothing on the shelf and must not be listed`
+    );
+  }
+  assert.ok(
+    board.inbox.length < backlog.rows[0].n,
+    'the inbox must never be the whole backlog'
+  );
+});

@@ -114,6 +114,30 @@ function suggestSlot(section, studentId, openBins) {
   return null;
 }
 
+// ── The shelf epoch ──────────────────────────────────────────────────────────
+// The shelf is a PHYSICAL object: it holds what someone actually put on it. But the DB
+// carries a large historical backlog of pieces that reached التجهيز long before this
+// feature existed (May–June rows that never passed through الكوي in this flow). Showing
+// those as «وصلت توّا» would be a lie — nobody staged them, and no set built from them is
+// genuinely packable.
+//
+// So the board only ever shows a piece that EITHER is physically on the shelf, OR arrived
+// at التجهيز after the shelf went live. The epoch is stamped once, on first read, and kept
+// in site_settings so it survives restarts.
+async function getShelfEpoch(client) {
+  const run = runner(client);
+  const { rows } = await run("SELECT value FROM site_settings WHERE key = 'shelf_epoch'");
+  if (rows.length) return String(rows[0].value).replace(/^"|"$/g, '');
+  const now = new Date().toISOString();
+  await run(
+    `INSERT INTO site_settings (key, value) VALUES ('shelf_epoch', to_jsonb($1::text))
+     ON CONFLICT (key) DO NOTHING`,
+    [now]
+  );
+  const again = await run("SELECT value FROM site_settings WHERE key = 'shelf_epoch'");
+  return String(again.rows[0].value).replace(/^"|"$/g, '');
+}
+
 async function loadShelfOrder(orderId, client) {
   const { rows } = await runner(client)(
     `SELECT o.id, o.status, o.student_id, o.checkout_group_id,
@@ -321,33 +345,50 @@ async function buildBoard() {
   const sections = await loadSections();
   const openBins = await loadOpenBins();
 
-  // Every live retail piece belonging to a student who has something at التجهيز or on the
-  // shelf. Loading the WHOLE set (not just the shelved pieces) is what lets a bin say
-  // «ينتظر: وشاح — في التطريز» instead of just "occupied".
-  const { rows } = await query(`
-    WITH relevant AS (
-      SELECT DISTINCT o.student_id
-        FROM orders o JOIN students s ON s.id = o.student_id
-       WHERE s.wholesaler_id IS NULL AND o.status = 'preparing'
-      UNION
-      SELECT DISTINCT sp.student_id
+  const epoch = await getShelfEpoch();
+
+  // A piece is IN SCOPE only if it is physically on the shelf, or it arrived at التجهيز
+  // after the shelf went live. Everything older is pre-existing backlog that nobody staged
+  // — it stays on the ordinary قائمة التجهيز and must not pollute this screen.
+  //
+  // Whole SETS are then loaded for the in-scope students (not just their shelved pieces),
+  // which is what lets a bin say «ينتظر: وشاح — في التطريز» instead of just "occupied".
+  const { rows } = await query(
+    `
+    WITH arrived AS (
+      SELECT DISTINCT order_id
+        FROM staff_activity_log
+       WHERE to_stage = 'preparing' AND created_at >= $1::timestamptz
+    ),
+    in_scope AS (
+      SELECT sp.student_id
         FROM shelf_placements sp WHERE sp.collected_at IS NULL
+      UNION
+      SELECT o.student_id
+        FROM orders o
+        JOIN students s ON s.id = o.student_id
+       WHERE s.wholesaler_id IS NULL
+         AND o.status = 'preparing'
+         AND o.id IN (SELECT order_id FROM arrived)
     )
     SELECT o.id, o.student_id, o.checkout_group_id, o.status, o.created_at,
            p.type AS piece_type, p.name_ar AS product_name,
            u.name AS student_name, st.university_name, st.department,
-           sp.collected_at, sp.placed_at, so.shelf_code, so.slot_index
+           sp.collected_at, sp.placed_at, so.shelf_code, so.slot_index,
+           (o.id IN (SELECT order_id FROM arrived)) AS arrived_recently
       FROM orders o
       JOIN students st ON st.id = o.student_id
       JOIN products p  ON p.id  = o.product_id
       LEFT JOIN users u ON u.id = st.user_id
       LEFT JOIN shelf_placements sp ON sp.order_id = o.id AND sp.collected_at IS NULL
       LEFT JOIN shelf_slot_occupancy so ON so.id = sp.occupancy_id
-     WHERE o.student_id IN (SELECT student_id FROM relevant)
+     WHERE o.student_id IN (SELECT student_id FROM in_scope)
        AND st.wholesaler_id IS NULL
        AND o.status NOT IN ('cancelled', 'delivered')
      ORDER BY u.name NULLS LAST, o.created_at
-  `);
+  `,
+    [epoch]
+  );
 
   // ---- Sets ----
   const setMap = new Map();
@@ -378,14 +419,19 @@ async function buildBoard() {
   // A set is READY when every piece has ARRIVED at التجهيز (preparing) or moved past it.
   // Placement is an address, not a gate — an un-shelved piece («بلا خانة», D4) is still
   // physically present and must not block packing.
-  const sets = [...setMap.values()].map((s) => {
-    const waiting = s.pieces.filter((p) => p.status !== 'preparing' && p.status !== 'ready');
-    return {
-      ...s,
-      state: waiting.length === 0 ? 'ready' : 'waiting',
-      waiting_for: waiting.map((p) => `${p.piece_label} — ${p.stage_ar}`),
-    };
-  });
+  const sets = [...setMap.values()]
+    .map((s) => {
+      const waiting = s.pieces.filter((p) => p.status !== 'preparing' && p.status !== 'ready');
+      return {
+        ...s,
+        state: waiting.length === 0 ? 'ready' : 'waiting',
+        waiting_for: waiting.map((p) => `${p.piece_label} — ${p.stage_ar}`),
+      };
+    })
+    // A set only belongs on this screen once at least one of its pieces is genuinely on
+    // the shelf. Otherwise «جاهز للتغليف» fills with old backlog sets that no one staged
+    // and that the preparer has no bin to collect from.
+    .filter((s) => s.pieces.some((p) => p.slot_code));
   const setByStudent = new Map();
   for (const s of sets) {
     if (!setByStudent.has(s.student_id)) setByStudent.set(s.student_id, []);
@@ -400,7 +446,9 @@ async function buildBoard() {
   // pieces genuinely have nowhere to go once the shelf is full.
   const projected = openBins.map((b) => ({ ...b }));
   const inbox = rows
-    .filter((r) => r.status === 'preparing' && !r.shelf_code)
+    // arrived_recently: only pieces that genuinely came through الكوي/التجهيز since the
+    // shelf went live. Historical backlog is never presented as «وصلت توّا».
+    .filter((r) => r.status === 'preparing' && !r.shelf_code && r.arrived_recently)
     .map((r) => {
       const section = sections.find((s) => s.piece_type === r.piece_type);
       const suggestion = section ? suggestSlot(section, r.student_id, projected) : null;
