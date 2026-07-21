@@ -189,6 +189,47 @@ test('live: a rep-linked piece is refused (retail-only, D1)', async (t) => {
   );
 });
 
+test('live: reverting a piece out of التجهيز frees its خانة (no phantom bin)', async (t) => {
+  const order = await pickRetailOrder('cap');
+  if (!order) return t.skip('no retail cap at preparing in this snapshot');
+  const admin = await query("SELECT id FROM users WHERE role = 'admin' LIMIT 1");
+  const user = { id: admin.rows[0].id, role: 'admin' };
+
+  let placed;
+  try {
+    placed = await shelf.placePiece(order.id, user);
+    const idx = Number(placed.slot_code.slice(1));
+
+    // Simulate exactly what productionController.revert does for a piece at preparing.
+    await shelf.releaseForOrder(order.id);
+
+    const live = await query(
+      'SELECT COUNT(*)::int n FROM shelf_placements WHERE order_id = $1',
+      [order.id]
+    );
+    assert.strictEqual(live.rows[0].n, 0, 'placement must be gone');
+
+    const open = await query(
+      `SELECT COUNT(*)::int n FROM shelf_slot_occupancy
+        WHERE shelf_code = 'C' AND slot_index = $1 AND closed_at IS NULL`,
+      [idx]
+    );
+    assert.strictEqual(open.rows[0].n, 0, 'bin must be CLOSED — a phantom bin is the bug');
+
+    // And the slot must be re-usable straight away.
+    const board = await shelf.buildBoard();
+    const slot = board.shelves.find((s) => s.code === 'C').slots.find((s) => s.index === idx);
+    assert.strictEqual(slot.state, 'empty');
+    assert.strictEqual(slot.count, 0);
+  } finally {
+    await query('DELETE FROM shelf_placements WHERE order_id = $1', [order.id]);
+    await query(
+      `DELETE FROM shelf_slot_occupancy so
+        WHERE NOT EXISTS (SELECT 1 FROM shelf_placements sp WHERE sp.occupancy_id = so.id)`
+    );
+  }
+});
+
 test('live: board is retail-only and internally consistent', async () => {
   const board = await shelf.buildBoard();
   assert.strictEqual(board.sections.length, 4);

@@ -44,6 +44,18 @@ router.post('/students/:studentId/full-set-order', requireStaffType(), edit.save
 router.patch('/orders/:id/details', requireStaffType(), edit.patchOrderDetails);
 router.post('/uploads/image', requireStaffType(), imageUploadLimit, imageUpload.single('file'), validateUploadedImage, edit.uploadImage);
 
+// رف التجهيز — retail staging bins between الكوي and التجهيز. requireStaffType auto-passes
+// manager + admin, so this is presser + preparer + manager + admin. The presser needs it to
+// shelve what he just pressed; the preparer to shelve caps/شال (which skip الكوي) and to pack.
+const shelfC = require('../controllers/shelfController');
+router.get('/shelf', requireStaffType('presser', 'preparer'), shelfC.getBoard);
+router.post('/shelf/place', requireStaffType('presser', 'preparer'), shelfC.place);
+router.post('/shelf/collect', requireStaffType('presser', 'preparer'), shelfC.collect);
+router.post('/shelf/close-set', requireStaffType('presser', 'preparer'), shelfC.closeSet);
+router.delete('/shelf/placement/:orderId', requireStaffType('presser', 'preparer'), shelfC.releasePlacement);
+// Shelf layout config (عدد الخانات / الحد الأقصى) — manager + admin only.
+router.patch('/shelf/sections/:id', requireStaffType(), shelfC.patchSection);
+
 // «الفصال» (tailor) — parallel, independent track over RETAIL orders. Permission
 // (tailor staff_type OR manager/admin) is enforced inside each controller.
 router.get('/tailor-queue', c.tailorQueue);

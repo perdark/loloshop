@@ -3,6 +3,11 @@ const { canStaffTransition, STATUS_LABEL_AR, TRANSITIONS, orderZoneClause } = re
 const { signSseTicket, staffScopeAllows, staffTypesOf } = require('../middleware/auth');
 const { imageUpload, publicUrl } = require('../lib/upload');
 const { addClient, publish } = require('../lib/eventBus');
+// رف التجهيز: a piece leaving التجهيز (revert) or being deleted must give up its خانة,
+// otherwise the shelf shows a bin occupied by something no longer physically there.
+// NB lib/shelf.js lazily requires THIS module back (for performAdvance) — that cycle is
+// resolved by its require sitting inside the function, not at module top level.
+const { releaseForOrder } = require('../lib/shelf');
 
 // ---------- SSE stream: live presence + order events for staff/admin ----------
 function issueEventsTicket(req, res) {
@@ -994,6 +999,11 @@ async function revert(req, res) {
        WHERE id = $2 RETURNING id, status`,
       [to, id]
     );
+    // Leaving التجهيز means the piece is no longer on the shelf — free its خانة, else the
+    // bin stays "occupied" by a piece that has physically gone back up the line.
+    if (from === 'preparing') {
+      await releaseForOrder(id, client);
+    }
     // Reverting to designing resets the design to pending so the student/staff
     // can submit a new design and the approve→advance flow works again.
     if (to === 'designing' && order.design_id) {
@@ -1520,6 +1530,9 @@ async function deleteOrder(req, res) {
     }
 
     await client.query(`DELETE FROM staff_activity_log WHERE order_id=$1`, [id]);
+    // The placement row cascades with the order, but the BIN would stay open holding
+    // nothing — release first so an emptied خانة is properly closed and reusable.
+    await releaseForOrder(id, client);
     await client.query(`DELETE FROM orders WHERE id=$1`, [id]);
     let remaining = [];
     let groupDeleted = false;
