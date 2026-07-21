@@ -84,6 +84,9 @@ export interface TvSnapshot {
     total_pieces: number; // raw order rows (قطعة)
     retail_orders: number; // retail bundles (طلب تجزئة) — feeds the rank ladder
     revenue_total: number | null; // null unless money_visible
+    profit_total: number | null; // null unless money_visible
+    revenue_month: number | null; // null unless money_visible
+    profit_month: number | null; // null unless money_visible
     universities_count: number;
     universities: { name: string; count: number }[];
   };

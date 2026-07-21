@@ -40,6 +40,7 @@ function Card({ title, hint, children }: { title: string; hint?: string; childre
 
 export function MoneyScene({ data }: { data: TvSnapshot }) {
   const k = data.kpis;
+  const lt = data.lifetime;
   const series = data.graphs.series.map((p) => ({
     label: p.label,
     revenue: p.revenue ?? 0,
@@ -51,6 +52,10 @@ export function MoneyScene({ data }: { data: TvSnapshot }) {
   );
   const cumTotal = cumulative.length ? cumulative[cumulative.length - 1].total : 0;
   const rangeLabel = data.range === "today" ? "اليوم (بالساعة)" : data.range === "7" ? "آخر ٧ أيام" : "آخر ٣٠ يوم";
+  // A range with no sales renders as a flat line on an empty grid, which reads as a
+  // broken chart on a wall screen. Say it in words instead — the headline figures
+  // above already carry the real money.
+  const rangeHasMoney = series.some((p) => p.revenue || p.profit);
   const g = data.growth;
   const yoyRev =
     g && g.last_year_rev != null && g.this_year_rev != null && g.last_year_rev > 0
@@ -62,25 +67,28 @@ export function MoneyScene({ data }: { data: TvSnapshot }) {
       kicker="🔓 الأداء المالي · الطلبات الموافق عليها وغير الملغاة فقط"
       title="الإيراد والربح"
       right={
+        /* Headline = LIFETIME + THIS MONTH, deliberately NOT «اليوم» (2026-07-21).
+           The scene used to lead with revenue_today/profit_today while the board sits
+           on its default range=today — so on any quiet day the unlock revealed nothing
+           but zeros and two flat charts. These figures are always meaningful. */
         <div className="flex items-center gap-6">
-          <span className="max-w-52 text-sm font-semibold leading-snug text-[#9a6a3a]">
+          <div>
+            <div className="text-base font-semibold text-[#9a6a3a]">إيراد هذا الشهر</div>
+            <div className="font-[Cairo] text-4xl font-black tabular-nums text-[#F47B42]">{fmtNum(lt?.revenue_month ?? 0)}</div>
+          </div>
+          <div>
+            <div className="text-base font-semibold text-[#9a6a3a]">ربح هذا الشهر</div>
+            <div className="font-[Cairo] text-4xl font-black tabular-nums text-[#16A34A]">{fmtNum(lt?.profit_month ?? 0)}</div>
+          </div>
+          <span className="max-w-44 text-sm font-semibold leading-snug text-[#9a6a3a]">
             الربح = الإيراد − التكلفة / حصة الإدارة
           </span>
-          <div>
-            <div className="text-base font-semibold text-[#9a6a3a]">إيراد اليوم</div>
-            <div className="font-[Cairo] text-4xl font-black tabular-nums text-[#F47B42]">{fmtNum(k.revenue_today ?? 0)}</div>
-          </div>
-          <div>
-            <div className="text-base font-semibold text-[#9a6a3a]">ربح اليوم</div>
-            <div className="font-[Cairo] text-4xl font-black tabular-nums text-[#16A34A]">{fmtNum(k.profit_today ?? 0)}</div>
-          </div>
-          <span className="rounded-full bg-[#FFE4C4] px-3 py-1 text-sm font-bold text-[#7a4e22]">{rangeLabel}</span>
         </div>
       }
     >
       <div className="grid h-full grid-cols-2 grid-rows-2 gap-5">
-        <Card title="الإيراد والربح" hint={rangeLabel}>
-          {series.length ? (
+        <Card title="الإيراد والربح" hint={`${rangeLabel} — نطاق اللوحة`}>
+          {series.length && rangeHasMoney ? (
             <ResponsiveContainer>
               <LineChart data={series} margin={{ top: 8, right: 12, left: -6, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
@@ -97,7 +105,7 @@ export function MoneyScene({ data }: { data: TvSnapshot }) {
         </Card>
 
         <Card title="الإيراد التراكمي" hint={fmtIQD(cumTotal)}>
-          {cumulative.length ? (
+          {cumulative.length && rangeHasMoney ? (
             <ResponsiveContainer>
               <AreaChart data={cumulative} margin={{ top: 8, right: 12, left: 2, bottom: 0 }}>
                 <defs>
@@ -118,14 +126,23 @@ export function MoneyScene({ data }: { data: TvSnapshot }) {
           )}
         </Card>
 
-        <div className="tv-panel flex flex-col justify-center gap-4 p-6">
+        <div className="tv-panel flex flex-col justify-center gap-3 p-6">
           <h3 className="font-[Amiri] text-2xl font-bold text-[#5a3210]">إجمالي مدى الحياة</h3>
           <div>
             <div className="text-base font-semibold text-[#9a6a3a]">إيراد تراكمي على الإطلاق</div>
-            <div className="font-[Cairo] text-6xl font-black leading-none tabular-nums text-[#F47B42]">
-              {fmtNum(data.lifetime?.revenue_total ?? 0)}
+            <div className="font-[Cairo] text-5xl font-black leading-none tabular-nums text-[#F47B42]">
+              {fmtNum(lt?.revenue_total ?? 0)}
             </div>
-            <div className="text-base text-[#b59673]">دينار عراقي</div>
+          </div>
+          <div>
+            <div className="text-base font-semibold text-[#9a6a3a]">ربح تراكمي</div>
+            <div className="font-[Cairo] text-4xl font-black leading-none tabular-nums text-[#16A34A]">
+              {fmtNum(lt?.profit_total ?? 0)}
+            </div>
+          </div>
+          {/* Today is now a footnote, not the headline — it is usually zero. */}
+          <div className="mt-1 border-t border-[#F0DCC4] pt-2 text-sm font-semibold text-[#b59673]">
+            اليوم: {fmtNum(k.revenue_today ?? 0)} إيراد · {fmtNum(k.profit_today ?? 0)} ربح
           </div>
         </div>
 

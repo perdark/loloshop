@@ -138,7 +138,8 @@ async function setMoneyGate(secret) {
 const MONEY_FIELDS = [
   'kpis.revenue_today', 'kpis.revenue_delta', 'kpis.profit_today',
   'graphs.series[].revenue', 'graphs.series[].profit',
-  'lifetime.revenue_total', 'records.best_day_revenue',
+  'lifetime.revenue_total', 'lifetime.profit_total',
+  'lifetime.revenue_month', 'lifetime.profit_month', 'records.best_day_revenue',
   'growth.this_year_rev', 'growth.last_year_rev',
 ];
 
@@ -147,7 +148,12 @@ const MONEY_FIELDS = [
 function stripMoney(data) {
   const out = { ...data, money_visible: false };
   if (data.kpis) out.kpis = { ...data.kpis, revenue_today: null, revenue_delta: null, profit_today: null };
-  if (data.lifetime) out.lifetime = { ...data.lifetime, revenue_total: null };
+  if (data.lifetime) {
+    out.lifetime = {
+      ...data.lifetime,
+      revenue_total: null, profit_total: null, revenue_month: null, profit_month: null,
+    };
+  }
   if (data.records) out.records = { ...data.records, best_day_revenue: null };
   if (data.growth) out.growth = { ...data.growth, this_year_rev: null, last_year_rev: null };
   if (data.graphs) {
@@ -217,7 +223,14 @@ async function buildLegend(source) {
          COUNT(*) FILTER (WHERE o.status::text<>'cancelled')::int AS total_pieces,
          COUNT(DISTINCT COALESCE(o.checkout_group_id, o.id))
            FILTER (WHERE o.status::text<>'cancelled' AND s.wholesaler_id IS NULL)::int AS retail_orders,
-         COALESCE(SUM(o.price) FILTER (WHERE o.status::text<>'cancelled' AND ${SETTLED_MONEY_SQL}),0)::bigint AS revenue_total
+         COALESCE(SUM(o.price) FILTER (WHERE o.status::text<>'cancelled' AND ${SETTLED_MONEY_SQL}),0)::bigint AS revenue_total,
+         COALESCE(SUM(o.profit) FILTER (WHERE o.status::text<>'cancelled' AND ${SETTLED_MONEY_SQL}),0)::bigint AS profit_total,
+         COALESCE(SUM(o.price) FILTER (WHERE o.status::text<>'cancelled' AND ${SETTLED_MONEY_SQL}
+           AND date_trunc('month', o.created_at AT TIME ZONE '${TZ}')
+             = date_trunc('month', NOW() AT TIME ZONE '${TZ}')),0)::bigint AS revenue_month,
+         COALESCE(SUM(o.profit) FILTER (WHERE o.status::text<>'cancelled' AND ${SETTLED_MONEY_SQL}
+           AND date_trunc('month', o.created_at AT TIME ZONE '${TZ}')
+             = date_trunc('month', NOW() AT TIME ZONE '${TZ}')),0)::bigint AS profit_month
        FROM orders o JOIN students s ON s.id=o.student_id WHERE TRUE ${src}`
     ),
     // Universities served — list (trophy wall) + implicit count.
@@ -294,6 +307,9 @@ async function buildLegend(source) {
     total_pieces: lf.total_pieces || 0,   // قطعة (order rows)
     retail_orders: lf.retail_orders || 0, // طلب تجزئة — feeds the rank ladder
     revenue_total: Number(lf.revenue_total || 0),
+    profit_total: Number(lf.profit_total || 0),
+    revenue_month: Number(lf.revenue_month || 0),
+    profit_month: Number(lf.profit_month || 0),
     universities_count: universities.length,
     universities, // trophy-wall list
   };
@@ -445,11 +461,24 @@ async function buildSnapshot(source, range) {
        ORDER BY b.deadline ASC LIMIT 12`
     ),
     // Design spotlight — latest finished artwork.
+    // SOURCE FIXED 2026-07-21: this read `orders.final_design_url`, a DEAD field since
+    // FinalDesignUpload was deleted (2026-07-15) — only 5 orders carry one, so the wall
+    // cycled the same 5 stale images forever. The real artwork now lives per-zone on
+    // order_items.customer_image_url (784 orders). DISTINCT ON the image so the same
+    // photo reused across zones doesn't fill the gallery with duplicates.
     query(
-      `SELECT o.id, o.final_design_url, u.name AS student_name, s.university_name
-       FROM orders o JOIN students s ON s.id = o.student_id JOIN users u ON u.id = s.user_id
-       WHERE o.final_design_url IS NOT NULL ${src}
-       ORDER BY o.updated_at DESC LIMIT 12`
+      `SELECT * FROM (
+         SELECT DISTINCT ON (oi.customer_image_url)
+                o.id, oi.customer_image_url AS final_design_url,
+                u.name AS student_name, s.university_name, o.updated_at
+         FROM order_items oi
+         JOIN orders o ON o.id = oi.order_id
+         JOIN students s ON s.id = o.student_id
+         JOIN users u ON u.id = s.user_id
+         WHERE oi.customer_image_url IS NOT NULL AND oi.customer_image_url <> ''
+           AND o.status::text <> 'cancelled' ${src}
+         ORDER BY oi.customer_image_url, o.updated_at DESC
+       ) z ORDER BY z.updated_at DESC LIMIT 24`
     ),
     // Ticker seed — recent order events.
     query(
