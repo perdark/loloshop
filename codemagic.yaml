@@ -6,12 +6,12 @@
 # file stays at the REPOSITORY ROOT; `working_directory: frontend` routes every
 # build command into the app folder (and fixes the monorepo scan error).
 #
-# The iOS native project is generated fresh on the build machine each run, so
-# there is no ios/ folder to commit from Linux.
+# The iOS native project (incl. App.xcworkspace via CocoaPods) is generated
+# fresh on the build machine each run, so there is no ios/ folder committed.
 #
-# Signing is fully automatic: the "Set up code signing" step below CREATES the
+# Signing is fully automatic: the "Set up code signing" step CREATES the
 # distribution certificate + App Store provisioning profile on first run using
-# the revoart_asc App Store Connect API key, so there is nothing to upload by hand.
+# the revoart_asc App Store Connect API key.
 
 workflows:
   ios-appstore:
@@ -30,7 +30,6 @@ workflows:
         BUNDLE_ID: "com.loloshop96.app"
         # Numeric Apple ID of the app record (NOT the bundle id). Used to auto-bump builds.
         APP_STORE_APPLE_ID: 6793976053
-        XCODE_WORKSPACE: "App.xcworkspace"
         XCODE_SCHEME: "App"
       node: 22          # Capacitor 8 CLI needs Node >= 22
       xcode: latest
@@ -39,18 +38,27 @@ workflows:
     scripts:
       - name: Install JS dependencies
         script: |
-          # npm install (not ci) so the newly added @capacitor/ios reconciles the lockfile
+          set -e
           npm install
+          # Belt-and-suspenders: make sure the iOS platform package is present
+          npm ls @capacitor/ios || npm install @capacitor/ios@^8.4.1
 
       - name: Generate + sync the iOS native project
         script: |
-          if [ ! -d "ios" ]; then
-            npx cap add ios
-          fi
+          set -e
+          echo "node: $(node --version) | cap: $(npx cap --version)"
+          # Add the iOS platform (skip only if the Xcode project is already there)
+          [ -d "ios/App/App.xcodeproj" ] || npx cap add ios
           npx cap sync ios
+          # Capacitor usually runs this, but do it explicitly so App.xcworkspace exists
+          cd ios/App
+          pod install
+          echo "=== ios/App contents (App.xcworkspace must appear below) ==="
+          ls -la
 
       - name: Set up code signing (creates cert + profile if missing)
         script: |
+          set -e
           keychain initialize
           # --create makes the App Store profile (and cert) if they don't exist yet
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
@@ -62,15 +70,17 @@ workflows:
 
       - name: Auto-increment the build number
         script: |
+          set -e
           cd ios/App
           LATEST=$(app-store-connect get-latest-app-store-build-number "$APP_STORE_APPLE_ID" 2>/dev/null || echo 0)
           agvtool new-version -all $(($LATEST + 1))
 
       - name: Build the signed .ipa
         script: |
-          cd ios/App
+          set -e
+          # Absolute path so there is no ambiguity about where the workspace is
           xcode-project build-ipa \
-            --workspace "$XCODE_WORKSPACE" \
+            --workspace "$CM_BUILD_DIR/frontend/ios/App/App.xcworkspace" \
             --scheme "$XCODE_SCHEME"
 
     artifacts:
