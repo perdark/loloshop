@@ -79,12 +79,15 @@ workflows:
           cd ios/App
           xcode-project use-profiles
 
-      - name: Auto-increment the build number
+      - name: Set a unique, always-increasing build number
         script: |
           set -e
           cd ios/App
-          LATEST=$(app-store-connect get-latest-app-store-build-number "$APP_STORE_APPLE_ID" 2>/dev/null || echo 0)
-          agvtool new-version -all $(($LATEST + 1))
+          # Unix timestamp: always larger than any previous upload, never collides.
+          NEW=$(date +%s)
+          agvtool new-version -all "$NEW"
+          echo "CFBundleVersion set to $NEW (verify below):"
+          agvtool what-version -terse
 
       - name: Build the signed .ipa
         script: |
