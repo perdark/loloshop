@@ -1,0 +1,80 @@
+# Codemagic CI/CD — builds and ships the LoloShop iOS app (لولو شوب) to the
+# App Store WITHOUT needing a Mac locally. The build runs on Codemagic's macOS
+# machines. See the checklist Claude gave you for the one-time account setup.
+#
+# The Capacitor project lives in ./frontend (appId com.loloshop96.app). The iOS
+# native project is generated fresh on the build machine each run, so there is no
+# ios/ folder to commit from Linux.
+#
+# BEFORE THE FIRST BUILD — fill in the two values marked  <<< FILL IN  below and
+# configure the App Store Connect integration in the Codemagic UI
+# (Teams → Integrations → Apple → connect your API key, name it "loloshop_asc").
+
+workflows:
+  ios-appstore:
+    name: LoloShop iOS — App Store
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+
+    integrations:
+      # Name you gave the App Store Connect API key inside the Codemagic UI.
+      app_store_connect: loloshop_asc          # <<< FILL IN (must match the UI name)
+
+    environment:
+      ios_signing:
+        distribution_type: app_store           # Codemagic auto-creates the cert + profile
+        bundle_identifier: com.loloshop96.app
+      vars:
+        # Apple ID of the app record (the numeric "Apple ID" on the App Store
+        # Connect app page, NOT the bundle id). Used to auto-bump the build number.
+        APP_STORE_APPLE_ID: 6793976053
+        XCODE_WORKSPACE: "App.xcworkspace"
+        XCODE_SCHEME: "App"
+      node: 22          # Capacitor 8 CLI needs Node >= 22
+      xcode: latest
+      cocoapods: default
+
+    scripts:
+      - name: Install JS dependencies
+        script: |
+          cd frontend
+          # npm install (not ci) so the newly added @capacitor/ios reconciles the lockfile
+          npm install
+
+      - name: Generate + sync the iOS native project
+        script: |
+          cd frontend
+          if [ ! -d "ios" ]; then
+            npx cap add ios
+          fi
+          npx cap sync ios
+
+      - name: Apply App Store signing profiles to the Xcode project
+        script: |
+          cd frontend/ios/App
+          xcode-project use-profiles
+
+      - name: Auto-increment the build number
+        script: |
+          cd frontend/ios/App
+          LATEST=$(app-store-connect get-latest-app-store-build-number "$APP_STORE_APPLE_ID" 2>/dev/null || echo 0)
+          agvtool new-version -all $(($LATEST + 1))
+
+      - name: Build the signed .ipa
+        script: |
+          cd frontend/ios/App
+          xcode-project build-ipa \
+            --workspace "$XCODE_WORKSPACE" \
+            --scheme "$XCODE_SCHEME"
+
+    artifacts:
+      - frontend/ios/App/build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+
+    publishing:
+      app_store_connect:
+        auth: integration
+        # First runs land in TestFlight only. Flip to true (and add release_type)
+        # once you're ready to actually submit for App Store review.
+        submit_to_testflight: true
+        submit_to_app_store: false
