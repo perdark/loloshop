@@ -28,6 +28,8 @@ workflows:
       app_store_connect: revoart_asc
 
     environment:
+      groups:
+        - ios_signing        # holds CERTIFICATE_PRIVATE_KEY (add it in the Codemagic UI, marked Secure)
       vars:
         BUNDLE_ID: "com.loloshop96.app"
         # Numeric Apple ID of the app record (NOT the bundle id). Used to auto-bump builds.
@@ -61,6 +63,7 @@ workflows:
           # --create makes the App Store profile (and cert) if they don't exist yet
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
+            --certificate-key=@env:CERTIFICATE_PRIVATE_KEY \
             --create
           keychain add-certificates
           cd ios/App
