@@ -6,9 +6,11 @@
 # file stays at the REPOSITORY ROOT; `working_directory: frontend` routes every
 # build command into the app folder (and fixes the monorepo scan error).
 #
-# The iOS native project (incl. App.xcworkspace via CocoaPods) is generated
-# fresh on the build machine each run, so there is no ios/ folder committed.
+# Capacitor 8 uses Swift Package Manager (NOT CocoaPods): there is no Podfile
+# and no .xcworkspace — the build targets ios/App/App.xcodeproj directly, and
+# xcodebuild resolves the SPM plugin packages during the archive.
 #
+# The iOS native project is generated fresh on the build machine each run.
 # Signing is fully automatic: the "Set up code signing" step CREATES the
 # distribution certificate + App Store provisioning profile on first run using
 # the revoart_asc App Store Connect API key.
@@ -33,7 +35,6 @@ workflows:
         XCODE_SCHEME: "App"
       node: 22          # Capacitor 8 CLI needs Node >= 22
       xcode: latest
-      cocoapods: default
 
     scripts:
       - name: Install JS dependencies
@@ -50,11 +51,8 @@ workflows:
           # Add the iOS platform (skip only if the Xcode project is already there)
           [ -d "ios/App/App.xcodeproj" ] || npx cap add ios
           npx cap sync ios
-          # Capacitor usually runs this, but do it explicitly so App.xcworkspace exists
-          cd ios/App
-          pod install
-          echo "=== ios/App contents (App.xcworkspace must appear below) ==="
-          ls -la
+          echo "=== ios/App contents (App.xcodeproj must appear below) ==="
+          ls -la ios/App
 
       - name: Set up code signing (creates cert + profile if missing)
         script: |
@@ -78,9 +76,9 @@ workflows:
       - name: Build the signed .ipa
         script: |
           set -e
-          # Absolute path so there is no ambiguity about where the workspace is
+          # Capacitor 8 = SPM, so build the .xcodeproj directly (no .xcworkspace)
           xcode-project build-ipa \
-            --workspace "$CM_BUILD_DIR/frontend/ios/App/App.xcworkspace" \
+            --project "$CM_BUILD_DIR/frontend/ios/App/App.xcodeproj" \
             --scheme "$XCODE_SCHEME"
 
     artifacts:
