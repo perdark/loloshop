@@ -91,7 +91,10 @@ workflows:
     publishing:
       app_store_connect:
         auth: integration
-        # First runs land in TestFlight only. Flip submit_to_app_store to true
-        # once you're ready to actually submit for App Store review.
-        submit_to_testflight: true
+        # The build always UPLOADS to App Store Connect. submit_to_testflight only
+        # controls the EXTRA external-beta-review submission, which needs TestFlight
+        # "Test Information" filled in. Kept false so builds upload cleanly (no red);
+        # flip to true AND fill test-info if you ever want external beta testers.
+        submit_to_testflight: false
+        # Flip to true once the App Store listing is ready to submit for review.
         submit_to_app_store: false
