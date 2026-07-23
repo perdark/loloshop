@@ -56,6 +56,16 @@ workflows:
           echo "=== ios/App contents (App.xcodeproj must appear below) ==="
           ls -la ios/App
 
+      - name: Bake the real LoloShop icon + splash into the app
+        script: |
+          set -e
+          # Generates the iOS AppIcon + launch screen from frontend/resources/
+          # (icon.png / splash.png). Without this the build ships Capacitor's
+          # default placeholder icon, which Apple rejects.
+          npx capacitor-assets generate --ios
+          echo "=== generated AppIcon set ==="
+          ls -la ios/App/App/Assets.xcassets/AppIcon.appiconset || true
+
       - name: Set up code signing (creates cert + profile if missing)
         script: |
           set -e
