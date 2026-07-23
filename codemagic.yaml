@@ -13,7 +13,7 @@
 #
 # BEFORE THE FIRST BUILD: configure the App Store Connect integration in the
 # Codemagic UI (Teams → Integrations → Apple → connect your API key, name it
-# exactly "loloshop_asc").
+# exactly "revoart_asc").
 
 workflows:
   ios-appstore:
@@ -24,7 +24,8 @@ workflows:
 
     integrations:
       # Must match the name you give the App Store Connect API key in the Codemagic UI.
-      app_store_connect: loloshop_asc
+      # This key is account-wide (RevoArt) — reuse it for every future app too.
+      app_store_connect: revoart_asc
 
     environment:
       ios_signing:
