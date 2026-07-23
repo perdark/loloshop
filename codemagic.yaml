@@ -3,17 +3,15 @@
 # machines.
 #
 # The Capacitor project lives in ./frontend (appId com.loloshop96.app). This
-# file stays at the REPOSITORY ROOT (Codemagic requires that); the
-# `working_directory: frontend` key below routes every build command into the
-# app folder — which also fixes the "repository doesn't contain a mobile
-# application" scan error for monorepos.
+# file stays at the REPOSITORY ROOT; `working_directory: frontend` routes every
+# build command into the app folder (and fixes the monorepo scan error).
 #
 # The iOS native project is generated fresh on the build machine each run, so
 # there is no ios/ folder to commit from Linux.
 #
-# BEFORE THE FIRST BUILD: configure the App Store Connect integration in the
-# Codemagic UI (Teams → Integrations → Apple → connect your API key, name it
-# exactly "revoart_asc").
+# Signing is fully automatic: the "Set up code signing" step below CREATES the
+# distribution certificate + App Store provisioning profile on first run using
+# the revoart_asc App Store Connect API key, so there is nothing to upload by hand.
 
 workflows:
   ios-appstore:
@@ -23,15 +21,13 @@ workflows:
     working_directory: frontend      # <- app lives here; all scripts run from here
 
     integrations:
-      # Must match the name you give the App Store Connect API key in the Codemagic UI.
-      # This key is account-wide (RevoArt) — reuse it for every future app too.
+      # Must match the App Store Connect API key name in the Codemagic UI.
+      # Account-wide (RevoArt) — reuse it for every future app too.
       app_store_connect: revoart_asc
 
     environment:
-      ios_signing:
-        distribution_type: app_store          # Codemagic auto-creates the cert + profile
-        bundle_identifier: com.loloshop96.app
       vars:
+        BUNDLE_ID: "com.loloshop96.app"
         # Numeric Apple ID of the app record (NOT the bundle id). Used to auto-bump builds.
         APP_STORE_APPLE_ID: 6793976053
         XCODE_WORKSPACE: "App.xcworkspace"
@@ -53,8 +49,14 @@ workflows:
           fi
           npx cap sync ios
 
-      - name: Apply App Store signing profiles to the Xcode project
+      - name: Set up code signing (creates cert + profile if missing)
         script: |
+          keychain initialize
+          # --create makes the App Store profile (and cert) if they don't exist yet
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --create
+          keychain add-certificates
           cd ios/App
           xcode-project use-profiles
 
