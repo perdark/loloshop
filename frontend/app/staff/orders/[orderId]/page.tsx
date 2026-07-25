@@ -173,6 +173,25 @@ function QuickEditButton({ label, onClick }: { label: string; onClick: () => voi
   );
 }
 
+function StructuredEditLink({
+  href,
+  label,
+}: {
+  href: string;
+  label: string;
+}) {
+  return (
+    <Link
+      href={href}
+      aria-label={label}
+      title={label}
+      className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-line text-ink-soft transition-colors hover:border-orange-ink/50 hover:text-orange-ink"
+    >
+      ✎
+    </Link>
+  );
+}
+
 /** Countdown chip shared between intake card and Instagram copy. */
 function EventChip({ eventDate }: { eventDate: string | null }) {
   const days = daysUntil(eventDate);
@@ -1875,7 +1894,15 @@ function ProductionOrderDetailContent() {
           {/* Measurements */}
           {order.measurements && (
             <article className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
-              <h3 className="mb-3 text-sm font-semibold text-ink">قياسات الروب</h3>
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h3 className="text-sm font-semibold text-ink">قياسات الروب</h3>
+                {canEdit && (
+                  <StructuredEditLink
+                    href={`/staff/orders/${order.id}/edit#measurements`}
+                    label="تعديل قياسات الروب"
+                  />
+                )}
+              </div>
               <dl className="space-y-2 text-sm">
                 <div className="flex justify-between gap-4 border-b border-line pb-2">
                   <dt className="text-muted">الكتف</dt>
@@ -1951,7 +1978,15 @@ function ProductionOrderDetailContent() {
             (i) => i.group_id !== null || !!i.customer_text || !!i.customer_image_url
           ).length > 0 && (
             <article className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
-              <h3 className="mb-3 text-sm font-semibold text-ink">خيارات الطلب</h3>
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h3 className="text-sm font-semibold text-ink">خيارات الطلب</h3>
+                {canEdit && (
+                  <StructuredEditLink
+                    href={`/staff/orders/${order.id}/edit#options`}
+                    label="تعديل خيارات الطلب"
+                  />
+                )}
+              </div>
               <ul className="space-y-3">
                 {items
                   .filter(
@@ -1982,27 +2017,41 @@ function ProductionOrderDetailContent() {
                               ✎
                             </button>
                           )}
+                          {canEdit && !item.customer_text && item.group_id && (
+                            <StructuredEditLink
+                              href={`/staff/orders/${order.id}/edit#options`}
+                              label={`تعديل ${item.label_snapshot}`}
+                            />
+                          )}
                         </span>
                       </div>
                       {/* Customer reference photo shown inline (no download step) */}
                       {item.customer_image_url && (
-                        <a
-                          href={resolveImageUrl(item.customer_image_url) ?? "#"}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="block w-fit"
-                          aria-label={`عرض صورة ${item.label_snapshot} بالحجم الكامل`}
-                        >
-                          <Image
-                            src={resolveImageUrl(item.customer_image_url) ?? ""}
-                            alt={`صورة العميل — ${item.label_snapshot}`}
-                            width={240}
-                            height={240}
-                            className="max-h-56 w-auto rounded-lg border border-line object-contain"
-                            loading="lazy"
-                            unoptimized
-                          />
-                        </a>
+                        <div className="flex items-start gap-2">
+                          <a
+                            href={resolveImageUrl(item.customer_image_url) ?? "#"}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block w-fit"
+                            aria-label={`عرض صورة ${item.label_snapshot} بالحجم الكامل`}
+                          >
+                            <Image
+                              src={resolveImageUrl(item.customer_image_url) ?? ""}
+                              alt={`صورة العميل — ${item.label_snapshot}`}
+                              width={240}
+                              height={240}
+                              className="max-h-56 w-auto rounded-lg border border-line object-contain"
+                              loading="lazy"
+                              unoptimized
+                            />
+                          </a>
+                          {canEdit && (
+                            <StructuredEditLink
+                              href={`/staff/orders/${order.id}/edit#options`}
+                              label={`استبدال صورة ${item.label_snapshot}`}
+                            />
+                          )}
+                        </div>
                       )}
                     </li>
                   ))}

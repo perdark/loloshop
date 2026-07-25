@@ -1,4 +1,5 @@
 const { query, tx } = require('../lib/db');
+const { moneyCalculations, calculationFor } = require('../lib/moneyCalculation');
 const { priceRoleForUser } = require('./catalogController');
 const { publish } = require('../lib/eventBus');
 const { staffScopeAllows, staffTypesOf } = require('../middleware/auth');
@@ -121,49 +122,6 @@ function orderZoneClause(zone, alias = 'o') {
     ? ` AND ((oi.customer_text IS NOT NULL AND btrim(oi.customer_text) <> '') OR oi.customer_image_url IS NOT NULL)`
     : '';
   return `EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = ${alias}.id AND ${match}${content})`;
-}
-
-// Admin-facing calculation trace. `orders.price/cost` remain the accounting source of
-// truth; line snapshots explain their composition. Historical rows may have a zero
-// admin snapshot, so explicit adjustments reconcile the explanation without pretending
-// that old detail exists.
-async function moneyCalculations(rows) {
-  const ids = [...new Set(rows.map((r) => r.order_id || r.id).filter(Boolean))];
-  if (!ids.length) return new Map();
-  const detail = await query(
-    `SELECT order_id, label_snapshot, price_snapshot, admin_price_snapshot, qty
-     FROM order_items
-     WHERE order_id = ANY($1::uuid[])
-       AND (price_snapshot <> 0 OR admin_price_snapshot <> 0)
-     ORDER BY created_at`,
-    [ids]
-  );
-  const byId = new Map(ids.map((id) => [id, []]));
-  for (const line of detail.rows) {
-    byId.get(line.order_id)?.push({
-      label: line.label_snapshot,
-      price: Number(line.price_snapshot || 0),
-      admin_price: Number(line.admin_price_snapshot || 0),
-      qty: Number(line.qty || 1),
-    });
-  }
-  return byId;
-}
-
-function calculationFor(row, byId) {
-  const id = row.order_id || row.id;
-  const lines = byId.get(id) || [];
-  const linePrice = lines.reduce((sum, line) => sum + line.price, 0);
-  const lineAdmin = lines.reduce((sum, line) => sum + line.admin_price, 0);
-  const price = Number(row.price || 0);
-  const cost = Number(row.cost || 0);
-  return {
-    lines,
-    line_price_total: linePrice,
-    line_admin_total: lineAdmin,
-    price_adjustment: price - linePrice,
-    cost_adjustment: cost - lineAdmin,
-  };
 }
 
 async function listOrders(req, res) {
@@ -461,6 +419,16 @@ async function priceSelections({ productId, role, selections, studentGender }) {
   );
   const groupMap = new Map(groups.rows.map((g) => [g.id, g]));
   const sel = Array.isArray(selections) ? selections : [];
+  const groupCounts = new Map();
+  for (const s of sel) {
+    const count = (groupCounts.get(s.group_id) || 0) + 1;
+    groupCounts.set(s.group_id, count);
+    // Every current input type represents one row per group (counter quantity lives in
+    // `qty`). Reject duplicates instead of silently charging the same option twice.
+    if (count > 1) {
+      return { ok: false, status: 400, error: 'خيار مكرر في الطلب', code: 'ERR_VALIDATION' };
+    }
+  }
   const selectedGroupIds = new Set(sel.map((s) => s.group_id));
   for (const g of groups.rows) {
     if (g.required && !selectedGroupIds.has(g.id)) {
@@ -535,6 +503,29 @@ async function priceSelections({ productId, role, selections, studentGender }) {
   return { ok: true, total, items, hasEmbroidery };
 }
 
+// Shared retail robe validation. Staff retail-order edits and the student configurator must
+// accept/reject the exact same measurement payload; keeping the rules here prevents the
+// privileged editor from becoming a looser side door.
+function validateRobeMeasurements(productType, measurements) {
+  if (productType !== 'robe') return null;
+  const m = measurements || {};
+  const { shoulder_cm, chest_cm, robe_length_cm, sleeve_length_cm } = m;
+  if (
+    !isFinite(Number(shoulder_cm)) || Number(shoulder_cm) <= 0 ||
+    !isFinite(Number(robe_length_cm)) || Number(robe_length_cm) <= 0 ||
+    !isFinite(Number(sleeve_length_cm)) || Number(sleeve_length_cm) <= 0
+  ) {
+    return 'يرجى إدخال قياسات الروب';
+  }
+  const chestNum = Number(chest_cm);
+  if (chest_cm != null && chest_cm !== '' && isFinite(chestNum) && chestNum > 0) {
+    if (chestNum < 60 || chestNum > 180) {
+      return 'قياسات الروب غير صالحة — محيط الصدر يجب أن يكون بين 60 و 180 سم';
+    }
+  }
+  return null;
+}
+
 // ---------- Configure order from selected options (retail student) ----------
 async function configureOrder(req, res) {
   const { product_id, design_id, batch_id, selections, measurements } = req.body;
@@ -563,27 +554,10 @@ async function configureOrder(req, res) {
   }
   const productType = prodTypeRes.rows[0].type;
 
-  // Robe requires measurements (قياسات الروب). محيط الصدر (chest_cm) is optional;
-  // shoulder / robe length / sleeve length are required.
-  if (productType === 'robe') {
-    const m = measurements || {};
-    const { shoulder_cm, chest_cm, robe_length_cm, sleeve_length_cm } = m;
-    if (
-      !isFinite(Number(shoulder_cm)) || Number(shoulder_cm) <= 0 ||
-      !isFinite(Number(robe_length_cm)) || Number(robe_length_cm) <= 0 ||
-      !isFinite(Number(sleeve_length_cm)) || Number(sleeve_length_cm) <= 0
-    ) {
-      return res.status(400).json({ error: 'يرجى إدخال قياسات الروب', code: 'ERR_VALIDATION' });
-    }
-    const chestNum = Number(chest_cm);
-    if (chest_cm != null && chest_cm !== '' && isFinite(chestNum) && chestNum > 0) {
-      if (chestNum < 60 || chestNum > 180) {
-        return res.status(400).json({
-          error: 'قياسات الروب غير صالحة — محيط الصدر يجب أن يكون بين 60 و 180 سم',
-          code: 'ERR_VALIDATION',
-        });
-      }
-    }
+  // Robe requires measurements (قياسات الروب). محيط الصدر is optional.
+  const measurementError = validateRobeMeasurements(productType, measurements);
+  if (measurementError) {
+    return res.status(400).json({ error: measurementError, code: 'ERR_VALIDATION' });
   }
 
   // auto-attach rep orders to their wholesaler's most recent batch
@@ -1609,6 +1583,6 @@ async function returnedOrders(req, res) {
 module.exports = {
   listOrders, myOrders, returnedOrders, updateStatus, configureOrder, configurePackage, configureFullSet, getOrderBreakdown,
   vipUpgradeContext, upgradeToVip, repFullSetContext, configureRepFullSet,
-  priceSelections, canStaffTransition, TRANSITIONS, STATUS_LABEL_AR, ALL_STATUSES,
+  priceSelections, validateRobeMeasurements, canStaffTransition, TRANSITIONS, STATUS_LABEL_AR, ALL_STATUSES,
   orderZoneClause,
 };

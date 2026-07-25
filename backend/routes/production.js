@@ -41,6 +41,7 @@ router.get('/students-search', requireStaffType(), edit.studentsSearch);
 router.get('/students/:studentId/full-set-order', requireStaffType(), edit.getStudentFullSet);
 router.get('/orders/:id/edit-context', requireStaffType(), edit.editContext);
 router.post('/students/:studentId/full-set-order', requireStaffType(), edit.saveFullSetOrder);
+router.put('/orders/:id/retail-configuration', requireStaffType(), edit.saveRetailConfiguration);
 router.patch('/orders/:id/details', requireStaffType(), edit.patchOrderDetails);
 router.post('/uploads/image', requireStaffType(), imageUploadLimit, imageUpload.single('file'), validateUploadedImage, edit.uploadImage);
 

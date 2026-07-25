@@ -24,6 +24,8 @@ interface CustomerImageUploadProps {
   allowOptionalImage?: boolean;
   /** Show inline error state (called by parent after failed submit attempt). */
   showErrors?: boolean;
+  /** Privileged editors can supply their own authenticated upload endpoint. */
+  uploadImage?: (file: File) => Promise<string>;
 }
 
 export function CustomerImageUpload({
@@ -36,6 +38,7 @@ export function CustomerImageUpload({
   allowOptionalText = false,
   allowOptionalImage = false,
   showErrors = false,
+  uploadImage = uploadDesignImage,
 }: CustomerImageUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -61,7 +64,7 @@ export function CustomerImageUpload({
   async function handleFile(file: File) {
     setUploading(true);
     try {
-      const url = await uploadDesignImage(file);
+      const url = await uploadImage(file);
       onChange(url);
       toast.success("تم رفع الصورة");
     } catch (e) {

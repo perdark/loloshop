@@ -14,7 +14,10 @@ import type {
   StaffGoal,
   StaffSalary,
   StudyType,
+  ProductType,
+  RobeMeasurements,
 } from "./types";
+import type { ConfigureSelectionPayload } from "./orders";
 import {
   mapApiOrderRow,
   type MonitorData,
@@ -172,6 +175,7 @@ export interface OrderEditStudent {
   id: string;
   name: string;
   phone: string | null;
+  gender: "male" | "female";
   instagram_username: string | null;
   university_name: string | null;
   department: string | null;
@@ -195,9 +199,33 @@ export interface OrderEditContext {
   existing: FullSetExistingOrder | null;
   pricing: FullSetPricing | null;
   can_edit_full_set: boolean;
+  edit_mode: "full_set" | "retail" | "limited";
   /** The order's own typed spec lines (e.g. «تطريز الوشاح» → «احمد») — editable via
    *  the limited (quick) editor when `can_edit_full_set` is false (retail orders). */
   editable_items: { id: string; label: string; text: string }[];
+  retail_order: RetailOrderEditSnapshot | null;
+}
+
+export interface RetailOrderEditSnapshot {
+  id: string;
+  product_id: string;
+  product_type: ProductType;
+  product_name: string;
+  status: OrderStatus;
+  price: number;
+  cost: number;
+  measurements: RobeMeasurements | null;
+  has_embroidery: boolean;
+  needs_pressing: boolean;
+  tailor_status: "pending" | "done";
+  quantity: number;
+  selections: Array<{
+    group_id: string;
+    option_id: string;
+    qty: number;
+    customer_text: string | null;
+    customer_image_url: string | null;
+  }>;
 }
 
 export async function getOrderEditContext(orderId: string): Promise<OrderEditContext> {
@@ -244,6 +272,59 @@ export interface QuickEditPayload {
 
 export async function patchOrderDetails(orderId: string, body: QuickEditPayload): Promise<void> {
   await api.patch(`/production/orders/${orderId}/details`, body);
+}
+
+export interface SaveRetailOrderResult {
+  id: string;
+  oldPrice: number;
+  newPrice: number;
+  priceDifference: number;
+  cost: number;
+  profit: number;
+  status: OrderStatus;
+  designRework: boolean;
+  tailorReopened: boolean;
+}
+
+export async function saveRetailOrderConfiguration(
+  orderId: string,
+  body: {
+    selections: ConfigureSelectionPayload[];
+    measurements?: RobeMeasurements;
+    student?: {
+      name?: string;
+      instagram_username?: string;
+      university_name?: string;
+      department?: string;
+      study_type?: StudyType | "";
+    };
+    group?: { phone_primary?: string; phone_secondary?: string };
+  }
+): Promise<SaveRetailOrderResult> {
+  const { data } = await api.put<{
+    data: {
+      id: string;
+      old_price: number;
+      new_price: number;
+      price_difference: number;
+      cost: number;
+      profit: number;
+      status: OrderStatus;
+      design_rework: boolean;
+      tailor_reopened: boolean;
+    };
+  }>(`/production/orders/${orderId}/retail-configuration`, body);
+  return {
+    id: data.data.id,
+    oldPrice: Number(data.data.old_price),
+    newPrice: Number(data.data.new_price),
+    priceDifference: Number(data.data.price_difference),
+    cost: Number(data.data.cost),
+    profit: Number(data.data.profit),
+    status: data.data.status,
+    designRework: Boolean(data.data.design_rework),
+    tailorReopened: Boolean(data.data.tailor_reopened),
+  };
 }
 
 export async function uploadProductionImage(file: File): Promise<string> {
@@ -407,16 +488,31 @@ export interface WholesalerOrderRow {
   nextLabel: string | null;
   adminAmount: number | null;
   wholesalerAmount: number | null;
-  /** Money-line breakdown (money-eligible roles only; 0 otherwise). Lets the admin page
-   *  explain the admin/rep totals: packages + شال + other add-ons + single pieces. */
-  pkgCount: number;
-  pkgStudent: number;
-  shawlCount: number;
-  shawlStudent: number;
-  otherStudent: number;
-  pieceStudent: number;
-  /** Historical/non-standard paid lines that do not match the named pricing categories. */
-  unclassifiedStudent: number;
+}
+
+export interface WholesalerAccountLine {
+  label: string;
+  qty: number;
+  studentAmount: number;
+  adminAmount: number;
+  representativeProfit: number;
+  kind: "saved" | "adjustment";
+}
+
+export interface WholesalerAccountSummary {
+  scope: "approved_non_cancelled";
+  inventory: {
+    sashRoyal: number;
+    sashNormal: number;
+    capRoyal: number;
+    capNormal: number;
+  };
+  money: {
+    studentTotal: number;
+    adminTotal: number;
+    representativeProfit: number;
+    lines: WholesalerAccountLine[];
+  };
 }
 
 interface WholesalerOrderApiRow {
@@ -435,13 +531,29 @@ interface WholesalerOrderApiRow {
   next_label: string | null;
   admin_amount: number | null;
   wholesaler_amount: number | null;
-  pkg_count?: number;
-  pkg_student?: number;
-  shawl_count?: number;
-  shawl_student?: number;
-  other_student?: number;
-  piece_student?: number;
-  unclassified_student?: number;
+}
+
+interface WholesalerAccountSummaryApi {
+  scope: "approved_non_cancelled";
+  confirmed_inventory: {
+    sash_royal: number;
+    sash_normal: number;
+    cap_royal: number;
+    cap_normal: number;
+  };
+  money: {
+    student_total: number;
+    admin_total: number;
+    representative_profit: number;
+    lines: Array<{
+      label: string;
+      qty: number;
+      student_amount: number;
+      admin_amount: number;
+      representative_profit: number;
+      kind: "saved" | "adjustment";
+    }>;
+  };
 }
 
 /**
@@ -452,13 +564,16 @@ interface WholesalerOrderApiRow {
 export async function getWholesalerOrders(
   wholesalerId: string,
   opts: { zone?: string; isAdmin?: boolean } = {}
-): Promise<WholesalerOrderRow[]> {
+): Promise<{ orders: WholesalerOrderRow[]; summary: WholesalerAccountSummary | null }> {
   const base = opts.isAdmin ? "/admin" : "/staff";
-  const { data } = await api.get<{ data: WholesalerOrderApiRow[] }>(
+  const { data } = await api.get<{
+    data: WholesalerOrderApiRow[];
+    summary: WholesalerAccountSummaryApi | null;
+  }>(
     `${base}/wholesalers/${wholesalerId}/orders`,
     { params: opts.zone ? { zone: opts.zone } : undefined }
   );
-  return (data.data || []).map((r) => ({
+  const orders = (data.data || []).map((r) => ({
     id: r.id,
     studentId: r.student_id,
     studentName: r.student_name,
@@ -474,14 +589,35 @@ export async function getWholesalerOrders(
     nextLabel: r.next_label,
     adminAmount: r.admin_amount == null ? null : Number(r.admin_amount),
     wholesalerAmount: r.wholesaler_amount == null ? null : Number(r.wholesaler_amount),
-    pkgCount: Number(r.pkg_count || 0),
-    pkgStudent: Number(r.pkg_student || 0),
-    shawlCount: Number(r.shawl_count || 0),
-    shawlStudent: Number(r.shawl_student || 0),
-    otherStudent: Number(r.other_student || 0),
-    pieceStudent: Number(r.piece_student || 0),
-    unclassifiedStudent: Number(r.unclassified_student || 0),
   }));
+  const raw = data.summary;
+  return {
+    orders,
+    summary: raw
+      ? {
+          scope: raw.scope,
+          inventory: {
+            sashRoyal: Number(raw.confirmed_inventory.sash_royal || 0),
+            sashNormal: Number(raw.confirmed_inventory.sash_normal || 0),
+            capRoyal: Number(raw.confirmed_inventory.cap_royal || 0),
+            capNormal: Number(raw.confirmed_inventory.cap_normal || 0),
+          },
+          money: {
+            studentTotal: Number(raw.money.student_total || 0),
+            adminTotal: Number(raw.money.admin_total || 0),
+            representativeProfit: Number(raw.money.representative_profit || 0),
+            lines: (raw.money.lines || []).map((line) => ({
+              label: line.label,
+              qty: Number(line.qty || 0),
+              studentAmount: Number(line.student_amount || 0),
+              adminAmount: Number(line.admin_amount || 0),
+              representativeProfit: Number(line.representative_profit || 0),
+              kind: line.kind,
+            })),
+          },
+        }
+      : null,
+  };
 }
 
 export interface BulkAdvanceResult {

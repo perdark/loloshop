@@ -6,6 +6,132 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
+## 2026-07-24 — 🍏 iOS submission: reviewer demo login was DEAD in prod (fixed) · listing metadata written · 5 ASC blockers left
+
+**Session paused mid-submission — user tired, resuming next session. NOTHING expires; the ASC draft and the uploaded
+build both persist.** Only prod change this session = one env var (below). No code committed, no rebuild needed.
+
+**① THE REAL FIND — the App Review demo login was broken on prod and would have failed review.**
+`POST /api/auth/login {07700000000, Lolo#Review2026}` against lolo-shop96.com returned **`otp_required: true`** — Apple's
+reviewer would have hit the WhatsApp OTP wall on an Iraqi number they don't own → guaranteed rejection.
+**Cause:** the 2026-07-19 security batch added a SECOND gate, `DEMO_LOGIN_EXPIRES_AT`, that was never set in prod.
+`isDemoLoginPhone` (`backend/lib/otp.js:44-48`) parses the deadline FIRST — unset → `NaN` → `return false`, so the
+allow-list is **silently inert** even though `DEMO_LOGIN_PHONES=07700000000` was correctly present. **Setting only the
+phone list looks configured but does nothing.**
+**Fix applied to prod** (`.env` backed up to `.env.bak-pre-demo-expiry-20260724`): added
+`DEMO_LOGIN_EXPIRES_AT=2026-08-21` + `pm2 restart loloshop-api --update-env`. **Verified live:** login now returns a
+token, `otp_required:false`; token works on `/api/auth/me` `/api/catalog/shop` `/api/orders/mine` (all 200), unauth
+control still 401. Account confirmed `role='retail'`, id `fd00c7e2…`. Memory `project_play_reviewer_demo_login` updated
+with the two-var requirement + the curl verification command.
+**⚠️ The bypass DIES 2026-08-21** — if review is rejected and resubmitted after that, push the date forward + restart.
+
+**② Listing metadata written + verified against Apple's limits** (Promotional 129/170 · Description 976/4000 ·
+Keywords 92/100 · Review Notes 2583/4000). All URLs verified 200: `/` `/privacy` `/terms` `/delete-account`
+(the last one matters — Apple REQUIRES in-app account deletion for any app with sign-up; we have it).
+Review Notes deliberately (a) tell the reviewer the OTP is bypassed so they don't read login as broken, and (b) name the
+configurator + live production tracking as the non-webview functionality — that is the **4.2 minimum-functionality**
+defense. Contact: Furqan Wesam · +9647713644460 · fn.the.gamer@gmail.com. Release = **Manually release**.
+
+**③ Five ASC blockers remain (all in the browser, nothing to build):**
+1. **13-inch iPad screenshot** — decision made: KEEP iPad support (staff use iPads), just add screenshots; do NOT
+   drop iPad (that needs a target change + full rebuild + re-upload). **1 of 4 captured**:
+   `~/Desktop/loloshop-ios-assets/screenshots-ipad/01-home.png` at **2048×2732** (valid for the 13" slot).
+   Method: chrome-devtools `emulate` viewport **`1024x1366x2`** → screenshot → exact 2048×2732, no scaling needed.
+   **NB `/shop` 301s to `/`** — the catalog is a section on the home page (`/#catalog`), so a plain `/shop` capture is a
+   duplicate of the home viewport. Remaining 3: catalog (`/#catalog`), a product page
+   (e.g. `/product/5b5c3ff7-4f6d-4aba-8744-17d1110bc0ce`), and `/sizes`. Screenshot files MUST be written inside the repo
+   root (MCP workspace restriction) then moved out.
+2. **Content Rights** (App Information) → No third-party content.
+3. **Age Rating** (App Information) → answer None to all → 4+.
+4. **Privacy Policy URL** → `https://lolo-shop96.com/privacy`.
+5. **App Privacy questionnaire** → data collected: name, phone, photo uploads, order history. **Verified there are NO
+   analytics/tracking SDKs** (grepped for gtag/GA/GTM/Pixel/Mixpanel/Amplitude/Sentry/PostHog/Vercel Analytics — none),
+   no ads, no IDFA. Physical goods + cash ⇒ no IAP (correctly skipped).
+
+### Open follow-ups
+- **Staff GPS is PARKED until the app is approved (owner decision).** Today it is harmless: live
+  `staff_attendance_settings.verification_mode = 'none'` ⇒ `verified` is always true, so attendance stamp-in works on
+  iPhone with no location permission and just stores `latitude: null`.
+  **⚠️ FOOTGUN: do NOT switch `verification_mode` to `location`/`both`/`network_or_location`** until (a) an iOS build
+  ships with `NSLocationWhenInUseUsageDescription` and (b) `shop_latitude`/`shop_longitude` are set — they are **NULL
+  right now**, so location mode would 403 «لا يمكن تسجيل البصمة خارج نطاق المحل» for EVERY user on EVERY platform
+  (`attendanceController.js:409`, `:490`). iOS 1.1 work = plist string via a `codemagic.yaml` step (the iOS project is
+  regenerated each CI run, so a one-off file edit will not survive), then **test on TestFlight whether plain
+  `navigator.geolocation` actually returns coordinates inside Capacitor's WKWebView** — if not, use `@capacitor/geolocation`.
+- Branch `ios-appstore` still NOT merged; the `frontend/package-lock.json` desync is still open (`@capacitor/ios` is in
+  package.json but NOT installed locally). **`npm install` was deliberately NOT run — disk is at 97% (2.3G free)** and
+  would risk ENOSPC. Free disk before merging.
+- Untracked junk still present and must not be committed: `frontend/public/dev-login.html`,
+  `frontend/public/dev-token-tmp.json`.
+
+---
+
+## 2026-07-23 — 🍏 iOS App Store: build pipeline WORKS end-to-end (Codemagic, NO Mac) · binary with real icon uploaded to App Store Connect · listing ~60%, submission NOT sent
+
+**No Mac / no iPhone used — all via Codemagic cloud CI.** Branch **`ios-appstore`** (NOT merged to main — hazard below).
+Website/prod untouched. Full working `codemagic.yaml` is the reference for any future Capacitor iOS app. Memory:
+[[project_mobile_apps_capacitor]].
+
+**What got done (Apple account → green build with the real icon uploaded):**
+- Apple Developer acct ($99) activated. ASC **API key** (role Admin, `.p8` saved), **bundle id `com.loloshop96.app`**
+  registered (+Push cap), **app record: Apple ID `6793976053`**, «لولو شوب», ar-SA, SKU loloshop-ios.
+- Codemagic connected to the GitHub repo. ASC integration named **`revoart_asc`** (account-wide — reuse for future apps).
+  **`CERTIFICATE_PRIVATE_KEY`** added as a **Secure** var in Codemagic group **`ios_signing`**.
+- **`codemagic.yaml` at repo ROOT** (workflow `ios-appstore`): install → generate iOS (SPM) → bake icon → sign → timestamp
+  build number → build-ipa → upload to ASC. **GREEN.** A build with the **real LoloShop icon** is uploaded + selected.
+- Assets at **`~/Desktop/loloshop-ios-assets/`**: `AppIcon-1024.png` + **4 screenshots at 1284×2778** (captured LIVE from
+  lolo-shop96.com via chrome-devtools at viewport `428x926x3`). Listing metadata drafted + given to user (Arabic description,
+  keywords, Support URL lolo-shop96.com, Marketing URL instagram, Copyright «2026 Lolo Shop»).
+
+**⚠️ EVERY failure hit this session + its fix — DO NOT re-debug these:**
+1. **Apple "Failed to verify your identity"** (brand-new paid account login) — NOT a browser bug. New account still activating
+   + **home Wi-Fi IP flagged**. **FIX: sign in over phone mobile-data / hotspot** (different IP). Worked instantly.
+2. **Codemagic "repository doesn't contain a mobile application"** — app is in `frontend/`. **FIX: `working_directory: frontend`
+   (the yaml MUST stay at repo root)** + "Set type manually" to get past the scanner wizard.
+3. **Signing "No matching profiles found … app_store"** — the declarative `ios_signing` block only FETCHES, never creates.
+   **FIX: drop `ios_signing`; use `app-store-connect fetch-signing-files --type IOS_APP_STORE --create`.**
+4. **"App.xcworkspace does not exist" then "No Podfile found"** — **Capacitor 8 uses Swift Package Manager, NOT CocoaPods**
+   (no Podfile, no .xcworkspace). **FIX: NO pod install; build `ios/App/App.xcodeproj` via `build-ipa --project` (not --workspace).**
+5. **"Cannot save Signing Certificates without certificate private key"** — the first distribution cert needs a private key.
+   **FIX: generated RSA key at `~/Desktop/loloshop-ios-cert-key.pem`, added as Secure var `CERTIFICATE_PRIVATE_KEY` (group
+   `ios_signing`), passed `--certificate-key=@env:CERTIFICATE_PRIVATE_KEY`. Key MUST be stable across builds** (a per-build key
+   hits Apple's cert limit).
+6. **"App Store distribution fail" (TestFlight)** — cosmetic: the binary uploaded fine; only external-TestFlight submit needs
+   "Test Information". **FIX: `submit_to_testflight: false` (upload only).**
+7. **Screenshot dimensions rejected** — uploaded 1290×2796 (6.7″) into the 6.5″ slot. **FIX: 1284×2778 (valid for both slots).**
+8. **Default Capacitor placeholder icon** (generic blue X — was on BOTH stores; Play only showed the logo because it was
+   uploaded to the listing separately; **Apple takes the icon FROM THE BUILD — no separate upload**). **FIX: `@capacitor/assets`
+   + `frontend/resources/icon.png|splash.png|splash-dark.png` (rendered from the 4672px `frontend/public/logo.png`) + CI step
+   `npx capacitor-assets generate --ios`.** Needed a rebuild.
+9. **Upload "bundle version must be higher than 1"** — `get-latest-app-store-build-number` returned 0 → recomputed 1.
+   **FIX: timestamp build number `agvtool new-version -all $(date +%s)`.**
+10. **"Missing Compliance" (export compliance)** — **ANSWER: "None of the algorithms mentioned above"** (app only uses
+    OS-provided HTTPS, implements no crypto → exempt, no docs to upload).
+
+**WHERE THE USER STOPPED — resume here (in the App Store submission):**
+- Finish **export compliance** → "None of the algorithms mentioned above".
+- **Pricing → Free** · **Age Rating → 4+** (answer "None" to all) · **Content Rights → No** third-party content.
+- **App Privacy** questionnaire — data collected: name, phone, photos/logo uploads, order history — answer accurately.
+- **App Review Information** ⚠️ — reviewer contact + **demo login `07700000000` / `Lolo#Review2026`** (OTP-skip via
+  `DEMO_LOGIN_PHONES` env — [[project_play_reviewer_demo_login]]). **VERIFY this login works on the LIVE site first** (env must
+  be set in prod) or the reviewer can't pass the WhatsApp OTP → rejection.
+- Then **Submit for review** (Apple review ~1–3 days).
+
+### Open follow-ups / hazards
+- **⚠️ 4.2 (Minimum Functionality) rejection risk** — LoloShop is a webview shell loading lolo-shop96.com; Apple's #1 reason
+  to reject wrappers (Android sailed through; Apple is stricter). If rejected: harden with real APNs push + native splash +
+  native camera for logo upload. Physical goods + cash = exempt from IAP/30% (no payment work).
+- **⚠️ Branch `ios-appstore` NOT merged to main** — main auto-deploys the website AND CI uses `npm ci`, which BREAKS on the
+  unsynced lockfile (`@capacitor/ios` + `@capacitor/assets` were added to `frontend/package.json` without updating
+  `frontend/package-lock.json`). **Before merging: run `npm install` in `frontend/` to sync the lockfile.** Until then keep
+  iOS work on the branch — it never touches prod.
+- **Android has the SAME placeholder icon on the phone** (Play shows the logo only because it was uploaded to the listing).
+  `frontend/resources/` now holds the source — next Android `.aab` rebuild: `npx capacitor-assets generate --android`.
+- Secrets on disk to back up: **`~/Desktop/loloshop-ios-cert-key.pem`** (signing private key — needed to reuse the same
+  distribution cert on future builds) + the ASC `.p8` (user saved it). A chrome-devtools tab may still be open on lolo-shop96.com.
+
+---
+
 ## 2026-07-21 (b) — ✅ PUSHED: قطعة · طلب · طالب — one unit vocabulary · TV board rebuilt · dead delivery panels deleted
 
 **Pushed to main (`303c9f0`) → auto-deploys.** No new migration (069+070 ride along from the earlier sessions;

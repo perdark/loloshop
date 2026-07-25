@@ -20,6 +20,7 @@ interface RobeSleeveSectionProps {
   fieldKey: (groupId: string, optionId: string) => string;
   showErrors?: boolean;
   errors?: Record<string, string>;
+  uploadImage?: (file: File) => Promise<string>;
 }
 
 export function RobeSleeveSection({
@@ -34,6 +35,7 @@ export function RobeSleeveSection({
   fieldKey,
   showErrors = false,
   errors = {},
+  uploadImage,
 }: RobeSleeveSectionProps) {
   if (!groups.length) return null;
 
@@ -92,6 +94,7 @@ export function RobeSleeveSection({
                     onTextChange={(text) => onTextChange(group.id, optionId, text)}
                     allowOptionalImage
                     showErrors={showErrors}
+                    uploadImage={uploadImage}
                   />
                 </div>
               )}

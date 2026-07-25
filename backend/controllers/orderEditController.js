@@ -8,7 +8,10 @@
 // wholesaler-linked OR is an admin-created name-only account (users.phone IS NULL).
 const { query, tx } = require('../lib/db');
 const { persistFullSetOrder, readFullSetOrder, loadWholesalerPricing } = require('../lib/fullSetOrder');
+const { priceSelections, validateRobeMeasurements } = require('./orderController');
 const { publicUrl } = require('../lib/upload');
+const { publish } = require('../lib/eventBus');
+const { releaseForOrder } = require('../lib/shelf');
 
 function clean(v, max) {
   const t = v == null ? '' : String(v).trim();
@@ -19,7 +22,7 @@ const isUuid = (s) => /^[0-9a-f-]{36}$/i.test(String(s || ''));
 async function loadStudent(studentId) {
   if (!isUuid(studentId)) return null;
   const { rows } = await query(
-    `SELECT s.id, s.user_id, u.name, u.phone, s.status, s.instagram_username,
+    `SELECT s.id, s.user_id, u.name, u.phone, s.status, s.gender::text AS gender, s.instagram_username,
             s.university_name, s.department, s.study_type::text AS study_type,
             s.wholesaler_id, wu.name AS rep_name
        FROM students s
@@ -207,7 +210,14 @@ async function editContext(req, res) {
   const { id } = req.params;
   if (!isUuid(id)) return res.status(400).json({ error: 'طلب غير صحيح', code: 'ERR_VALIDATION' });
   const o = await query(
-    `SELECT id, student_id, design_id, checkout_group_id FROM orders WHERE id = $1`, [id]
+    `SELECT o.id, o.student_id, o.design_id, o.checkout_group_id, o.product_id,
+            o.status::text AS status, o.price, o.cost, o.measurements, o.has_embroidery,
+            o.needs_pressing, o.tailor_status::text AS tailor_status,
+            p.type::text AS product_type, p.name_ar AS product_name
+       FROM orders o
+       JOIN products p ON p.id = o.product_id
+      WHERE o.id = $1`,
+    [id]
   );
   if (!o.rows.length) return res.status(404).json({ error: 'الطلب غير موجود', code: 'ERR_NOT_FOUND' });
   const order = o.rows[0];
@@ -224,9 +234,8 @@ async function editContext(req, res) {
     );
     group = g.rows[0] || null;
   }
-  // The order's editable spec lines — every line that already carries TYPED content (same set
-  // patchOrderDetails accepts). This drives the LIMITED editor for retail orders (which can't
-  // use the full طقم form): edit the student's info + each piece's text, no re-pricing.
+  // Full saved retail selection snapshot. The old response exposed only typed lines, which
+  // made measurements, cap shape, normal/royal options and image-only rows impossible to edit.
   //
   // FIX (2026-07-20): this used to also require `COALESCE(price_snapshot,0) = 0`, meant as
   // "never touch price rows". That conflated a line CARRYING a price with editing CHANGING
@@ -242,18 +251,33 @@ async function editContext(req, res) {
   // knowing: readFullSetOrder derives sash_type/cap_type from those values, so retyping
   // «نوع الوشاح» to «ملكي» re-prices the bundle on the NEXT full-form save (not here).
   const editable = await query(
-    `SELECT id, label_snapshot AS label, customer_text AS text
+    `SELECT id, group_id, option_id, label_snapshot AS label, qty,
+            customer_text AS text, customer_image_url
        FROM order_items
-      WHERE order_id = $1 AND customer_text IS NOT NULL
+      WHERE order_id = $1
       ORDER BY id`,
     [order.id]
   );
+  const qtyResult = await query(
+    `SELECT COALESCE((
+       SELECT GREATEST(qty, 1)
+         FROM order_items
+        WHERE order_id = $1 AND group_id IS NULL AND option_id IS NULL
+        ORDER BY created_at, id
+        LIMIT 1
+     ), 1)::int AS quantity`,
+    [order.id]
+  );
+  const editMode = canEdit
+    ? 'full_set'
+    : (student.wholesaler_id == null && student.phone != null ? 'retail' : 'limited');
   res.json({
     data: {
       student: {
         id: student.id,
         name: student.name,
         phone: student.phone,
+        gender: student.gender,
         instagram_username: student.instagram_username,
         university_name: student.university_name,
         department: student.department,
@@ -265,7 +289,309 @@ async function editContext(req, res) {
       existing,
       pricing: await publicPricing(student.wholesaler_id),
       can_edit_full_set: canEdit,
-      editable_items: editable.rows,
+      edit_mode: editMode,
+      editable_items: editable.rows.filter((it) => it.text != null),
+      retail_order: editMode === 'retail' ? {
+        id: order.id,
+        product_id: order.product_id,
+        product_type: order.product_type,
+        product_name: order.product_name,
+        status: order.status,
+        price: Number(order.price || 0),
+        cost: Number(order.cost || 0),
+        measurements: order.measurements,
+        has_embroidery: !!order.has_embroidery,
+        needs_pressing: !!order.needs_pressing,
+        tailor_status: order.tailor_status,
+        quantity: Number(qtyResult.rows[0]?.quantity || 1),
+        selections: editable.rows
+          .filter((it) => it.group_id != null && it.option_id != null)
+          .map((it) => ({
+            group_id: it.group_id,
+            option_id: it.option_id,
+            qty: Number(it.qty || 1),
+            customer_text: it.text,
+            customer_image_url: it.customer_image_url,
+          })),
+      } : null,
+    },
+  });
+}
+
+function normalizeRetailMeasurements(productType, raw) {
+  if (productType !== 'robe') return null;
+  const m = raw || {};
+  const chest = m.chest_cm == null || m.chest_cm === '' ? null : Number(m.chest_cm);
+  return {
+    shoulder_cm: Number(m.shoulder_cm),
+    chest_cm: Number.isFinite(chest) && chest > 0 ? chest : null,
+    robe_length_cm: Number(m.robe_length_cm),
+    sleeve_length_cm: Number(m.sleeve_length_cm),
+    tailor_notes: clean(m.tailor_notes, 500),
+    receipt_image_url: clean(m.receipt_image_url, 1000),
+  };
+}
+
+function comparableSelections(lines) {
+  return lines
+    .filter((line) => line.group_id && line.option_id)
+    .map((line) => ({
+      group_id: String(line.group_id),
+      option_id: String(line.option_id),
+      qty: Number(line.qty || 1),
+      customer_text: clean(line.customer_text, 200),
+      customer_image_url: clean(line.customer_image_url, 1000),
+    }))
+    .sort((a, b) =>
+      `${a.group_id}:${a.option_id}`.localeCompare(`${b.group_id}:${b.option_id}`)
+    );
+}
+
+function comparableStoredSelections(lines, orderQuantity) {
+  const multiplier = Math.max(1, Number(orderQuantity) || 1);
+  return comparableSelections(lines.map((line) => ({
+    ...line,
+    // Cart checkout stores line quantities multiplied by the number of identical
+    // pieces. priceSelections() returns the per-piece selection, so normalize the
+    // saved value or an unchanged ×2 order would look edited.
+    qty: Number(line.qty || 1) / multiplier,
+  })));
+}
+
+const DESIGN_PASSED_STAGES = new Set([
+  'converting', 'embroidery', 'pressing', 'preparing', 'ready', 'delivered',
+]);
+
+// ── PUT /api/production/orders/:id/retail-configuration ─────────────────────
+// Full structured editor for independent retail pieces. Product/design identity and recorded
+// production cost stay immutable; selections are authoritatively re-priced at the retail role.
+async function saveRetailConfiguration(req, res) {
+  const { id } = req.params;
+  if (!isUuid(id)) return res.status(400).json({ error: 'طلب غير صحيح', code: 'ERR_VALIDATION' });
+
+  const current = await query(
+    `SELECT o.id, o.student_id, o.product_id, o.design_id, o.checkout_group_id,
+            o.status::text AS status,
+            o.price, o.cost, o.measurements, o.has_embroidery, o.needs_pressing,
+            o.tailor_status::text AS tailor_status,
+            s.user_id, s.gender::text AS gender, s.wholesaler_id, u.phone, u.name,
+            p.type::text AS product_type
+       FROM orders o
+       JOIN students s ON s.id = o.student_id
+       JOIN users u ON u.id = s.user_id
+       JOIN products p ON p.id = o.product_id
+      WHERE o.id = $1`,
+    [id]
+  );
+  if (!current.rows.length) {
+    return res.status(404).json({ error: 'الطلب غير موجود', code: 'ERR_NOT_FOUND' });
+  }
+  const order = current.rows[0];
+  if (order.wholesaler_id != null || order.phone == null) {
+    return res.status(403).json({ error: 'هذا المسار للطلبات المفردة فقط', code: 'ERR_FORBIDDEN' });
+  }
+  if (order.status === 'cancelled') {
+    return res.status(409).json({ error: 'لا يمكن تعديل طلب ملغى', code: 'ERR_INVALID_STATE' });
+  }
+
+  const selections = Array.isArray(req.body?.selections) ? req.body.selections : [];
+  if (selections.length > 50) {
+    return res.status(400).json({ error: 'عدد كبير من الخيارات', code: 'ERR_VALIDATION' });
+  }
+  const measurementError = validateRobeMeasurements(order.product_type, req.body?.measurements);
+  if (measurementError) {
+    return res.status(400).json({ error: measurementError, code: 'ERR_VALIDATION' });
+  }
+  const infoPayload = { ...(req.body?.student || {}), ...(req.body?.group || {}) };
+  const infoValidation = validateStudentInfo(infoPayload);
+  if (infoValidation.error) {
+    return res.status(400).json({ error: infoValidation.error, code: 'ERR_VALIDATION' });
+  }
+
+  const priced = await priceSelections({
+    productId: order.product_id,
+    role: 'retail',
+    selections,
+    studentGender: order.gender,
+  });
+  if (!priced.ok) {
+    return res.status(priced.status).json({ error: priced.error, code: priced.code });
+  }
+
+  const oldItemsResult = await query(
+    `SELECT group_id, option_id, qty, customer_text, customer_image_url
+       FROM order_items
+      WHERE order_id = $1 AND group_id IS NOT NULL AND option_id IS NOT NULL
+      ORDER BY id`,
+    [id]
+  );
+  const qtyResult = await query(
+    `SELECT COALESCE((
+       SELECT GREATEST(qty, 1)
+         FROM order_items
+        WHERE order_id = $1 AND group_id IS NULL AND option_id IS NULL
+        ORDER BY created_at, id
+        LIMIT 1
+     ), 1)::int AS quantity`,
+    [id]
+  );
+  const orderQuantity = Number(qtyResult.rows[0]?.quantity || 1);
+  const beforeSelections = comparableStoredSelections(oldItemsResult.rows, orderQuantity);
+  const afterSelections = comparableSelections(priced.items);
+  const selectionsChanged = JSON.stringify(beforeSelections) !== JSON.stringify(afterSelections);
+  const beforeMeasurements = normalizeRetailMeasurements(order.product_type, order.measurements);
+  const afterMeasurements = normalizeRetailMeasurements(order.product_type, req.body?.measurements);
+  const measurementsChanged = JSON.stringify(beforeMeasurements) !== JSON.stringify(afterMeasurements);
+
+  const designRework =
+    priced.hasEmbroidery && selectionsChanged && DESIGN_PASSED_STAGES.has(order.status);
+  const tailorReopened =
+    order.product_type === 'robe' && measurementsChanged && order.tailor_status === 'done';
+  const resultingStatus = designRework ? 'design_complete' : order.status;
+  const newPrice = Number(priced.total || 0) * orderQuantity;
+  const oldPrice = Number(order.price || 0);
+  const recordedCost = Number(order.cost || 0);
+
+  let studentInfoChanged = [];
+  await tx(async (client) => {
+    const locked = await client.query(
+      `SELECT status::text AS status, price FROM orders WHERE id = $1 FOR UPDATE`,
+      [id]
+    );
+    if (!locked.rows.length) {
+      const e = new Error('الطلب غير موجود');
+      e.statusCode = 404;
+      throw e;
+    }
+    if (locked.rows[0].status === 'cancelled') {
+      const e = new Error('لا يمكن تعديل طلب ملغى');
+      e.statusCode = 409;
+      throw e;
+    }
+    if (
+      locked.rows[0].status !== order.status ||
+      Number(locked.rows[0].price || 0) !== oldPrice
+    ) {
+      const e = new Error('تم تحديث الطلب أثناء التعديل — أعد تحميل الصفحة ثم حاول مجدداً');
+      e.statusCode = 409;
+      throw e;
+    }
+
+    await client.query(`DELETE FROM order_items WHERE order_id = $1`, [id]);
+    for (const item of priced.items) {
+      await client.query(
+        `INSERT INTO order_items
+           (order_id, group_id, option_id, label_snapshot, price_snapshot,
+            admin_price_snapshot, qty, customer_image_url, customer_text)
+         VALUES ($1, $2, $3, $4, $5, 0, $6, $7, $8)`,
+        [
+          id,
+          item.group_id || null,
+          item.option_id || null,
+          item.label,
+          Number(item.price || 0) * orderQuantity,
+          Number(item.qty || 1) * orderQuantity,
+          clean(item.customer_image_url, 1000),
+          clean(item.customer_text, 200),
+        ]
+      );
+    }
+
+    await client.query(
+      `UPDATE orders
+          SET price = $1,
+              status = $2,
+              measurements = $3::jsonb,
+              has_embroidery = $4,
+              needs_pressing = $5,
+              embroidery_zones = CASE WHEN $6 THEN '{}'::jsonb ELSE embroidery_zones END,
+              final_design_url = CASE WHEN $6 THEN NULL ELSE final_design_url END,
+              tailor_status = CASE WHEN $7 THEN 'pending'::tailor_track_status ELSE tailor_status END,
+              tailor_done_at = CASE WHEN $7 THEN NULL ELSE tailor_done_at END,
+              tailor_done_by = CASE WHEN $7 THEN NULL ELSE tailor_done_by END
+        WHERE id = $8`,
+      [
+        newPrice,
+        resultingStatus,
+        afterMeasurements == null ? null : JSON.stringify(afterMeasurements),
+        !!priced.hasEmbroidery,
+        order.product_type !== 'cap',
+        designRework,
+        tailorReopened,
+        id,
+      ]
+    );
+    if (designRework) await releaseForOrder(id, client);
+    const infoResult = await applyStudentInfo(
+      {
+        id: order.student_id,
+        user_id: order.user_id,
+        name: order.name,
+      },
+      infoPayload,
+      order.checkout_group_id,
+      (sql, params) => client.query(sql, params)
+    );
+    if (infoResult.error) {
+      const e = new Error(infoResult.error);
+      e.statusCode = 400;
+      throw e;
+    }
+    studentInfoChanged = infoResult.changed || [];
+
+    await client.query(
+      `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
+       VALUES ($1, 'staff_order_edit', 'order', $2, $3::jsonb)`,
+      [
+        req.user.id,
+        id,
+        JSON.stringify({
+          via: 'retail_configuration',
+          product_id: order.product_id,
+          selections_before: beforeSelections,
+          selections_after: afterSelections,
+          measurements_before: beforeMeasurements,
+          measurements_after: afterMeasurements,
+          price_before: oldPrice,
+          price_after: newPrice,
+          cost_preserved: recordedCost,
+          profit_before: oldPrice - recordedCost,
+          profit_after: newPrice - recordedCost,
+          status_before: order.status,
+          status_after: resultingStatus,
+          design_rework: designRework,
+          tailor_reopened: tailorReopened,
+          student_info_fields: studentInfoChanged,
+        }),
+      ]
+    );
+  }).catch((err) => {
+    if (err.statusCode) {
+      res.status(err.statusCode).json({
+        error: err.message,
+        code: err.statusCode === 404 ? 'ERR_NOT_FOUND' : 'ERR_INVALID_STATE',
+      });
+      return null;
+    }
+    throw err;
+  });
+  if (res.headersSent) return;
+
+  publish({ type: 'order', orderId: id, status: resultingStatus });
+  res.json({
+    data: {
+      id,
+      old_price: oldPrice,
+      new_price: newPrice,
+      price_difference: newPrice - oldPrice,
+      cost: recordedCost,
+      profit: newPrice - recordedCost,
+      status: resultingStatus,
+      design_rework: designRework,
+      tailor_reopened: tailorReopened,
+      quantity: orderQuantity,
+      selections: afterSelections,
+      measurements: afterMeasurements,
     },
   });
 }
@@ -475,10 +801,12 @@ async function uploadImage(req, res) {
 }
 
 module.exports = {
-  editContext, saveFullSetOrder, patchOrderDetails, studentsSearch, getStudentFullSet, uploadImage,
+  editContext, saveFullSetOrder, saveRetailConfiguration, patchOrderDetails,
+  studentsSearch, getStudentFullSet, uploadImage,
   // shared with adminCustomOrderController (existing-student mode)
   loadStudent, eligibleForFullSet, captureApproval, restoreApproval,
   captureGroupPhone, restoreGroupPhone,
   // exported for unit tests
-  validateStudentInfo, applyStudentInfo,
+  validateStudentInfo, applyStudentInfo, normalizeRetailMeasurements, comparableSelections,
+  comparableStoredSelections,
 };

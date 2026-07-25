@@ -14,6 +14,7 @@ import {
 import {
   advanceBulk,
   getWholesalerOrders,
+  type WholesalerAccountSummary,
   type WholesalerOrderRow,
 } from "@/lib/staff";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -22,6 +23,8 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 import { formatIQD } from "@/lib/format";
+import { Count } from "@/components/ui/Count";
+import { CalculationDetails } from "@/components/admin/CalculationDetails";
 
 // ─── Shared status pill (warm brand palette, no blue/purple) ──────────────────
 const STATUS_PILL: Partial<Record<OrderStatus, string>> = {
@@ -173,6 +176,7 @@ function OrdersTab({
   ready: boolean;
 }) {
   const [orders, setOrders] = useState<WholesalerOrderRow[]>([]);
+  const [accountSummary, setAccountSummary] = useState<WholesalerAccountSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);
   const [zone, setZone] = useState<FullSetZone | "">("");
@@ -210,8 +214,9 @@ function OrdersTab({
     setLoading(true);
     setFetchError(false);
     getWholesalerOrders(wholesalerId, { zone: zone || undefined, isAdmin })
-      .then((rows) => {
+      .then(({ orders: rows, summary }) => {
         setOrders(rows);
+        setAccountSummary(summary);
         setLoadedOnce(true);
       })
       .catch((err) => {
@@ -307,48 +312,12 @@ function OrdersTab({
     }),
     [orders]
   );
-  const money = useMemo(() => ({
-    admin: filtered.reduce((sum, order) => sum + (order.adminAmount || 0), 0),
-    wholesaler: filtered.reduce((sum, order) => sum + (order.wholesalerAmount || 0), 0),
-    visible: filtered.some((order) => order.adminAmount != null),
-  }), [filtered]);
-
-  // Full "why is it this number" split for the admin. Reconciles exactly to the money tiles:
-  //   admin due  = base/historical admin + shawlAdmin(20k×n) + otherStudent + pieceStudent
-  //   rep profit = pkgRep (base spread) + shawlRep (شال − 20k) ; add-ons & single pieces → 0.
-  const breakdown = useMemo(() => {
-    const a = { pkgCount: 0, pkgStudent: 0, pkgAdmin: 0, shawlCount: 0, shawlStudent: 0, otherStudent: 0, pieceStudent: 0, unclassifiedStudent: 0 };
-    for (const o of filtered) {
-      if (o.adminAmount == null) continue;
-      a.pkgCount += o.pkgCount;
-      a.pkgStudent += o.pkgStudent;
-      a.shawlCount += o.shawlCount;
-      a.shawlStudent += o.shawlStudent;
-      a.otherStudent += o.otherStudent;
-      a.pieceStudent += o.pieceStudent;
-      a.unclassifiedStudent += o.unclassifiedStudent;
-      // package admin share = this order's admin due minus the non-package admin shares
-      a.pkgAdmin += (o.adminAmount || 0) - 20000 * o.shawlCount - o.otherStudent - o.pieceStudent;
-    }
-    const shawlAdmin = 20000 * a.shawlCount;
-    return { ...a, shawlAdmin, pkgRep: a.pkgStudent + a.unclassifiedStudent - a.pkgAdmin, shawlRep: a.shawlStudent - shawlAdmin };
-  }, [filtered]);
-
   // Opening an order should return to THIS rep's page (not the generic /staff home).
   const backFrom = `/staff/wholesalers/${wholesalerId}/students`;
 
   return (
     <div className="space-y-4">
-      {money.visible && (
-        <div className="space-y-3">
-          <div className="grid grid-cols-3 gap-3">
-            <MoneyTotal label="حصة الإدارة" value={money.admin} />
-            <MoneyTotal label="يجمعه الممثل" value={money.wholesaler} accent />
-            <MoneyTotal label="ربح الممثل" value={money.wholesaler - money.admin} />
-          </div>
-          <MoneyBreakdown b={breakdown} totalStudent={money.wholesaler} totalAdmin={money.admin} />
-        </div>
-      )}
+      {accountSummary && <WholesalerSummary summary={accountSummary} />}
       {/* Zone chips — horizontal scroll on mobile */}
       <nav
         aria-label="تصفية حسب مكان التطريز"
@@ -563,77 +532,159 @@ function OrderRow({
   );
 }
 
-function MoneyTotal({ label, value, accent }: { label: string; value: number; accent?: boolean }) {
-  return <div className="rounded-2xl border border-line bg-surface p-4"><p className="text-xs text-ink-soft">{label}</p><p className={`mt-1 text-lg font-bold ${accent ? "text-orange-ink" : "text-ink"}`} dir="ltr">{formatIQD(value)}</p></div>;
-}
-
-interface BreakdownData {
-  pkgCount: number; pkgStudent: number; pkgAdmin: number; pkgRep: number;
-  shawlCount: number; shawlStudent: number; shawlAdmin: number; shawlRep: number;
-  otherStudent: number; pieceStudent: number;
-  unclassifiedStudent: number;
-}
-
-/** Full "why these totals" table for the admin: every line traced to admin vs. rep. */
-function MoneyBreakdown({ b, totalStudent, totalAdmin }: { b: BreakdownData; totalStudent: number; totalAdmin: number }) {
-  const ar = (n: number) => n.toLocaleString("ar-EG");
-  const rows: { label: string; count?: number; student: number; admin: number; rep: number; note?: string }[] = [];
-  if (b.pkgStudent || b.unclassifiedStudent) rows.push({
-    label: b.unclassifiedStudent ? "السعر الأساسي وبنود تاريخية" : "أطقم كاملة",
-    count: b.pkgCount || undefined,
-    student: b.pkgStudent + b.unclassifiedStudent,
-    admin: b.pkgAdmin,
-    rep: b.pkgRep,
-    note: b.unclassifiedStudent
-      ? "تتضمن بنوداً قديمة غير مصنفة؛ المبلغ النهائي المخزن هو المعتمد"
-      : "الممثل يربح فرق السعر الأساسي",
-  });
-  if (b.shawlStudent) rows.push({ label: "شال امريكي", count: b.shawlCount, student: b.shawlStudent, admin: b.shawlAdmin, rep: b.shawlRep, note: "٢٠٬٠٠٠ للإدارة لكل شال، والباقي للممثل" });
-  if (b.otherStudent) rows.push({ label: "إضافات أخرى", student: b.otherStudent, admin: b.otherStudent, rep: 0, note: "كاملة للإدارة" });
-  if (b.pieceStudent) rows.push({ label: "قطع مفردة (غير طقم)", student: b.pieceStudent, admin: b.pieceStudent, rep: 0, note: "كاملة للإدارة" });
-  const totalRep = totalStudent - totalAdmin;
+function WholesalerSummary({ summary }: { summary: WholesalerAccountSummary }) {
+  const { inventory, money } = summary;
+  const inventoryRows = [
+    ["وشاح ملكي", inventory.sashRoyal],
+    ["وشاح عادي", inventory.sashNormal],
+    ["قبعة ملكية", inventory.capRoyal],
+    ["قبعة عادية", inventory.capNormal],
+  ] as const;
   return (
-    <div className="rounded-2xl border border-line bg-surface p-4">
-      <p className="mb-2 text-sm font-bold text-ink">تفصيل الحساب — كيف تكوّنت هذه المبالغ</p>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[440px] border-collapse text-right text-xs">
-          <thead>
-            <tr className="border-b border-line text-ink-soft">
-              <th className="py-1.5 pe-2 font-semibold">البند</th>
-              <th className="py-1.5 px-2 font-semibold">العدد</th>
-              <th className="py-1.5 px-2 font-semibold">يدفعه الطلاب</th>
-              <th className="py-1.5 px-2 font-semibold">حصة الإدارة</th>
-              <th className="py-1.5 ps-2 font-semibold">ربح الممثل</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.label} className="border-b border-line/60 align-top">
-                <td className="py-2 pe-2">
-                  <span className="font-medium text-ink">{r.label}</span>
-                  {r.note && <span className="block text-[10px] text-ink-soft">{r.note}</span>}
-                </td>
-                <td className="py-2 px-2 text-ink-soft" dir="ltr">{r.count != null ? ar(r.count) : "—"}</td>
-                <td className="py-2 px-2 text-ink" dir="ltr">{formatIQD(r.student)}</td>
-                <td className="py-2 px-2 text-ink" dir="ltr">{formatIQD(r.admin)}</td>
-                <td className="py-2 ps-2 font-semibold text-emerald-700" dir="ltr">{formatIQD(r.rep)}</td>
-              </tr>
-            ))}
-            <tr className="font-bold text-ink">
-              <td className="py-2 pe-2">الإجمالي</td>
-              <td className="py-2 px-2"></td>
-              <td className="py-2 px-2 text-orange-ink" dir="ltr">{formatIQD(totalStudent)}</td>
-              <td className="py-2 px-2" dir="ltr">{formatIQD(totalAdmin)}</td>
-              <td className="py-2 ps-2 text-emerald-700" dir="ltr">{formatIQD(totalRep)}</td>
-            </tr>
-          </tbody>
-        </table>
+    <section className="space-y-3" aria-label="الجرد والحساب المؤكد">
+      <div className="rounded-2xl border border-line bg-surface p-4">
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-bold text-ink">الجرد المؤكد</h2>
+            <p className="mt-0.5 text-xs text-ink-soft">قطع الطلبات الموافق عليها وغير الملغاة</p>
+          </div>
+          <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-bold text-emerald-700">
+            مؤكد فقط
+          </span>
+        </div>
+        <div className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-xl bg-line sm:grid-cols-4">
+          {inventoryRows.map(([label, value]) => (
+            <div key={label} className="bg-surface-sink p-3 text-center">
+              <p className="text-xs font-semibold text-ink-soft">{label}</p>
+              <Count
+                value={value}
+                unit="piece"
+                className="mt-1 block text-lg font-bold text-ink"
+                unitClassName="text-[10px] font-medium text-ink-soft"
+              />
+            </div>
+          ))}
+        </div>
       </div>
-      <p className="mt-2 text-[11px] leading-relaxed text-ink-soft">
-        «يجمعه الممثل» = ما يدفعه الطلاب. «حصة الإدارة» = ما يسلّمه الممثل للإدارة. الفرق هو ربح الممثل =
-        فرق سعر الطقم الأساسي لكل طقم + (سعر الشال − ٢٠٬٠٠٠) لكل شال امريكي. الإضافات الأخرى والقطع المفردة كاملة للإدارة (ربح الممثل منها صفر).
-        هذه الصفحة تشمل الطلبات الموافق عليها وغير الملغاة فقط.
+
+      <div className="rounded-2xl border border-line bg-surface p-4">
+        <div>
+          <h2 className="text-sm font-bold text-ink">الحساب المؤكد</h2>
+          <p className="mt-0.5 text-xs text-ink-soft">
+            لا يتغير عند تصفية قائمة العمل أدناه
+          </p>
+        </div>
+        <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <MoneyTotal label="يجمعه الممثل من الطلاب" value={money.studentTotal} accent />
+          <MoneyTotal label="حصة الإدارة" value={money.adminTotal} />
+          <MoneyTotal label="ربح الممثل" value={money.representativeProfit} positive />
+        </div>
+        <p className="mt-3 rounded-xl bg-ink/[0.04] px-3 py-2 text-sm font-semibold text-ink">
+          ربح الممثل = {formatIQD(money.studentTotal)} − {formatIQD(money.adminTotal)} ={" "}
+          <span className="text-emerald-700">{formatIQD(money.representativeProfit)}</span>
+        </p>
+
+        <CalculationDetails summary="شرح الحساب بنداً بنداً" className="mt-3">
+          {money.lines.length === 0 ? (
+            <p>لا توجد مبالغ مؤكدة لهذا الممثل.</p>
+          ) : (
+            <>
+              <div className="space-y-2 sm:hidden">
+                {money.lines.map((line, index) => (
+                  <div
+                    key={`${line.label}-${index}`}
+                    className={`rounded-xl p-3 ${
+                      line.kind === "adjustment" ? "bg-amber-50 text-amber-900" : "bg-surface"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="font-semibold">{line.label}</p>
+                      {line.qty > 0 && <span className="text-xs">×{line.qty}</span>}
+                    </div>
+                    <dl className="mt-2 grid grid-cols-3 gap-2 text-[11px]">
+                      <MoneyCell label="الطلاب" value={line.studentAmount} />
+                      <MoneyCell label="الإدارة" value={line.adminAmount} />
+                      <MoneyCell label="ربح الممثل" value={line.representativeProfit} />
+                    </dl>
+                  </div>
+                ))}
+              </div>
+              <div className="hidden overflow-x-auto sm:block">
+                <table className="w-full min-w-[520px] border-collapse text-right text-xs">
+                  <thead>
+                    <tr className="border-b border-line text-ink-soft">
+                      <th className="pb-2 pe-2 font-semibold">البند المحفوظ</th>
+                      <th className="px-2 pb-2 font-semibold">العدد</th>
+                      <th className="px-2 pb-2 font-semibold">يدفعه الطلاب</th>
+                      <th className="px-2 pb-2 font-semibold">حصة الإدارة</th>
+                      <th className="ps-2 pb-2 font-semibold">ربح الممثل</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {money.lines.map((line, index) => (
+                      <tr
+                        key={`${line.label}-${index}`}
+                        className={`border-b border-line/60 last:border-0 ${
+                          line.kind === "adjustment" ? "bg-amber-50 text-amber-900" : ""
+                        }`}
+                      >
+                        <td className="py-2 pe-2 font-medium">{line.label}</td>
+                        <td className="px-2 py-2" dir="ltr">{line.qty || "—"}</td>
+                        <td className="px-2 py-2" dir="ltr">{formatIQD(line.studentAmount)}</td>
+                        <td className="px-2 py-2" dir="ltr">{formatIQD(line.adminAmount)}</td>
+                        <td className="ps-2 py-2 font-semibold" dir="ltr">
+                          {formatIQD(line.representativeProfit)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {money.lines.some((line) => line.kind === "adjustment") && (
+                <p className="mt-3 text-[11px] leading-relaxed text-amber-800">
+                  «تسوية / سجل قديم» تعني أن المبلغ النهائي المحفوظ يختلف عن تفاصيل البنود
+                  المتاحة. تظهر التسوية صراحةً حتى يبقى الإجمالي مطابقاً للحساب المعتمد.
+                </p>
+              )}
+            </>
+          )}
+        </CalculationDetails>
+      </div>
+    </section>
+  );
+}
+
+function MoneyTotal({
+  label,
+  value,
+  accent = false,
+  positive = false,
+}: {
+  label: string;
+  value: number;
+  accent?: boolean;
+  positive?: boolean;
+}) {
+  return (
+    <div className="rounded-xl bg-surface-sink p-3">
+      <p className="text-xs text-ink-soft">{label}</p>
+      <p
+        className={`mt-1 text-base font-bold tabular-nums ${
+          accent ? "text-orange-ink" : positive ? "text-emerald-700" : "text-ink"
+        }`}
+        dir="ltr"
+      >
+        {formatIQD(value)}
       </p>
+    </div>
+  );
+}
+
+function MoneyCell({ label, value }: { label: string; value: number }) {
+  return (
+    <div>
+      <dt className="text-ink-soft">{label}</dt>
+      <dd className="mt-0.5 font-semibold text-ink" dir="ltr">{formatIQD(value)}</dd>
     </div>
   );
 }

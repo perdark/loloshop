@@ -190,5 +190,12 @@ export function MoneyScene({ data }: { data: TvSnapshot }) {
 }
 
 function Empty() {
-  return <div className="flex h-full items-center justify-center text-[#b59673]">لا توجد بيانات بعد</div>;
+  // Money-specific wording: on this scene an empty chart means "no sales in the
+  // board's current range", not "the board has no data" — the headline figures
+  // above are showing real money at the same moment.
+  return (
+    <div className="flex h-full items-center justify-center text-lg text-[#b59673]">
+      لا مبيعات في هذا النطاق
+    </div>
+  );
 }
