@@ -1,6 +1,9 @@
 // backend/controllers/calligraphyController.js
 const crypto = require('crypto');
-const archiver = require('archiver');
+// archiver v8 dropped the callable default export in favour of named classes.
+// The instance API (file/append/pipe/finalize/on) is unchanged. v8 is required:
+// every release up to 7.0.1 is inside GHSA-mh99-v99m-4gvg (brace-expansion DoS).
+const { ZipArchive } = require('archiver');
 const sharp = require('sharp');
 const { query } = require('../lib/db');
 const { generateImage, MODELS } = require('../lib/openrouter');
@@ -370,7 +373,7 @@ async function reroll(req, res) {
 function streamPlatesZip(res, rows, filename, includeSheets = false) {
   res.setHeader('Content-Type', 'application/zip');
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-  const archive = archiver('zip', { zlib: { level: 9 } });
+  const archive = new ZipArchive({ zlib: { level: 9 } });
   archive.on('error', (e) => { console.error('zip error', e); try { res.status(500).end(); } catch {} });
   archive.pipe(res);
   const { absFromUrl } = require('../lib/upload');
