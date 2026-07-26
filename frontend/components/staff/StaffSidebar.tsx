@@ -97,7 +97,16 @@ function getNavLinks(staffTypes: StaffType[], isAdmin: boolean): NavLink[] {
     return [
       { href: "/staff", label: "المتابعة", icon: iconBarChart() },
       { href: "/staff/queue", label: "جميع الطلبات", icon: iconClipboard(), prefix: true },
-      { href: "/staff/custom-order", label: "طلب مخصص", icon: iconClipboard(), prefix: true },
+      // «طلب مخصص» has TWO mounts and they are not interchangeable: the whole
+      // /api/staff/* router is `requireRole('staff')`, which blocks the admin role by
+      // design (backend/routes/staff.js), so an admin sent to /staff/custom-order lands
+      // on a form whose config request 403s. Admins get their own /admin mount.
+      {
+        href: isAdmin ? "/admin/custom-order" : "/staff/custom-order",
+        label: "طلب مخصص",
+        icon: iconClipboard(),
+        prefix: true,
+      },
       { href: "/staff/tailor", label: "الفصال", icon: iconScissors(), prefix: true },
       { href: "/staff/shelf", label: "رف التجهيز", icon: iconClipboard(), prefix: true },
     ];

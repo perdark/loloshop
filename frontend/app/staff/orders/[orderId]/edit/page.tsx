@@ -247,6 +247,9 @@ export default function StaffOrderEditPage() {
             studyType,
           }}
           onSaved={(result) => {
+            if (result.productChanged) {
+              toast.info(`تم تبديل نوع القطعة إلى ${result.productName}`);
+            }
             if (result.designRework) {
               toast.info("أُعيد الطلب إلى بانتظار التصميم بسبب التعديل");
             } else if (result.tailorReopened) {

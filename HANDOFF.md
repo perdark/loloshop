@@ -6,6 +6,140 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
+## 2026-07-26 (b) — ✅ PUSHED: «طلب مستقل بدون ممثل» is a real retail order builder · admin's «طلب مخصص» dead end fixed · hydration + autofill bugs
+
+**Pushed to main → auto-deploys.** No migration. Gates: **backend tests 111/111** (+11 new) · FE `tsc` 0 · `eslint` 0
+errors · **browser-verified end to end** on the laptop dev DB (a real 2-piece order created and re-opened in the editor).
+Spec: `docs/superpowers/specs/2026-07-26-independent-retail-order-builder-design.md`.
+
+**The report.** «still طلب مستقل بدون ممثل is not enough and bad, i want it like all informations of students and all
+products for retail students.» Plus, earlier the same session: «the custom order is not working, also غير مصرح».
+
+**① The admin «طلب مخصص» dead end (fixed first — it blocked everything else).** `backend/routes/staff.js:9` guards the
+WHOLE `/api/staff/*` router with `requireRole('staff')`, which blocks the **admin** role by design (the comment on
+line 20 says so). But `app/staff/custom-order/page.tsx` claimed `isManager = role === 'admin' || …` and
+`StaffSidebar.tsx:100` pointed admins at `/staff/custom-order` — so the page rendered, its config 403'd, and the admin
+got «تعذر تحميل نموذج الطلب». Classic [[project_state_machine_single_source]]: the frontend mirroring an authz rule the
+backend owns. **Fix is frontend-only** (backend authz deliberately NOT widened): the sidebar sends admins to
+`/admin/custom-order`, and `/staff/custom-order` now redirects them there instead of guessing.
+
+**② The finding that shaped the rebuild: the problem was the IDENTITY, not the form.** `createCustomOrder` made the
+independent student with `users.phone = NULL` / `students.gender = NULL`, and
+`eligibleForFullSet = wholesaler_id != null || phone == null` makes such a student **permanently a طقم student**
+(`editContext` → `full_set`, `saveRetailConfiguration` → 403, search → `full_set_eligible: true`). So a pretty retail
+creation form alone would have produced retail-priced orders that **the طقم editor re-prices rep-style on the next
+edit** — the [[project_order_write_paths_sync]] money-bug class. Owner accepted the consequence: **phone is now
+REQUIRED** for an independent student (and gender, because `priceSelections` rejects gender-restricted options when
+`studentGender` is null).
+
+**③ NEW `POST /api/production/retail-orders`** (`orderEditController.createRetailOrders`, admin + manager). Takes
+`{student|student_id, pieces[1..10], group}` → creates/resolves the student, **one** `checkout_group`, one `orders` row
+per piece. Every piece priced by `priceSelections({role:'retail'})` — never the rep addon table. Per-piece routing
+(embroidery → `design_complete`, plain cap → `preparing`, else `pressing`), `wholesaler_approval = NULL`, per-piece
+duplicate pre-check → 409 `ERR_DUPLICATE_PIECE` + 23505 race backstop, duplicate-product-in-one-payload → 400, and
+**everything in ONE `tx`** so a half-created student or 2-of-3 pieces can't be left behind. `users.phone` is UNIQUE →
+**409 `ERR_PHONE_TAKEN` naming the existing student** (never silently attaches to whoever owns the number). The old
+single-piece `POST /students/:id/retail-order` is now a thin adapter over the same core — one write path, not two.
+
+**④ NEW `components/staff/RetailOrderBuilder.tsx`** replaces `RetailSingleOrderForm`. «+ أضف قطعة» → picker over all
+four families from `getShopFeed()` → the shared `RetailPieceOptions` (byte-identical to the storefront — verified side
+by side on وشاح ملكي: same 5 groups, same labels, same optionality, same price) → per-piece card with ✎/✕, one delivery
+section, one total. Serves **both** «طالب جديد + مستقل» and «طالب موجود + تجزئة», so the two retail surfaces can't
+drift. Products already in the order are disabled in the picker. Validation names the offending piece
+(«قبعة سادة: اختر: لون القبعة»).
+
+**⑤ Two bugs found in the browser, not the code review.**
+- **Hydration error:** `<Spinner>` renders a `<div>` and was wrapped in `<p>` in 4 places (2 of them in the new file) —
+  invalid HTML, logged as a React hydration error on every load. All 4 → `<div>`.
+- **⚠️ Chrome autofilled the gender `<select>` to «ذكر»** without the admin touching it (and نوع الدراسة to «صباحي»).
+  Gender decides which option groups render AND price, so an unnoticed default silently builds the wrong order. Gender
+  is now a **radio group** (autofill-proof, one tap on a phone) and every new-student field carries
+  `autoComplete="off"`. **Worth remembering: never put a required, semantically-guessable field in a bare `<select>`.**
+
+**Verified in the browser** (dev DB): created «سارة تجريبية للاختبار» + وشاح ملكي 25,000 + قبعة سادة 15,000 → one
+`checkout_group`, prices at the retail book, sash `design_complete` / cap `preparing` with `needs_pressing=false`,
+`wholesaler_approval` NULL on both, and **`eligibleForFullSet = false`** — then re-opened the sash in the editor and
+confirmed it renders the **retail** editor («طلب تجزئة» + «نوع القطعة» swap picker), not the طقم form. That last check
+is the whole point of the design.
+
+### Open follow-ups
+- **Test row left in the laptop dev DB** (harmless, snapshot-only): student «سارة تجريبية للاختبار» / `07701234567`
+  with 2 orders. Delete when it gets noisy.
+- «طالب جديد» **with a rep selected** is unchanged — `FullSetOrderForm`, rep التسعيرة, approval flow. Only the
+  independent path became retail.
+- The single-piece `POST /students/:id/retail-order` now has **no frontend caller** (the builder posts to
+  `/retail-orders`). Kept as a tested adapter; delete it if nothing external uses it.
+- Governorate is still a free-text input — there is no governorate list constant in the frontend.
+- **`frontend/node_modules` had to be reinstalled from scratch this session** — a half-finished npm install left
+  `.bin/next` unlinked and `next dev` printed "Ready" then exited after 1s. If :3000 dies that way again, `rm -rf
+  node_modules && npm install` (clear `node_modules/@img/.sharp-*` leftovers first if `ENOTEMPTY`).
+- Still untracked and must not be committed: `frontend/public/dev-login.html`, `frontend/public/dev-token-tmp.json`
+  (the latter holds a live admin JWT).
+- Unchanged on the board: the 5 iOS ASC blockers, the unmerged `ios-appstore` branch + lockfile desync, staff GPS parked.
+
+---
+
+## 2026-07-26 — Finished the two half-built features: تبديل المنتج (retail piece swap) + «طلب مخصص» for تجزئة students · the (student, product) invariant now has an Arabic answer
+
+**Uncommitted on main.** No migration. Gates: BE `node --check` 0 · **backend tests 100/100** (was 22/23 failing on the
+retail-order path when this session started; +3 new) · FE `tsc` 0 · `eslint` 0. **NO browser test** — port 3000 is
+running a different project this session, so the two new screens are code-verified only (see follow-ups).
+
+**Where it stood.** The 07-25 session left the BACKEND of two features in the working tree with **no UI for either**,
+and one failing test. Nothing in `frontend/` referenced `swap_candidates`, `keep_price`, `force_design_rework`,
+`full_set_eligible` or `POST /production/students/:id/retail-order`.
+
+**① The failing test was a real defect, not a bad fixture.** `uq_orders_student_product_nodesign` (`db/schema.sql:310`)
+allows **one live design-less order per (student, product)**. `createRetailOrder` INSERTed blind, so ordering a product
+the student already holds raised a raw **23505 → 500** with no Arabic message. The SWAP path had the same hole
+(swapping a piece ONTO a product the student already owns). Both now:
+- pre-check via NEW `liveOrderForProduct(studentId, productId, exceptOrderId)` → **409 `ERR_DUPLICATE_PIECE`** carrying
+  **`existing_order_id`** so the UI can point at the order to edit instead;
+- keep a 23505 catch as the race backstop (check and write are not atomic);
+- and `swapCandidates` now filters out products the student already holds — **the picker can't offer a target that
+  would 409**. Three tests cover it (create-duplicate, swap-onto-owned, candidate-hidden).
+- `editContext` also returns **`can_force_rework`** — whether «أرجع الطلب إلى بانتظار التصميم» is meaningful is a
+  state-machine question, so it is answered server-side from `REWORKABLE_STAGES` rather than mirrored in the UI
+  ([[project_state_machine_single_source]] — a frontend copy of that set is how ghost buttons that 409 get built).
+- `students-search` now also returns `gender` (the retail form's option groups are gender-scoped).
+
+**② تبديل المنتج — UI in `RetailOrderEditForm.tsx`.** A «نوع القطعة» radio-card picker (current piece + same-family
+siblings with their retail base price). Picking one reloads the priced product **without resetting the admin's
+in-progress edits** (a `initialised` ref splits first-load-fills-from-order from later swap-reloads; selections are
+pruned to groups that still exist, which for a same-family swap is a no-op by construction). Plus two checkboxes:
+**«تثبيت السعر الحالي»** (`keep_price` — shows the recomputed price struck through next to the price that will
+actually be saved) and **«أرجع الطلب إلى بانتظار التصميم»** (`force_design_rework`, rendered only when
+`can_force_rework`; the copy names what it destroys — zones, final design, shelf slot). The confirm modal states the
+product change, the applied price and the rework explicitly.
+
+**③ «طلب مخصص» for تجزئة — NEW `components/staff/RetailSingleOrderForm.tsx`.** `CustomOrderForm` (shared by
+`/admin/custom-order` and `/staff/custom-order`) now branches on `full_set_eligible`: a self-registered تجزئة student
+gets a single-piece retail form (product picker from `getShopFeed()` — admin/staff resolve to the **retail** price
+role, verified in `priceRoleForUser`), options, robe measurements, delivery fields, price breakdown, confirm. It calls
+`POST /production/students/:id/retail-order` itself (that endpoint accepts admin AND manager, so one component serves
+both pages) and the host page routes to the created order. `pickStudent` **no longer calls the طقم read-back for a
+تجزئة student** — that endpoint 403s for them by design and used to toast «تعذر تحميل طلب الطالب» and unpick.
+
+**④ Shared fields extracted — NEW `components/admin/RetailPieceFields.tsx`** (`RetailPieceOptions`,
+`RobeMeasurementFields`, `robeMeasurementsError`, `emptyRobeMeasurements`). Both retail surfaces post to endpoints
+priced by the same server-side `priceSelections(role:'retail')`, so they must offer the same fields; one copy is what
+guarantees it. `RetailOrderEditForm` was re-pointed at it (net −120 lines there).
+
+### Open follow-ups
+- **Browser walkthrough not done.** Worth clicking: (a) `/staff/orders/<retail order>/edit` — swap picker, keep-price
+  strike-through, rework checkbox; (b) `/admin/custom-order` → «طالب موجود» → pick a تجزئة student → the single-piece
+  form; (c) the 409 path — order a product the student already has and confirm the Arabic message. Dev fixtures on the
+  laptop DB: تجزئة students نضال حيدر علي / حسين احمد صادق صبري; retail robe orders `61cf8f68…`, `71e33416…`
+  (20 siblings each, so the picker is well populated).
+- The retail create form makes **one piece per submit** (stated in the UI). A second piece = a second طلب.
+- Governorate is a free-text input — there is no governorate list constant in the frontend today.
+- Still untracked and must not be committed: `frontend/public/dev-login.html`, `frontend/public/dev-token-tmp.json`
+  (the latter holds a live 7-day admin JWT).
+- Everything else on the board is unchanged: the 5 iOS ASC blockers, the unmerged `ios-appstore` branch + lockfile
+  desync, staff GPS parked.
+
+---
+
 ## 2026-07-24 — 🍏 iOS submission: reviewer demo login was DEAD in prod (fixed) · listing metadata written · 5 ASC blockers left
 
 **Session paused mid-submission — user tired, resuming next session. NOTHING expires; the ASC draft and the uploaded

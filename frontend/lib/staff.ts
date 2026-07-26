@@ -148,7 +148,13 @@ export interface StudentSearchHit {
   university_name: string | null;
   wholesaler_id: string | null;
   rep_name: string | null;
+  /** Needed by the single-piece retail form: option groups are gender-scoped. */
+  gender: "male" | "female";
   has_full_set: boolean;
+  /** true → rep-linked or admin-created name-only → the طقم form.
+   *  false → self-registered تجزئة student → the single-piece retail form. The two
+   *  server guards are exact complements, so this flag picks the ONLY form that works. */
+  full_set_eligible: boolean;
 }
 
 export async function searchProductionStudents(q: string): Promise<StudentSearchHit[]> {
@@ -206,12 +212,25 @@ export interface OrderEditContext {
   retail_order: RetailOrderEditSnapshot | null;
 }
 
+/** A sibling product this piece may be re-pointed at («وشاح الفراشة» → «وشاح ملكي»).
+ *  Same family + same type only, and never one the student already holds a live piece of. */
+export interface ProductSwapCandidate {
+  id: string;
+  name_ar: string;
+  image_url: string | null;
+  retail_price: number;
+}
+
 export interface RetailOrderEditSnapshot {
   id: string;
   product_id: string;
+  product_parent_id: string | null;
+  swap_candidates: ProductSwapCandidate[];
   product_type: ProductType;
   product_name: string;
   status: OrderStatus;
+  /** Backend-owned: is «أرجع الطلب إلى بانتظار التصميم» meaningful at this stage? */
+  can_force_rework: boolean;
   price: number;
   cost: number;
   measurements: RobeMeasurements | null;
@@ -277,8 +296,15 @@ export async function patchOrderDetails(orderId: string, body: QuickEditPayload)
 export interface SaveRetailOrderResult {
   id: string;
   oldPrice: number;
+  /** What the selections re-price to — reported even when the price was frozen. */
   newPrice: number;
   priceDifference: number;
+  /** What was actually written to the order (equals oldPrice when keepPrice was set). */
+  priceApplied: number;
+  priceKept: boolean;
+  productChanged: boolean;
+  productId: string;
+  productName: string;
   cost: number;
   profit: number;
   status: OrderStatus;
@@ -290,6 +316,12 @@ export async function saveRetailOrderConfiguration(
   orderId: string,
   body: {
     selections: ConfigureSelectionPayload[];
+    /** Same-family sibling to move the piece onto. Omit to keep the current product. */
+    product_id?: string;
+    /** Freeze orders.price at its current value (an agreed price the admin already quoted). */
+    keep_price?: boolean;
+    /** Explicitly send the piece back to «بانتظار التصميم» for rework. */
+    force_design_rework?: boolean;
     measurements?: RobeMeasurements;
     student?: {
       name?: string;
@@ -307,6 +339,11 @@ export async function saveRetailOrderConfiguration(
       old_price: number;
       new_price: number;
       price_difference: number;
+      price_applied: number;
+      price_kept: boolean;
+      product_changed: boolean;
+      product_id: string;
+      product_name: string;
       cost: number;
       profit: number;
       status: OrderStatus;
@@ -319,11 +356,87 @@ export async function saveRetailOrderConfiguration(
     oldPrice: Number(data.data.old_price),
     newPrice: Number(data.data.new_price),
     priceDifference: Number(data.data.price_difference),
+    priceApplied: Number(data.data.price_applied),
+    priceKept: Boolean(data.data.price_kept),
+    productChanged: Boolean(data.data.product_changed),
+    productId: data.data.product_id,
+    productName: data.data.product_name,
     cost: Number(data.data.cost),
     profit: Number(data.data.profit),
     status: data.data.status,
     designRework: Boolean(data.data.design_rework),
     tailorReopened: Boolean(data.data.tailor_reopened),
+  };
+}
+
+/** One piece of a «طلب مخصص» — a catalog product plus the student's choices on it. */
+export interface RetailOrderPiecePayload {
+  product_id: string;
+  selections: ConfigureSelectionPayload[];
+  measurements?: RobeMeasurements;
+}
+
+/** The student block when «طلب مخصص» is creating an independent (بدون ممثل) student.
+ *  name/phone/gender are REQUIRED server-side: the phone is what makes this a تجزئة
+ *  student the retail edit path owns for life, and gender decides which option groups
+ *  exist at all. */
+export interface NewRetailStudentPayload {
+  name: string;
+  phone: string;
+  gender: "male" | "female";
+  instagram_username?: string;
+  university_name?: string;
+  department?: string;
+  study_type?: "morning" | "evening";
+}
+
+export interface RetailOrderDeliveryPayload {
+  customer_name?: string;
+  instagram_username?: string;
+  phone_primary?: string;
+  phone_secondary?: string;
+  governorate?: string;
+  area_details?: string;
+  event_date?: string;
+  notes?: string;
+}
+
+export interface CreatedRetailOrder {
+  id: string;
+  product_id: string;
+  product_name: string;
+  price: number;
+  status: OrderStatus;
+}
+
+/** «طلب مخصص» priced at the retail book — one brand-new bundle holding every piece.
+ *  Pass `student_id` for an existing تجزئة student, or `student` to create an independent
+ *  one. The complement of `saveStudentFullSetOrder`: exactly one of the two works for any
+ *  given student (see `StudentSearchHit.full_set_eligible`). */
+export async function createRetailOrders(body: {
+  student_id?: string;
+  student?: NewRetailStudentPayload;
+  pieces: RetailOrderPiecePayload[];
+  group?: RetailOrderDeliveryPayload;
+}): Promise<{
+  studentId: string;
+  checkoutGroupId: string;
+  orders: CreatedRetailOrder[];
+  total: number;
+}> {
+  const { data } = await api.post<{
+    data: {
+      student_id: string;
+      checkout_group_id: string;
+      orders: CreatedRetailOrder[];
+      total: number;
+    };
+  }>(`/production/retail-orders`, body);
+  return {
+    studentId: data.data.student_id,
+    checkoutGroupId: data.data.checkout_group_id,
+    orders: data.data.orders,
+    total: Number(data.data.total),
   };
 }
 

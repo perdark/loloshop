@@ -41,6 +41,13 @@ router.get('/students-search', requireStaffType(), edit.studentsSearch);
 router.get('/students/:studentId/full-set-order', requireStaffType(), edit.getStudentFullSet);
 router.get('/orders/:id/edit-context', requireStaffType(), edit.editContext);
 router.post('/students/:studentId/full-set-order', requireStaffType(), edit.saveFullSetOrder);
+// «طلب مخصص» for a self-registered تجزئة student — the exact complement of the طقم path
+// above (retail pricing, always a NEW checkout_group, never touches existing orders).
+router.post('/students/:studentId/retail-order', requireStaffType(), edit.createRetailOrder);
+// Multi-piece «طلب مخصص» — one bundle, N pieces, retail pricing. Serves BOTH an existing
+// تجزئة student (`student_id`) and a brand-new independent one (`student`), which is what
+// makes «طلب مستقل بدون ممثل» a real retail order instead of a rep طقم.
+router.post('/retail-orders', requireStaffType(), edit.createRetailOrders);
 router.put('/orders/:id/retail-configuration', requireStaffType(), edit.saveRetailConfiguration);
 router.patch('/orders/:id/details', requireStaffType(), edit.patchOrderDetails);
 router.post('/uploads/image', requireStaffType(), imageUploadLimit, imageUpload.single('file'), validateUploadedImage, edit.uploadImage);

@@ -1,21 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { CustomerImageUpload } from "@/components/catalog/CustomerImageUpload";
-import { OptionGroupField } from "@/components/catalog/OptionGroupField";
 import { PriceBreakdown } from "@/components/catalog/PriceBreakdown";
-import { ReceiptUpload } from "@/components/catalog/ReceiptUpload";
-import { RobeSleeveSection } from "@/components/catalog/RobeSleeveSection";
+import {
+  RetailPieceOptions,
+  RobeMeasurementFields,
+  robeMeasurementsError,
+} from "@/components/admin/RetailPieceFields";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Modal } from "@/components/ui/Modal";
 import { getApiErrorMessage } from "@/lib/api";
 import { getProductFull } from "@/lib/catalog";
 import {
-  customerImageRequired,
-  customerTextRequired,
-  getSelectedOptionId,
   selectionKey,
   validateCustomerImages,
   validateCustomerTexts,
@@ -25,11 +23,9 @@ import { formatIQD } from "@/lib/format";
 import { buildConfigureSelections } from "@/lib/orders";
 import {
   computePriceBreakdown,
-  groupVisibleForGender,
   type OptionSelection,
   validateSelection,
 } from "@/lib/pricing";
-import { partitionRobeSleeveGroups } from "@/lib/robeSleeve";
 import {
   saveRetailOrderConfiguration,
   uploadProductionImage,
@@ -61,6 +57,12 @@ export function RetailOrderEditForm({
 }) {
   const snapshot = context.retail_order;
   const [product, setProduct] = useState<CatalogProduct | null>(null);
+  // The product the piece will BECOME. Only same-family siblings are offered, and the server
+  // re-validates the id, so this is a convenience — never the authority.
+  const [targetProductId, setTargetProductId] = useState(snapshot?.product_id ?? "");
+  const [swapping, setSwapping] = useState(false);
+  const [keepPrice, setKeepPrice] = useState(false);
+  const [forceRework, setForceRework] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selection, setSelection] = useState<OptionSelection>({});
@@ -77,15 +79,30 @@ export function RetailOrderEditForm({
   const [showErrors, setShowErrors] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const initialised = useRef(false);
 
   useEffect(() => {
-    if (!snapshot) return;
+    if (!snapshot || !targetProductId) return;
     let alive = true;
-    setLoading(true);
+    // First load fills the form from the saved order. A later run is a product SWAP: the
+    // admin's in-progress edits must survive it, so only the priced product is replaced.
+    const first = !initialised.current;
+    if (first) setLoading(true);
+    else setSwapping(true);
     setLoadError(null);
-    getProductFull(snapshot.product_id, "retail")
+    getProductFull(targetProductId, "retail")
       .then((loaded) => {
         if (!alive) return;
+        setProduct(loaded);
+        if (!first) {
+          // Same-family siblings share their option groups (groups live on the parent), so
+          // nothing should drop — prune anyway so a stale group can never reach the server.
+          const live = new Set(loaded.optionGroups.map((g) => g.id));
+          setSelection((prev) =>
+            Object.fromEntries(Object.entries(prev).filter(([groupId]) => live.has(groupId)))
+          );
+          return;
+        }
         const nextSelection: OptionSelection = {};
         const nextImages: Record<string, string> = {};
         const nextTexts: Record<string, string> = {};
@@ -106,21 +123,28 @@ export function RetailOrderEditForm({
           if (saved.customer_image_url) nextImages[key] = saved.customer_image_url;
           if (saved.customer_text) nextTexts[key] = saved.customer_text;
         }
-        setProduct(loaded);
         setSelection(nextSelection);
         setCustomerImages(nextImages);
         setCustomerTexts(nextTexts);
+        initialised.current = true;
       })
       .catch(() => {
-        if (alive) setLoadError("تعذر تحميل خيارات المنتج الحالية.");
+        if (!alive) return;
+        if (first) setLoadError("تعذر تحميل خيارات المنتج الحالية.");
+        else {
+          toast.error("تعذر تحميل المنتج المطلوب — بقي المنتج السابق.");
+          setTargetProductId(snapshot.product_id);
+        }
       })
       .finally(() => {
-        if (alive) setLoading(false);
+        if (!alive) return;
+        setLoading(false);
+        setSwapping(false);
       });
     return () => {
       alive = false;
     };
-  }, [snapshot]);
+  }, [snapshot, targetProductId]);
 
   function setGroupValue(groupId: string, value: OptionSelection[string]) {
     if (selection[groupId] === value) return;
@@ -150,22 +174,17 @@ export function RetailOrderEditForm({
     }),
     [unitPreview, quantity]
   );
-  const priceDifference = preview.total - (snapshot?.price ?? 0);
+  const oldPrice = snapshot?.price ?? 0;
+  const productChanged = !!snapshot && targetProductId !== snapshot.product_id;
+  // What will actually be written. «تثبيت السعر» keeps the agreed price even though the
+  // recomputed one is still shown, so the admin always sees both numbers.
+  const appliedTotal = keepPrice ? oldPrice : preview.total;
+  const priceDifference = preview.total - oldPrice;
 
-  const measurementsError = useMemo(() => {
-    if (product?.type !== "robe") return null;
-    if (
-      measurements.shoulder_cm <= 0 ||
-      measurements.robe_length_cm <= 0 ||
-      measurements.sleeve_length_cm <= 0
-    ) {
-      return "يرجى إدخال مقاسات الروب المطلوبة";
-    }
-    const chest = measurements.chest_cm ?? 0;
-    return chest > 0 && (chest < 60 || chest > 180)
-      ? "محيط الصدر يجب أن يكون بين ٦٠ و١٨٠ سم"
-      : null;
-  }, [measurements, product?.type]);
+  const measurementsError = useMemo(
+    () => (product?.type === "robe" ? robeMeasurementsError(measurements) : null),
+    [measurements, product?.type]
+  );
 
   function validate(): boolean {
     if (!product) return false;
@@ -187,6 +206,9 @@ export function RetailOrderEditForm({
     try {
       const result = await saveRetailOrderConfiguration(orderId, {
         selections: buildConfigureSelections(product, selection, customerImages, customerTexts),
+        ...(productChanged ? { product_id: targetProductId } : {}),
+        ...(keepPrice ? { keep_price: true } : {}),
+        ...(forceRework ? { force_design_rework: true } : {}),
         ...(product.type === "robe" ? { measurements } : {}),
         student: {
           name: student.name.trim(),
@@ -226,156 +248,118 @@ export function RetailOrderEditForm({
     return <EmptyState title="تعذر تحميل الخيارات" message={loadError ?? "حاول مرة أخرى."} />;
   }
 
-  const groups = product.optionGroups
-    .filter((group) => groupVisibleForGender(group, context.student.gender))
-    .sort((a, b) => a.sort - b.sort);
-  const { sleeveGroups, otherGroups } =
-    product.type === "robe"
-      ? partitionRobeSleeveGroups(groups)
-      : { sleeveGroups: [], otherGroups: groups };
-
   return (
     <div className="space-y-5">
+      {snapshot.swap_candidates.length > 0 && (
+        <section id="product" className="scroll-mt-24 rounded-2xl border border-line bg-surface p-4">
+          <h2 className="text-base font-bold text-ink">نوع القطعة</h2>
+          <p className="mt-1 text-sm leading-relaxed text-ink-soft">
+            يمكن تبديل القطعة إلى نوع آخر من نفس العائلة. كل ما هو محفوظ — الألوان، نصوص
+            التطريز، الصور — ينتقل كما هو، ويتغيّر السعر الأساسي فقط.
+          </p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            {[
+              {
+                id: snapshot.product_id,
+                name_ar: snapshot.product_name,
+                image_url: null,
+                retail_price: null as number | null,
+              },
+              ...snapshot.swap_candidates,
+            ].map((option) => {
+              const active = option.id === targetProductId;
+              const isCurrent = option.id === snapshot.product_id;
+              return (
+                <label
+                  key={option.id}
+                  className={`flex min-h-11 cursor-pointer items-center gap-3 rounded-xl border p-3 transition ${
+                    active
+                      ? "border-orange-ink bg-orange-ink/5"
+                      : "border-line bg-white hover:border-orange-ink/40"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="retail-edit-product"
+                    className="size-4 accent-[var(--color-orange-ink)]"
+                    checked={active}
+                    disabled={swapping}
+                    onChange={() => {
+                      if (option.id === targetProductId) return;
+                      setTargetProductId(option.id);
+                      setShowErrors(false);
+                    }}
+                  />
+                  {option.image_url && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={option.image_url}
+                      alt=""
+                      className="size-11 shrink-0 rounded-lg object-cover"
+                    />
+                  )}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-semibold text-ink">
+                      {option.name_ar}
+                    </span>
+                    <span className="mt-0.5 block text-xs text-ink-soft">
+                      {isCurrent ? (
+                        "النوع الحالي"
+                      ) : (
+                        <span dir="ltr" className="tabular-nums">
+                          {formatIQD(option.retail_price ?? 0)}
+                        </span>
+                      )}
+                    </span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+          {swapping && (
+            <p className="mt-3 text-xs font-semibold text-ink-soft" role="status">
+              جارٍ تحديث الخيارات والسعر…
+            </p>
+          )}
+          {productChanged && !swapping && (
+            <p className="mt-3 rounded-xl bg-orange-ink/5 px-3 py-2 text-xs leading-relaxed text-ink">
+              سيتحوّل الطلب إلى <strong>{product.nameAr}</strong>. راجع السعر في الأسفل قبل
+              الحفظ — يمكنك تثبيت السعر الحالي إذا كان متّفقًا عليه مع الطالب.
+            </p>
+          )}
+        </section>
+      )}
+
       <section id="options" className="space-y-4 scroll-mt-24">
         <div>
-          <h2 className="text-base font-bold text-ink">خيارات {snapshot.product_name}</h2>
+          <h2 className="text-base font-bold text-ink">خيارات {product.nameAr}</h2>
           <p className="mt-1 text-sm text-ink-soft">
             غيّر الشكل أو النوع أو الإضافات؛ السعر أدناه يتحدث مباشرة.
           </p>
         </div>
 
-        {otherGroups.map((group) => {
-          const optionId = getSelectedOptionId(group, selection);
-          const needsImage = customerImageRequired(group, optionId);
-          const needsText = customerTextRequired(group, optionId);
-          const isSashEmbroidery =
-            product.type === "sash" && group.nameAr.startsWith("تطريز");
-          const isSashThread =
-            product.type === "sash" && group.nameAr === "لون التطريز";
-          const isCapEmbroidery =
-            product.type === "cap" &&
-            (group.nameAr === "القبعة من الجانب" || group.nameAr === "القبعة من الأعلى");
-          const isShawl = product.type === "shawl" && group.nameAr === "صورة الشال";
-          const showDetails =
-            !!optionId &&
-            (needsImage || needsText || isSashEmbroidery || isSashThread || isCapEmbroidery || isShawl);
-          const key = optionId ? selectionKey(group.id, optionId) : null;
-          return (
-            <div key={group.id}>
-              <OptionGroupField
-                group={group}
-                selection={selection}
-                role="retail"
-                lockedOptionId={group.lockedOptionId}
-                onChange={setGroupValue}
-              />
-              {showDetails && optionId && key && (
-                <CustomerImageUpload
-                  group={group}
-                  optionId={optionId}
-                  value={customerImages[key]}
-                  onChange={(url) => setCustomerImages((prev) => ({ ...prev, [key]: url }))}
-                  textValue={customerTexts[key]}
-                  onTextChange={(text) => setCustomerTexts((prev) => ({ ...prev, [key]: text }))}
-                  allowOptionalText={isShawl || ((isSashEmbroidery || isSashThread) && !needsText)}
-                  allowOptionalImage={isShawl || isSashEmbroidery || isCapEmbroidery}
-                  showErrors={showErrors}
-                  uploadImage={uploadProductionImage}
-                />
-              )}
-            </div>
-          );
-        })}
-
-        {sleeveGroups.length > 0 && (
-          <RobeSleeveSection
-            groups={sleeveGroups}
-            role="retail"
-            selection={selection}
-            customerTexts={customerTexts}
-            customerImages={customerImages}
-            onToggle={(groupId, checked) => setGroupValue(groupId, checked)}
-            onTextChange={(groupId, optionId, text) => {
-              const key = selectionKey(groupId, optionId);
-              setCustomerTexts((prev) => ({ ...prev, [key]: text }));
-            }}
-            onImageChange={(groupId, optionId, url) => {
-              const key = selectionKey(groupId, optionId);
-              setCustomerImages((prev) => ({ ...prev, [key]: url }));
-            }}
-            fieldKey={selectionKey}
-            showErrors={showErrors}
-            uploadImage={uploadProductionImage}
-          />
-        )}
+        <RetailPieceOptions
+          product={product}
+          gender={context.student.gender}
+          selection={selection}
+          onGroupChange={setGroupValue}
+          customerImages={customerImages}
+          customerTexts={customerTexts}
+          setCustomerImages={setCustomerImages}
+          setCustomerTexts={setCustomerTexts}
+          showErrors={showErrors}
+          uploadImage={uploadProductionImage}
+        />
       </section>
 
       {product.type === "robe" && (
-        <fieldset
-          id="measurements"
-          className="scroll-mt-24 rounded-2xl border border-line bg-surface p-4"
-        >
-          <legend className="px-1 text-sm font-bold text-ink">
-            قياسات الروب <span className="text-orange-ink">*</span>
-          </legend>
-          <p className="mt-1 text-xs text-ink-soft">كل القياسات بالسنتيمتر.</p>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            {([
-              ["shoulder_cm", "عرض الكتف", false],
-              ["chest_cm", "محيط الصدر", true],
-              ["robe_length_cm", "طول الروب", false],
-              ["sleeve_length_cm", "طول الردن", false],
-            ] as const).map(([key, label, optional]) => (
-              <label key={key} className="text-sm font-semibold text-ink">
-                {label}
-                {optional && <span className="ms-1 text-xs font-normal text-ink-soft">(اختياري)</span>}
-                <span className="relative mt-1.5 block">
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    min={1}
-                    max={300}
-                    value={measurements[key] || ""}
-                    onChange={(event) =>
-                      setMeasurements((prev) => ({
-                        ...prev,
-                        [key]: Number(event.target.value) || 0,
-                      }))
-                    }
-                    className="min-h-11 w-full rounded-xl border border-line bg-white px-3 py-2 pe-12 text-sm text-ink outline-none focus:border-orange-ink focus:ring-2 focus:ring-orange-ink/20"
-                  />
-                  <span className="pointer-events-none absolute end-3 top-1/2 -translate-y-1/2 text-xs text-ink-soft">
-                    سم
-                  </span>
-                </span>
-              </label>
-            ))}
-          </div>
-          {showErrors && measurementsError && (
-            <p role="alert" className="mt-2 text-xs font-semibold text-danger">
-              {measurementsError}
-            </p>
-          )}
-          <label className="mt-4 block text-sm font-semibold text-ink">
-            ملاحظات الفصال <span className="text-xs font-normal text-ink-soft">(اختياري)</span>
-            <textarea
-              rows={3}
-              maxLength={500}
-              value={measurements.tailor_notes ?? ""}
-              onChange={(event) =>
-                setMeasurements((prev) => ({ ...prev, tailor_notes: event.target.value }))
-              }
-              className="mt-1.5 w-full resize-none rounded-xl border border-line bg-white px-3 py-2.5 text-sm text-ink outline-none focus:border-orange-ink focus:ring-2 focus:ring-orange-ink/20"
-            />
-          </label>
-          <ReceiptUpload
-            value={measurements.receipt_image_url}
-            onChange={(url) =>
-              setMeasurements((prev) => ({ ...prev, receipt_image_url: url }))
-            }
-            uploadImage={uploadProductionImage}
-          />
-        </fieldset>
+        <RobeMeasurementFields
+          measurements={measurements}
+          setMeasurements={setMeasurements}
+          showErrors={showErrors}
+          error={measurementsError}
+          uploadImage={uploadProductionImage}
+        />
       )}
 
       <PriceBreakdown lines={preview.lines} total={preview.total} compact />
@@ -383,13 +367,56 @@ export function RetailOrderEditForm({
       <section className="rounded-2xl border border-orange-ink/20 bg-orange-ink/5 p-4">
         <div className="grid gap-3 sm:grid-cols-3">
           <PriceMetric label="السعر الحالي" value={snapshot.price} />
-          <PriceMetric label="السعر بعد التعديل" value={preview.total} accent />
           <PriceMetric
-            label="الفرق"
-            value={priceDifference}
-            signed
+            label={keepPrice ? "السعر المحسوب (لن يُطبَّق)" : "السعر بعد التعديل"}
+            value={preview.total}
+            accent={!keepPrice}
+            muted={keepPrice}
+          />
+          <PriceMetric
+            label={keepPrice ? "السعر الذي سيُحفظ" : "الفرق"}
+            value={keepPrice ? appliedTotal : priceDifference}
+            signed={!keepPrice}
+            accent={keepPrice}
           />
         </div>
+
+        {priceDifference !== 0 && (
+          <label className="mt-3 flex min-h-11 cursor-pointer items-start gap-2.5 rounded-xl bg-white/70 p-3">
+            <input
+              type="checkbox"
+              className="mt-0.5 size-4 accent-[var(--color-orange-ink)]"
+              checked={keepPrice}
+              onChange={(event) => setKeepPrice(event.target.checked)}
+            />
+            <span className="text-xs leading-relaxed text-ink">
+              <strong className="block text-sm">تثبيت السعر الحالي</strong>
+              احفظ التعديل دون تغيير السعر — للحالات التي اتُّفق فيها على السعر مع الطالب
+              مسبقًا. الكلفة المسجّلة لا تتغيّر في الحالتين.
+            </span>
+          </label>
+        )}
+
+        {/* Only for a piece that HAS design work. A plain piece pushed to «بانتظار التصميم»
+            is invisible to the designer queues (they filter on has_embroidery) — it would
+            just fall out of the pipeline. Adding embroidery in this same edit is covered by
+            the automatic rework rule instead. */}
+        {snapshot.can_force_rework && snapshot.has_embroidery && (
+          <label className="mt-2 flex min-h-11 cursor-pointer items-start gap-2.5 rounded-xl bg-white/70 p-3">
+            <input
+              type="checkbox"
+              className="mt-0.5 size-4 accent-[var(--color-orange-ink)]"
+              checked={forceRework}
+              onChange={(event) => setForceRework(event.target.checked)}
+            />
+            <span className="text-xs leading-relaxed text-ink">
+              <strong className="block text-sm">أرجع الطلب إلى «بانتظار التصميم»</strong>
+              يمسح مناطق التطريز المنجزة وملف التصميم النهائي ويُفرغ خانة الرف، ليعاد العمل
+              من البداية. اتركه فارغًا إذا كان التعديل لا يستدعي إعادة تصميم.
+            </span>
+          </label>
+        )}
+
         <p className="mt-3 text-xs leading-relaxed text-ink-soft">
           حالة الإنتاج الحالية:{" "}
           <strong className="text-ink">{ORDER_STATUS_LABELS[snapshot.status]}</strong>.
@@ -399,6 +426,7 @@ export function RetailOrderEditForm({
 
       <Button
         fullWidth
+        disabled={swapping}
         onClick={() => {
           if (validate()) setConfirmOpen(true);
         }}
@@ -422,13 +450,30 @@ export function RetailOrderEditForm({
         }
       >
         <div className="space-y-3 text-sm text-ink-soft">
-          <p>
-            سيتغير السعر من <strong className="text-ink">{formatIQD(snapshot.price)}</strong>{" "}
-            إلى <strong className="text-orange-ink">{formatIQD(preview.total)}</strong>.
-          </p>
+          {productChanged && (
+            <p>
+              سيتحوّل نوع القطعة من{" "}
+              <strong className="text-ink">{snapshot.product_name}</strong> إلى{" "}
+              <strong className="text-orange-ink">{product.nameAr}</strong> مع نقل كل
+              الخيارات المحفوظة كما هي.
+            </p>
+          )}
+          {keepPrice ? (
+            <p>
+              سيبقى السعر <strong className="text-ink">{formatIQD(snapshot.price)}</strong> كما
+              هو (السعر المحسوب {formatIQD(preview.total)} لن يُطبَّق).
+            </p>
+          ) : (
+            <p>
+              سيتغير السعر من <strong className="text-ink">{formatIQD(snapshot.price)}</strong>{" "}
+              إلى <strong className="text-orange-ink">{formatIQD(preview.total)}</strong>.
+            </p>
+          )}
           <p>
             الطلب في مرحلة <strong className="text-ink">{ORDER_STATUS_LABELS[snapshot.status]}</strong>.
-            إذا أضاف التعديل عمل تصميم/تطريز جديدًا، سيعود الطلب تلقائيًا إلى بانتظار التصميم.
+            {forceRework
+              ? " سيعود إلى «بانتظار التصميم» وتُمسح مناطق التطريز المنجزة."
+              : " إذا أضاف التعديل عمل تصميم/تطريز جديدًا، سيعود الطلب تلقائيًا إلى بانتظار التصميم."}
           </p>
           {product.type === "robe" && snapshot.tailor_status === "done" && (
             <p>إذا تغيرت القياسات، سيُعاد فتح مهمة الفصال حتى لا تُنفذ المقاسات القديمة.</p>
@@ -444,19 +489,20 @@ function PriceMetric({
   value,
   accent = false,
   signed = false,
+  muted = false,
 }: {
   label: string;
   value: number;
   accent?: boolean;
   signed?: boolean;
+  /** The number is still true, but it is not what will be saved — say so visually. */
+  muted?: boolean;
 }) {
+  const tone = muted ? "text-ink-soft line-through" : accent ? "text-orange-ink" : "text-ink";
   return (
     <div>
       <p className="text-xs text-ink-soft">{label}</p>
-      <p
-        dir="ltr"
-        className={`mt-1 text-base font-bold tabular-nums ${accent ? "text-orange-ink" : "text-ink"}`}
-      >
+      <p dir="ltr" className={`mt-1 text-base font-bold tabular-nums ${tone}`}>
         {signed && value > 0 ? "+" : ""}
         {formatIQD(value)}
       </p>
