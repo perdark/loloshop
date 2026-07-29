@@ -1,5 +1,33 @@
 # Progress
 
+## 2026-07-29 — الورشة: piece rates split by customer type (ممثلين / تجزئة) — SHIPPED
+
+**Pushed to main `8832922`, CI green, deployed. Migration 072 applied to prod by the deploy.**
+Gates: backend **123/123** (+5 new) · `tsc` 0 · `eslint` 0 · live e2e on the dev DB · browser-verified
+as a workshop worker and as staff.
+
+**Done**
+- Migration 072: `audience` (`wholesale`/`retail`) on `workshop_piece_rates` + `workshop_production_entries`;
+  unique key is now `(operation, product, audience)`. `DEFAULT 'wholesale'` backfills all existing rows.
+  Retail rates seeded equal to wholesale so no job is ever worth 0 on day one.
+- `insertProduction`, `upsertRate`, `ratesMatrix` all resolve by audience — they had to change together,
+  because the migration invalidates the 2-column conflict target and makes the un-filtered rate lookup
+  match two rows.
+- Audience is **required** on every production entry — no default, validated server-side.
+- `ledgerFor` + `dashboard` return `production_wholesale` / `production_retail` (+ `pieces_*`).
+- Worker screen: «لمين هالشغل؟» toggle (unselected by default, submit disabled until tapped), live price
+  follows the choice, حسابك shows the two totals, each ledger line names its audience.
+- Admin: two price inputs per job in أسعار القطع, the same required choice on تسجيل القطع, and a
+  الكل/ممثلين/تجزئة filter on نظرة عامة (المستحق under الكل only — حوافز/خصومات belong to no audience).
+- Payout card panel removed from the workshop crew's screen + its two backend routes deleted.
+
+**Next**
+- **Enter the real تجزئة wages in `/admin/workshop` → أسعار القطع.** Every retail rate currently equals its
+  wholesale twin, so the split is structurally correct but changes no numbers until this is done.
+- The payout-card feature remains uncommitted and undeployed — see HANDOFF for the blocking accrual issue.
+
+---
+
 ## 2026-07-20 — Order editing repaired: priced spec lines were uneditable · student academic info had no edit path
 
 **Branch `security-fixes`, committed, NOT pushed. No migration for this fix.** Reported by the owner as "editing on order for

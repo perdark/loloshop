@@ -6,6 +6,90 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
+## 2026-07-29 — ✅ PUSHED + DEPLOYED: الورشة piece rates split by customer (ممثلين / تجزئة) · payout card removed from workshop crew
+
+**Pushed to main (`8832922`) → CI green (frontend · backend · Deploy to VPS) → live.** Migration **072 applied to prod by
+the deploy** (`scripts/deploy.sh` runs `npm run migrate` at L17 before `pm2 reload` at L23). Gates: **backend 123/123**
+(+5) · `tsc` 0 · `eslint` 0 · live e2e on the dev DB · **browser-verified** as a real workshop worker and as staff.
+Spec: `docs/superpowers/specs/2026-07-29-workshop-retail-piece-rates-design.md` · plan:
+`docs/superpowers/plans/2026-07-29-workshop-retail-piece-rates.md`.
+
+**⚠️ OWNER ACTION REQUIRED — the split is live but numerically meaningless until you do this.** Migration 072 seeded every
+تجزئة rate **equal to its ممثلين rate** (deliberate: shipping zeros would have paid workers 0 the first time anyone tapped
+تجزئة). Go to **`/admin/workshop` → أسعار القطع** and enter the real retail wages. Until then retail work pays the
+wholesale rate.
+
+**The report.** «the syrian workers the prices are different on wholesaler (that already built) and the retail students
+(not built) so just add a section for retail students working.»
+
+**Owner decisions locked (2026-07-29):** ① **same jobs, second price** — every operation×product keeps its ممثلين price and
+gains a تجزئة price; no fallback, both explicit. ② **the worker states the audience** via a toggle at the top of سجّل شغلك.
+③ **labels + split totals** — worker sees the two totals separately, admin نظرة عامة filters. Per-worker breakdown was NOT
+chosen. **Out of scope (unchanged):** workshop production is still standalone bulk piecework with **no link to `orders`** —
+nobody verifies that the 20 retail robes a worker claims actually exist.
+
+**What shipped.**
+- **Migration 072** (`db/migrations/072_workshop_rate_audience.sql` + schema.sql mirror): `audience TEXT NOT NULL DEFAULT
+  'wholesale' CHECK (audience IN ('wholesale','retail'))` on `workshop_piece_rates` AND `workshop_production_entries`. The
+  unique key becomes `(operation, product, audience)` via `uq_workshop_rate` — **the old
+  `workshop_piece_rates_operation_product_key` is DROPPED**. `DEFAULT 'wholesale'` is the backfill: every pre-existing rate
+  and entry becomes ممثلين, which is what they were. Retail rates seeded by copying wholesale.
+- **`workshopController.js` — three call sites had to move together**, because the migration invalidates all of them:
+  `upsertRate`'s `ON CONFLICT(operation,product)` (would throw on every call), `insertProduction`'s rate lookup (post-migration
+  it matched TWO rows with no ORDER BY — this computes real wages), and `ratesMatrix`'s `${op}:${product}` map key (audience
+  rows collided, last-one-wins). All three now carry audience. `ledgerFor` + `dashboard` return
+  `production_wholesale`/`production_retail` (+ `pieces_*`).
+- **The audience has NO DEFAULT anywhere.** `validatePiece` rejects a missing/unknown audience with «حدد لمين هالشغل: ممثلين
+  أو تجزئة»; the worker's submit button stays disabled until tapped. Deliberate — the 2026-07-26 session lost an order to a
+  Chrome-autofilled `<select>`, and this field decides the wage.
+- **Rates stay frozen per entry** (`rate`/`amount` copied at insert) — editing a price never rewrites past wages. Tested.
+- **NO `?audience=` API filter** — حوافز/خصومات belong to no audience, so a server-side slice would return a المستحق that
+  doesn't reconcile with its own parts. The admin filter is presentation-only and المستحق renders under الكل alone.
+- **`RateRow` now returns 20 rows instead of 10**, which silently doubles every product/operation dropdown. Both recording
+  forms scope their pickers to one audience — worth remembering if a third recording surface is ever added.
+- **Payout card removed from the workshop crew** (owner, same session): `PayoutAccountPanel` off `/workshop`, and the two
+  `/workshop/me/payout-account` routes deleted. **This also fixed a latent deploy-breaker** — see below.
+
+**Two tests the reviewer proved were worthless, now real.** A migration test asserted `COUNT(*) WHERE audience NOT IN (...)`
+against a table with **0 rows** — it passed unconditionally and proved nothing; it now inserts an entry *without* naming an
+audience and asserts it lands as `wholesale`. A uniqueness test checked that no duplicates *happened to exist* rather than
+that the DB *rejects* one; it now attempts a colliding insert and asserts `23505`. Both verified by dropping the constraint
+in a rollback sandbox and confirming they then fail.
+
+**⚠️ THE CATCH WORTH REMEMBERING — the branch would have broken the production build.** `frontend/app/workshop/page.tsx` is
+tracked, but it imported `@/components/payments/PayoutAccountPanel` and `@/lib/payments`, which are part of the **still-
+uncommitted** payout feature — **0 of those files are tracked in git**. A tracked file importing untracked files typechecks
+fine locally (the files are on disk) and fails `next build` on the VPS. Caught pre-push by grepping every committed-on-branch
+file for references to untracked code, then **stashing all 68 uncommitted files and re-running the gates against exactly what
+prod would see** (tsc 0, 120/120 — the 3 missing tests live in the untracked payout file). **Do this check whenever a feature
+branch is cut while another feature sits uncommitted in the same tree.**
+
+### Open follow-ups
+- **Enter the real تجزئة rates** (top of this entry). Nothing else about this feature matters until that is done.
+- **Deploy window:** migration 072 drops the unique constraint that the *old* deployed `upsertRate` targets, so
+  `PUT /workshop/rates` 500s for the seconds between `npm run migrate` and `pm2 reload`. Admin-only, rarely used, inherent to
+  any unique-key change. Already past for this deploy.
+- **The payout-card feature is STILL uncommitted (~68 files in the tree) and did NOT deploy** — deliberately. Blocking issue:
+  **`suggested_amount` is a lifetime accrual that manual payouts never reduce** (staff `base_salary + bonuses − deductions`,
+  workshop `production + bonuses − deductions`; neither subtracts `manual_payouts`). Pay محمد عادل his 501,000 and the screen
+  still suggests 501,000 next month — a pay button beside a number that never drops. Also: **ابو عبدو appears twice** in the
+  recipients list (once `tailor` via `role='staff'`, once `workshop` via `workshop_workers`) so the counter reads 11 for 10
+  people; **مضر محمد's suggested amount renders as −775,000**; and changing someone's card leaves **no history** (upsert keeps
+  only `updated_by`, no `audit_log` row) unlike every other money path in this repo.
+- **Also uncommitted in that batch:** the eligibility gate added this session — workshop crew (checked against the
+  `workshop_workers` roster, NOT by name or staff_type, so it keeps holding) get `eligible:false` from
+  `/payroll/me/payout-account` and a 403 on PUT; `/staff/me` hides the panel. Verified for ابو عبدو (hidden) vs محمد عادل
+  (shown). Admins have no card panel of their own — they set everyone else's from `/admin/payouts`.
+- **Android icon/splash assets** (`capacitor-assets generate --android`, versionCode 3 / 1.0.2) also still uncommitted.
+- **Process note from the owner, applies to future sessions:** the full brainstorm → spec → plan → per-task
+  implementer/reviewer pipeline was **too heavy for a change this size** («u took a lot of time for a simple feature»).
+  Tasks 3-5 were done directly in minutes at the same quality. Reserve the ceremony for genuinely large or risky work; for a
+  few-file feature go straight to editing with a verification pass at the end.
+- Unchanged on the board: the 5 iOS ASC blockers, the unmerged `ios-appstore` branch + lockfile desync, staff GPS parked.
+  Still untracked and must not be committed: `frontend/public/dev-login.html`, `frontend/public/dev-token-tmp.json` (live JWT).
+
+---
+
 ## 2026-07-26 (b) — ✅ PUSHED: «طلب مستقل بدون ممثل» is a real retail order builder · admin's «طلب مخصص» dead end fixed · hydration + autofill bugs
 
 **Pushed to main → auto-deploys.** No migration. Gates: **backend tests 111/111** (+11 new) · FE `tsc` 0 · `eslint` 0
