@@ -3,12 +3,16 @@ import { api } from "./api";
 export type WorkshopOperation = "cut" | "overlock" | "cap_sew" | "robe_sew" | "shawl_close" | "american_shawl";
 export type WorkshopProduct = "robe" | "cap" | "shawl" | "sash";
 export type WorkshopAdjustmentKind = "bonus" | "deduction";
+/** Who the finished piece is for — decides which piece rate the worker is paid. */
+export type WorkshopAudience = "wholesale" | "retail";
 
 export interface RateRow {
   operation: WorkshopOperation;
   product: WorkshopProduct;
+  audience: WorkshopAudience;
   operation_label_ar: string;
   product_label_ar: string;
+  audience_label_ar: string;
   amount: number;
 }
 
@@ -34,6 +38,9 @@ export interface WorkshopLedgerEntry {
   operation: WorkshopOperation | null;
   product_label_ar: string | null;
   operation_label_ar: string | null;
+  /** null on bonus/deduction rows — an adjustment belongs to no audience. */
+  audience: WorkshopAudience | null;
+  audience_label_ar: string | null;
   qty: number;
   rate: number;
   amount: number;
@@ -44,6 +51,8 @@ export interface WorkshopLedgerEntry {
 
 export interface WorkerSummary {
   production: number;
+  production_wholesale: number;
+  production_retail: number;
   bonuses: number;
   deductions: number;
   payable: number;
@@ -53,7 +62,11 @@ export interface WorkerSummary {
 }
 
 export interface WorkshopDashboard {
-  totals: Omit<WorkerSummary, "entries" | "rates"> & { active_workers: number };
+  totals: Omit<WorkerSummary, "entries" | "rates"> & {
+    active_workers: number;
+    pieces_wholesale: number;
+    pieces_retail: number;
+  };
   workers: WorkshopWorker[];
   recent: (WorkshopLedgerEntry & { worker_name: string })[];
 }
@@ -76,7 +89,8 @@ export async function getMyWorkshopSummary(): Promise<WorkerSummary> {
 }
 
 export async function recordMyProduction(body: {
-  product: WorkshopProduct; operation: WorkshopOperation; qty: number; work_date?: string; note?: string;
+  product: WorkshopProduct; operation: WorkshopOperation; audience: WorkshopAudience;
+  qty: number; work_date?: string; note?: string;
 }) {
   const { data } = await api.post("/workshop/me/production", body);
   return data as { id: string; qty: number; rate: number; amount: number };
@@ -111,12 +125,16 @@ export async function listRates(): Promise<RateRow[]> {
   return data.data || [];
 }
 
-export async function upsertRate(operation: WorkshopOperation, product: WorkshopProduct, amount: number) {
-  await api.put("/workshop/rates", { operation, product, amount });
+export async function upsertRate(
+  operation: WorkshopOperation, product: WorkshopProduct,
+  audience: WorkshopAudience, amount: number
+) {
+  await api.put("/workshop/rates", { operation, product, audience, amount });
 }
 
 export async function recordProductionForWorker(body: {
-  worker_id: string; product: WorkshopProduct; operation: WorkshopOperation; qty: number; work_date?: string; note?: string;
+  worker_id: string; product: WorkshopProduct; operation: WorkshopOperation;
+  audience: WorkshopAudience; qty: number; work_date?: string; note?: string;
 }) {
   const { data } = await api.post("/workshop/production", body);
   return data as { id: string; qty: number; rate: number; amount: number };

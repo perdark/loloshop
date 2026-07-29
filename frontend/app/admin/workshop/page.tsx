@@ -15,7 +15,7 @@ import {
   addWorkshopAdjustment, createWorkshopWorker, getLinkCandidates, getWorkshopDashboard,
   listRates, recordProductionForWorker, updateWorkshopWorker, upsertRate,
   type PortalMember, type RateRow, type WorkshopDashboard, type WorkshopOperation,
-  type WorkshopProduct, type WorkshopWorker,
+  type WorkshopProduct, type WorkshopWorker, type WorkshopAudience,
 } from "@/lib/workshop";
 
 type Tab = "overview" | "record" | "rates" | "workers";
@@ -44,8 +44,20 @@ export default function AdminWorkshopPage() {
 
 function Overview({ data, onChanged }: { data: WorkshopDashboard; onChanged: () => Promise<void> }) {
   const [adjust, setAdjust] = useState<WorkshopWorker | null>(null);
+  const [audience, setAudience] = useState<"all" | WorkshopAudience>("all");
+  const pieces = audience === "all" ? data.totals.pieces : audience === "retail" ? data.totals.pieces_retail : data.totals.pieces_wholesale;
+  const production = audience === "all" ? data.totals.production : audience === "retail" ? data.totals.production_retail : data.totals.production_wholesale;
   return <div className="space-y-6">
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-5"><Stat label="القطع" value={String(data.totals.pieces)} /><Stat label="أجور القطع" value={formatIQD(data.totals.production)} /><Stat label="الحوافز" value={formatIQD(data.totals.bonuses)} /><Stat label="الخصومات" value={formatIQD(data.totals.deductions)} /><Stat label="المستحق" value={formatIQD(data.totals.payable)} accent /></div>
+    <div className="flex flex-wrap gap-2" role="group" aria-label="تصفية حسب نوع الزبون">
+      {([["all","الكل"],["wholesale","ممثلين"],["retail","تجزئة"]] as ["all"|WorkshopAudience,string][]).map(([key,label]) => (
+        <button key={key} type="button" onClick={() => setAudience(key)} aria-pressed={audience === key}
+          className={`min-h-11 rounded-full border px-4 text-sm font-semibold ${audience === key ? 'border-orange-ink bg-orange-ink text-white' : 'border-line bg-surface text-ink'}`}>
+          {label}
+        </button>
+      ))}
+    </div>
+    {/* الحوافز/الخصومات belong to no audience, so المستحق is only meaningful under الكل. */}
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-5"><Stat label="القطع" value={String(pieces)} /><Stat label="أجور القطع" value={formatIQD(production)} />{audience === "all" && <><Stat label="الحوافز" value={formatIQD(data.totals.bonuses)} /><Stat label="الخصومات" value={formatIQD(data.totals.deductions)} /><Stat label="المستحق" value={formatIQD(data.totals.payable)} accent /></>}</div>
     <CalculationDetails summary="كيف حُسبت مستحقات الورشة؟">
       <p>أجر كل تسجيل إنتاج = عدد القطع × سعر القطعة المحفوظ وقت التسجيل.</p>
       <p className="mt-1 rounded-lg bg-ink/[0.04] px-2.5 py-2 text-ink">
@@ -61,20 +73,34 @@ function Overview({ data, onChanged }: { data: WorkshopDashboard; onChanged: () 
 function RecordForm({ workers, rates, onDone }: { workers: WorkshopWorker[]; rates: RateRow[]; onDone: () => Promise<void> }) {
   const active = workers.filter((w) => w.active);
   const [workerId, setWorkerId] = useState(active[0]?.id || "");
-  const [product, setProduct] = useState<WorkshopProduct>(rates[0]?.product || "robe");
-  const available = useMemo(() => rates.filter((r) => r.product === product), [rates, product]);
+  // rates carries one row per (product, operation, audience); derive the job pickers from a
+  // single audience so each product/operation appears once.
+  const jobs = useMemo(() => rates.filter((r) => r.audience === "wholesale"), [rates]);
+  const [product, setProduct] = useState<WorkshopProduct>(jobs[0]?.product || "robe");
+  const available = useMemo(() => jobs.filter((r) => r.product === product), [jobs, product]);
   const [operation, setOperation] = useState<WorkshopOperation>(available[0]?.operation || "cut");
+  // No default — the audience decides the wage, so it must be chosen explicitly.
+  const [audience, setAudience] = useState<WorkshopAudience | null>(null);
   const [qty, setQty] = useState(""); const [date, setDate] = useState(new Date().toISOString().slice(0,10)); const [note,setNote] = useState(""); const [busy,setBusy] = useState(false);
-  const productOptions = Array.from(new Map(rates.map((r) => [r.product,r.product_label_ar])).entries()).map(([value,label]) => ({ value,label }));
-  const rate = rates.find((r) => r.product === product && r.operation === operation)?.amount || 0;
-  async function submit() { const count = Math.floor(Number(qty)); if (!workerId || count < 1) { toast.error("اختر العامل وأدخل الكمية"); return; } setBusy(true); try { await recordProductionForWorker({ worker_id: workerId,product,operation,qty:count,work_date:date,note }); toast.success("تم تسجيل القطع"); setQty("");setNote("");await onDone(); } catch(e){toast.error(getApiErrorMessage(e,"تعذّر التسجيل"));} finally{setBusy(false);} }
-  return <div className="max-w-2xl space-y-4 rounded-2xl border border-line bg-surface p-5"><div><h2 className="font-bold text-ink">تسجيل إنتاج عامل</h2><p className="text-sm text-ink-soft">مثال: محمود صنع 50 قطعة من نوع محدد.</p></div><div className="grid gap-3 sm:grid-cols-2"><Select label="العامل" value={workerId} onChange={(e) => setWorkerId(e.target.value)} options={active.map((w) => ({value:w.id,label:w.name}))} /><Select label="القطعة" value={product} onChange={(e) => { const p=e.target.value as WorkshopProduct;setProduct(p);setOperation(rates.find((r)=>r.product===p)?.operation||'cut'); }} options={productOptions} /><Select label="نوع الشغل" value={operation} onChange={(e) => setOperation(e.target.value as WorkshopOperation)} options={available.map((r)=>({value:r.operation,label:r.operation_label_ar}))} /><Input label="الكمية" type="number" min={1} value={qty} onChange={(e)=>setQty(e.target.value)} /><Input label="التاريخ" type="date" value={date} onChange={(e)=>setDate(e.target.value)} /><Input label="ملاحظة (اختياري)" value={note} onChange={(e)=>setNote(e.target.value)} /></div><p className="rounded-xl bg-surface-sink p-3 text-sm text-ink-soft">سعر القطعة {formatIQD(rate)} · المجموع <b className="text-ink">{formatIQD((Number(qty)||0)*rate)}</b></p><Button onClick={submit} loading={busy}>تسجيل</Button></div>;
+  const productOptions = Array.from(new Map(jobs.map((r) => [r.product,r.product_label_ar])).entries()).map(([value,label]) => ({ value,label }));
+  const rate = audience ? rates.find((r) => r.product === product && r.operation === operation && r.audience === audience)?.amount || 0 : 0;
+  async function submit() { const count = Math.floor(Number(qty)); if (!audience) { toast.error("حدد لمين هالشغل: ممثلين أو تجزئة"); return; } if (!workerId || count < 1) { toast.error("اختر العامل وأدخل الكمية"); return; } setBusy(true); try { await recordProductionForWorker({ worker_id: workerId,product,operation,audience,qty:count,work_date:date,note }); toast.success("تم تسجيل القطع"); setQty("");setNote("");await onDone(); } catch(e){toast.error(getApiErrorMessage(e,"تعذّر التسجيل"));} finally{setBusy(false);} }
+  return <div className="max-w-2xl space-y-4 rounded-2xl border border-line bg-surface p-5"><div><h2 className="font-bold text-ink">تسجيل إنتاج عامل</h2><p className="text-sm text-ink-soft">مثال: محمود صنع 50 قطعة من نوع محدد.</p></div><div className="grid gap-3 sm:grid-cols-2"><Select label="العامل" value={workerId} onChange={(e) => setWorkerId(e.target.value)} options={active.map((w) => ({value:w.id,label:w.name}))} /><Select label="لمين هالشغل" value={audience ?? ""} onChange={(e) => setAudience((e.target.value || null) as WorkshopAudience | null)} options={[{value:"",label:"— اختر —"},{value:"wholesale",label:"ممثلين"},{value:"retail",label:"تجزئة"}]} /><Select label="القطعة" value={product} onChange={(e) => { const p=e.target.value as WorkshopProduct;setProduct(p);setOperation(jobs.find((r)=>r.product===p)?.operation||'cut'); }} options={productOptions} /><Select label="نوع الشغل" value={operation} onChange={(e) => setOperation(e.target.value as WorkshopOperation)} options={available.map((r)=>({value:r.operation,label:r.operation_label_ar}))} /><Input label="الكمية" type="number" min={1} value={qty} onChange={(e)=>setQty(e.target.value)} /><Input label="التاريخ" type="date" value={date} onChange={(e)=>setDate(e.target.value)} /><Input label="ملاحظة (اختياري)" value={note} onChange={(e)=>setNote(e.target.value)} /></div><p className="rounded-xl bg-surface-sink p-3 text-sm text-ink-soft">سعر القطعة {formatIQD(rate)} · المجموع <b className="text-ink">{formatIQD((Number(qty)||0)*rate)}</b></p><Button onClick={submit} loading={busy}>تسجيل</Button></div>;
 }
 
 function Rates({ rows, onDone }: { rows: RateRow[]; onDone: () => Promise<void> }) {
-  const [drafts,setDrafts]=useState<Record<string,string>>(()=>Object.fromEntries(rows.map((r)=>[`${r.product}:${r.operation}`,String(r.amount)]))); const [busy,setBusy]=useState<string|null>(null);
-  async function save(r:RateRow){const key=`${r.product}:${r.operation}`,amount=Math.floor(Number(drafts[key]));if(amount<0||!Number.isFinite(amount)){toast.error("السعر غير صحيح");return;}setBusy(key);try{await upsertRate(r.operation,r.product,amount);toast.success("تم حفظ السعر");await onDone();}catch(e){toast.error(getApiErrorMessage(e,"تعذّر الحفظ"));}finally{setBusy(null);}}
-  return <div className="grid gap-3 sm:grid-cols-2">{rows.map((r)=>{const key=`${r.product}:${r.operation}`;return <div key={key} className="flex items-end gap-3 rounded-2xl border border-line bg-surface p-4"><div className="flex-1"><p className="mb-2 text-sm font-bold text-ink">{r.operation_label_ar} · {r.product_label_ar}</p><Input type="number" min={0} value={drafts[key]??''} onChange={(e)=>setDrafts((d)=>({...d,[key]:e.target.value}))} /></div><Button size="sm" onClick={()=>save(r)} loading={busy===key}>حفظ</Button></div>;})}</div>;
+  const [drafts,setDrafts]=useState<Record<string,string>>(()=>Object.fromEntries(rows.map((r)=>[`${r.product}:${r.operation}:${r.audience}`,String(r.amount)]))); const [busy,setBusy]=useState<string|null>(null);
+  // One card per job, two prices on it — the rows arrive split by audience.
+  const jobs = Array.from(new Map(rows.map((r)=>[`${r.product}:${r.operation}`,r])).values());
+  async function save(job:RateRow){
+    const jobKey=`${job.product}:${job.operation}`;
+    const pending=(["wholesale","retail"] as const).map((audience)=>({audience,amount:Math.floor(Number(drafts[`${jobKey}:${audience}`]))}));
+    if(pending.some((p)=>!Number.isFinite(p.amount)||p.amount<0)){toast.error("السعر غير صحيح");return;}
+    setBusy(jobKey);
+    try{for(const p of pending){await upsertRate(job.operation,job.product,p.audience,p.amount);}toast.success("تم حفظ السعرين");await onDone();}
+    catch(e){toast.error(getApiErrorMessage(e,"تعذّر الحفظ"));}finally{setBusy(null);}
+  }
+  return <div className="grid gap-3 sm:grid-cols-2">{jobs.map((job)=>{const jobKey=`${job.product}:${job.operation}`;return <div key={jobKey} className="rounded-2xl border border-line bg-surface p-4"><p className="mb-3 text-sm font-bold text-ink">{job.operation_label_ar} · {job.product_label_ar}</p><div className="grid grid-cols-2 gap-3">{(["wholesale","retail"] as const).map((audience)=><Input key={audience} label={audience==="retail"?"تجزئة":"ممثلين"} type="number" min={0} value={drafts[`${jobKey}:${audience}`]??''} onChange={(e)=>setDrafts((d)=>({...d,[`${jobKey}:${audience}`]:e.target.value}))} />)}</div><Button className="mt-3" size="sm" onClick={()=>save(job)} loading={busy===jobKey}>حفظ</Button></div>;})}</div>;
 }
 
 function Workers({ workers, onDone }: { workers: WorkshopWorker[]; onDone: () => Promise<void> }) {

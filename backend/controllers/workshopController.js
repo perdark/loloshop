@@ -114,29 +114,35 @@ async function ledgerFor(workerId, limit = 100) {
   const totals = await query(
     `SELECT
        COALESCE((SELECT SUM(amount) FROM workshop_production_entries WHERE worker_id=$1),0) AS production,
+       COALESCE((SELECT SUM(amount) FROM workshop_production_entries WHERE worker_id=$1 AND audience='wholesale'),0) AS production_wholesale,
+       COALESCE((SELECT SUM(amount) FROM workshop_production_entries WHERE worker_id=$1 AND audience='retail'),0) AS production_retail,
        COALESCE((SELECT SUM(amount) FROM workshop_adjustments WHERE worker_id=$1 AND kind='bonus'),0) AS bonuses,
        COALESCE((SELECT SUM(amount) FROM workshop_adjustments WHERE worker_id=$1 AND kind='deduction'),0) AS deductions,
        COALESCE((SELECT SUM(qty) FROM workshop_production_entries WHERE worker_id=$1),0)::int AS pieces`,
     [workerId]
   );
   const entries = await query(
-    `SELECT id, 'production' AS kind, product, operation, qty, rate, amount,
+    `SELECT id, 'production' AS kind, product, operation, audience, qty, rate, amount,
             work_date AS entry_date, note AS reason, created_at
        FROM workshop_production_entries WHERE worker_id=$1
      UNION ALL
-     SELECT id, kind, NULL, NULL, 0, 0, amount, entry_date, reason, created_at
+     SELECT id, kind, NULL, NULL, NULL, 0, 0, amount, entry_date, reason, created_at
        FROM workshop_adjustments WHERE worker_id=$1
      ORDER BY created_at DESC LIMIT $2`, [workerId, limit]
   );
   const t = totals.rows[0];
   const production = n(t.production), bonuses = n(t.bonuses), deductions = n(t.deductions);
   return {
-    production, bonuses, deductions, payable: production + bonuses - deductions,
+    production,
+    production_wholesale: n(t.production_wholesale),
+    production_retail: n(t.production_retail),
+    bonuses, deductions, payable: production + bonuses - deductions,
     pieces: n(t.pieces),
     entries: entries.rows.map((r) => ({
       ...r, qty: n(r.qty), rate: n(r.rate), amount: n(r.amount),
       product_label_ar: r.product ? PRODUCT_LABEL_AR[r.product] : null,
       operation_label_ar: r.operation ? OP_LABEL_AR[r.operation] : null,
+      audience_label_ar: r.audience ? AUDIENCE_LABEL_AR[r.audience] : null,
     })),
   };
 }
@@ -295,27 +301,35 @@ async function dashboard(req, res) {
   const totals = await query(
     `SELECT
        COALESCE((SELECT SUM(qty) FROM workshop_production_entries),0)::int pieces,
+       COALESCE((SELECT SUM(qty) FROM workshop_production_entries WHERE audience='wholesale'),0)::int pieces_wholesale,
+       COALESCE((SELECT SUM(qty) FROM workshop_production_entries WHERE audience='retail'),0)::int pieces_retail,
        COALESCE((SELECT SUM(amount) FROM workshop_production_entries),0) production,
+       COALESCE((SELECT SUM(amount) FROM workshop_production_entries WHERE audience='wholesale'),0) production_wholesale,
+       COALESCE((SELECT SUM(amount) FROM workshop_production_entries WHERE audience='retail'),0) production_retail,
        COALESCE((SELECT SUM(amount) FROM workshop_adjustments WHERE kind='bonus'),0) bonuses,
        COALESCE((SELECT SUM(amount) FROM workshop_adjustments WHERE kind='deduction'),0) deductions`
   );
   const t = totals.rows[0];
   const recent = await query(
-    `SELECT p.id,'production' kind,u.name worker_name,p.product,p.operation,p.qty,p.rate,p.amount,
+    `SELECT p.id,'production' kind,u.name worker_name,p.product,p.operation,p.audience,p.qty,p.rate,p.amount,
             p.work_date entry_date,p.note reason,p.created_at
        FROM workshop_production_entries p JOIN workshop_workers w ON w.id=p.worker_id JOIN users u ON u.id=w.user_id
      UNION ALL
-     SELECT a.id,a.kind,u.name,NULL,NULL,0,0,a.amount,a.entry_date,a.reason,a.created_at
+     SELECT a.id,a.kind,u.name,NULL,NULL,NULL,0,0,a.amount,a.entry_date,a.reason,a.created_at
        FROM workshop_adjustments a JOIN workshop_workers w ON w.id=a.worker_id JOIN users u ON u.id=w.user_id
      ORDER BY created_at DESC LIMIT 100`
   );
   res.json({ totals: {
-    active_workers: n(workers.rows[0].active_workers), pieces: n(t.pieces), production: n(t.production),
+    active_workers: n(workers.rows[0].active_workers), pieces: n(t.pieces),
+    pieces_wholesale: n(t.pieces_wholesale), pieces_retail: n(t.pieces_retail),
+    production: n(t.production),
+    production_wholesale: n(t.production_wholesale), production_retail: n(t.production_retail),
     bonuses: n(t.bonuses), deductions: n(t.deductions), payable: n(t.production) + n(t.bonuses) - n(t.deductions),
   }, workers: (await workerRows()).data,
   recent: recent.rows.map((r) => ({ ...r, qty: n(r.qty), rate: n(r.rate), amount: n(r.amount),
     product_label_ar: r.product ? PRODUCT_LABEL_AR[r.product] : null,
     operation_label_ar: r.operation ? OP_LABEL_AR[r.operation] : null,
+    audience_label_ar: r.audience ? AUDIENCE_LABEL_AR[r.audience] : null,
   })) });
 }
 
@@ -330,6 +344,6 @@ module.exports = {
   attachWorker, requireLead, requireWorkerSelf, portalMembers, portalLogin,
   mySummary, myProduction, listWorkers, createWorker, updateWorker, linkCandidates,
   listRates, upsertRate, createProduction, createAdjustment, workerLedger, dashboard,
-  validatePiece, insertProduction, ratesMatrix,
+  validatePiece, insertProduction, ratesMatrix, ledgerFor,
   OPERATIONS, PRODUCTS, PRODUCT_OPS, AUDIENCES, AUDIENCE_LABEL_AR,
 };
