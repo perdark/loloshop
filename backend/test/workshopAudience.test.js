@@ -7,6 +7,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const crypto = require('crypto');
 const { query } = require('../lib/db');
+const wc = require('../controllers/workshopController');
 
 const TAG = `wsaud-${crypto.randomBytes(4).toString('hex')}`;
 
@@ -110,5 +111,96 @@ test('migration 072: a production entry written without audience defaults to who
     if (entryId) await query(`DELETE FROM workshop_production_entries WHERE id = $1`, [entryId]);
     if (workerId) await query(`DELETE FROM workshop_workers WHERE id = $1`, [workerId]);
     if (userId) await query(`DELETE FROM users WHERE id = $1`, [userId]);
+  }
+});
+
+test('validatePiece rejects a missing audience — no silent default', () => {
+  const err = wc.validatePiece({ product: 'robe', operation: 'cut', qty: 5 });
+  assert.strictEqual(err, 'حدد لمين هالشغل: ممثلين أو تجزئة');
+});
+
+test('validatePiece rejects an unknown audience', () => {
+  const err = wc.validatePiece({ product: 'robe', operation: 'cut', qty: 5, audience: 'walk_in' });
+  assert.strictEqual(err, 'حدد لمين هالشغل: ممثلين أو تجزئة');
+});
+
+test('validatePiece accepts a valid retail piece', () => {
+  assert.strictEqual(
+    wc.validatePiece({ product: 'robe', operation: 'cut', qty: 5, audience: 'retail' }),
+    null
+  );
+});
+
+test('ratesMatrix returns both audiences for every job', async () => {
+  const rows = await wc.ratesMatrix();
+  const wholesale = rows.filter((r) => r.audience === 'wholesale');
+  const retail = rows.filter((r) => r.audience === 'retail');
+  assert.strictEqual(wholesale.length, retail.length);
+  assert.ok(wholesale.length >= 10, `expected >=10 jobs, got ${wholesale.length}`);
+  assert.ok(rows.every((r) => r.audience_label_ar === (r.audience === 'retail' ? 'تجزئة' : 'ممثلين')));
+});
+
+test('a retail entry is priced from the RETAIL rate, not the wholesale one', async () => {
+  // Self-cleaning: a throwaway user + worker, removed in finally.
+  const u = await query(
+    `INSERT INTO users (name, password_hash, role) VALUES ('عامل اختبار الأسعار','x','worker') RETURNING id`
+  );
+  const userId = u.rows[0].id;
+  let workerId = null;
+  // Snapshot the real rates for this job so the finally block can put back exactly
+  // what was there — restoring to a hard-coded number would silently rewrite the
+  // shop's configured wages.
+  const rateSnapshot = await query(
+    `SELECT audience, amount FROM workshop_piece_rates WHERE operation='cut' AND product='robe'`
+  );
+  try {
+    const w = await query(
+      `INSERT INTO workshop_workers (user_id) VALUES ($1) RETURNING id`, [userId]
+    );
+    workerId = w.rows[0].id;
+
+    // Make the two prices differ so the assertion can only pass by reading the right row.
+    await query(
+      `INSERT INTO workshop_piece_rates (operation, product, audience, amount)
+       VALUES ('cut','robe','wholesale',500), ('cut','robe','retail',900)
+       ON CONFLICT (operation, product, audience)
+       DO UPDATE SET amount = EXCLUDED.amount`
+    );
+
+    const retail = await wc.insertProduction({
+      workerId, actorUserId: userId,
+      body: { product: 'robe', operation: 'cut', qty: 10, audience: 'retail' },
+    });
+    assert.ok(!retail.error, `unexpected error: ${retail.error}`);
+    assert.strictEqual(Number(retail.data.rate), 900);
+    assert.strictEqual(Number(retail.data.amount), 9000);
+
+    const wholesale = await wc.insertProduction({
+      workerId, actorUserId: userId,
+      body: { product: 'robe', operation: 'cut', qty: 10, audience: 'wholesale' },
+    });
+    assert.strictEqual(Number(wholesale.data.rate), 500);
+    assert.strictEqual(Number(wholesale.data.amount), 5000);
+
+    // The rate is frozen: changing the price must not rewrite the stored wage.
+    await query(
+      `UPDATE workshop_piece_rates SET amount = 1 WHERE operation='cut' AND product='robe' AND audience='retail'`
+    );
+    const stored = await query(
+      `SELECT rate, amount FROM workshop_production_entries WHERE id = $1`, [retail.data.id]
+    );
+    assert.strictEqual(Number(stored.rows[0].rate), 900, 'past wages must never be recomputed');
+    assert.strictEqual(Number(stored.rows[0].amount), 9000);
+  } finally {
+    if (workerId) await query(`DELETE FROM workshop_production_entries WHERE worker_id = $1`, [workerId]);
+    await query(`DELETE FROM workshop_workers WHERE user_id = $1`, [userId]);
+    await query(`DELETE FROM users WHERE id = $1`, [userId]);
+    await query(`DELETE FROM workshop_piece_rates WHERE operation='cut' AND product='robe'`);
+    for (const row of rateSnapshot.rows) {
+      await query(
+        `INSERT INTO workshop_piece_rates (operation, product, audience, amount)
+         VALUES ('cut','robe',$1,$2)`, [row.audience, row.amount]
+      );
+    }
   }
 });
