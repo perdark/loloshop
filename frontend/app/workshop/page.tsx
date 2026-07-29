@@ -6,35 +6,21 @@ import { toast } from "sonner";
 import { getApiErrorMessage } from "@/lib/api";
 import { getUser, logout } from "@/lib/auth";
 import { formatIQD, formatDateShort } from "@/lib/format";
-import { PayoutAccountPanel } from "@/components/payments/PayoutAccountPanel";
 import {
   getMyWorkshopSummary, recordMyProduction,
   type RateRow, type WorkerSummary, type WorkshopOperation, type WorkshopProduct,
   type WorkshopAudience,
 } from "@/lib/workshop";
-import {
-  getMyWorkshopPayoutAccount,
-  saveMyWorkshopPayoutAccount,
-  type PayoutAccount,
-} from "@/lib/payments";
 
 export default function WorkshopWorkerPage() {
   const router = useRouter();
   const [name, setName] = useState("");
   const [allowed, setAllowed] = useState<boolean | null>(null);
   const [summary, setSummary] = useState<WorkerSummary | null>(null);
-  const [payoutAccount, setPayoutAccount] = useState<PayoutAccount | null>(null);
   const [tab, setTab] = useState<"record" | "account">("record");
 
   const load = useCallback(async () => {
-    try {
-      const [nextSummary, nextPayoutAccount] = await Promise.all([
-        getMyWorkshopSummary(),
-        getMyWorkshopPayoutAccount(),
-      ]);
-      setSummary(nextSummary);
-      setPayoutAccount(nextPayoutAccount);
-    }
+    try { setSummary(await getMyWorkshopSummary()); }
     catch (e) { toast.error(getApiErrorMessage(e, "في مشكلة بالتحميل")); }
   }, []);
 
@@ -63,21 +49,7 @@ export default function WorkshopWorkerPage() {
         ) : tab === "record" ? (
           <ProductionForm rates={summary.rates || []} onDone={load} />
         ) : (
-          <Account
-            summary={summary}
-            payoutAccount={payoutAccount}
-            ownerName={name}
-            onPayoutSave={async (cardNumber, cardholderName) => {
-              try {
-                const saved = await saveMyWorkshopPayoutAccount(cardNumber, cardholderName);
-                setPayoutAccount(saved);
-                return saved;
-              } catch (caught) {
-                toast.error(getApiErrorMessage(caught, "تعذّر حفظ بطاقة SuperQi"));
-                throw caught;
-              }
-            }}
-          />
+          <Account summary={summary} />
         )}
       </main>
     </div>
@@ -142,27 +114,9 @@ function ProductionForm({ rates, onDone }: { rates: RateRow[]; onDone: () => Pro
   );
 }
 
-function Account({
-  summary,
-  payoutAccount,
-  ownerName,
-  onPayoutSave,
-}: {
-  summary: WorkerSummary;
-  payoutAccount: PayoutAccount | null;
-  ownerName: string;
-  onPayoutSave: (
-    cardNumber: string,
-    cardholderName?: string
-  ) => Promise<PayoutAccount>;
-}) {
+function Account({ summary }: { summary: WorkerSummary }) {
   return <div className="space-y-4">
     <div className="grid grid-cols-2 gap-3"><Metric label="أجور ممثلين" value={formatIQD(summary.production_wholesale)} /><Metric label="أجور تجزئة" value={formatIQD(summary.production_retail)} /><Metric label="حوافز" value={formatIQD(summary.bonuses)} /><Metric label="خصومات" value={formatIQD(summary.deductions)} /><Metric label="المستحق" value={formatIQD(summary.payable)} accent /></div>
-    <PayoutAccountPanel
-      account={payoutAccount}
-      ownerName={ownerName}
-      onSave={onPayoutSave}
-    />
     <section><h2 className="mb-2 font-bold text-ink">آخر الحركات</h2><div className="divide-y divide-line rounded-2xl border border-line bg-surface px-4">{summary.entries.length ? summary.entries.map((e) => <div key={e.id} className="flex items-center justify-between gap-3 py-3 text-sm"><div><p className="font-medium text-ink">{e.kind === "production" ? `${e.operation_label_ar} · ${e.product_label_ar} × ${e.qty} · ${e.audience_label_ar}` : e.kind === "bonus" ? "حافز" : "خصم"}</p><p className="text-xs text-ink-soft">{e.reason || formatDateShort(e.entry_date)}</p></div><b className={e.kind === "deduction" ? "text-danger" : "text-ink"}>{e.kind === "deduction" ? "−" : "+"}{formatIQD(e.amount)}</b></div>) : <p className="py-10 text-center text-sm text-ink-soft">ما في حركات بعد.</p>}</div></section>
   </div>;
 }
