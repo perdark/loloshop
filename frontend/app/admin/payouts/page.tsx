@@ -10,8 +10,10 @@ import { Modal } from "@/components/ui/Modal";
 import { getApiErrorMessage } from "@/lib/api";
 import { formatDateShort, formatIQD } from "@/lib/format";
 import {
+  formatPayoutAccountNumber,
   formatPayoutCardNumber,
   getAdminPayouts,
+  normalizePayoutAccountNumber,
   normalizePayoutCardNumber,
   recordManualPayout,
   saveAdminPayoutAccount,
@@ -21,6 +23,14 @@ import {
 } from "@/lib/payments";
 
 type Filter = "all" | PayoutRecipientKind;
+
+/**
+ * A destination is both numbers. A recipient saved before migration 073 has a
+ * card but no account number — the server refuses to record a transfer for them
+ * until an admin completes it here, so the row must read as "not ready".
+ */
+const isReady = (recipient: PayoutRecipient) =>
+  Boolean(recipient.cardNumber && recipient.accountNumber);
 
 const KIND_LABELS: Record<PayoutRecipientKind, string> = {
   staff: "الموظفون",
@@ -63,7 +73,7 @@ export default function AdminPayoutsPage() {
     });
   }, [filter, recipients, search]);
 
-  const readyCount = recipients.filter((recipient) => recipient.cardNumber).length;
+  const readyCount = recipients.filter(isReady).length;
   const missingCount = recipients.length - readyCount;
 
   return (
@@ -82,8 +92,8 @@ export default function AdminPayoutsPage() {
           i
         </span>
         <p>
-          النظام لا يرسل المال تلقائياً. انسخ رقم البطاقة، حوّل المبلغ من تطبيق
-          البنك، ثم اضغط «تم التحويل» لتسجيل العملية.
+          النظام لا يرسل المال تلقائياً. انسخ رقم البطاقة أو رقم الحساب، حوّل
+          المبلغ من تطبيق البنك، ثم اضغط «تم التحويل» لتسجيل العملية.
         </p>
       </div>
 
@@ -107,8 +117,8 @@ export default function AdminPayoutsPage() {
           <section className="mb-8 border-y border-line">
             <dl className="flex flex-wrap divide-x divide-x-reverse divide-line">
               <Summary label="مستلم راتب" value={recipients.length} />
-              <Summary label="بطاقة جاهزة" value={readyCount} />
-              <Summary label="بانتظار البطاقة" value={missingCount} warn={missingCount > 0} />
+              <Summary label="بيانات جاهزة" value={readyCount} />
+              <Summary label="بانتظار البيانات" value={missingCount} warn={missingCount > 0} />
             </dl>
           </section>
 
@@ -262,6 +272,22 @@ function RecipientRow({
           >
             {formatPayoutCardNumber(recipient.cardNumber)}
           </p>
+          {recipient.accountNumber ? (
+            <p className="mt-1 text-xs text-ink-soft">
+              رقم الحساب{" "}
+              <span dir="ltr" className="font-semibold tabular-nums text-ink">
+                {formatPayoutAccountNumber(recipient.accountNumber)}
+              </span>
+            </p>
+          ) : (
+            <button
+              type="button"
+              onClick={onEdit}
+              className="mt-1 inline-flex min-h-11 items-center text-xs font-semibold text-danger underline underline-offset-4"
+            >
+              + أضف رقم حساب SuperQi
+            </button>
+          )}
           <p className="mt-1 truncate text-xs text-ink-soft">
             {recipient.cardholderName || recipient.name}
           </p>
@@ -272,7 +298,7 @@ function RecipientRow({
           onClick={onEdit}
           className="min-h-11 justify-self-start rounded-full border border-dashed border-danger/45 px-4 text-sm font-semibold text-danger hover:bg-danger/5"
         >
-          + إضافة بطاقة
+          + إضافة البطاقة والحساب
         </button>
       )}
 
@@ -285,12 +311,15 @@ function RecipientRow({
         {recipient.cardNumber && (
           <>
             <CopyButton text={recipient.cardNumber} label="نسخ البطاقة" />
+            {recipient.accountNumber && (
+              <CopyButton text={recipient.accountNumber} label="نسخ الحساب" />
+            )}
             <Button size="sm" variant="ghost" onClick={onEdit}>
               تعديل
             </Button>
           </>
         )}
-        <Button size="sm" onClick={onSend} disabled={!recipient.cardNumber}>
+        <Button size="sm" onClick={onSend} disabled={!isReady(recipient)}>
           إرسال المبلغ
         </Button>
       </div>
@@ -356,6 +385,19 @@ function SendPayoutModal({
           >
             {formatPayoutCardNumber(recipient.cardNumber)}
           </p>
+          <div className="mt-3 flex items-center justify-between gap-3 border-t border-cream/15 pt-3">
+            <div className="min-w-0">
+              <p className="text-xs text-cream/60">رقم حساب SuperQi</p>
+              <p dir="ltr" className="mt-1 text-left font-semibold tabular-nums">
+                {formatPayoutAccountNumber(recipient.accountNumber)}
+              </p>
+            </div>
+            <CopyButton
+              text={recipient.accountNumber || ""}
+              label="نسخ الحساب"
+              className="border-cream/25 bg-transparent text-cream hover:border-cream/45 hover:text-cream"
+            />
+          </div>
           <div className="mt-3 flex items-center justify-between gap-3">
             <p className="truncate text-sm">
               {recipient.cardholderName || recipient.name}
@@ -400,24 +442,34 @@ function EditCardModal({
   onSaved: () => Promise<void>;
 }) {
   const [cardNumber, setCardNumber] = useState(recipient.cardNumber || "");
+  const [accountNumber, setAccountNumber] = useState(recipient.accountNumber || "");
   const [cardholderName, setCardholderName] = useState(
     recipient.cardholderName || recipient.name
   );
   const [saving, setSaving] = useState(false);
 
   async function save() {
-    const normalized = normalizePayoutCardNumber(cardNumber);
-    if (normalized.length !== 16) {
+    const normalizedCard = normalizePayoutCardNumber(cardNumber);
+    if (normalizedCard.length !== 16) {
       toast.error("رقم البطاقة يجب أن يتكون من 16 رقماً");
+      return;
+    }
+    const normalizedAccount = normalizePayoutAccountNumber(accountNumber);
+    if (normalizedAccount.length !== 9) {
+      toast.error("رقم حساب SuperQi يجب أن يتكون من 9 أرقام");
       return;
     }
     setSaving(true);
     try {
-      await saveAdminPayoutAccount(recipient.userId, normalized, cardholderName);
-      toast.success("تم حفظ بطاقة المستلم");
+      await saveAdminPayoutAccount(recipient.userId, {
+        cardNumber: normalizedCard,
+        accountNumber: normalizedAccount,
+        cardholderName,
+      });
+      toast.success("تم حفظ بيانات المستلم");
       await onSaved();
     } catch (caught) {
-      toast.error(getApiErrorMessage(caught, "تعذّر حفظ البطاقة"));
+      toast.error(getApiErrorMessage(caught, "تعذّر حفظ البيانات"));
     } finally {
       setSaving(false);
     }
@@ -427,14 +479,14 @@ function EditCardModal({
     <Modal
       open
       onClose={onClose}
-      title={`بطاقة SuperQi — ${recipient.name}`}
+      title={`بيانات SuperQi — ${recipient.name}`}
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
             إلغاء
           </Button>
           <Button onClick={save} loading={saving}>
-            حفظ البطاقة
+            حفظ البيانات
           </Button>
         </>
       }
@@ -452,6 +504,17 @@ function EditCardModal({
           dir="ltr"
         />
         <Input
+          label="رقم حساب SuperQi (9 أرقام)"
+          value={formatPayoutAccountNumber(accountNumber)}
+          onChange={(event) =>
+            setAccountNumber(normalizePayoutAccountNumber(event.target.value))
+          }
+          inputMode="numeric"
+          autoComplete="off"
+          placeholder="000 000 000"
+          dir="ltr"
+        />
+        <Input
           label="اسم حامل البطاقة (اختياري)"
           value={cardholderName}
           onChange={(event) => setCardholderName(event.target.value)}
@@ -459,7 +522,7 @@ function EditCardModal({
           autoComplete="cc-name"
         />
         <p className="text-xs leading-5 text-ink-soft">
-          احفظ رقم البطاقة فقط. لا تطلب أو تسجل PIN أو CVV.
+          احفظ رقم البطاقة ورقم الحساب فقط. لا تطلب أو تسجل PIN أو CVV.
         </p>
       </div>
     </Modal>
@@ -505,6 +568,12 @@ function HistoryList({ history }: { history: ManualPayout[] }) {
                 <div className="flex items-center gap-3">
                   <span className="font-bold text-ink">{formatIQD(entry.amount)}</span>
                   <CopyButton text={entry.cardNumberSnapshot} label="نسخ البطاقة" />
+                  {entry.accountNumberSnapshot && (
+                    <CopyButton
+                      text={entry.accountNumberSnapshot}
+                      label="نسخ الحساب"
+                    />
+                  )}
                 </div>
               </li>
             ))}

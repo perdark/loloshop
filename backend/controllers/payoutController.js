@@ -1,12 +1,22 @@
 /**
- * SuperQi Mastercard payout destinations and manual-transfer records.
+ * SuperQi payout destinations and manual-transfer records.
  *
- * This controller never talks to a bank. It stores the recipient's card number
- * and lets an admin record a transfer only after completing it externally.
+ * A destination is BOTH numbers: the 16-digit SuperQi Mastercard and the
+ * 9-digit SuperQi account number. Both are required on every save (owner rule,
+ * 2026-07-29) — the DB columns stay nullable only for rows written before
+ * migration 073, which cannot be re-saved or paid until they are completed.
+ *
+ * This controller never talks to a bank. It stores the recipient's numbers and
+ * lets an admin record a transfer only after completing it externally.
  */
 
 const { query } = require('../lib/db');
-const { normalizeCardNumber, isValidCardNumber } = require('../lib/payoutAccount');
+const {
+  normalizeCardNumber,
+  normalizeAccountNumber,
+  isValidCardNumber,
+  isValidAccountNumber,
+} = require('../lib/payoutAccount');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const RECIPIENT_KINDS = new Set(['staff', 'tailor', 'workshop']);
@@ -16,6 +26,7 @@ function mapAccount(row) {
   return {
     provider: 'superqi_mastercard',
     card_number: row?.card_number || null,
+    account_number: row?.account_number || null,
     cardholder_name: row?.cardholder_name || null,
     updated_at: row?.updated_at || null,
   };
@@ -23,7 +34,7 @@ function mapAccount(row) {
 
 async function accountForUser(userId) {
   const { rows } = await query(
-    `SELECT provider, card_number, cardholder_name, updated_at
+    `SELECT provider, card_number, account_number, cardholder_name, updated_at
        FROM payout_accounts
       WHERE user_id = $1`,
     [userId]
@@ -37,13 +48,22 @@ function validateAccountBody(body) {
     return {
       error: 'رقم بطاقة SuperQi يجب أن يتكون من 16 رقماً',
       code: 'ERR_VALIDATION',
+      field: 'card_number',
+    };
+  }
+  const accountNumber = normalizeAccountNumber(body?.account_number);
+  if (!isValidAccountNumber(accountNumber)) {
+    return {
+      error: 'رقم حساب SuperQi يجب أن يتكون من 9 أرقام',
+      code: 'ERR_VALIDATION',
+      field: 'account_number',
     };
   }
   const cardholderName = String(body?.cardholder_name || '').trim() || null;
   if (cardholderName && cardholderName.length > 120) {
     return { error: 'اسم حامل البطاقة طويل جداً', code: 'ERR_VALIDATION' };
   }
-  return { cardNumber, cardholderName };
+  return { cardNumber, accountNumber, cardholderName };
 }
 
 async function upsertAccount(userId, body, actorId) {
@@ -51,16 +71,23 @@ async function upsertAccount(userId, body, actorId) {
   if (validated.error) return validated;
   const { rows } = await query(
     `INSERT INTO payout_accounts
-       (user_id, provider, card_number, cardholder_name, updated_at, updated_by)
-     VALUES ($1, 'superqi_mastercard', $2, $3, NOW(), $4)
+       (user_id, provider, card_number, account_number, cardholder_name, updated_at, updated_by)
+     VALUES ($1, 'superqi_mastercard', $2, $3, $4, NOW(), $5)
      ON CONFLICT (user_id) DO UPDATE
        SET provider = EXCLUDED.provider,
            card_number = EXCLUDED.card_number,
+           account_number = EXCLUDED.account_number,
            cardholder_name = EXCLUDED.cardholder_name,
            updated_at = NOW(),
            updated_by = EXCLUDED.updated_by
-     RETURNING provider, card_number, cardholder_name, updated_at`,
-    [userId, validated.cardNumber, validated.cardholderName, actorId]
+     RETURNING provider, card_number, account_number, cardholder_name, updated_at`,
+    [
+      userId,
+      validated.cardNumber,
+      validated.accountNumber,
+      validated.cardholderName,
+      actorId,
+    ]
   );
   return { account: mapAccount(rows[0]) };
 }
@@ -140,6 +167,7 @@ async function staffRecipients() {
        COALESCE(st.bonuses, 0) AS bonuses,
        COALESCE(st.deductions, 0) AS deductions,
        pa.card_number,
+       pa.account_number,
        pa.cardholder_name,
        pa.updated_at AS card_updated_at,
        lp.amount AS last_payout_amount,
@@ -173,6 +201,7 @@ async function staffRecipients() {
     recipient_kind: row.recipient_kind,
     suggested_amount: n(row.base_salary) + n(row.bonuses) - n(row.deductions),
     card_number: row.card_number || null,
+    account_number: row.account_number || null,
     cardholder_name: row.cardholder_name || null,
     card_updated_at: row.card_updated_at || null,
     last_payout_amount: row.last_payout_amount == null ? null : n(row.last_payout_amount),
@@ -190,6 +219,7 @@ async function workshopRecipients() {
        COALESCE(a.bonuses, 0) AS bonuses,
        COALESCE(a.deductions, 0) AS deductions,
        pa.card_number,
+       pa.account_number,
        pa.cardholder_name,
        pa.updated_at AS card_updated_at,
        lp.amount AS last_payout_amount,
@@ -226,6 +256,7 @@ async function workshopRecipients() {
     recipient_kind: 'workshop',
     suggested_amount: n(row.production) + n(row.bonuses) - n(row.deductions),
     card_number: row.card_number || null,
+    account_number: row.account_number || null,
     cardholder_name: row.cardholder_name || null,
     card_updated_at: row.card_updated_at || null,
     last_payout_amount: row.last_payout_amount == null ? null : n(row.last_payout_amount),
@@ -242,6 +273,7 @@ async function payoutHistory() {
        mp.source_id,
        mp.amount,
        mp.card_number_snapshot,
+       mp.account_number_snapshot,
        mp.note,
        mp.paid_at,
        mp.created_at,
@@ -312,21 +344,34 @@ async function recordManualPayout(req, res) {
     return res.status(404).json({ error: 'مستلم الراتب غير موجود', code: 'ERR_NOT_FOUND' });
   }
 
+  // Both numbers must be on file before money is recorded as moved — the log
+  // snapshots exactly what the admin copied. Rows saved before migration 073
+  // carry only a card and are blocked here until an admin completes them.
   const account = await accountForUser(userId);
-  if (!account.card_number) {
+  if (!account.card_number || !account.account_number) {
     return res.status(409).json({
-      error: 'لا يمكن تسجيل التحويل قبل إضافة بطاقة SuperQi',
+      error: 'لا يمكن تسجيل التحويل قبل إضافة رقم بطاقة SuperQi ورقم الحساب',
       code: 'ERR_PAYOUT_ACCOUNT_REQUIRED',
     });
   }
 
   const { rows } = await query(
     `INSERT INTO manual_payouts
-       (user_id, recipient_kind, source_id, amount, card_number_snapshot, note, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+       (user_id, recipient_kind, source_id, amount, card_number_snapshot,
+        account_number_snapshot, note, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      RETURNING id, user_id, recipient_kind, source_id, amount,
-               card_number_snapshot, note, paid_at, created_at`,
-    [userId, requestedKind, sourceId, amount, account.card_number, note, req.user.id]
+               card_number_snapshot, account_number_snapshot, note, paid_at, created_at`,
+    [
+      userId,
+      requestedKind,
+      sourceId,
+      amount,
+      account.card_number,
+      account.account_number,
+      note,
+      req.user.id,
+    ]
   );
   res.status(201).json({ data: { ...rows[0], amount: n(rows[0].amount) } });
 }

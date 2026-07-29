@@ -167,13 +167,13 @@ export default function StaffMePage() {
           {payoutAccount?.eligible !== false && <PayoutAccountPanel
             account={payoutAccount}
             ownerName={getUser()?.name || "الموظف"}
-            onSave={async (cardNumber, cardholderName) => {
+            onSave={async (input) => {
               try {
-                const saved = await saveMyStaffPayoutAccount(cardNumber, cardholderName);
+                const saved = await saveMyStaffPayoutAccount(input);
                 setPayoutAccount(saved);
                 return saved;
               } catch (caught) {
-                toast.error(getApiErrorMessage(caught, "تعذّر حفظ بطاقة SuperQi"));
+                toast.error(getApiErrorMessage(caught, "تعذّر حفظ بيانات SuperQi"));
                 throw caught;
               }
             }}

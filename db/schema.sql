@@ -735,6 +735,8 @@ CREATE TABLE IF NOT EXISTS payout_accounts (
   provider         TEXT NOT NULL DEFAULT 'superqi_mastercard'
     CHECK (provider = 'superqi_mastercard'),
   card_number      TEXT NOT NULL CHECK (card_number ~ '^[0-9]{16}$'),
+  account_number   TEXT CONSTRAINT payout_accounts_account_number_format
+    CHECK (account_number IS NULL OR account_number ~ '^[0-9]{9}$'),
   cardholder_name  TEXT CHECK (cardholder_name IS NULL OR char_length(cardholder_name) <= 120),
   updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_by       UUID REFERENCES users(id) ON DELETE SET NULL
@@ -748,6 +750,8 @@ CREATE TABLE IF NOT EXISTS manual_payouts (
   source_id             UUID NOT NULL,
   amount                BIGINT NOT NULL CHECK (amount > 0),
   card_number_snapshot  TEXT NOT NULL CHECK (card_number_snapshot ~ '^[0-9]{16}$'),
+  account_number_snapshot TEXT CONSTRAINT manual_payouts_account_number_snapshot_format
+    CHECK (account_number_snapshot IS NULL OR account_number_snapshot ~ '^[0-9]{9}$'),
   note                  TEXT CHECK (note IS NULL OR char_length(note) <= 500),
   paid_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   created_by            UUID REFERENCES users(id) ON DELETE SET NULL,
@@ -758,6 +762,19 @@ CREATE INDEX IF NOT EXISTS idx_manual_payouts_recipient
   ON manual_payouts(recipient_kind, source_id, paid_at DESC);
 CREATE INDEX IF NOT EXISTS idx_manual_payouts_user
   ON manual_payouts(user_id, paid_at DESC);
+
+-- 073: SuperQi account number (9 digits) beside the 16-digit card. Nullable in the
+-- DB because rows written before 073 hold only a card; "both required" is enforced
+-- on every save by payoutController.validateAccountBody.
+ALTER TABLE payout_accounts ADD COLUMN IF NOT EXISTS account_number TEXT;
+ALTER TABLE payout_accounts DROP CONSTRAINT IF EXISTS payout_accounts_account_number_format;
+ALTER TABLE payout_accounts ADD CONSTRAINT payout_accounts_account_number_format
+  CHECK (account_number IS NULL OR account_number ~ '^[0-9]{9}$');
+
+ALTER TABLE manual_payouts ADD COLUMN IF NOT EXISTS account_number_snapshot TEXT;
+ALTER TABLE manual_payouts DROP CONSTRAINT IF EXISTS manual_payouts_account_number_snapshot_format;
+ALTER TABLE manual_payouts ADD CONSTRAINT manual_payouts_account_number_snapshot_format
+  CHECK (account_number_snapshot IS NULL OR account_number_snapshot ~ '^[0-9]{9}$');
 
 -- =====================================================
 -- STAFF ATTENDANCE — بصمة الموظفين

@@ -5,24 +5,32 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import {
+  formatPayoutAccountNumber,
   formatPayoutCardNumber,
+  normalizePayoutAccountNumber,
   normalizePayoutCardNumber,
   type PayoutAccount,
+  type PayoutAccountInput,
 } from "@/lib/payments";
 
 interface PayoutAccountPanelProps {
   account: PayoutAccount | null;
   ownerName: string;
-  onSave: (cardNumber: string, cardholderName?: string) => Promise<PayoutAccount>;
+  onSave: (input: PayoutAccountInput) => Promise<PayoutAccount>;
 }
+
+/** Both numbers must be on file — a card alone can no longer be saved or paid. */
+const isComplete = (account: PayoutAccount | null) =>
+  Boolean(account?.cardNumber && account?.accountNumber);
 
 export function PayoutAccountPanel({
   account,
   ownerName,
   onSave,
 }: PayoutAccountPanelProps) {
-  const [editing, setEditing] = useState(!account?.cardNumber);
+  const [editing, setEditing] = useState(!isComplete(account));
   const [cardNumber, setCardNumber] = useState(account?.cardNumber || "");
+  const [accountNumber, setAccountNumber] = useState(account?.accountNumber || "");
   const [cardholderName, setCardholderName] = useState(
     account?.cardholderName || ownerName
   );
@@ -30,15 +38,16 @@ export function PayoutAccountPanel({
 
   useEffect(() => {
     setCardNumber(account?.cardNumber || "");
+    setAccountNumber(account?.accountNumber || "");
     setCardholderName(account?.cardholderName || ownerName);
-    setEditing(!account?.cardNumber);
+    setEditing(!isComplete(account));
   }, [account, ownerName]);
 
-  async function copyNumber() {
-    if (!account?.cardNumber) return;
+  async function copyValue(value: string | null | undefined, label: string) {
+    if (!value) return;
     try {
-      await navigator.clipboard.writeText(account.cardNumber);
-      toast.success("تم نسخ رقم البطاقة");
+      await navigator.clipboard.writeText(value);
+      toast.success(`تم نسخ ${label}`);
     } catch {
       toast.error("تعذّر نسخ الرقم");
     }
@@ -46,16 +55,25 @@ export function PayoutAccountPanel({
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    const normalized = normalizePayoutCardNumber(cardNumber);
-    if (normalized.length !== 16) {
+    const normalizedCard = normalizePayoutCardNumber(cardNumber);
+    if (normalizedCard.length !== 16) {
       toast.error("رقم البطاقة يجب أن يتكون من 16 رقماً");
+      return;
+    }
+    const normalizedAccount = normalizePayoutAccountNumber(accountNumber);
+    if (normalizedAccount.length !== 9) {
+      toast.error("رقم حساب SuperQi يجب أن يتكون من 9 أرقام");
       return;
     }
     setSaving(true);
     try {
-      await onSave(normalized, cardholderName);
+      await onSave({
+        cardNumber: normalizedCard,
+        accountNumber: normalizedAccount,
+        cardholderName,
+      });
       setEditing(false);
-      toast.success("تم حفظ بطاقة استلام الراتب");
+      toast.success("تم حفظ بيانات استلام الراتب");
     } finally {
       setSaving(false);
     }
@@ -67,12 +85,13 @@ export function PayoutAccountPanel({
         <div>
           <h2 className="font-bold text-ink">بطاقة استلام الراتب</h2>
           <p className="mt-1 text-sm text-ink-soft">
-            بطاقة SuperQi Mastercard التي تستلم عليها مستحقاتك.
+            بطاقة SuperQi Mastercard ورقم حساب SuperQi اللذان تستلم عليهما
+            مستحقاتك.
           </p>
         </div>
-        {account?.cardNumber && !editing && (
+        {isComplete(account) && !editing && (
           <Button size="sm" variant="ghost" onClick={() => setEditing(true)}>
-            تعديل البطاقة
+            تعديل البيانات
           </Button>
         )}
       </div>
@@ -96,7 +115,29 @@ export function PayoutAccountPanel({
               ? formatPayoutCardNumber(account.cardNumber)
               : "•••• •••• •••• ••••"}
           </p>
-          <div className="mt-5 flex items-end justify-between gap-3">
+          <div className="mt-4 flex items-center justify-between gap-3 border-t border-cream/15 pt-3">
+            <div className="min-w-0">
+              <p className="text-[11px] text-cream/55">رقم حساب SuperQi</p>
+              <p
+                className="mt-0.5 text-left text-sm font-semibold tracking-[0.12em] tabular-nums"
+                dir="ltr"
+              >
+                {account?.accountNumber
+                  ? formatPayoutAccountNumber(account.accountNumber)
+                  : "••• ••• •••"}
+              </p>
+            </div>
+            {account?.accountNumber && (
+              <button
+                type="button"
+                onClick={() => copyValue(account.accountNumber, "رقم الحساب")}
+                className="min-h-11 shrink-0 rounded-full border border-cream/25 px-4 text-xs font-semibold transition-colors hover:bg-cream/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cream"
+              >
+                نسخ الحساب
+              </button>
+            )}
+          </div>
+          <div className="mt-4 flex items-end justify-between gap-3">
             <div className="min-w-0">
               <p className="text-[11px] text-cream/55">اسم حامل البطاقة</p>
               <p className="mt-0.5 truncate text-sm font-semibold">
@@ -106,7 +147,7 @@ export function PayoutAccountPanel({
             {account?.cardNumber && (
               <button
                 type="button"
-                onClick={copyNumber}
+                onClick={() => copyValue(account.cardNumber, "رقم البطاقة")}
                 className="min-h-11 shrink-0 rounded-full border border-cream/25 px-4 text-xs font-semibold transition-colors hover:bg-cream/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cream"
               >
                 نسخ الرقم
@@ -129,6 +170,17 @@ export function PayoutAccountPanel({
               dir="ltr"
             />
             <Input
+              label="رقم حساب SuperQi (9 أرقام)"
+              value={formatPayoutAccountNumber(accountNumber)}
+              onChange={(event) =>
+                setAccountNumber(normalizePayoutAccountNumber(event.target.value))
+              }
+              inputMode="numeric"
+              autoComplete="off"
+              placeholder="000 000 000"
+              dir="ltr"
+            />
+            <Input
               label="اسم حامل البطاقة (اختياري)"
               value={cardholderName}
               onChange={(event) => setCardholderName(event.target.value)}
@@ -136,18 +188,19 @@ export function PayoutAccountPanel({
               autoComplete="cc-name"
             />
             <p className="text-xs leading-5 text-ink-soft">
-              أدخل رقم البطاقة فقط. لا تدخل الرمز السري أو CVV أبداً.
+              أدخل رقم البطاقة ورقم الحساب فقط. لا تدخل الرمز السري أو CVV أبداً.
             </p>
             <div className="flex flex-wrap gap-2 pt-1">
               <Button type="submit" loading={saving}>
-                حفظ البطاقة
+                حفظ البيانات
               </Button>
-              {account?.cardNumber && (
+              {isComplete(account) && (
                 <Button
                   variant="ghost"
                   onClick={() => {
-                    setCardNumber(account.cardNumber || "");
-                    setCardholderName(account.cardholderName || ownerName);
+                    setCardNumber(account?.cardNumber || "");
+                    setAccountNumber(account?.accountNumber || "");
+                    setCardholderName(account?.cardholderName || ownerName);
                     setEditing(false);
                   }}
                 >
@@ -158,10 +211,10 @@ export function PayoutAccountPanel({
           </form>
         ) : (
           <div className="rounded-xl bg-surface-sink p-4">
-            <p className="font-semibold text-ink">البطاقة جاهزة للاستلام</p>
+            <p className="font-semibold text-ink">البيانات جاهزة للاستلام</p>
             <p className="mt-1 text-sm leading-6 text-ink-soft">
-              يستطيع المدير نسخ الرقم من شاشة الرواتب وتحويل المبلغ يدوياً عبر
-              تطبيق البنك.
+              يستطيع المدير نسخ رقم البطاقة أو رقم الحساب من شاشة الرواتب وتحويل
+              المبلغ يدوياً عبر تطبيق البنك.
             </p>
           </div>
         )}
