@@ -6,12 +6,16 @@ const salary = require('../controllers/salaryController');
 const staff = require('../controllers/staffController');
 const attendance = require('../controllers/attendanceController');
 const customOrders = require('../controllers/adminCustomOrderController');
+const payouts = require('../controllers/payoutController');
 const { imageUpload, imageUploadLimit, validateUploadedImage } = require('../lib/upload');
 
 router.use(authRequired, requireRole('admin'));
 
 router.get('/analytics', c.analytics);
 router.get('/accounting', c.accounting);
+router.get('/payouts', payouts.adminDashboard);
+router.post('/payouts', payouts.recordManualPayout);
+router.put('/payout-accounts/:userId', payouts.adminSaveAccount);
 router.get('/orders', orders.listOrders);
 router.get('/custom-order/config', customOrders.customOrderConfig);
 router.post('/custom-order', customOrders.createCustomOrder);

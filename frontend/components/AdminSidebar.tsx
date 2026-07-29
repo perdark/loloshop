@@ -18,6 +18,7 @@ const navItems: {
   { href: "/design-support", label: "أيادي التصميم", exact: false },
   { href: "/admin/custom-order", label: "طلب مخصص", exact: false },
   { href: "/admin/attendance", label: "بصمة الموظفين", exact: false },
+  { href: "/admin/payouts", label: "تحويل الرواتب", exact: false },
   { href: "/admin/wholesalers", label: "الممثلون", exact: false },
   { href: "/admin/products", label: "الكتالوج", exact: false },
   { href: "/admin/packages", label: "باقات VIP", exact: false },
