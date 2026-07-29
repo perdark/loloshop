@@ -54,7 +54,7 @@ function validateAccountBody(body) {
   const accountNumber = normalizeAccountNumber(body?.account_number);
   if (!isValidAccountNumber(accountNumber)) {
     return {
-      error: 'رقم حساب SuperQi يجب أن يتكون من 9 أرقام',
+      error: 'أدخل رقم حساب SuperQi (أرقام فقط)',
       code: 'ERR_VALIDATION',
       field: 'account_number',
     };

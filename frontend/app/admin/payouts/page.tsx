@@ -455,8 +455,8 @@ function EditCardModal({
       return;
     }
     const normalizedAccount = normalizePayoutAccountNumber(accountNumber);
-    if (normalizedAccount.length !== 9) {
-      toast.error("رقم حساب SuperQi يجب أن يتكون من 9 أرقام");
+    if (!normalizedAccount) {
+      toast.error("أدخل رقم حساب SuperQi");
       return;
     }
     setSaving(true);
@@ -504,14 +504,14 @@ function EditCardModal({
           dir="ltr"
         />
         <Input
-          label="رقم حساب SuperQi (9 أرقام)"
+          label="رقم حساب SuperQi"
           value={formatPayoutAccountNumber(accountNumber)}
           onChange={(event) =>
             setAccountNumber(normalizePayoutAccountNumber(event.target.value))
           }
           inputMode="numeric"
           autoComplete="off"
-          placeholder="000 000 000"
+          placeholder="أدخل الرقم كما هو"
           dir="ltr"
         />
         <Input

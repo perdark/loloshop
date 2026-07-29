@@ -25,14 +25,19 @@ test('account number normalizes Arabic digits and separators', () => {
   assert.equal(normalizeAccountNumber('١٢٣ ٤٥٦-٧٨٩'), '123456789');
 });
 
-test('account number requires exactly nine digits', () => {
+test('account number accepts any real length (9, 10, 12 digits)', () => {
   assert.equal(isValidAccountNumber('123456789'), true);
   assert.equal(isValidAccountNumber('123 456 789'), true);
-  assert.equal(isValidAccountNumber('12345678'), false);
-  assert.equal(isValidAccountNumber('1234567890'), false);
-  // A card number is not an account number — the two lengths never overlap.
-  assert.equal(isValidAccountNumber('1234567890123456'), false);
+  assert.equal(isValidAccountNumber('1234567890'), true);
+  assert.equal(isValidAccountNumber('123456789012'), true);
   assert.equal(isValidCardNumber('123456789'), false);
+});
+
+test('account number rejects only empty input and absurd length', () => {
+  assert.equal(isValidAccountNumber('1'), true);
+  assert.equal(isValidAccountNumber('-'), false);
+  assert.equal(isValidAccountNumber('1'.repeat(24)), true);
+  assert.equal(isValidAccountNumber('1'.repeat(25)), false);
 });
 
 test('a missing value is not a valid number of either kind', () => {

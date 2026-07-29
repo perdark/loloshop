@@ -133,15 +133,24 @@ export function normalizePayoutCardNumber(value: string): string {
   return toLatinDigits(value).slice(0, 16);
 }
 
+/**
+ * SuperQi account numbers have no fixed length (9, 10 and 12 digits are all
+ * real), so they are shown as plain digits — any grouping would imply a format
+ * that does not exist. The 24 cap mirrors the DB storage guard (migration 074).
+ */
+export const PAYOUT_ACCOUNT_MAX_DIGITS = 24;
+
 export function formatPayoutAccountNumber(
   accountNumber: string | null | undefined
 ): string {
-  const digits = toLatinDigits(String(accountNumber || "")).slice(0, 9);
-  return digits.replace(/(\d{3})(?=\d)/g, "$1 ").trim();
+  return toLatinDigits(String(accountNumber || "")).slice(
+    0,
+    PAYOUT_ACCOUNT_MAX_DIGITS
+  );
 }
 
 export function normalizePayoutAccountNumber(value: string): string {
-  return toLatinDigits(value).slice(0, 9);
+  return toLatinDigits(value).slice(0, PAYOUT_ACCOUNT_MAX_DIGITS);
 }
 
 async function getAccount(path: string): Promise<PayoutAccount> {

@@ -3,8 +3,12 @@ const EASTERN_ARABIC = '۰۱۲۳۴۵۶۷۸۹';
 
 /** SuperQi Mastercard number. */
 const CARD_DIGITS = 16;
-/** SuperQi account number used for transfers inside the Qi wallet. */
-const ACCOUNT_DIGITS = 9;
+/**
+ * SuperQi account numbers are NOT a fixed length — 9, 10 and 12 digits are all
+ * real, so only "digits, not empty" is enforced. The maximum is a storage guard
+ * (see migration 074), not a format rule.
+ */
+const ACCOUNT_MAX_DIGITS = 24;
 
 function normalizeDigits(value) {
   return String(value ?? '')
@@ -22,12 +26,13 @@ function isValidCardNumber(value) {
 }
 
 function isValidAccountNumber(value) {
-  return normalizeDigits(value).length === ACCOUNT_DIGITS;
+  const digits = normalizeDigits(value).length;
+  return digits > 0 && digits <= ACCOUNT_MAX_DIGITS;
 }
 
 module.exports = {
   CARD_DIGITS,
-  ACCOUNT_DIGITS,
+  ACCOUNT_MAX_DIGITS,
   normalizeCardNumber,
   normalizeAccountNumber,
   isValidCardNumber,
