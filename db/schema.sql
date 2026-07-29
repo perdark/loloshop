@@ -963,20 +963,31 @@ CREATE TABLE IF NOT EXISTS workshop_piece_rates (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   operation  TEXT NOT NULL,
   product    TEXT NOT NULL,
+  audience   TEXT NOT NULL DEFAULT 'wholesale' CHECK (audience IN ('wholesale','retail')),
   amount     BIGINT NOT NULL DEFAULT 0 CHECK (amount >= 0),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
-  UNIQUE (operation, product)
+  updated_by UUID REFERENCES users(id) ON DELETE SET NULL
 );
+-- Migration 072: a rate is identified by job AND customer type.
+ALTER TABLE workshop_piece_rates ADD COLUMN IF NOT EXISTS audience TEXT NOT NULL DEFAULT 'wholesale'
+  CHECK (audience IN ('wholesale','retail'));
+ALTER TABLE workshop_piece_rates DROP CONSTRAINT IF EXISTS workshop_piece_rates_operation_product_key;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_workshop_rate ON workshop_piece_rates(operation, product, audience);
 
--- Fresh/demo databases get useful example rates; existing admin-edited values win.
-INSERT INTO workshop_piece_rates (operation, product, amount)
+-- Fresh/demo databases get useful example rates for BOTH audiences; existing
+-- admin-edited values win. Retail seeds match wholesale until an admin sets the
+-- real retail wages.
+INSERT INTO workshop_piece_rates (operation, product, audience, amount)
 VALUES
-  ('cut', 'robe', 500), ('overlock', 'robe', 750), ('robe_sew', 'robe', 1500),
-  ('cut', 'cap', 250), ('cap_sew', 'cap', 750),
-  ('cut', 'shawl', 250), ('shawl_close', 'shawl', 500), ('american_shawl', 'shawl', 1000),
-  ('cut', 'sash', 250), ('shawl_close', 'sash', 500)
-ON CONFLICT (operation, product) DO NOTHING;
+  ('cut','robe','wholesale',500), ('overlock','robe','wholesale',750), ('robe_sew','robe','wholesale',1500),
+  ('cut','cap','wholesale',250), ('cap_sew','cap','wholesale',750),
+  ('cut','shawl','wholesale',250), ('shawl_close','shawl','wholesale',500), ('american_shawl','shawl','wholesale',1000),
+  ('cut','sash','wholesale',250), ('shawl_close','sash','wholesale',500),
+  ('cut','robe','retail',500), ('overlock','robe','retail',750), ('robe_sew','robe','retail',1500),
+  ('cut','cap','retail',250), ('cap_sew','cap','retail',750),
+  ('cut','shawl','retail',250), ('shawl_close','shawl','retail',500), ('american_shawl','shawl','retail',1000),
+  ('cut','sash','retail',250), ('shawl_close','sash','retail',500)
+ON CONFLICT (operation, product, audience) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS workshop_production_entries (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -988,6 +999,8 @@ CREATE TABLE IF NOT EXISTS workshop_production_entries (
   created_by UUID REFERENCES users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE workshop_production_entries ADD COLUMN IF NOT EXISTS audience TEXT NOT NULL DEFAULT 'wholesale'
+  CHECK (audience IN ('wholesale','retail'));
 CREATE INDEX IF NOT EXISTS idx_workshop_production_worker ON workshop_production_entries(worker_id, work_date DESC, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS workshop_adjustments (
