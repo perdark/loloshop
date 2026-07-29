@@ -726,6 +726,40 @@ CREATE TABLE IF NOT EXISTS staff_goals (
 CREATE INDEX IF NOT EXISTS idx_staff_goals_user ON staff_goals(user_id, created_at DESC);
 
 -- =====================================================
+-- PAYOUT DESTINATIONS — SuperQi Mastercard + manual admin transfer log
+-- =====================================================
+-- No banking API is used. Recipients save a 16-digit card number; an admin
+-- transfers externally and records the completed manual transfer for audit.
+CREATE TABLE IF NOT EXISTS payout_accounts (
+  user_id          UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  provider         TEXT NOT NULL DEFAULT 'superqi_mastercard'
+    CHECK (provider = 'superqi_mastercard'),
+  card_number      TEXT NOT NULL CHECK (card_number ~ '^[0-9]{16}$'),
+  cardholder_name  TEXT CHECK (cardholder_name IS NULL OR char_length(cardholder_name) <= 120),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_by       UUID REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS manual_payouts (
+  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id               UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  recipient_kind        TEXT NOT NULL
+    CHECK (recipient_kind IN ('staff', 'tailor', 'workshop')),
+  source_id             UUID NOT NULL,
+  amount                BIGINT NOT NULL CHECK (amount > 0),
+  card_number_snapshot  TEXT NOT NULL CHECK (card_number_snapshot ~ '^[0-9]{16}$'),
+  note                  TEXT CHECK (note IS NULL OR char_length(note) <= 500),
+  paid_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_by            UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_manual_payouts_recipient
+  ON manual_payouts(recipient_kind, source_id, paid_at DESC);
+CREATE INDEX IF NOT EXISTS idx_manual_payouts_user
+  ON manual_payouts(user_id, paid_at DESC);
+
+-- =====================================================
 -- STAFF ATTENDANCE — بصمة الموظفين
 -- Admin controls the required shift window, grace minutes, per-minute late
 -- penalty marker, and shop verification requirements (network/GPS/both/none).
@@ -988,6 +1022,26 @@ VALUES
   ('cut','shawl','retail',250), ('shawl_close','shawl','retail',500), ('american_shawl','shawl','retail',1000),
   ('cut','sash','retail',250), ('shawl_close','sash','retail',500)
 ON CONFLICT (operation, product, audience) DO NOTHING;
+
+-- A database that already held admin-edited wholesale rates when `audience` was added
+-- gets its retail rows from the seed above — i.e. the SEED defaults, not that shop's real
+-- wholesale amounts. That silently misprices retail work (prod had overlock 300 / robe_sew
+-- 1000 against seed defaults of 750 / 1500). Migration 072 copies wholesale→retail
+-- dynamically, but `scripts/deploy.sh` runs `npm run migrate`, which applies THIS FILE and
+-- never the numbered migrations — so the correction has to live here.
+--
+-- Aligns a retail rate to its wholesale twin only while no admin has ever set it
+-- (`upsertRate` stamps `updated_by`; the seed leaves it NULL). Once the admin enters a real
+-- retail wage this stops touching that row forever. Idempotent — safe on every deploy.
+UPDATE workshop_piece_rates r
+   SET amount = w.amount
+  FROM workshop_piece_rates w
+ WHERE r.audience = 'retail'
+   AND r.updated_by IS NULL
+   AND w.audience = 'wholesale'
+   AND w.operation = r.operation
+   AND w.product   = r.product
+   AND r.amount   <> w.amount;
 
 CREATE TABLE IF NOT EXISTS workshop_production_entries (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
