@@ -66,6 +66,47 @@ workflows:
           echo "=== generated AppIcon set ==="
           ls -la ios/App/App/Assets.xcassets/AppIcon.appiconset || true
 
+      - name: Inject the iOS privacy usage strings (FIXES the camera crash)
+        script: |
+          set -e
+          PLIST="ios/App/App/Info.plist"
+
+          # WHY THIS STEP EXISTS — Apple rejected build 1784823314 under guideline
+          # 2.1(a) on 2026-07-29: "the app crashed when we tapped on Take Photo to
+          # attach a design image from camera" (iPad Air M3 + iPhone 17 Pro Max).
+          #
+          # That is not an app bug. iOS TERMINATES any process the instant it touches
+          # the camera without NSCameraUsageDescription in Info.plist. The storefront
+          # attaches logos/designs with a plain <input type="file" accept="image/*">;
+          # tapping it in WKWebView offers "Take Photo", which opens the camera — and
+          # the app died there on every device, every time.
+          #
+          # The strings CANNOT simply be committed once: `npx cap add ios` above
+          # regenerates ios/ from Capacitor's template on EVERY build, so any manual
+          # edit to Info.plist is wiped before it is ever compiled. They have to be
+          # re-injected here, after `cap sync`, on each run.
+          #
+          # `plutil -replace` inserts the key when missing and overwrites when present.
+          plutil -replace NSCameraUsageDescription -string \
+            "لالتقاط صورة لشعار جامعتك أو تصميمك وإرفاقها بطلب الوشاح." "$PLIST"
+          plutil -replace NSPhotoLibraryUsageDescription -string \
+            "لاختيار صورة الشعار أو التصميم من ألبومك وإرفاقها بطلب الوشاح." "$PLIST"
+
+          # Answers the "Missing Compliance" question once, in the binary, instead of
+          # re-answering it in App Store Connect after every single upload. The app
+          # implements no cryptography of its own and only uses the OS HTTPS stack,
+          # which is exactly the exemption this key declares.
+          plutil -replace ITSAppUsesNonExemptEncryption -bool false "$PLIST"
+
+          # FAIL THE BUILD rather than ship another binary that crashes on camera.
+          # A silent no-op here is what a rejected submission looks like two days later.
+          for KEY in NSCameraUsageDescription NSPhotoLibraryUsageDescription; do
+            plutil -extract "$KEY" raw "$PLIST" >/dev/null 2>&1 \
+              || { echo "FATAL: $KEY missing from $PLIST — camera would crash on device"; exit 1; }
+          done
+          echo "=== privacy keys present in Info.plist ==="
+          plutil -p "$PLIST" | grep -E "NSCamera|NSPhotoLibrary|ITSAppUsesNonExempt"
+
       - name: Set up code signing (creates cert + profile if missing)
         script: |
           set -e
