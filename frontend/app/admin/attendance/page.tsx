@@ -1,12 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
+  correctBreak,
+  decideBreak,
   getAttendanceCalendar,
   getAttendanceRecords,
   getAttendanceSettings,
   getAttendanceUserSettings,
+  getBreakBalances,
+  getBreaks,
   deleteAttendanceUserSettings,
   overrideAttendanceRecord,
   setAttendanceUserSettings,
@@ -20,6 +24,8 @@ import type {
   StaffAttendanceRecord,
   StaffAttendanceSettings,
   StaffAttendanceUserSetting,
+  StaffBreak,
+  StaffBreakBalanceRow,
 } from "@/lib/types";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
@@ -108,6 +114,75 @@ export default function AdminAttendancePage() {
   const [saving, setSaving] = useState(false);
   const [confirmAction, setConfirmAction] = useState<AttendanceConfirm | null>(null);
   const [confirming, setConfirming] = useState(false);
+  // الخروج المؤقت
+  const [breaks, setBreaks] = useState<StaffBreak[]>([]);
+  const [breakBalances, setBreakBalances] = useState<StaffBreakBalanceRow[]>([]);
+  const [breakBusyId, setBreakBusyId] = useState<string | null>(null);
+  const [correcting, setCorrecting] = useState<StaffBreak | null>(null);
+  const [correctMinutes, setCorrectMinutes] = useState("");
+
+  const breakMonth = calendarMonth;
+  // everything still waiting on a decision, including breaks already taken and
+  // charged — approving those is what cancels the deduction
+  const pendingBreaks = useMemo(
+    () => breaks.filter((b) => b.approval === "pending"),
+    [breaks]
+  );
+
+  const loadBreaks = useCallback(async () => {
+    try {
+      const [list, balances] = await Promise.all([
+        getBreaks({ ...monthRange(breakMonth) }),
+        getBreakBalances(breakMonth),
+      ]);
+      setBreaks(list);
+      setBreakBalances(balances.staff);
+    } catch (e) {
+      toast.error(getApiErrorMessage(e, "تعذر تحميل الخروج المؤقت"));
+    }
+  }, [breakMonth]);
+
+  useEffect(() => {
+    loadBreaks();
+  }, [loadBreaks]);
+
+  async function decide(row: StaffBreak, decision: "approve" | "reject") {
+    setBreakBusyId(row.id);
+    try {
+      await decideBreak(row.id, decision);
+      toast.success(decision === "approve" ? "تمت الموافقة" : "تم الرفض");
+      // a decision re-prices the whole month, so both views are refetched
+      await loadBreaks();
+    } catch (e) {
+      toast.error(getApiErrorMessage(e, "تعذر تنفيذ القرار"));
+    } finally {
+      setBreakBusyId(null);
+    }
+  }
+
+  async function saveCorrection() {
+    if (!correcting) return;
+    const minutes = Number(correctMinutes.replace(/[^\d]/g, ""));
+    if (!Number.isInteger(minutes) || minutes < 0) {
+      toast.error("أدخل عدد دقائق صحيح");
+      return;
+    }
+    setBreakBusyId(correcting.id);
+    try {
+      await correctBreak(correcting.id, {
+        minutes,
+        adminNoteAr: "تصحيح مدة الخروج من الأدمن",
+      });
+      toast.success("تم تصحيح المدة");
+      setCorrecting(null);
+      setCorrectMinutes("");
+      await loadBreaks();
+    } catch (e) {
+      toast.error(getApiErrorMessage(e, "تعذر تصحيح المدة"));
+    } finally {
+      setBreakBusyId(null);
+    }
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -184,7 +259,10 @@ export default function AdminAttendancePage() {
         graceMinutes: draft.graceMinutes ?? settings?.graceMinutes ?? 15,
         deductionPerMinute: draft.deductionPerMinute ?? settings?.deductionPerMinute ?? 0,
         attendanceRequired: draft.attendanceRequired,
+        breakMonthlyMinutes: draft.breakMonthlyMinutes,
       });
+      // the allowance change re-prices this month, so reload the break views
+      loadBreaks();
       setUserSettings((prev) => prev.map((item) => (item.userId === next.userId ? next : item)));
       setDrafts((prev) => ({ ...prev, [next.userId]: next }));
       toast.success("تم حفظ دوام الموظف");
@@ -204,6 +282,7 @@ export default function AdminAttendancePage() {
         graceMinutes: null,
         deductionPerMinute: null,
         attendanceRequired: true,
+        breakMonthlyMinutes: null,
         hasOverride: false,
       };
       setUserSettings((prev) => prev.map((item) => (item.userId === row.userId ? next : item)));
@@ -263,6 +342,23 @@ export default function AdminAttendancePage() {
               value={String(settings.deductionPerMinute)}
               onChange={(e) => setSettings({ ...settings, deductionPerMinute: Number(e.target.value.replace(/[^\d]/g, "")) || 0 })}
             />
+            <div className="md:col-span-2">
+              <Input
+                label="رصيد الخروج المؤقت شهرياً (دقيقة)"
+                inputMode="numeric"
+                value={String(settings.breakMonthlyMinutes)}
+                onChange={(e) =>
+                  setSettings({
+                    ...settings,
+                    breakMonthlyMinutes: Number(e.target.value.replace(/[^\d]/g, "")) || 0,
+                  })
+                }
+              />
+              <p className="mt-1 text-xs text-muted">
+                = {durationLabel(settings.breakMonthlyMinutes)} لكل موظف شهرياً. الدقائق المصرَّحة
+                داخل الرصيد مجانية؛ ما بعدها وأي خروج بدون موافقة يُخصم بمبلغ الدقيقة أعلاه.
+              </p>
+            </div>
           </div>
           <CalculationDetails summary="كيف يُحسب مبلغ التأخير؟" className="mt-3">
             <p>
@@ -349,6 +445,7 @@ export default function AdminAttendancePage() {
                     <th className="px-4 py-3 text-start">الخروج</th>
                     <th className="px-4 py-3 text-start">السماح</th>
                     <th className="px-4 py-3 text-start">مبلغ الدقيقة</th>
+                    <th className="px-4 py-3 text-start">رصيد الخروج</th>
                     <th className="px-4 py-3 text-start">الحالة</th>
                     <th className="px-4 py-3 text-start">إجراء</th>
                   </tr>
@@ -412,6 +509,25 @@ export default function AdminAttendancePage() {
                             }
                           />
                         </td>
+                        <td className="px-4 py-3">
+                          <Input
+                            inputMode="numeric"
+                            placeholder={String(settings.breakMonthlyMinutes)}
+                            value={
+                              draft.breakMonthlyMinutes == null
+                                ? ""
+                                : String(draft.breakMonthlyMinutes)
+                            }
+                            disabled={!draft.attendanceRequired}
+                            onChange={(e) => {
+                              const raw = e.target.value.replace(/[^\d]/g, "");
+                              // empty = inherit the shop-wide allowance
+                              updateDraft(row.userId, {
+                                breakMonthlyMinutes: raw === "" ? null : Number(raw),
+                              });
+                            }}
+                          />
+                        </td>
                         <td className="px-4 py-3 text-xs text-ink-soft">
                           {!row.attendanceRequired
                             ? "معفى من البصمة"
@@ -440,6 +556,242 @@ export default function AdminAttendancePage() {
           )}
         </section>
       )}
+
+      {/* ── الخروج المؤقت ─────────────────────────────────────────────────── */}
+      <section className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="font-display-ar text-base font-bold text-ink">الخروج المؤقت</h2>
+            <p className="mt-1 text-sm text-ink-soft">
+              طلبات الخروج خلال الدوام ورصيد كل موظف لشهر {breakMonth}. الدقائق المصرَّحة داخل
+              الرصيد مجانية؛ ما بعدها وأي خروج بدون موافقة يُخصم من الراتب.
+            </p>
+          </div>
+          <Button variant="ghost" size="sm" onClick={loadBreaks}>
+            تحديث
+          </Button>
+        </div>
+
+        {pendingBreaks.length > 0 && (
+          <div className="mb-5 space-y-2">
+            <h3 className="text-sm font-bold text-ink">
+              بانتظار قرارك ({pendingBreaks.length})
+            </h3>
+            {pendingBreaks.map((row) => (
+              <div
+                key={row.id}
+                className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3 ${
+                  row.leftWithoutApproval
+                    ? "border-danger/35 bg-danger/5"
+                    : "border-orange-ink/25 bg-peach/30"
+                }`}
+              >
+                <div className="min-w-0">
+                  <p className="font-bold text-ink">
+                    {row.staffName || "—"}
+                    {row.leftWithoutApproval && (
+                      <span className="ms-2 rounded-full border border-danger/30 bg-surface px-2 py-0.5 text-[11px] font-bold text-danger">
+                        خرج بدون موافقة
+                      </span>
+                    )}
+                  </p>
+                  <p className="mt-0.5 text-xs text-ink-soft">
+                    {row.state === "out"
+                      ? `خارج المحل الآن — ${durationLabel(row.openMinutes)}`
+                      : row.state === "returned"
+                        ? `خرج ${durationLabel(row.minutes)} · خصم ${formatIQD(row.deductionAmount)}`
+                        : "لم يخرج بعد"}
+                    {row.requestedMinutes ? ` · طلب ${durationLabel(row.requestedMinutes)}` : ""}
+                    {row.reasonAr ? ` · ${row.reasonAr}` : ""}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    onClick={() => decide(row, "approve")}
+                    loading={breakBusyId === row.id}
+                    disabled={breakBusyId === row.id}
+                  >
+                    {row.state === "returned" ? "أوافق وألغي الخصم" : "أوافق"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    onClick={() => decide(row, "reject")}
+                    disabled={breakBusyId === row.id}
+                  >
+                    أرفض
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <h3 className="mb-2 text-sm font-bold text-ink">رصيد الموظفين</h3>
+        {breakBalances.length === 0 ? (
+          <EmptyState message="لا يوجد موظفون مطلوبة منهم البصمة" />
+        ) : (
+          <div className="overflow-x-auto rounded-2xl border border-line">
+            <table className="w-full text-sm">
+              <thead className="bg-surface-sink text-ink-soft">
+                <tr>
+                  <th className="px-4 py-3 text-start">الموظف</th>
+                  <th className="px-4 py-3 text-start">الرصيد</th>
+                  <th className="px-4 py-3 text-start">استهلك</th>
+                  <th className="px-4 py-3 text-start">الباقي</th>
+                  <th className="px-4 py-3 text-start">مخصوم</th>
+                  <th className="px-4 py-3 text-start">مرات</th>
+                </tr>
+              </thead>
+              <tbody>
+                {breakBalances.map((row) => (
+                  <tr key={row.userId} className="border-t border-line">
+                    <td className="px-4 py-3 font-semibold text-ink">
+                      {row.staffName || "—"}
+                      {row.outCount > 0 && (
+                        <span className="ms-2 rounded-full border border-orange-ink/30 bg-peach/40 px-2 py-0.5 text-[11px] font-bold text-orange-ink">
+                          خارج الآن
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-ink-soft">{durationLabel(row.monthlyMinutes)}</td>
+                    <td className="px-4 py-3 text-ink-soft">{durationLabel(row.usedMinutes)}</td>
+                    <td
+                      className={`px-4 py-3 font-bold ${
+                        row.remainingMinutes > 0 ? "text-ink" : "text-danger"
+                      }`}
+                    >
+                      {row.remainingMinutes > 0 ? durationLabel(row.remainingMinutes) : "خلص"}
+                    </td>
+                    <td
+                      className={`px-4 py-3 ${
+                        row.deductionAmount > 0 ? "font-bold text-danger" : "text-ink-soft"
+                      }`}
+                    >
+                      {row.deductionAmount > 0 ? formatIQD(row.deductionAmount) : "—"}
+                    </td>
+                    <td className="px-4 py-3 text-ink-soft">{row.breakCount}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <h3 className="mb-2 mt-5 text-sm font-bold text-ink">سجل الخروج</h3>
+        {breaks.length === 0 ? (
+          <EmptyState message="لا يوجد خروج مؤقت هذا الشهر" />
+        ) : (
+          <div className="overflow-x-auto rounded-2xl border border-line">
+            <table className="w-full text-sm">
+              <thead className="bg-surface-sink text-ink-soft">
+                <tr>
+                  <th className="px-4 py-3 text-start">الموظف</th>
+                  <th className="px-4 py-3 text-start">التاريخ</th>
+                  <th className="px-4 py-3 text-start">الخروج</th>
+                  <th className="px-4 py-3 text-start">الرجوع</th>
+                  <th className="px-4 py-3 text-start">المدة</th>
+                  <th className="px-4 py-3 text-start">الحالة</th>
+                  <th className="px-4 py-3 text-start">الخصم</th>
+                  <th className="px-4 py-3 text-start">إجراء</th>
+                </tr>
+              </thead>
+              <tbody>
+                {breaks.map((row) => (
+                  <tr key={row.id} className="border-t border-line">
+                    <td className="px-4 py-3 font-semibold text-ink">{row.staffName || "—"}</td>
+                    <td className="px-4 py-3 text-ink-soft">{formatDateShort(row.workDate)}</td>
+                    <td className="px-4 py-3 text-ink-soft">{timeOnly(row.leftAt)}</td>
+                    <td className="px-4 py-3 text-ink-soft">
+                      {row.state === "out" ? "لم يرجع" : timeOnly(row.returnedAt)}
+                    </td>
+                    <td className="px-4 py-3 text-ink-soft">
+                      {row.state === "out"
+                        ? durationLabel(row.openMinutes)
+                        : durationLabel(row.minutes)}
+                      {row.autoClosed && (
+                        <span className="ms-1 text-[11px] text-muted">(أُغلق بالبصمة)</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-xs">
+                      <span
+                        className={
+                          row.approval === "approved"
+                            ? "font-bold text-emerald-700"
+                            : row.approval === "rejected"
+                              ? "font-bold text-danger"
+                              : "font-bold text-orange-ink"
+                        }
+                      >
+                        {row.approval === "approved"
+                          ? "مصرَّح"
+                          : row.approval === "rejected"
+                            ? "مرفوض"
+                            : "بانتظار الموافقة"}
+                      </span>
+                      {row.leftWithoutApproval && (
+                        <span className="block text-[11px] text-danger">خرج بدون موافقة</span>
+                      )}
+                    </td>
+                    <td
+                      className={`px-4 py-3 ${
+                        row.deductionAmount > 0 ? "font-bold text-danger" : "text-ink-soft"
+                      }`}
+                    >
+                      {row.deductionAmount > 0 ? formatIQD(row.deductionAmount) : "—"}
+                      {row.deductedMinutes > 0 && (
+                        <span className="block text-[11px] text-muted">
+                          {row.deductedMinutes} دقيقة مخصومة
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-wrap gap-2">
+                        {row.approval !== "approved" && (
+                          <Button
+                            size="sm"
+                            onClick={() => decide(row, "approve")}
+                            loading={breakBusyId === row.id}
+                            disabled={breakBusyId === row.id}
+                          >
+                            أوافق
+                          </Button>
+                        )}
+                        {row.approval !== "rejected" && row.state === "returned" && (
+                          <Button
+                            size="sm"
+                            variant="danger"
+                            onClick={() => decide(row, "reject")}
+                            disabled={breakBusyId === row.id}
+                          >
+                            أرفض
+                          </Button>
+                        )}
+                        {row.state !== "requested" && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              setCorrecting(row);
+                              setCorrectMinutes(
+                                String(row.state === "out" ? row.openMinutes : row.minutes)
+                              );
+                            }}
+                            disabled={breakBusyId === row.id}
+                          >
+                            تصحيح المدة
+                          </Button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       <section className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
         <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
@@ -602,6 +954,50 @@ export default function AdminAttendancePage() {
             ? `سيعود ${confirmAction.row.staffName || "الموظف"} إلى إعدادات الدوام العامة.`
             : "سيُلغى مبلغ التأخير لهذا السجل مع إبقاء سجل الحضور محفوظاً."}
         </p>
+      </Modal>
+
+      {/* Relief valve for a worker who forgot to tap «رجعت» and is being billed for it. */}
+      <Modal
+        open={correcting !== null}
+        onClose={() => {
+          if (breakBusyId !== correcting?.id) setCorrecting(null);
+        }}
+        title="تصحيح مدة الخروج"
+        footer={
+          <>
+            <Button
+              variant="ghost"
+              disabled={breakBusyId === correcting?.id}
+              onClick={() => setCorrecting(null)}
+            >
+              إلغاء
+            </Button>
+            <Button loading={breakBusyId === correcting?.id} onClick={saveCorrection}>
+              حفظ المدة
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-ink-soft">
+          {correcting?.staffName || "الموظف"} — المدة المسجّلة{" "}
+          {durationLabel(
+            correcting?.state === "out" ? correcting?.openMinutes : correcting?.minutes
+          )}
+          . أدخل المدة الحقيقية؛ يُعاد حساب الرصيد والخصم لهذا الشهر بالكامل.
+        </p>
+        <div className="mt-3">
+          <Input
+            label="المدة بالدقائق"
+            inputMode="numeric"
+            value={correctMinutes}
+            onChange={(e) => setCorrectMinutes(e.target.value.replace(/[^\d]/g, ""))}
+          />
+        </div>
+        {correcting?.state === "out" && (
+          <p className="mt-2 text-xs font-semibold text-orange-ink">
+            هذا الخروج ما زال مفتوحاً — الحفظ سيُغلقه ويُسجّل رجوعه.
+          </p>
+        )}
       </Modal>
     </div>
   );

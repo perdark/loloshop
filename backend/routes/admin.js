@@ -5,6 +5,7 @@ const orders = require('../controllers/orderController');
 const salary = require('../controllers/salaryController');
 const staff = require('../controllers/staffController');
 const attendance = require('../controllers/attendanceController');
+const attendanceBreaks = require('../controllers/attendanceBreakController');
 const customOrders = require('../controllers/adminCustomOrderController');
 const payouts = require('../controllers/payoutController');
 const { imageUpload, imageUploadLimit, validateUploadedImage } = require('../lib/upload');
@@ -65,6 +66,14 @@ router.delete('/attendance/staff-settings/:userId', attendance.deleteUserSetting
 router.get('/attendance/calendar', attendance.calendar);
 router.get('/attendance/records', attendance.listRecords);
 router.patch('/attendance/records/:id/override', attendance.overrideRecord);
+
+// الخروج المؤقت — the admin side: who is asking, who is out, who is over their
+// monthly allowance. `balances` is declared before `:id` so it isn't shadowed.
+router.get('/attendance/breaks/balances', attendanceBreaks.listBalances);
+router.get('/attendance/breaks', attendanceBreaks.listBreaks);
+router.post('/attendance/breaks/:id/approve', attendanceBreaks.approveBreak);
+router.post('/attendance/breaks/:id/reject', attendanceBreaks.rejectBreak);
+router.patch('/attendance/breaks/:id', attendanceBreaks.correctBreak);
 
 // Site settings — discount popup promo config
 router.patch('/promo', c.updatePromo);

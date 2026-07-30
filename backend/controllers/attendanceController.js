@@ -1,8 +1,17 @@
 const net = require('net');
 const { query, tx } = require('../lib/db');
+const breaks = require('../lib/attendanceBreak');
 
 const DEFAULT_TZ = 'Asia/Baghdad';
 const VALID_MODES = new Set(['none', 'network', 'location', 'both', 'network_or_location']);
+
+/**
+ * Returned الخروج المؤقت minutes for a record, so worked_minutes can exclude
+ * time the worker spent outside the shop. Expects the record aliased as `r`.
+ */
+const BREAK_MINUTES_SQL = `(SELECT COALESCE(SUM(b.minutes), 0)::int
+       FROM staff_attendance_breaks b
+      WHERE b.attendance_id = r.id AND b.state = 'returned') AS break_minutes`;
 
 function cleanIp(ip) {
   const raw = String(ip || '').split(',')[0].trim();
@@ -113,6 +122,7 @@ async function loadEffectiveSettings(userId, client = null) {
   const { rows } = await db.query(
     `SELECT start_time, end_time, grace_minutes, deduction_per_minute,
             COALESCE(attendance_required, TRUE) AS attendance_required,
+            break_monthly_minutes,
             updated_at
        FROM staff_attendance_user_settings
       WHERE user_id = $1`,
@@ -126,6 +136,11 @@ async function loadEffectiveSettings(userId, client = null) {
     grace_minutes: rows[0].grace_minutes,
     deduction_per_minute: rows[0].deduction_per_minute,
     attendance_required: rows[0].attendance_required,
+    // a NULL override inherits the shop-wide allowance
+    break_monthly_minutes:
+      rows[0].break_monthly_minutes == null
+        ? base.break_monthly_minutes
+        : rows[0].break_monthly_minutes,
     updated_at: rows[0].updated_at,
     is_user_override: true,
   };
@@ -146,6 +161,7 @@ function serializeSettings(row) {
     updated_at: row.updated_at,
     is_user_override: !!row.is_user_override,
     attendance_required: row.attendance_required !== false,
+    break_monthly_minutes: breaks.effectiveAllowance(row),
   };
 }
 
@@ -158,6 +174,9 @@ function serializeUserSetting(row) {
     grace_minutes: row.grace_minutes == null ? null : Number(row.grace_minutes),
     deduction_per_minute: row.deduction_per_minute == null ? null : Number(row.deduction_per_minute),
     attendance_required: row.attendance_required !== false,
+    // null = inherits the shop-wide الخروج المؤقت allowance
+    break_monthly_minutes:
+      row.break_monthly_minutes == null ? null : Number(row.break_monthly_minutes),
     has_override: !!row.has_override,
     updated_at: row.updated_at || null,
   };
@@ -165,9 +184,12 @@ function serializeUserSetting(row) {
 
 function serializeRecord(row, now = new Date()) {
   if (!row) return null;
-  const worked = row.check_in_at ? diffMinutes(row.check_in_at, row.check_out_at || now) : 0;
+  const present = row.check_in_at ? diffMinutes(row.check_in_at, row.check_out_at || now) : 0;
+  // Time spent outside the shop on الخروج المؤقت is not worked time (migration 075).
+  const breakMinutes = Number(row.break_minutes || 0);
+  const worked = Math.max(0, present - breakMinutes);
   const planned = scheduledMinutes(row.expected_start_time, row.expected_end_time);
-  const openTooLong = !!row.check_in_at && !row.check_out_at && worked >= 24 * 60;
+  const openTooLong = !!row.check_in_at && !row.check_out_at && present >= 24 * 60;
   const overtime = row.check_out_at ? Math.max(0, worked - planned) : 0;
   const note = openTooLong ? 'الموظف لم يخرج من المعمل' : row.admin_note_ar;
   return {
@@ -198,6 +220,9 @@ function serializeRecord(row, now = new Date()) {
     admin_note_ar: row.admin_note_ar,
     note_ar: note,
     worked_minutes: worked,
+    // check-in → check-out span, before break time is removed
+    present_minutes: present,
+    break_minutes: breakMinutes,
     scheduled_minutes: planned,
     overtime_minutes: overtime,
     open_too_long: openTooLong,
@@ -277,6 +302,11 @@ async function updateSettings(req, res) {
   if (!Number.isInteger(radius) || radius <= 0) {
     return res.status(400).json({ error: 'نطاق الموقع غير صالح', code: 'ERR_VALIDATION' });
   }
+  const breakAllowance =
+    req.body.break_monthly_minutes == null ? 600 : Number(req.body.break_monthly_minutes);
+  if (!Number.isInteger(breakAllowance) || breakAllowance < 0) {
+    return res.status(400).json({ error: 'رصيد الخروج المؤقت غير صالح', code: 'ERR_VALIDATION' });
+  }
   const ranges = Array.isArray(req.body.allowed_ip_ranges)
     ? req.body.allowed_ip_ranges.map((r) => String(r).trim()).filter(Boolean)
     : [];
@@ -289,8 +319,9 @@ async function updateSettings(req, res) {
   const { rows } = await query(
     `INSERT INTO staff_attendance_settings
        (id, start_time, end_time, grace_minutes, deduction_per_minute, verification_mode,
-        allowed_ip_ranges, shop_latitude, shop_longitude, shop_radius_meters, updated_by, updated_at)
-     VALUES (TRUE, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+        allowed_ip_ranges, shop_latitude, shop_longitude, shop_radius_meters,
+        break_monthly_minutes, updated_by, updated_at)
+     VALUES (TRUE, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
      ON CONFLICT (id) DO UPDATE
        SET start_time = EXCLUDED.start_time,
            end_time = EXCLUDED.end_time,
@@ -301,12 +332,40 @@ async function updateSettings(req, res) {
            shop_latitude = EXCLUDED.shop_latitude,
            shop_longitude = EXCLUDED.shop_longitude,
            shop_radius_meters = EXCLUDED.shop_radius_meters,
+           break_monthly_minutes = EXCLUDED.break_monthly_minutes,
            updated_by = EXCLUDED.updated_by,
            updated_at = NOW()
      RETURNING *`,
-    [start, end, grace, perMinute, mode, ranges, lat, lng, radius, req.user.id]
+    [start, end, grace, perMinute, mode, ranges, lat, lng, radius, breakAllowance, req.user.id]
   );
+  // Changing the allowance changes how already-taken breaks were charged, so the
+  // ledger is re-run now instead of drifting until the next break happens.
+  await recomputeCurrentMonthForAll(req.user.id);
   res.json({ data: serializeSettings(rows[0]) });
+}
+
+/**
+ * Re-run the current month for every staff member who has breaks in it.
+ * Small by construction (one shop, a handful of staff).
+ */
+async function recomputeCurrentMonthForAll(actorId) {
+  const monthKey = breaks.monthKeyFor(new Date(), DEFAULT_TZ);
+  const { rows } = await query(
+    `SELECT DISTINCT user_id FROM staff_attendance_breaks
+      WHERE month_key = $1 AND state = 'returned'`,
+    [monthKey]
+  );
+  for (const row of rows) {
+    const settings = await loadEffectiveSettings(row.user_id);
+    await tx(async (client) =>
+      breaks.recomputeMonth(client, {
+        userId: row.user_id,
+        monthKey,
+        allowanceMinutes: breaks.effectiveAllowance(settings),
+        actorId,
+      })
+    );
+  }
 }
 
 async function listUserSettings(req, res) {
@@ -314,6 +373,7 @@ async function listUserSettings(req, res) {
     `SELECT u.id AS user_id, u.name AS staff_name,
             s.start_time, s.end_time, s.grace_minutes, s.deduction_per_minute,
             COALESCE(s.attendance_required, TRUE) AS attendance_required,
+            s.break_monthly_minutes,
             s.updated_at,
             (s.user_id IS NOT NULL) AS has_override
        FROM users u
@@ -340,25 +400,49 @@ async function setUserSettings(req, res) {
   if (!Number.isInteger(grace) || grace < 0 || !Number.isInteger(perMinute) || perMinute < 0) {
     return res.status(400).json({ error: 'إعدادات الخصم غير صالحة', code: 'ERR_VALIDATION' });
   }
+  // null / '' means "inherit the shop-wide الخروج المؤقت allowance"
+  const rawAllowance = req.body.break_monthly_minutes;
+  const breakAllowance =
+    rawAllowance == null || rawAllowance === '' ? null : Number(rawAllowance);
+  if (breakAllowance != null && (!Number.isInteger(breakAllowance) || breakAllowance < 0)) {
+    return res.status(400).json({ error: 'رصيد الخروج المؤقت غير صالح', code: 'ERR_VALIDATION' });
+  }
 
   const { rows } = await query(
     `INSERT INTO staff_attendance_user_settings
-       (user_id, start_time, end_time, grace_minutes, deduction_per_minute, attendance_required, updated_by, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+       (user_id, start_time, end_time, grace_minutes, deduction_per_minute, attendance_required,
+        break_monthly_minutes, updated_by, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
      ON CONFLICT (user_id) DO UPDATE
        SET start_time = EXCLUDED.start_time,
            end_time = EXCLUDED.end_time,
            grace_minutes = EXCLUDED.grace_minutes,
            deduction_per_minute = EXCLUDED.deduction_per_minute,
            attendance_required = EXCLUDED.attendance_required,
+           break_monthly_minutes = EXCLUDED.break_monthly_minutes,
            updated_by = EXCLUDED.updated_by,
            updated_at = NOW()
      RETURNING user_id, start_time, end_time, grace_minutes, deduction_per_minute,
-               attendance_required, updated_at, TRUE AS has_override`,
-    [userId, start, end, grace, perMinute, attendanceRequired, req.user.id]
+               attendance_required, break_monthly_minutes, updated_at, TRUE AS has_override`,
+    [userId, start, end, grace, perMinute, attendanceRequired, breakAllowance, req.user.id]
   );
+  await recomputeCurrentMonthFor(userId, req.user.id);
   const staff = await query(`SELECT name AS staff_name FROM users WHERE id = $1`, [userId]);
   res.json({ data: serializeUserSetting({ ...rows[0], staff_name: staff.rows[0]?.staff_name }) });
+}
+
+/** Re-run one worker's current month after their allowance changed. */
+async function recomputeCurrentMonthFor(userId, actorId) {
+  const settings = await loadEffectiveSettings(userId);
+  const monthKey = breaks.monthKeyFor(new Date(), settings.timezone || DEFAULT_TZ);
+  await tx(async (client) =>
+    breaks.recomputeMonth(client, {
+      userId,
+      monthKey,
+      allowanceMinutes: breaks.effectiveAllowance(settings),
+      actorId,
+    })
+  );
 }
 
 async function deleteUserSettings(req, res) {
@@ -366,29 +450,54 @@ async function deleteUserSettings(req, res) {
   const { err } = await ensureStaff(userId);
   if (err) return res.status(err.status).json(err.body);
   await query(`DELETE FROM staff_attendance_user_settings WHERE user_id = $1`, [userId]);
+  // dropping the override falls back to the shop allowance, which re-prices the month
+  await recomputeCurrentMonthFor(userId, req.user.id);
   res.json({ data: { user_id: userId, has_override: false } });
 }
 
 async function getToday(req, res) {
   const settings = await loadEffectiveSettings(req.user.id);
-  const today = localParts(new Date(), settings.timezone || DEFAULT_TZ).date;
+  const timeZone = settings.timezone || DEFAULT_TZ;
+  const today = localParts(new Date(), timeZone).date;
   const { rows } = await query(
-    `(SELECT * FROM staff_attendance_records
-       WHERE user_id = $1 AND check_in_at IS NOT NULL AND check_out_at IS NULL
-       ORDER BY check_in_at DESC
-       LIMIT 1)
-     UNION ALL
-     (SELECT * FROM staff_attendance_records
-       WHERE user_id = $1 AND work_date = $2
-         AND NOT EXISTS (
-           SELECT 1 FROM staff_attendance_records
-            WHERE user_id = $1 AND check_in_at IS NOT NULL AND check_out_at IS NULL
-         )
-       LIMIT 1)
-     LIMIT 1`,
+    `SELECT r.*, ${BREAK_MINUTES_SQL}
+       FROM (
+         (SELECT * FROM staff_attendance_records
+           WHERE user_id = $1 AND check_in_at IS NOT NULL AND check_out_at IS NULL
+           ORDER BY check_in_at DESC
+           LIMIT 1)
+         UNION ALL
+         (SELECT * FROM staff_attendance_records
+           WHERE user_id = $1 AND work_date = $2
+             AND NOT EXISTS (
+               SELECT 1 FROM staff_attendance_records
+                WHERE user_id = $1 AND check_in_at IS NOT NULL AND check_out_at IS NULL
+             )
+           LIMIT 1)
+         LIMIT 1
+       ) r`,
     [req.user.id, today]
   );
-  res.json({ data: { settings: serializeSettings(settings), record: serializeRecord(rows[0]) } });
+  res.json({
+    data: {
+      settings: serializeSettings(settings),
+      record: serializeRecord(rows[0]),
+      ...(await breakState(req.user.id, settings, timeZone)),
+    },
+  });
+}
+
+/**
+ * The worker's open break plus their allowance for the current month — attached
+ * to every attendance response so one round-trip refreshes the whole card.
+ */
+async function breakState(userId, settings, timeZone = DEFAULT_TZ) {
+  const monthKey = breaks.monthKeyFor(new Date(), timeZone);
+  const [open, balance] = await Promise.all([
+    breaks.openBreakFor({ query }, userId),
+    breaks.loadBalance({ query }, userId, monthKey, breaks.effectiveAllowance(settings)),
+  ]);
+  return { break: breaks.serializeBreak(open), break_balance: balance };
 }
 
 async function checkIn(req, res) {
@@ -475,7 +584,13 @@ async function checkIn(req, res) {
     return { settings, record: inserted.rows[0] };
   });
 
-  res.status(201).json({ data: { settings: serializeSettings(result.settings), record: serializeRecord(result.record) } });
+  res.status(201).json({
+    data: {
+      settings: serializeSettings(result.settings),
+      record: serializeRecord(result.record),
+      ...(await breakState(req.user.id, result.settings, result.settings.timezone || DEFAULT_TZ)),
+    },
+  });
 }
 
 async function checkOut(req, res) {
@@ -494,24 +609,76 @@ async function checkOut(req, res) {
       data: evidence,
     });
   }
-  const { rows } = await query(
-    `UPDATE staff_attendance_records
-        SET check_out_at = COALESCE(check_out_at, NOW()),
-            check_out_ip = $2,
-            updated_at = NOW()
-      WHERE id = (
-        SELECT id FROM staff_attendance_records
-         WHERE user_id = $1 AND check_in_at IS NOT NULL AND check_out_at IS NULL
-         ORDER BY check_in_at DESC
-         LIMIT 1
-      )
-      RETURNING *`,
-    [req.user.id, evidence.ip]
-  );
-  if (!rows.length) {
-    return res.status(404).json({ error: 'لا توجد بصمة دخول لهذا اليوم', code: 'ERR_NOT_FOUND' });
-  }
-  res.json({ data: { settings: serializeSettings(settings), record: serializeRecord(rows[0]) } });
+  const timeZone = settings.timezone || DEFAULT_TZ;
+  const result = await tx(async (client) => {
+    const closed = await client.query(
+      `UPDATE staff_attendance_records
+          SET check_out_at = COALESCE(check_out_at, NOW()),
+              check_out_ip = $2,
+              updated_at = NOW()
+        WHERE id = (
+          SELECT id FROM staff_attendance_records
+           WHERE user_id = $1 AND check_in_at IS NOT NULL AND check_out_at IS NULL
+           ORDER BY check_in_at DESC
+           LIMIT 1
+        )
+        RETURNING *`,
+      [req.user.id, evidence.ip]
+    );
+    if (!closed.rows.length) {
+      const e = new Error('لا توجد بصمة دخول لهذا اليوم');
+      e.status = 404;
+      e.expose = true;
+      e.code = 'ERR_NOT_FOUND';
+      throw e;
+    }
+    const record = closed.rows[0];
+
+    // A forgotten «رجعت» must never bill the rest of the night: stamping out ends
+    // any break still open, at the checkout moment. A request nobody acted on is
+    // just dropped — the shift it belonged to is over.
+    let autoClosed = null;
+    const open = await breaks.openBreakFor(client, req.user.id);
+    if (open?.state === 'out') {
+      autoClosed = await breaks.finishBreak(client, open, {
+        returnedAt: record.check_out_at,
+        perMinute: settings.deduction_per_minute,
+        autoClosed: true,
+      });
+      if (autoClosed) {
+        await breaks.recomputeMonth(client, {
+          userId: req.user.id,
+          monthKey: autoClosed.month_key,
+          allowanceMinutes: breaks.effectiveAllowance(settings),
+        });
+      }
+    } else if (open?.state === 'requested') {
+      await client.query(
+        `UPDATE staff_attendance_breaks SET state = 'cancelled', updated_at = NOW() WHERE id = $1`,
+        [open.id]
+      );
+    }
+
+    const totals = await client.query(
+      `SELECT COALESCE(SUM(minutes), 0)::int AS break_minutes
+         FROM staff_attendance_breaks
+        WHERE attendance_id = $1 AND state = 'returned'`,
+      [record.id]
+    );
+    return {
+      record: { ...record, break_minutes: totals.rows[0].break_minutes },
+      autoClosedBreakId: autoClosed?.id || null,
+    };
+  });
+
+  res.json({
+    data: {
+      settings: serializeSettings(settings),
+      record: serializeRecord(result.record),
+      auto_closed_break_id: result.autoClosedBreakId,
+      ...(await breakState(req.user.id, settings, timeZone)),
+    },
+  });
 }
 
 async function listRecords(req, res) {
@@ -523,7 +690,7 @@ async function listRecords(req, res) {
     userClause = `AND r.user_id = $${params.length}`;
   }
   const { rows } = await query(
-    `SELECT r.*, u.name AS staff_name
+    `SELECT r.*, u.name AS staff_name, ${BREAK_MINUTES_SQL}
        FROM staff_attendance_records r
        JOIN users u ON u.id = r.user_id
       WHERE r.work_date = $1 ${userClause}
@@ -551,7 +718,7 @@ async function calendar(req, res) {
   }
 
   const { rows } = await query(
-    `SELECT r.*, u.name AS staff_name
+    `SELECT r.*, u.name AS staff_name, ${BREAK_MINUTES_SQL}
        FROM staff_attendance_records r
        JOIN users u ON u.id = r.user_id
       WHERE r.work_date BETWEEN $1 AND $2 ${userClause}
@@ -575,6 +742,7 @@ async function calendar(req, res) {
           open_too_long_count: 0,
           worked_minutes: 0,
           overtime_minutes: 0,
+          break_minutes: 0,
         },
       });
     }
@@ -587,6 +755,7 @@ async function calendar(req, res) {
     if (record.open_too_long) day.totals.open_too_long_count += 1;
     day.totals.worked_minutes += record.worked_minutes || 0;
     day.totals.overtime_minutes += record.overtime_minutes || 0;
+    day.totals.break_minutes += record.break_minutes || 0;
   }
 
   res.json({ data: { from, to, days: Array.from(byDate.values()) } });
@@ -641,4 +810,11 @@ module.exports = {
   listRecords,
   calendar,
   overrideRecord,
+  // shared with attendanceBreakController — one source for the effective schedule,
+  // the shop timezone and the staff-role guard
+  loadEffectiveSettings,
+  serializeSettings,
+  localParts,
+  ensureStaff,
+  DEFAULT_TZ,
 };

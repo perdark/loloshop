@@ -11,6 +11,8 @@ import type {
   StaffActivity,
   StaffAttendanceRecord,
   StaffAttendanceSettings,
+  StaffBreak,
+  StaffBreakBalance,
   StaffGoal,
   StaffSalary,
   StudyType,
@@ -1102,6 +1104,7 @@ interface ApiAttendanceSettings {
   shop_longitude: number | null;
   shop_radius_meters: number;
   timezone: string;
+  break_monthly_minutes?: number;
 }
 
 interface ApiAttendanceRecord {
@@ -1131,6 +1134,8 @@ interface ApiAttendanceRecord {
   admin_note_ar: string | null;
   note_ar: string | null;
   worked_minutes: number;
+  present_minutes?: number;
+  break_minutes?: number;
   scheduled_minutes: number;
   overtime_minutes: number;
   open_too_long: boolean;
@@ -1153,6 +1158,7 @@ function mapAttendanceSettings(r: ApiAttendanceSettings): StaffAttendanceSetting
     shopLongitude: r.shop_longitude == null ? null : Number(r.shop_longitude),
     shopRadiusMeters: Number(r.shop_radius_meters),
     timezone: r.timezone,
+    breakMonthlyMinutes: Number(r.break_monthly_minutes ?? 0),
   };
 }
 
@@ -1186,6 +1192,8 @@ function mapAttendanceRecord(r: ApiAttendanceRecord | null): StaffAttendanceReco
     adminNoteAr: r.admin_note_ar,
     noteAr: r.note_ar,
     workedMinutes: Number(r.worked_minutes) || 0,
+    presentMinutes: Number(r.present_minutes ?? r.worked_minutes) || 0,
+    breakMinutes: Number(r.break_minutes ?? 0) || 0,
     scheduledMinutes: Number(r.scheduled_minutes) || 0,
     overtimeMinutes: Number(r.overtime_minutes) || 0,
     openTooLong: Boolean(r.open_too_long),
@@ -1199,6 +1207,161 @@ function mapAttendanceRecord(r: ApiAttendanceRecord | null): StaffAttendanceReco
 export interface MyAttendanceToday {
   settings: StaffAttendanceSettings;
   record: StaffAttendanceRecord | null;
+  /** the open الخروج المؤقت, if the worker is out or waiting for approval */
+  break: StaffBreak | null;
+  breakBalance: StaffBreakBalance;
+}
+
+interface ApiBreak {
+  id: string;
+  user_id: string;
+  staff_name: string | null;
+  work_date: string;
+  month_key: string;
+  reason_ar: string | null;
+  requested_minutes: number | null;
+  requested_at: string;
+  left_at: string | null;
+  returned_at: string | null;
+  minutes: number;
+  state: StaffBreak["state"];
+  approval: StaffBreak["approval"];
+  left_without_approval: boolean;
+  decided_at: string | null;
+  decision_note_ar: string | null;
+  free_minutes: number;
+  deducted_minutes: number;
+  deduction_per_minute: number;
+  deduction_amount: number;
+  auto_closed: boolean;
+  admin_note_ar: string | null;
+  open_minutes: number;
+  open_too_long: boolean;
+}
+
+interface ApiBreakBalance {
+  month_key: string;
+  monthly_minutes: number;
+  used_minutes: number;
+  remaining_minutes: number;
+  deducted_minutes: number;
+  deduction_amount: number;
+  break_count: number;
+}
+
+export function mapBreak(r: ApiBreak | null): StaffBreak | null {
+  if (!r) return null;
+  return {
+    id: r.id,
+    userId: r.user_id,
+    staffName: r.staff_name,
+    workDate: r.work_date,
+    monthKey: r.month_key,
+    reasonAr: r.reason_ar,
+    requestedMinutes: r.requested_minutes == null ? null : Number(r.requested_minutes),
+    requestedAt: r.requested_at,
+    leftAt: r.left_at,
+    returnedAt: r.returned_at,
+    minutes: Number(r.minutes) || 0,
+    state: r.state,
+    approval: r.approval,
+    leftWithoutApproval: Boolean(r.left_without_approval),
+    decidedAt: r.decided_at,
+    decisionNoteAr: r.decision_note_ar,
+    freeMinutes: Number(r.free_minutes) || 0,
+    deductedMinutes: Number(r.deducted_minutes) || 0,
+    deductionPerMinute: Number(r.deduction_per_minute) || 0,
+    deductionAmount: Number(r.deduction_amount) || 0,
+    autoClosed: Boolean(r.auto_closed),
+    adminNoteAr: r.admin_note_ar,
+    openMinutes: Number(r.open_minutes) || 0,
+    openTooLong: Boolean(r.open_too_long),
+  };
+}
+
+export function mapBreakBalance(r: ApiBreakBalance): StaffBreakBalance {
+  return {
+    monthKey: r.month_key,
+    monthlyMinutes: Number(r.monthly_minutes) || 0,
+    usedMinutes: Number(r.used_minutes) || 0,
+    remainingMinutes: Number(r.remaining_minutes) || 0,
+    deductedMinutes: Number(r.deducted_minutes) || 0,
+    deductionAmount: Number(r.deduction_amount) || 0,
+    breakCount: Number(r.break_count) || 0,
+  };
+}
+
+interface ApiAttendancePayload {
+  settings: ApiAttendanceSettings;
+  record: ApiAttendanceRecord | null;
+  break: ApiBreak | null;
+  break_balance: ApiBreakBalance;
+}
+
+function mapAttendancePayload(d: ApiAttendancePayload): MyAttendanceToday {
+  return {
+    settings: mapAttendanceSettings(d.settings),
+    record: mapAttendanceRecord(d.record),
+    break: mapBreak(d.break),
+    breakBalance: mapBreakBalance(d.break_balance),
+  };
+}
+
+/** Ask to step out. The clock does not start until `startBreak`. */
+export async function requestBreak(input: {
+  reasonAr?: string;
+  requestedMinutes?: number | null;
+}): Promise<MyAttendanceToday> {
+  const { data } = await api.post<{ data: ApiAttendancePayload }>("/staff/attendance/breaks", {
+    reason_ar: input.reasonAr || null,
+    requested_minutes: input.requestedMinutes ?? null,
+  });
+  return mapAttendancePayload(data.data);
+}
+
+/**
+ * Actually leave — this is when the clock starts. `withoutApproval` records a
+ * break the admin never approved, where every minute is deductible.
+ */
+export async function startBreak(
+  breakId: string,
+  withoutApproval = false
+): Promise<MyAttendanceToday> {
+  const { data } = await api.post<{ data: ApiAttendancePayload }>(
+    `/staff/attendance/breaks/${breakId}/leave`,
+    { without_approval: withoutApproval }
+  );
+  return mapAttendancePayload(data.data);
+}
+
+export async function endBreak(breakId: string): Promise<MyAttendanceToday> {
+  const { data } = await api.post<{ data: ApiAttendancePayload }>(
+    `/staff/attendance/breaks/${breakId}/return`,
+    {}
+  );
+  return mapAttendancePayload(data.data);
+}
+
+export async function cancelBreakRequest(breakId: string): Promise<MyAttendanceToday> {
+  const { data } = await api.delete<{ data: ApiAttendancePayload }>(
+    `/staff/attendance/breaks/${breakId}`
+  );
+  return mapAttendancePayload(data.data);
+}
+
+export async function getMyBreaks(month?: string): Promise<{
+  monthKey: string;
+  breaks: StaffBreak[];
+  balance: StaffBreakBalance;
+}> {
+  const { data } = await api.get<{
+    data: { month_key: string; breaks: ApiBreak[]; break_balance: ApiBreakBalance };
+  }>("/staff/attendance/breaks/mine", { params: month ? { month } : undefined });
+  return {
+    monthKey: data.data.month_key,
+    breaks: data.data.breaks.map((b) => mapBreak(b)!).filter(Boolean),
+    balance: mapBreakBalance(data.data.break_balance),
+  };
 }
 
 export interface AttendanceLocationPayload {
@@ -1226,35 +1389,24 @@ export function getBrowserAttendanceLocation(): Promise<AttendanceLocationPayloa
 }
 
 export async function getMyAttendanceToday(): Promise<MyAttendanceToday> {
-  const { data } = await api.get<{
-    data: { settings: ApiAttendanceSettings; record: ApiAttendanceRecord | null };
-  }>("/staff/attendance/today");
-  return {
-    settings: mapAttendanceSettings(data.data.settings),
-    record: mapAttendanceRecord(data.data.record),
-  };
+  const { data } = await api.get<{ data: ApiAttendancePayload }>("/staff/attendance/today");
+  return mapAttendancePayload(data.data);
 }
 
 export async function checkInAttendance(
   location: AttendanceLocationPayload | null
 ): Promise<MyAttendanceToday> {
-  const { data } = await api.post<{
-    data: { settings: ApiAttendanceSettings; record: ApiAttendanceRecord | null };
-  }>("/staff/attendance/check-in", { location });
-  return {
-    settings: mapAttendanceSettings(data.data.settings),
-    record: mapAttendanceRecord(data.data.record),
-  };
+  const { data } = await api.post<{ data: ApiAttendancePayload }>("/staff/attendance/check-in", {
+    location,
+  });
+  return mapAttendancePayload(data.data);
 }
 
 export async function checkOutAttendance(
   location: AttendanceLocationPayload | null
 ): Promise<MyAttendanceToday> {
-  const { data } = await api.post<{
-    data: { settings: ApiAttendanceSettings; record: ApiAttendanceRecord | null };
-  }>("/staff/attendance/check-out", { location });
-  return {
-    settings: mapAttendanceSettings(data.data.settings),
-    record: mapAttendanceRecord(data.data.record),
-  };
+  const { data } = await api.post<{ data: ApiAttendancePayload }>("/staff/attendance/check-out", {
+    location,
+  });
+  return mapAttendancePayload(data.data);
 }

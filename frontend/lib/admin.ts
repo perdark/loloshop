@@ -18,6 +18,8 @@ import type {
   StaffAttendanceRecord,
   StaffAttendanceSettings,
   StaffAttendanceUserSetting,
+  StaffBreak,
+  StaffBreakBalanceRow,
   StaffActivity,
   StaffGoal,
   StaffSalary,
@@ -908,6 +910,7 @@ interface ApiAttendanceSettings {
   updated_at?: string | null;
   is_user_override?: boolean;
   attendance_required?: boolean;
+  break_monthly_minutes?: number;
 }
 
 interface ApiAttendanceUserSetting {
@@ -918,6 +921,7 @@ interface ApiAttendanceUserSetting {
   grace_minutes: number | null;
   deduction_per_minute: number | null;
   attendance_required: boolean;
+  break_monthly_minutes: number | null;
   has_override: boolean;
   updated_at: string | null;
 }
@@ -949,6 +953,8 @@ interface ApiAttendanceRecord {
   admin_note_ar: string | null;
   note_ar: string | null;
   worked_minutes: number;
+  present_minutes?: number;
+  break_minutes?: number;
   scheduled_minutes: number;
   overtime_minutes: number;
   open_too_long: boolean;
@@ -973,6 +979,7 @@ function mapAttendanceSettings(r: ApiAttendanceSettings): StaffAttendanceSetting
     updatedAt: r.updated_at ?? null,
     isUserOverride: Boolean(r.is_user_override),
     attendanceRequired: r.attendance_required !== false,
+    breakMonthlyMinutes: Number(r.break_monthly_minutes ?? 0),
   };
 }
 
@@ -985,6 +992,8 @@ function mapAttendanceUserSetting(r: ApiAttendanceUserSetting): StaffAttendanceU
     graceMinutes: r.grace_minutes == null ? null : Number(r.grace_minutes),
     deductionPerMinute: r.deduction_per_minute == null ? null : Number(r.deduction_per_minute),
     attendanceRequired: r.attendance_required !== false,
+    breakMonthlyMinutes:
+      r.break_monthly_minutes == null ? null : Number(r.break_monthly_minutes),
     hasOverride: Boolean(r.has_override),
     updatedAt: r.updated_at,
   };
@@ -1019,6 +1028,8 @@ function mapAttendanceRecord(r: ApiAttendanceRecord): StaffAttendanceRecord {
     adminNoteAr: r.admin_note_ar,
     noteAr: r.note_ar,
     workedMinutes: Number(r.worked_minutes) || 0,
+    presentMinutes: Number(r.present_minutes ?? r.worked_minutes) || 0,
+    breakMinutes: Number(r.break_minutes ?? 0) || 0,
     scheduledMinutes: Number(r.scheduled_minutes) || 0,
     overtimeMinutes: Number(r.overtime_minutes) || 0,
     openTooLong: Boolean(r.open_too_long),
@@ -1047,6 +1058,7 @@ export async function updateAttendanceSettings(
     shop_latitude: input.shopLatitude,
     shop_longitude: input.shopLongitude,
     shop_radius_meters: input.shopRadiusMeters,
+    break_monthly_minutes: input.breakMonthlyMinutes,
   });
   return mapAttendanceSettings(data.data);
 }
@@ -1146,6 +1158,8 @@ export async function setAttendanceUserSettings(
     graceMinutes: number;
     deductionPerMinute: number;
     attendanceRequired: boolean;
+    /** null = inherit the shop-wide الخروج المؤقت allowance */
+    breakMonthlyMinutes?: number | null;
   }
 ): Promise<StaffAttendanceUserSetting> {
   const { data } = await api.put<{ data: ApiAttendanceUserSetting }>(
@@ -1156,6 +1170,7 @@ export async function setAttendanceUserSettings(
       grace_minutes: input.graceMinutes,
       deduction_per_minute: input.deductionPerMinute,
       attendance_required: input.attendanceRequired,
+      break_monthly_minutes: input.breakMonthlyMinutes ?? null,
     }
   );
   return mapAttendanceUserSetting(data.data);
@@ -1163,6 +1178,150 @@ export async function setAttendanceUserSettings(
 
 export async function deleteAttendanceUserSettings(userId: string): Promise<void> {
   await api.delete(`/admin/attendance/staff-settings/${userId}`);
+}
+
+// ─── الخروج المؤقت (admin side) ──────────────────────────────────────────────
+
+interface ApiAdminBreak {
+  id: string;
+  user_id: string;
+  staff_name: string | null;
+  work_date: string;
+  month_key: string;
+  reason_ar: string | null;
+  requested_minutes: number | null;
+  requested_at: string;
+  left_at: string | null;
+  returned_at: string | null;
+  minutes: number;
+  state: StaffBreak["state"];
+  approval: StaffBreak["approval"];
+  left_without_approval: boolean;
+  decided_at: string | null;
+  decision_note_ar: string | null;
+  free_minutes: number;
+  deducted_minutes: number;
+  deduction_per_minute: number;
+  deduction_amount: number;
+  auto_closed: boolean;
+  admin_note_ar: string | null;
+  open_minutes: number;
+  open_too_long: boolean;
+}
+
+function mapAdminBreak(r: ApiAdminBreak): StaffBreak {
+  return {
+    id: r.id,
+    userId: r.user_id,
+    staffName: r.staff_name,
+    workDate: r.work_date,
+    monthKey: r.month_key,
+    reasonAr: r.reason_ar,
+    requestedMinutes: r.requested_minutes == null ? null : Number(r.requested_minutes),
+    requestedAt: r.requested_at,
+    leftAt: r.left_at,
+    returnedAt: r.returned_at,
+    minutes: Number(r.minutes) || 0,
+    state: r.state,
+    approval: r.approval,
+    leftWithoutApproval: Boolean(r.left_without_approval),
+    decidedAt: r.decided_at,
+    decisionNoteAr: r.decision_note_ar,
+    freeMinutes: Number(r.free_minutes) || 0,
+    deductedMinutes: Number(r.deducted_minutes) || 0,
+    deductionPerMinute: Number(r.deduction_per_minute) || 0,
+    deductionAmount: Number(r.deduction_amount) || 0,
+    autoClosed: Boolean(r.auto_closed),
+    adminNoteAr: r.admin_note_ar,
+    openMinutes: Number(r.open_minutes) || 0,
+    openTooLong: Boolean(r.open_too_long),
+  };
+}
+
+export async function getBreaks(params?: {
+  from?: string;
+  to?: string;
+  userId?: string;
+  state?: StaffBreak["state"];
+  approval?: StaffBreak["approval"];
+}): Promise<StaffBreak[]> {
+  const { data } = await api.get<{ data: ApiAdminBreak[] }>("/admin/attendance/breaks", {
+    params: {
+      from: params?.from,
+      to: params?.to,
+      user_id: params?.userId,
+      state: params?.state,
+      approval: params?.approval,
+    },
+  });
+  return (data.data || []).map(mapAdminBreak);
+}
+
+export async function getBreakBalances(month?: string): Promise<{
+  monthKey: string;
+  staff: StaffBreakBalanceRow[];
+}> {
+  const { data } = await api.get<{
+    data: {
+      month_key: string;
+      staff: Array<{
+        user_id: string;
+        staff_name: string | null;
+        monthly_minutes: number;
+        used_minutes: number;
+        remaining_minutes: number;
+        deducted_minutes: number;
+        deduction_amount: number;
+        break_count: number;
+        out_count: number;
+        pending_count: number;
+      }>;
+    };
+  }>("/admin/attendance/breaks/balances", { params: month ? { month } : undefined });
+  return {
+    monthKey: data.data.month_key,
+    staff: (data.data.staff || []).map((s) => ({
+      userId: s.user_id,
+      staffName: s.staff_name,
+      monthKey: data.data.month_key,
+      monthlyMinutes: Number(s.monthly_minutes) || 0,
+      usedMinutes: Number(s.used_minutes) || 0,
+      remainingMinutes: Number(s.remaining_minutes) || 0,
+      deductedMinutes: Number(s.deducted_minutes) || 0,
+      deductionAmount: Number(s.deduction_amount) || 0,
+      breakCount: Number(s.break_count) || 0,
+      outCount: Number(s.out_count) || 0,
+      pendingCount: Number(s.pending_count) || 0,
+    })),
+  };
+}
+
+export async function decideBreak(
+  breakId: string,
+  decision: "approve" | "reject",
+  noteAr?: string
+): Promise<StaffBreak> {
+  const { data } = await api.post<{ data: { break: ApiAdminBreak } }>(
+    `/admin/attendance/breaks/${breakId}/${decision}`,
+    { note_ar: noteAr || null }
+  );
+  return mapAdminBreak(data.data.break);
+}
+
+/** Fix a break the worker forgot to close, or correct its duration. */
+export async function correctBreak(
+  breakId: string,
+  input: { minutes?: number; returnedAt?: string; adminNoteAr?: string }
+): Promise<StaffBreak> {
+  const { data } = await api.patch<{ data: { break: ApiAdminBreak } }>(
+    `/admin/attendance/breaks/${breakId}`,
+    {
+      minutes: input.minutes,
+      returned_at: input.returnedAt,
+      admin_note_ar: input.adminNoteAr || null,
+    }
+  );
+  return mapAdminBreak(data.data.break);
 }
 
 // ─── Admin Custom Orders ──────────────────────────────────────────────────────
