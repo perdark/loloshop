@@ -34,6 +34,20 @@ function tokenVersionMatches(payload, user) {
   return Number(payload.ver || 0) === Number(user.token_version || 0);
 }
 
+/**
+ * The single "may this token act as this account?" test, used by every auth path
+ * (authRequired / authQuery / optionalAuth) so none of them can drift.
+ *
+ * A self-deleted account (migration 076) is refused outright. Deletion already
+ * increments token_version, which kills every issued token on its own — this is a
+ * second, independent lock so an erased account stays unreachable even if a token
+ * ever survived that check.
+ */
+function sessionValid(payload, user) {
+  if (user.deleted_at) return false;
+  return tokenVersionMatches(payload, user);
+}
+
 async function authRequired(req, res, next) {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
@@ -43,12 +57,12 @@ async function authRequired(req, res, next) {
     if (payload.aud) throw new Error('Scoped token cannot be used as an API access token');
     const { rows } = await query(
       `SELECT id, name, phone, email, role, staff_type, staff_types, order_scope,
-              phone_verified, token_version
+              phone_verified, token_version, deleted_at
        FROM users WHERE id = $1`,
       [payload.sub]
     );
     if (!rows.length) return res.status(401).json({ error: 'المستخدم غير موجود', code: 'ERR_AUTH' });
-    if (!tokenVersionMatches(payload, rows[0])) {
+    if (!sessionValid(payload, rows[0])) {
       return res.status(401).json({ error: 'الجلسة منتهية', code: 'ERR_AUTH' });
     }
     req.user = rows[0];
@@ -73,12 +87,12 @@ async function authQuery(req, res, next) {
     });
     const { rows } = await query(
       `SELECT id, name, phone, email, role, staff_type, staff_types, order_scope,
-              phone_verified, token_version
+              phone_verified, token_version, deleted_at
        FROM users WHERE id = $1`,
       [payload.sub]
     );
     if (!rows.length) return res.status(401).json({ error: 'المستخدم غير موجود', code: 'ERR_AUTH' });
-    if (!tokenVersionMatches(payload, rows[0])) {
+    if (!sessionValid(payload, rows[0])) {
       return res.status(401).json({ error: 'الجلسة منتهية', code: 'ERR_AUTH' });
     }
     req.user = rows[0];
@@ -156,11 +170,11 @@ async function optionalAuth(req, res, next) {
     if (payload.aud) throw new Error('Scoped token cannot be used as an API access token');
     const { rows } = await query(
       `SELECT id, name, phone, email, role, staff_type, staff_types, order_scope,
-              phone_verified, token_version
+              phone_verified, token_version, deleted_at
        FROM users WHERE id = $1`,
       [payload.sub]
     );
-    if (rows.length && tokenVersionMatches(payload, rows[0])) req.user = rows[0];
+    if (rows.length && sessionValid(payload, rows[0])) req.user = rows[0];
   } catch {
     /* ignore — retail pricing for shop/configurator */
   }

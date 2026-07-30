@@ -1,5 +1,55 @@
 # Progress
 
+## 2026-07-30 (b) — Apple rejection fixed: camera crash (2.1a) + in-app account deletion (5.1.1v)
+
+**Uncommitted. Migration 076 applied to the laptop dev DB + mirrored into `db/schema.sql`. The
+codemagic.yaml fix is on the `ios-appstore` branch (worktree), NOT main.** Gates: backend
+**161/161** (+8 new) · live HTTP e2e **15/15** · `tsc` 0 · `eslint` 0 · **browser-verified on a
+390px phone viewport, console clean**.
+
+- **Camera crash** — the repo has no `Info.plist` at all; `npx cap add ios` regenerates it every
+  build, so the app shipped without `NSCameraUsageDescription`. iOS kills any app that opens the
+  camera without it, which is exactly what "tapped Take Photo → crash" is. New codemagic step
+  injects the camera + photo-library strings after `cap sync` and **fails the build** if they are
+  missing, so this cannot silently regress. Also sets `ITSAppUsesNonExemptEncryption=false`.
+- **Account deletion** — new `POST /auth/account/delete` + `GET /auth/account/deletion-preview`
+  (`accountController.js`), new `/account` screen linked from the student nav, and `/delete-account`
+  rewritten to point at the real flow instead of "message us on Instagram".
+- Deletion **anonymises** rather than row-deletes: `orders.student_id` is `ON DELETE RESTRICT`, so a
+  real delete is refused the moment a student has an order and would destroy the shop's sales
+  records. The account dies (phone/email NULLed, password replaced, `token_version` bumped so every
+  JWT dies at once, cart/notifications/trusted devices cleared); the order survives on its
+  `checkout_groups` delivery snapshot so an in-flight sash still ships.
+- Retail only (`SELF_DELETE_ROLES`) — reps and staff/workshop keep admin-managed deletion.
+- New `npm run demo-account` recreates the App Review demo login, because the reviewer walking this
+  very flow would otherwise destroy it and fail the next submission.
+
+Open: enter the real Apple reply (screen recording), push, rebuild on Codemagic, resubmit.
+
+## 2026-07-30 — الخروج المؤقت: temporary-leave button beside بصمة + 10h monthly allowance
+
+**Uncommitted on main. Migration 075 applied to the laptop dev DB + mirrored into `db/schema.sql`.**
+Gates: backend **153/153** (+26 new) · `tsc` 0 · `eslint` 0 errors. **Browser walkthrough NOT done**
+(stopped at the owner's request). Spec:
+`docs/superpowers/specs/2026-07-30-attendance-temporary-leave-design.md`.
+
+- New `staff_attendance_breaks` table + `break_monthly_minutes` on both settings layers (global
+  default 600 = 10 hours, nullable per-staff override).
+- New `backend/lib/attendanceBreak.js` owns the whole money rule: free only if approved AND inside
+  the allowance; anything else deducted at the existing per-minute rate, frozen per row. Every
+  change re-runs the worker's whole month so the parts always sum to the balance.
+- New `backend/controllers/attendanceBreakController.js`: staff request → leave → return → cancel,
+  admin list/balances/approve/reject/correct-duration. Wired into `routes/staff.js` + `routes/admin.js`.
+- `worked_minutes` now excludes break time (new `present_minutes`/`break_minutes` on records);
+  بصمة الخروج auto-closes a break the worker forgot to end.
+- New `components/staff/StaffBreakControl.tsx` on both attendance surfaces (full card + compact
+  `/staff` row) with the allowance bar, live timer, and the «خرجت بدون موافقة» escape hatch;
+  new «الخروج المؤقت» section on `/admin/attendance`.
+
+Open:
+- Browser walkthrough (staff request → admin approve → طلعت → رجعت → over-quota deduction).
+- Owner decision: should lateness deductions also reach the salary balance? (see spec, last section)
+
 ## 2026-07-29 — الورشة: piece rates split by customer type (ممثلين / تجزئة) — SHIPPED
 
 **Pushed to main `8832922`, CI green, deployed. Migration 072 applied to prod by the deploy.**

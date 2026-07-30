@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { BrandMark } from "@/components/ui/BrandLogo";
 import { NotificationBell } from "@/components/NotificationBell";
-import { getToken, logout } from "@/lib/auth";
+import { AUTH_CHANGED_EVENT, getToken, logout } from "@/lib/auth";
 import { getCart } from "@/lib/cart";
 
 const NAV = [
@@ -32,6 +32,22 @@ const NAV = [
   },
 ];
 
+// Appended for signed-in students only. It is a normal account screen, but it is
+// also the ONLY route to self-service account deletion, which Apple requires to be
+// reachable from inside the app (guideline 5.1.1(v) — the first iOS submission was
+// rejected for its absence). Keep it in the visible nav row: a reviewer who cannot
+// find the delete option reports it as missing.
+const ACCOUNT_LINK = {
+  href: "/account",
+  label: "حسابي",
+  icon: (
+    <>
+      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+      <circle cx="12" cy="7" r="4" />
+    </>
+  ),
+};
+
 export function StudentNav() {
   const pathname = usePathname();
   const router = useRouter();
@@ -57,6 +73,20 @@ export function StudentNav() {
       setCartCount(0);
     }
   }, [pathname]);
+
+  // The auth check above is keyed on `pathname`, so a session that ends WITHOUT a
+  // route change leaves this header stale — which is exactly what account deletion
+  // does: it finishes on /account and shows a confirmation instead of navigating.
+  // Without this the header keeps showing «خروج» and «حسابي» to a deleted account.
+  useEffect(() => {
+    const resync = () => {
+      const token = getToken();
+      setAuthed(!!token);
+      if (!token) setCartCount(0);
+    };
+    window.addEventListener(AUTH_CHANGED_EVENT, resync);
+    return () => window.removeEventListener(AUTH_CHANGED_EVENT, resync);
+  }, []);
 
   useEffect(() => {
     let last = window.scrollY;
@@ -181,7 +211,7 @@ export function StudentNav() {
 
         {/* Nav row */}
         <nav className="-mx-1 flex items-center gap-1 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" aria-label="التنقل الرئيسي">
-          {NAV.map((item) => {
+          {(authed ? [...NAV, ACCOUNT_LINK] : NAV).map((item) => {
             const active = isActive(item.href);
             return (
               <Link

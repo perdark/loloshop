@@ -230,4 +230,38 @@ export async function staffPortalLogin(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Account deletion (Apple App Store guideline 5.1.1(v))
+// ---------------------------------------------------------------------------
+
+export type DeletionPreview = {
+  eligible: boolean;
+  /** Present only when eligible is false — why this account is admin-managed. */
+  reason_ar?: string;
+  /** Orders the shop is still working on. Deleting does NOT cancel them. */
+  active_orders: number;
+  total_orders: number;
+};
+
+export async function getDeletionPreview(): Promise<DeletionPreview> {
+  const { data } = await api.get<DeletionPreview>("/auth/account/deletion-preview");
+  return data;
+}
+
+/**
+ * Erases the account for good. The backend bumps token_version, so the JWT this
+ * call was made with is dead the moment it returns — the caller must clear local
+ * storage and leave the authenticated area rather than making another request.
+ */
+export async function deleteAccount(password: string): Promise<{ retained_orders: number }> {
+  try {
+    const { data } = await api.post<{
+      data: { deleted: boolean; retained_orders: number };
+    }>("/auth/account/delete", { password });
+    return { retained_orders: data.data.retained_orders };
+  } catch (e) {
+    throw fieldError(e, "تعذر حذف الحساب");
+  }
+}
+
 export { getApiErrorMessage };

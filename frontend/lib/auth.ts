@@ -43,12 +43,37 @@ export function setDeviceToken(token: string): void {
   localStorage.setItem(DEVICE_TOKEN_KEY, token);
 }
 
+/**
+ * Fired whenever the signed-in state changes without a route change. Chrome's native
+ * `storage` event only reaches OTHER tabs, so a component in THIS tab (the header)
+ * has no way to notice that the session ended under it — after account deletion it
+ * would keep offering «خروج» and «حسابي» for a user who no longer has an account.
+ */
+export const AUTH_CHANGED_EVENT = "loloshop:auth-changed";
+
+function notifyAuthChanged(): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
+}
+
 export function logout(): void {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
   // NOTE: device token is intentionally NOT cleared — a normal logout keeps the device
   // trusted so the user skips the OTP on their next login.
   clearSkipDashboardRedirect();
+  notifyAuthChanged();
+}
+
+/**
+ * Full sign-out for account DELETION, where the "keep this device trusted" tradeoff
+ * that `logout()` makes no longer applies: there is no account left to come back to.
+ * The backend already dropped the matching trusted_devices row, so a leftover token
+ * here would only be dead weight that the next person to use the phone inherits.
+ */
+export function logoutAndForgetDevice(): void {
+  logout();
+  localStorage.removeItem(DEVICE_TOKEN_KEY);
 }
 
 /** Panel home for dashboard roles; null for retail/wholesaler. */

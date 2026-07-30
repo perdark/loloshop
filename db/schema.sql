@@ -96,6 +96,16 @@ CREATE TABLE IF NOT EXISTS users (
 ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
 
+-- 076: in-app account deletion (Apple 5.1.1(v)). A deleted account is ANONYMISED,
+-- never row-deleted: orders.student_id is ON DELETE RESTRICT, so removing the row
+-- is refused as soon as the student has one order — and would take the shop's sales
+-- records with it. The account dies (phone/e-mail NULLed, password replaced,
+-- token_version bumped so every issued JWT dies at once); the order survives on the
+-- checkout_groups delivery snapshot so an in-flight sash still ships.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_users_deleted_at
+  ON users(deleted_at) WHERE deleted_at IS NOT NULL;
+
 -- =====================================================
 -- OTP CODES — phone verification via Zentramsg WhatsApp
 -- =====================================================
@@ -799,9 +809,14 @@ CREATE TABLE IF NOT EXISTS staff_attendance_settings (
   shop_longitude             DOUBLE PRECISION,
   shop_radius_meters         INTEGER NOT NULL DEFAULT 120 CHECK (shop_radius_meters > 0),
   timezone                   TEXT NOT NULL DEFAULT 'Asia/Baghdad',
+  -- migration 075: monthly الخروج المؤقت allowance (10 hours)
+  break_monthly_minutes      INTEGER NOT NULL DEFAULT 600 CHECK (break_monthly_minutes >= 0),
   updated_by                 UUID REFERENCES users(id) ON DELETE SET NULL,
   updated_at                 TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE staff_attendance_settings
+  ADD COLUMN IF NOT EXISTS break_monthly_minutes INTEGER NOT NULL DEFAULT 600
+    CHECK (break_monthly_minutes >= 0);
 INSERT INTO staff_attendance_settings (id)
 VALUES (TRUE)
 ON CONFLICT (id) DO NOTHING;
@@ -813,9 +828,14 @@ CREATE TABLE IF NOT EXISTS staff_attendance_user_settings (
   grace_minutes              INTEGER NOT NULL DEFAULT 15 CHECK (grace_minutes >= 0),
   deduction_per_minute       BIGINT NOT NULL DEFAULT 0 CHECK (deduction_per_minute >= 0),
   attendance_required        BOOLEAN NOT NULL DEFAULT TRUE,
+  -- migration 075: NULL = inherit the global الخروج المؤقت allowance
+  break_monthly_minutes      INTEGER CHECK (break_monthly_minutes IS NULL OR break_monthly_minutes >= 0),
   updated_by                 UUID REFERENCES users(id) ON DELETE SET NULL,
   updated_at                 TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE staff_attendance_user_settings
+  ADD COLUMN IF NOT EXISTS break_monthly_minutes INTEGER
+    CHECK (break_monthly_minutes IS NULL OR break_monthly_minutes >= 0);
 CREATE INDEX IF NOT EXISTS idx_staff_attendance_user_settings_updated
   ON staff_attendance_user_settings(updated_at DESC);
 
@@ -852,6 +872,58 @@ CREATE TABLE IF NOT EXISTS staff_attendance_records (
 );
 CREATE INDEX IF NOT EXISTS idx_staff_attendance_date ON staff_attendance_records(work_date DESC);
 CREATE INDEX IF NOT EXISTS idx_staff_attendance_user ON staff_attendance_records(user_id, work_date DESC);
+
+-- =====================================================
+-- Migration 075 — الخروج المؤقت (temporary leave during the shift)
+-- Money rule lives in backend/lib/attendanceBreak.js:
+--   the monthly balance always decrements by the FULL real minutes of a break
+--   free     = approved ? min(minutes, remaining_before_this_break) : 0
+--   deducted = minutes - free
+--   amount   = deducted * deduction_per_minute  (frozen on the row at return time)
+-- =====================================================
+CREATE TABLE IF NOT EXISTS staff_attendance_breaks (
+  id                        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id                   UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  attendance_id             UUID NOT NULL REFERENCES staff_attendance_records(id) ON DELETE CASCADE,
+  work_date                 DATE NOT NULL,
+  month_key                 TEXT NOT NULL CHECK (month_key ~ '^[0-9]{4}-[0-9]{2}$'),
+  reason_ar                 TEXT,
+  requested_minutes         INTEGER CHECK (requested_minutes IS NULL OR requested_minutes > 0),
+  requested_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  left_at                   TIMESTAMPTZ,
+  returned_at               TIMESTAMPTZ,
+  minutes                   INTEGER NOT NULL DEFAULT 0 CHECK (minutes >= 0),
+  state                     TEXT NOT NULL DEFAULT 'requested'
+    CHECK (state IN ('requested', 'out', 'returned', 'cancelled')),
+  approval                  TEXT NOT NULL DEFAULT 'pending'
+    CHECK (approval IN ('pending', 'approved', 'rejected')),
+  left_without_approval     BOOLEAN NOT NULL DEFAULT FALSE,
+  decided_by                UUID REFERENCES users(id) ON DELETE SET NULL,
+  decided_at                TIMESTAMPTZ,
+  decision_note_ar          TEXT,
+  free_minutes              INTEGER NOT NULL DEFAULT 0 CHECK (free_minutes >= 0),
+  deducted_minutes          INTEGER NOT NULL DEFAULT 0 CHECK (deducted_minutes >= 0),
+  deduction_per_minute      BIGINT NOT NULL DEFAULT 0 CHECK (deduction_per_minute >= 0),
+  deduction_amount          BIGINT NOT NULL DEFAULT 0 CHECK (deduction_amount >= 0),
+  deduction_transaction_id  UUID REFERENCES staff_salary_transactions(id) ON DELETE SET NULL,
+  auto_closed               BOOLEAN NOT NULL DEFAULT FALSE,
+  admin_note_ar             TEXT,
+  created_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at                TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+-- One live break per worker, enforced by the DB and not just by a JS check.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_attendance_break_open
+  ON staff_attendance_breaks(user_id)
+  WHERE state IN ('requested', 'out');
+CREATE INDEX IF NOT EXISTS idx_attendance_break_month
+  ON staff_attendance_breaks(user_id, month_key);
+CREATE INDEX IF NOT EXISTS idx_attendance_break_date
+  ON staff_attendance_breaks(work_date DESC);
+CREATE INDEX IF NOT EXISTS idx_attendance_break_record
+  ON staff_attendance_breaks(attendance_id);
+CREATE INDEX IF NOT EXISTS idx_attendance_break_pending
+  ON staff_attendance_breaks(requested_at DESC)
+  WHERE approval = 'pending' AND state <> 'cancelled';
 
 -- =====================================================
 -- Migration 021 — Full-set packages (طقم التخرج الكامل) + checkout intake groups

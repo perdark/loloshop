@@ -12,7 +12,8 @@
     "migrate": "node migrate.js",
     "migrate:file": "node migrate.js",
     "seed:fullset": "node seed-full-set.js",
-    "set-password": "node scripts/set-password.js"
+    "set-password": "node scripts/set-password.js",
+    "demo-account": "node scripts/demo-account.js"
   },
   "keywords": [],
   "author": "",

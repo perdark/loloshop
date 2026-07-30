@@ -6,6 +6,216 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
+## 2026-07-30 (b) — 🍏 APPLE REJECTION FIXED: the camera crash was a MISSING PLIST STRING, not app code · in-app account deletion built (5.1.1v)
+
+**Uncommitted. Migration 076 applied to the laptop dev DB + mirrored into `db/schema.sql` — prod needs
+`npm run migrate` before the pm2 reload (`scripts/deploy.sh` L17 already does this).** The camera fix is on the
+**`ios-appstore` branch** (worktree at `<scratchpad>/ios-wt`), NOT main — `codemagic.yaml` only exists there.
+Gates: backend **161/161** (+8 new) · live HTTP e2e **15/15** · `tsc` 0 · `eslint` 0 · **browser-verified at 390px,
+console clean**. `next build` NOT run locally (disk 90%); it runs on the server.
+
+**⚠️ THE KEY INSIGHT — the two fixes deploy by completely different routes.** The iOS app is a **webview shell**
+pointing at `lolo-shop96.com`, so **account deletion goes live by deploying the website (push main → VPS); it needs
+NO rebuild and NO new binary.** Only the camera crash needs a Codemagic rebuild + re-upload.
+
+**① Guideline 2.1(a) — the crash. Not an app bug: a missing Info.plist key.** There is **no `Info.plist` anywhere in
+the repo**; `codemagic.yaml` runs `npx cap add ios`, which regenerates `ios/` from Capacitor's template on **every
+build**. That template has no `NSCameraUsageDescription`, and **iOS terminates any process that touches the camera
+without it**. The storefront attaches logos/designs with a plain `<input type="file" accept="image/*">`; tapping it in
+WKWebView offers "Take Photo" → camera → instant kill, on every device, every time. There is **no `@capacitor/camera`
+plugin** — the camera is reached purely through the webview's native picker, so **zero JS changed**.
+**Fix:** a new codemagic step after `cap sync` injects `NSCameraUsageDescription` + `NSPhotoLibraryUsageDescription`
+via `plutil -replace`, and **`exit 1`s if the keys are absent afterwards** — a silent no-op here is what a rejection
+looks like two days later. Also sets `ITSAppUsesNonExemptEncryption=false`, which answers "Missing Compliance" **in
+the binary** instead of re-answering it in ASC after every upload. **Committing the strings once would not work** —
+they are wiped by `cap add` before they are ever compiled. Same regeneration trap already noted for the parked
+`NSLocationWhenInUseUsageDescription`; that string is deliberately **NOT** added (GPS stays parked, and requesting a
+permission the app doesn't use invites App Privacy questions).
+
+**② Guideline 5.1.1(v) — deletion. `/delete-account` said "message @lolo_shop96", which Apple rejects outright**
+(customer service is not an acceptable route outside highly-regulated industries).
+
+**Owner decisions locked (2026-07-30):** ① **retail students only** (`SELF_DELETE_ROLES`, an allow-list) — a rep
+deleting mid-season detaches 100+ students and kills their referral link, and staff/workshop accounts are payroll
+identities tied to attendance and wage ledgers. ② **delete anyway, warn first** — blocking on an active order is a
+barrier Apple can reject for the same guideline.
+
+**THE SCHEMA DECIDED THE DESIGN — deletion ANONYMISES, it does not row-delete.** `orders.student_id` is
+**`ON DELETE RESTRICT`** and `students.user_id` is `ON DELETE CASCADE`, so `DELETE FROM users` is **refused by the DB
+the moment the student has one order** — and forcing it would erase the shop's own sales and settlement records.
+So: the **account** dies, the **order** stays. That is safe only because `checkout_groups` already snapshots
+`customer_name`/`phone_primary`/address per order, so **an in-flight sash still gets embroidered and delivered after
+the student is gone** — the retained copy is the transaction record, not the account. Verified in the browser: order
+left at `embroidery` with its delivery snapshot intact while the account read `حساب محذوف`.
+Login becomes impossible on **two independent counts**: `phone` is NULLed (login looks accounts up BY phone) and
+`password_hash` is replaced with a bcrypt hash of 32 random bytes. `token_version` is bumped, killing every issued JWT
+and SSE ticket instantly. Cart, notifications, OTPs, password resets and trusted devices are deleted.
+
+**What shipped.**
+- **Migration 076** — `users.deleted_at` + a partial index. Tombstone only; nothing grants access from it.
+- **NEW `backend/controllers/accountController.js`** — `deleteAccount` (password re-confirmed, whole scrub in one
+  `tx`) + `deletionPreview` (feeds the warning). The UPDATE carries `AND deleted_at IS NULL`, so a double-tap or two
+  racing tabs erase exactly once — **there is a test that fires two concurrent deletes and asserts `token_version`
+  moves by exactly one and only one audit row exists**. The audit row deliberately stores **no name or phone** —
+  copying the data you just erased back into the DB is not deletion.
+- **`middleware/auth.js`** — the deleted check went into a **new shared `sessionValid()`** used by all three auth
+  paths (`authRequired`/`authQuery`/`optionalAuth`) rather than pasted three times.
+- **FE:** NEW `/account` screen (identity card, order links, danger zone with the active-order warning and a
+  password-confirmed two-step delete, plus a terminal «تم حذف حسابك» state) · **«حسابي» added to the visible student
+  nav** — a reviewer who cannot find the delete option reports it missing · `/delete-account` rewritten to describe
+  and link the in-app flow.
+- **NEW `npm run demo-account`** — recreates/resets the App Review demo login. **This is not optional housekeeping:
+  Apple asks the reviewer to walk the deletion flow, and if they walk it on `07700000000` the account is GONE and the
+  next submission fails with "we could not sign in".** Proven end-to-end: deleted the account over HTTP, ran the
+  script, logged in again. It also warns when `DEMO_LOGIN_PHONES`/`DEMO_LOGIN_EXPIRES_AT` are missing (setting only
+  the phone list leaves the bypass silently inert — the 2026-07-24 trap).
+
+**Two things the browser caught that the tests could not.** ① The header kept showing «خروج» and «حسابي» after
+deletion, because `StudentNav` re-checks auth only on `pathname` change and the flow **ends on `/account` without
+navigating** — it looked like the deletion hadn't worked. Fixed with a `loloshop:auth-changed` event dispatched from
+`logout()` (the native `storage` event only reaches OTHER tabs, so same-tab state had no way to notice). ② The
+device token survived `logout()` by design; deletion now uses `logoutAndForgetDevice()`, since there is no account
+left to keep the device trusted for.
+**Also worth recording:** during testing the tab appeared to jump to `/` after a wrong password, which reads exactly
+like "it deleted my account anyway". It did **not** — the DB showed `deleted_at NULL`, phone intact, no audit row,
+and a clean replay stayed on `/account` for 8s with an empty navigation log. It was a dev-server reload artifact;
+no app code redirects to `/`. The wrong-password path is verified correct in both the e2e and the browser.
+
+### Open follow-ups
+- **Two separate deploys, in this order.** ① **Website** (account deletion): push main → VPS. `scripts/deploy.sh`
+  runs `npm run migrate` (L17, applies `db/schema.sql` which carries 076) **before** `pm2 reload` (L23), so the
+  column lands by itself. This alone satisfies 5.1.1(v) — the app is a webview shell. ② **iOS binary** (camera):
+  commit + push the `codemagic.yaml` change **on `ios-appstore`**, trigger the build, select the new binary in ASC.
+  **Pushing main can never fix the crash — `codemagic.yaml` does not exist on main and Codemagic builds from
+  `ios-appstore`.**
+- **⚠️ IF THE `codemagic.yaml` EDIT IS LOST** (it was made in a git worktree under the session scratchpad, which is
+  temp storage — `git worktree list` to check if it still exists): re-add it by hand on the `ios-appstore` branch as
+  a new step in `workflows.ios-appstore.scripts`, placed **after** "Bake the real LoloShop icon" and **before**
+  "Set up code signing". The whole step is:
+
+  ```yaml
+      - name: Inject the iOS privacy usage strings (FIXES the camera crash)
+        script: |
+          set -e
+          PLIST="ios/App/App/Info.plist"
+          plutil -replace NSCameraUsageDescription -string \
+            "لالتقاط صورة لشعار جامعتك أو تصميمك وإرفاقها بطلب الوشاح." "$PLIST"
+          plutil -replace NSPhotoLibraryUsageDescription -string \
+            "لاختيار صورة الشعار أو التصميم من ألبومك وإرفاقها بطلب الوشاح." "$PLIST"
+          plutil -replace ITSAppUsesNonExemptEncryption -bool false "$PLIST"
+          for KEY in NSCameraUsageDescription NSPhotoLibraryUsageDescription; do
+            plutil -extract "$KEY" raw "$PLIST" >/dev/null 2>&1 \
+              || { echo "FATAL: $KEY missing from $PLIST — camera would crash on device"; exit 1; }
+          done
+          plutil -p "$PLIST" | grep -E "NSCamera|NSPhotoLibrary|ITSAppUsesNonExempt"
+  ```
+
+  It must run **after** `npx cap sync ios` because `npx cap add ios` regenerates `Info.plist` from Capacitor's
+  template on every build and wipes anything committed into it. The `exit 1` loop is deliberate: without it a
+  silently failed injection ships another crashing binary.
+- **Reply to Apple in App Store Connect** with a **screen recording on a physical device** showing: sign in with the
+  demo account → «حسابي» → «حذف حسابي نهائياً» → password → «تم حذف حسابك». Apple asked for this explicitly, and
+  they want it in the App Review Notes for future submissions. **Then run `npm run demo-account` on prod to restore
+  the login before resubmitting.**
+- **Verify the camera on a real device before resubmitting** — this is the one fix I could not test here (no Mac, no
+  iPhone). The build now fails if the plist keys are absent, so the failure mode is a red build, not a silent
+  rejection, but the actual "Take Photo" tap should still be walked on TestFlight.
+- **`ios-appstore` is still behind main and its lockfile is still desynced** (`@capacitor/ios` in package.json, not
+  in package-lock). Building the app from that branch is fine — the shell just loads the live site — but do not merge
+  it to main without running `npm install` in `frontend/` first.
+- Unchanged on the board: the attendance-breaks feature above is still uncommitted in the same tree (my changes do
+  not touch it), the payout-card feature + its `suggested_amount` lifetime-accrual bug, staff GPS parked. Still
+  untracked and must not be committed: `frontend/public/dev-login.html`, `frontend/public/dev-token-tmp.json`.
+
+---
+
+## 2026-07-30 — NEW «الخروج المؤقت»: leave-the-shop button beside بصمة · 10h/month allowance · over-quota and unapproved minutes are real salary deductions
+
+**Uncommitted on main.** Migration **075 applied to the laptop dev DB** + mirrored into `db/schema.sql` — **prod needs
+`npm run migrate` before the pm2 reload** (`scripts/deploy.sh` already does this at L17). Gates: BE `node --check` 0 ·
+**backend tests 153/153** (+26 new) · FE `tsc` 0 · `eslint` 0 errors. **NO browser walkthrough — stopped at the owner's
+request mid-verification; the two screens are code+test-verified only.** Spec:
+`docs/superpowers/specs/2026-07-30-attendance-temporary-leave-design.md`.
+
+**The report.** «Add another button beside بصمة — some staff need to get out of the shop for an hour or 5/15 min. Everyone
+has 10 hours a month to get out safely and any other time no.»
+
+**Owner decisions locked (2026-07-30):** ① **free only if approved AND inside the allowance** — over-quota minutes and
+any unapproved break are deducted («will get − on this money if admin didn't allow it»). ② **admin must approve first**,
+with an explicit «خرجت بدون موافقة» escape hatch, because software can't stop someone physically leaving and the
+unapproved case is the whole point of the deduction rule. ③ **break time is not worked time**. ④ break ends on **«رجعت»**,
+charged on real elapsed minutes. ⑤ deducted minutes use the **existing `deduction_per_minute`** (1,000 IQD/min live).
+⑥ **unapproved minutes still consume the allowance** — the balance measures time out of the shop, so skipping the request
+can't buy free time; a minute is never deducted twice.
+
+**⚠️ THE FINDING THAT SHAPED THE FEATURE — lateness deductions never actually reach the salary.**
+`staff_attendance_records.deduction_amount` is computed and shown, but **nothing has ever inserted the matching
+transaction**, and both `salaryController.js:47` and `payoutController.js:182` explicitly exclude
+`source_type='attendance'` — a guard written for a feature that was never wired. So «مبلغ التأخير» on the attendance
+screen is display-only today. Break deductions deliberately use **`source_type='attendance_break'`**, so they DO reduce
+`buildSalarySummary`'s balance and the payout suggestion — which is what the owner asked for. **Whether lateness should
+behave the same way is an open owner decision**, not something this batch changed.
+
+**What shipped.**
+- **Migration 075** (`db/migrations/075_attendance_breaks.sql` + schema.sql mirror): `break_monthly_minutes` on
+  `staff_attendance_settings` (default **600**) and a **nullable** override on `staff_attendance_user_settings`
+  (NULL = inherit) — the same two-layer shape as start/end/grace. New `staff_attendance_breaks` with `month_key`
+  ('YYYY-MM' in Baghdad tz = the quota bucket), `state` (`requested|out|returned|cancelled`) × `approval`
+  (`pending|approved|rejected`) as **two orthogonal fields**, `left_without_approval`, the frozen rate + computed
+  charge columns, and `auto_closed`. **`uq_attendance_break_open`** is a partial unique index → one live break per
+  worker enforced by the DB, not just a JS check (there is a test that drops to 23505 to prove it).
+- **NEW `backend/lib/attendanceBreak.js` owns the entire money rule.** Because a later admin decision changes how the
+  allowance was spent, **every change re-runs the worker's whole month in chronological order** (`recomputeMonth`)
+  instead of patching one row — that is what keeps the sum of the parts equal to the balance no matter what order the
+  admin acts in. Approving a returned break cancels its deduction via **soft-delete** (`deleted_at` +
+  `delete_reason_ar`), matching the existing manual-transaction pattern. **Rate frozen per row** (workshop-ledger rule);
+  **allowance read live**, so both settings endpoints re-price the current month immediately rather than letting the
+  screen drift from the ledger.
+- **NEW `backend/controllers/attendanceBreakController.js`** — staff request/leave/return/cancel/mine + admin
+  list/balances/approve/reject/correct-duration, mounted in `routes/staff.js` and `routes/admin.js` (`breaks/balances`
+  declared before `:id` so it isn't shadowed).
+- **`worked_minutes` now excludes break time** (new `present_minutes` + `break_minutes` on every serialized record, via
+  one `BREAK_MINUTES_SQL` subquery added to getToday/listRecords/calendar). **مدة العمل on `/admin/attendance` will read
+  lower than before** — intended, and the staff card names the subtraction under the number.
+- **بصمة الخروج auto-closes a forgotten break** at the checkout moment (`checkOut` is now wrapped in a `tx`), and drops
+  an un-acted request. This is the guard against the feature's biggest footgun: 8 forgotten hours at 1,000/min would be
+  480,000 IQD. Admin duration correction is the second guard.
+- **FE:** NEW `components/staff/StaffBreakControl.tsx` — three states in one component (idle button + allowance bar /
+  waiting with the «خرجت بدون موافقة» escape hatch / live timer + «رجعت»), mounted on **both** attendance surfaces
+  (`StaffAttendanceCard` full + the compact `/staff` row — both had to change, as expected). Polls only while a break is
+  live (20s ±5s), because a worker on «بانتظار موافقة المدير» has no other way to learn the admin answered. NEW
+  «الخروج المؤقت» section on `/admin/attendance`: pending queue with one-tap approve/reject («أوافق وألغي الخصم» when the
+  break is already charged), per-staff monthly balances, full log, duration-correction modal, allowance fields in both
+  settings forms.
+- **26 new tests** covering the rule as pure math, the chronological allowance spend, unapproved-consumes-allowance,
+  approve-after-return cancelling the deduction, the frozen rate surviving a rate change, month bucketing across the
+  Baghdad midnight, the DB uniqueness guard, checkout auto-close, `worked_minutes` exclusion, and every guard.
+
+**Two real bugs the gates caught (not test noise).** ① `notifyAdmins` did `SELECT admins` then N inserts — an admin
+account deleted in between fails the FK and **took the whole break request down with it**. Collapsing it to one
+statement was not enough (READ COMMITTED re-checks the FK mid-statement), so **notifications now run AFTER the tx
+commits** and can never fail the break; an error inside a Postgres tx aborts the whole tx, so it genuinely cannot be
+caught in place. ② eslint's `react-hooks/purity` caught `Date.now()` inside a `useMemo` in the live timer — impure during
+render and it would drift after the tab sleeps; it is now state seeded from the server's `open_minutes` and recomputed
+from `left_at` each tick.
+
+### Open follow-ups
+- **Browser walkthrough pending** (the only gate not run): staff request → admin approve → «طلعت» → «رجعت» → confirm the
+  balance drops; then an over-quota break and a «خرجت بدون موافقة» to confirm the deduction appears and that approving it
+  afterwards removes it. **Dev servers left UP:** BE :4000 (plain `node server.js`), FE :3000 (`next dev`).
+  Fresh 7-day tokens were minted for ابو عبدو (staff) and Admin — re-mint with `signToken` if they expire.
+- **⚠️ A stale automation Chrome (`--user-data-dir=~/.cache/chrome-devtools-mcp/chrome-profile`) was holding the profile
+  and blocked chrome-devtools.** Killing it is what verification needs first next time.
+- **Owner decision open:** should lateness deductions also hit the salary balance, the way break deductions now do?
+  Today «مبلغ التأخير» is display-only (see the finding above).
+- **The allowance is a policy number read live**, so changing it retroactively re-prices the current month (deliberate,
+  and the settings endpoints recompute immediately). Past months are never touched.
+- Unchanged on the board: the payout-card feature still uncommitted (~68 files, `suggested_amount` lifetime-accrual bug),
+  the 5 iOS ASC blockers, the unmerged `ios-appstore` branch + lockfile desync, staff GPS parked. Still untracked and must
+  not be committed: `frontend/public/dev-login.html`, `frontend/public/dev-token-tmp.json` (live JWT).
+
+---
+
 ## 2026-07-29 — ✅ PUSHED + DEPLOYED: الورشة piece rates split by customer (ممثلين / تجزئة) · payout card removed from workshop crew
 
 **Pushed to main (`8832922`) → CI green (frontend · backend · Deploy to VPS) → live.** Migration **072 applied to prod by
