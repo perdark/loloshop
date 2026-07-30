@@ -6,13 +6,34 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
-## 2026-07-30 (b) — 🍏 APPLE REJECTION FIXED: the camera crash was a MISSING PLIST STRING, not app code · in-app account deletion built (5.1.1v)
+## 2026-07-30 (c) — ✅ BOTH APPLE FIXES PUSHED + WEBSITE DEPLOYED. Only the Codemagic rebuild + the ASC reply are left.
 
-**Uncommitted. Migration 076 applied to the laptop dev DB + mirrored into `db/schema.sql` — prod needs
-`npm run migrate` before the pm2 reload (`scripts/deploy.sh` L17 already does this).** The camera fix is on the
-**`ios-appstore` branch** (worktree at `<scratchpad>/ios-wt`), NOT main — `codemagic.yaml` only exists there.
-Gates: backend **161/161** (+8 new) · live HTTP e2e **15/15** · `tsc` 0 · `eslint` 0 · **browser-verified at 390px,
-console clean**. `next build` NOT run locally (disk 90%); it runs on the server.
+**Website track is DONE and verified live. iOS track is committed and pushed but the binary is NOT built yet.**
+
+- **main `f42b585`** (2 commits: `6a13162` attendance breaks, `f42b585` account deletion) → **CI green** →
+  `deploy.sh` ran migrate → build → pm2 reload. **Verified on prod:** `/account` went **404 → 200**; the App Review
+  demo login `07700000000` returns a token with **no OTP wall**, `role: retail`; `GET /api/auth/account/deletion-preview`
+  → **200 `{"eligible":true,...}`**, which also proves **migration 076 applied** (all three auth paths query
+  `users.deleted_at` in `sessionValid`, so a missing column would 500 on any authed call). **This alone satisfies
+  5.1.1(v)** — the app is a webview shell, so no rebuild was needed for it.
+- **`ios-appstore` `b83cd5f`** — the camera fix is now **committed and pushed**, out of the temp `/tmp` worktree it was
+  authored in. **⚠️ Pushing does NOT start a build:** `codemagic.yaml` has **no `triggering:` block**, so the build must
+  be started by hand in the Codemagic UI, then the new binary selected in ASC.
+- Attendance breaks shipped in the same push (owner call — it could not be cleanly split: `routes/staff.js` imports the
+  break controller, and `db/schema.sql` + `frontend/lib/types.ts` are shared). It is **161/161 test-verified but still
+  never walked in a browser** — see follow-ups. `db/schema.sql` was deliberately put in the *deletion* commit so that
+  reverting the breaks commit cannot strip `users.deleted_at` from the schema.
+
+Gates before push: backend **161/161** · `tsc` 0 · `eslint` 0 errors (6 warnings, all in an Android build artifact).
+`next build` NOT run locally (disk 90%); it ran on the server as part of the deploy.
+
+---
+
+### The original build notes for both fixes (unchanged, kept for the reasoning)
+
+**⚠️ THE KEY INSIGHT — the two fixes deploy by completely different routes.** The iOS app is a **webview shell**
+pointing at `lolo-shop96.com`, so **account deletion goes live by deploying the website (push main → VPS); it needs
+NO rebuild and NO new binary.** Only the camera crash needs a Codemagic rebuild + re-upload.
 
 **⚠️ THE KEY INSIGHT — the two fixes deploy by completely different routes.** The iOS app is a **webview shell**
 pointing at `lolo-shop96.com`, so **account deletion goes live by deploying the website (push main → VPS); it needs
@@ -82,16 +103,27 @@ and a clean replay stayed on `/account` for 8s with an empty navigation log. It 
 no app code redirects to `/`. The wrong-password path is verified correct in both the e2e and the browser.
 
 ### Open follow-ups
-- **Two separate deploys, in this order.** ① **Website** (account deletion): push main → VPS. `scripts/deploy.sh`
-  runs `npm run migrate` (L17, applies `db/schema.sql` which carries 076) **before** `pm2 reload` (L23), so the
-  column lands by itself. This alone satisfies 5.1.1(v) — the app is a webview shell. ② **iOS binary** (camera):
-  commit + push the `codemagic.yaml` change **on `ios-appstore`**, trigger the build, select the new binary in ASC.
-  **Pushing main can never fix the crash — `codemagic.yaml` does not exist on main and Codemagic builds from
-  `ios-appstore`.**
-- **⚠️ IF THE `codemagic.yaml` EDIT IS LOST** (it was made in a git worktree under the session scratchpad, which is
-  temp storage — `git worktree list` to check if it still exists): re-add it by hand on the `ios-appstore` branch as
-  a new step in `workflows.ios-appstore.scripts`, placed **after** "Bake the real LoloShop icon" and **before**
-  "Set up code signing". The whole step is:
+- ~~**Deploy the website**~~ **DONE 2026-07-30 (c)** — main `f42b585`, CI green, verified live (`/account` 200,
+  demo login tokenises, deletion-preview 200). 5.1.1(v) is satisfied on prod right now.
+- ~~**Commit + push the `codemagic.yaml` camera fix**~~ **DONE** — `ios-appstore` `b83cd5f`.
+- **▶ NEXT, and it is all outside the repo — nothing left to code:**
+  1. **Start the Codemagic build by hand** on branch `ios-appstore`. There is **no `triggering:` block** in
+     `codemagic.yaml`, so the push did not start one. Watch for the step **"Inject the iOS privacy usage strings"** —
+     it prints the three keys and **fails the build** if they are absent, so a green build IS the proof the crash is
+     fixed at the plist level.
+  2. **Select the new binary in App Store Connect** (the old one, build 1784823314, is the rejected/crashing one).
+  3. **Reply to Apple** with a **screen recording on a physical device**: sign in with the demo account → «حسابي» →
+     «حذف حسابي نهائياً» → password → «تم حذف حسابك». Apple asked for this explicitly and wants it kept in the App
+     Review Notes for future submissions.
+  4. **⚠️ AFTER the reviewer walks the deletion flow, the demo account is GONE** — they delete it for real. Run
+     **`npm run demo-account`** on prod to recreate it before the *next* submission, or that one fails with "we could
+     not sign in". Verified intact as of this session, so nothing to do before *this* resubmission.
+  5. **Walk the camera on a real device (TestFlight)** before resubmitting — the one thing that could not be tested
+     here (no Mac, no iPhone). The build now fails loudly if the keys are missing, so the failure mode is a red build
+     rather than a silent rejection, but the actual "Take Photo" tap should still be tapped once.
+- **⚠️ IF THE `codemagic.yaml` EDIT IS EVER LOST AGAIN** — it is now committed at `ios-appstore` `b83cd5f`, so
+  recover it with `git show b83cd5f`. Kept below for reference; it belongs as a step in
+  `workflows.ios-appstore.scripts`, **after** "Bake the real LoloShop icon" and **before** "Set up code signing":
 
   ```yaml
       - name: Inject the iOS privacy usage strings (FIXES the camera crash)
@@ -113,18 +145,16 @@ no app code redirects to `/`. The wrong-password path is verified correct in bot
   It must run **after** `npx cap sync ios` because `npx cap add ios` regenerates `Info.plist` from Capacitor's
   template on every build and wipes anything committed into it. The `exit 1` loop is deliberate: without it a
   silently failed injection ships another crashing binary.
-- **Reply to Apple in App Store Connect** with a **screen recording on a physical device** showing: sign in with the
-  demo account → «حسابي» → «حذف حسابي نهائياً» → password → «تم حذف حسابك». Apple asked for this explicitly, and
-  they want it in the App Review Notes for future submissions. **Then run `npm run demo-account` on prod to restore
-  the login before resubmitting.**
-- **Verify the camera on a real device before resubmitting** — this is the one fix I could not test here (no Mac, no
-  iPhone). The build now fails if the plist keys are absent, so the failure mode is a red build, not a silent
-  rejection, but the actual "Take Photo" tap should still be walked on TestFlight.
+- **⚠️ THE ATTENDANCE-BREAKS BROWSER WALKTHROUGH IS STILL NOT DONE, AND IT IS NOW LIVE ON PROD** (shipped in
+  `6a13162` alongside the deletion fix — it could not be cleanly split out). It is 161/161 test-verified, so the
+  money rule itself is covered; what is unverified is the UI/flow. **Walk it on prod:** staff request → admin approve
+  → «طلعت» → «رجعت» → confirm the balance drops; then an over-quota break and a «خرجت بدون موافقة» to confirm the
+  deduction appears and that approving it afterwards removes it. Also expect **مدة العمل on `/admin/attendance` to
+  read lower than before** — that is the intended `worked_minutes` change, not a regression.
 - **`ios-appstore` is still behind main and its lockfile is still desynced** (`@capacitor/ios` in package.json, not
   in package-lock). Building the app from that branch is fine — the shell just loads the live site — but do not merge
   it to main without running `npm install` in `frontend/` first.
-- Unchanged on the board: the attendance-breaks feature above is still uncommitted in the same tree (my changes do
-  not touch it), the payout-card feature + its `suggested_amount` lifetime-accrual bug, staff GPS parked. Still
+- Unchanged on the board: the payout-card feature's `suggested_amount` lifetime-accrual bug, staff GPS parked. Still
   untracked and must not be committed: `frontend/public/dev-login.html`, `frontend/public/dev-token-tmp.json`.
 
 ---
