@@ -71,15 +71,22 @@ function durationAr(minutes) {
   return `${mins} دقيقة`;
 }
 
-/** Everything a staff response needs: the open break plus this month's balance. */
+/**
+ * Everything a staff response needs. This MUST be the full attendance payload —
+ * settings + record + break + break_balance — not just the break half.
+ *
+ * The frontend maps every one of these endpoints through the same
+ * `mapAttendancePayload`, which reads `settings.start_time` unconditionally. A
+ * break-only body made it throw `Cannot read properties of undefined` on the
+ * worker's screen even though the break had been written (HTTP 201), so the
+ * worker saw an error, retried, and hit «لديك خروج مؤقت مفتوح». Delegating to
+ * attendanceController.todayPayload keeps the shape identical to
+ * GET /attendance/today by construction instead of by memory.
+ *
+ * Call only AFTER the transaction commits — todayPayload uses the pool.
+ */
 async function staffPayload(userId, settings, extra = {}) {
-  const timeZone = settings.timezone || DEFAULT_TZ;
-  const monthKey = breaks.monthKeyFor(new Date(), timeZone);
-  const [open, balance] = await Promise.all([
-    breaks.openBreakFor({ query }, userId),
-    breaks.loadBalance({ query }, userId, monthKey, breaks.effectiveAllowance(settings)),
-  ]);
-  return { break: breaks.serializeBreak(open), break_balance: balance, ...extra };
+  return { ...(await attendance.todayPayload(userId, settings)), ...extra };
 }
 
 /** Load the worker's effective settings and refuse the exempt / non-staff cases. */

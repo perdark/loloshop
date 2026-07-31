@@ -455,9 +455,20 @@ async function deleteUserSettings(req, res) {
   res.json({ data: { user_id: userId, has_override: false } });
 }
 
-async function getToday(req, res) {
-  const settings = await loadEffectiveSettings(req.user.id);
-  const timeZone = settings.timezone || DEFAULT_TZ;
+/**
+ * The ONE staff attendance payload: schedule + today's record + break state.
+ *
+ * Shared with attendanceBreakController so that every break action (request /
+ * «طلعت» / «رجعت» / cancel) answers with exactly the same shape as
+ * GET /attendance/today. That is not tidiness — the frontend maps all of them
+ * through a single `mapAttendancePayload`, which reads `settings.start_time`
+ * unconditionally and throws `Cannot read properties of undefined` on a partial
+ * body. Returning half a payload from any one of these endpoints breaks the
+ * screen even though the write itself succeeded.
+ *
+ * Must be called OUTSIDE a transaction — it uses the pool, not a client.
+ */
+async function todayPayload(userId, settings, timeZone = settings.timezone || DEFAULT_TZ) {
   const today = localParts(new Date(), timeZone).date;
   const { rows } = await query(
     `SELECT r.*, ${BREAK_MINUTES_SQL}
@@ -476,15 +487,18 @@ async function getToday(req, res) {
            LIMIT 1)
          LIMIT 1
        ) r`,
-    [req.user.id, today]
+    [userId, today]
   );
-  res.json({
-    data: {
-      settings: serializeSettings(settings),
-      record: serializeRecord(rows[0]),
-      ...(await breakState(req.user.id, settings, timeZone)),
-    },
-  });
+  return {
+    settings: serializeSettings(settings),
+    record: serializeRecord(rows[0]),
+    ...(await breakState(userId, settings, timeZone)),
+  };
+}
+
+async function getToday(req, res) {
+  const settings = await loadEffectiveSettings(req.user.id);
+  res.json({ data: await todayPayload(req.user.id, settings) });
 }
 
 /**
@@ -814,6 +828,7 @@ module.exports = {
   // the shop timezone and the staff-role guard
   loadEffectiveSettings,
   serializeSettings,
+  todayPayload,
   localParts,
   ensureStaff,
   DEFAULT_TZ,
