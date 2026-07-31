@@ -6,6 +6,130 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
+## 2026-07-31 (b) — ✅ APP-ONLY GATE VERIFIED + DEPLOYED WITH THE FLAG **OFF** · one dead-app bug found in the gate · one live prod bug found in attendance breaks
+
+**Spec: `docs/superpowers/specs/2026-07-31-app-only-gate.md`** (owner decisions, route policy, deferred jobs).
+Phase 9 is DONE in a browser. **The flag is still OFF, so prod behaviour is unchanged — flipping it
+is the one remaining step and it is a VPS env edit, not a code change (see «HOW TO TURN IT ON»).**
+
+Gates: `eslint` **0 errors** (6 warnings, all inside `android/app/build/intermediates/` — a build
+artifact, pre-existing) · `next build` **exit 0 twice** (flag OFF and flag ON) · `tsc` 0 ·
+**backend 161/161**.
+
+**Owner decisions this session:** ① installed **PWA users get bounced too** — matches "everything
+lives in the app"; and because the gate fires at `/`, Chrome stops offering «Install app» to new
+visitors, so PWA installs die off on their own. ② store links supplied: Play
+`com.loloshop96.app`, App Store **id6793976053**.
+
+### ⚠️ THE BUG THAT WOULD HAVE KILLED THE APP — one signal was not enough
+The spec's read of `Bridge.java` stopped one line too early. **L266 gates the whole injection on
+`WebViewFeature.isFeatureSupported(DOCUMENT_START_SCRIPT)` — that is Android WebView 105+.** Below
+105 Capacitor falls back to `WebViewLocalServer`, which **never serves our HTML because `server.url`
+is remote** → `window.Capacitor` is **undefined** → the app would have redirected **itself** to the
+Play Store, on every launch, unrecoverably. **Fix: the gate now accepts `window.Capacitor ||
+window.androidBridge`.** `androidBridge` is registered on *every* Capacitor path
+(`MessageHandler.java:25-41` — `addWebMessageListener` on WebView 88+, classic
+`addJavascriptInterface` below), so it covers exactly the gap. iOS needs no equivalent: `WKUserScript`
+at document start has no version gate.
+
+**Proved with a controlled comparison**, not by reading — a proxy that splices the native global in
+right after `<body>` (i.e. ahead of the gate script, exactly like `addDocumentStartJavaScript`):
+`window.Capacitor` → holds · `androidBridge` **only** → holds · **nothing injected → bounces to Play**.
+Same proxy, same page; only the global differs. Script kept at the path named in the session
+scratchpad; re-create it in 20 lines if the gate is ever touched again.
+
+### Verified in a real browser (production build, not dev)
+- flag OFF → gate string count **0** in the HTML, storefront renders, `/get-app` still 200.
+- flag ON desktop → `/` bounces to `/get-app`; `/admin` `/workshop` `/tv/<key>` `/privacy` `/terms`
+  `/delete-account` all **held**.
+- Android UA → `/join/ABC123` → `play.google.com/…?id=com.loloshop96.app&**referrer=join_ABC123**`,
+  and the **real Play listing loaded** (so the package id is right).
+- iOS UA → `apps.apple.com/app/id6793976053` returns **301 → `itms-appss://`**. Desktop Chrome then
+  aborts it («a user gesture is required») because Linux has no handler for that scheme — that abort
+  is a **test-rig artifact, not a defect**; on a real iPhone the hop opens the App Store. **Still the
+  one thing to eyeball on a real iPhone.**
+- **Inside the app** → `/` and `/join/<code>` both held, full storefront rendered.
+- `TeamKeyEntry` — wrong key → «الرمز غير صحيح» · staff key → `/s` «دخول الموظفين» · workshop key →
+  `/w` «ورشة لولو» · a whole pasted `/s/<key>` link → routes straight through. It renders as a
+  **sibling** `<form>`, so the nested-form hazard is genuinely avoided.
+- Per-device bypass `?web=<token>` unlocked a plain browser.
+
+### ⚠️ Three things about the gate the owner should know (none block the flip)
+1. **The gate only fires on FULL page loads, never on client-side navigation.** `/admin` is
+   allowlisted → the app's own auth guard client-side-redirects to `/login` → the gate never re-runs.
+   So anyone who types `lolo-shop96.com/admin` lands on a working `/login` and can browse the whole
+   site from there. Consistent with «product routing, not a security boundary», but it *is* a hole in
+   the intent. Closing it needs an SPA-navigation guard, which **could bounce app users mid-session if
+   it is wrong** — deliberately NOT built without a decision.
+2. **`NEXT_PUBLIC_GATE_BYPASS` ships in the page source in plaintext**, so the bypass is not secret.
+   Inherent to any client-side gate (turning JS off bypasses it too).
+3. The allowlist publishes the strings `/s/ /w/ /d/` in every page's HTML. It leaks **no key**, but it
+   does advertise that the secret portals exist — the same concern the spec raises for AASA in Track B.
+
+### 🔴 SEPARATE, AND IT WAS LIVE ON PROD: attendance breaks were broken in the browser
+Shipped 2026-07-30 with 161/161 tests and **never clicked by a human**. The first human click failed:
+requesting a break threw **`Cannot read properties of undefined (reading 'start_time')`** — a raw
+English stack message shown to an Arabic-only worker.
+
+**Root cause:** `attendanceBreakController.staffPayload` returned only `{break, break_balance}`, but
+the frontend maps **all five** staff break calls (request · «طلعت» · «رجعت» · cancel) through one
+`mapAttendancePayload`, which reads `settings.start_time` unconditionally. **The write always
+succeeded (HTTP 201) — only the render died**, so the worker saw an error, retried, and hit «لديك خروج
+مؤقت مفتوح» from the DB's partial unique index. The tests never caught it because they call the API
+directly and never run the frontend mapper.
+
+**Fix:** extracted `attendanceController.todayPayload()` as the single source for
+`{settings, record, break, break_balance}`; `getToday` and `staffPayload` both delegate to it, so the
+break endpoints now answer with **exactly** the shape of `GET /attendance/today` by construction
+rather than by memory. Backend-only, no migration. **161/161 still pass.**
+
+**Then walked end to end in the browser** (local dev DB, so no real payroll was touched): بصمة دخول →
+request 30 د → admin «أوافق» → «طلعت الآن» (live timer + balance ticking down) → «رجعت» → **الرصيد
+10 س → 9 س 59 د**, «مدة العمل» annotated «بعد خصم 1 دقيقة خروج مؤقت». Then the money path: a second
+break taken via «خرجت بدون موافقة» → «استهلكت 2 دقيقة · **خصم ١٬٠٠٠ د.ع**» → admin «**أوافق وألغي
+الخصم**» → **مخصوم ١٬٠٠٠ → —** while استهلك stays 2 د. That is owner rule ⑥ exactly: unapproved minutes
+still consume the allowance, and approving afterwards cancels only the money.
+
+### HOW TO TURN THE GATE ON (the only step left)
+`NEXT_PUBLIC_*` is inlined at **build** time, so this is an env edit **plus a rebuild** — not a
+runtime toggle. On the VPS:
+```bash
+cd /var/www/loloshop/frontend
+echo 'NEXT_PUBLIC_APP_ONLY=1' >> .env
+echo 'NEXT_PUBLIC_APPSTORE_URL=https://apps.apple.com/app/id6793976053' >> .env
+echo 'NEXT_PUBLIC_PLAY_URL=https://play.google.com/store/apps/details?id=com.loloshop96.app' >> .env
+echo 'NEXT_PUBLIC_GATE_BYPASS=<pick-a-random-token>' >> .env   # your own escape hatch
+cd /var/www/loloshop && bash scripts/deploy.sh                  # rebuild + pm2 reload (~2-3 min)
+```
+**Turning it OFF is the same edit in reverse + another deploy (~2–3 min) — it is NOT instant.** The
+instant per-device escape is `https://lolo-shop96.com/login?web=<the token you set>`, which sets
+`localStorage.loloshop_web_ok` and unlocks that one browser forever.
+
+**Then, on a real phone, in this order:** ① open the **app** → it must behave exactly as today,
+nothing bouncing (this is the one that matters); ② open `lolo-shop96.com` in **Chrome** → Play Store;
+③ open it on an **iPhone** → confirm the App Store actually opens (the `itms-appss://` hop is the only
+step no desktop test could cover); ④ tap a `/join/<code>` link on Android → Play with the referrer.
+
+### Open follow-ups
+1. **Flip the flag** (above), then the 4 real-phone checks.
+2. ⚠️ **Rotate `STAFF_PORTAL_KEY` if the laptop `.env` value matches prod.** Testing `TeamKeyEntry`
+   put the key in a browser network log as a query string (`GET /auth/staff-portal/members?key=…`).
+   Worth noting generally: **these portal keys travel as URL query params**, so they land in access
+   logs and any proxy in between — the nginx config already redacts the portal paths, but the API
+   call is a different line.
+3. The `/admin → /login` SPA hole and the plaintext bypass token (above) — owner decisions, not bugs.
+4. **Lateness deductions are still display-only** (from 2026-07-30) — «مبلغ التأخير» never reaches the
+   salary, while break deductions now do. Still an open owner decision, untouched.
+5. Deferred, unchanged: **image/upload slowness** (spec explains why half the diagnosis is probably
+   backwards — measure with Slow-4G + 4× CPU before building) and **Track B deep links** (both
+   manifests 404 today; needs new binaries + one review; claim `/join/*` ONLY).
+6. Local dev DB now has an **open attendance record + 2 closed breaks for ابو عبدو** from this
+   walkthrough. Harmless snapshot noise; prod untouched.
+7. Still untracked and must never be committed: `frontend/public/dev-login.html`,
+   `frontend/public/dev-token-tmp.json`.
+
+---
+
 ## 2026-07-30 (c) — ✅ BOTH APPLE FIXES PUSHED + WEBSITE DEPLOYED. Only the Codemagic rebuild + the ASC reply are left.
 
 **Website track is DONE and verified live. iOS track is committed and pushed but the binary is NOT built yet.**

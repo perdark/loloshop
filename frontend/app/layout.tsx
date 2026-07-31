@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Amiri, Cairo, Great_Vibes, Playfair_Display } from "next/font/google";
 import { PwaRegistrar } from "@/components/PwaRegistrar";
 import { ToasterProvider } from "@/components/providers/ToasterProvider";
+import { APP_ONLY, buildGateScript } from "@/lib/app-gate";
 import "./globals.css";
 
 const amiri = Amiri({
@@ -89,6 +90,16 @@ export default function RootLayout({
       className={`${amiri.variable} ${cairo.variable} ${playfair.variable} ${greatVibes.variable} h-full`}
     >
       <body className="min-h-full flex flex-col font-sans antialiased">
+        {/*
+          App-only gate. FIRST element in <body> deliberately: it must run before any of the
+          page's DOM parses, so a browser visitor never sees a flash of the real storefront
+          before being sent to the store. Capacitor injects its bridge at document start, so
+          `window.Capacitor` is already readable this early — see lib/app-gate.ts.
+          Emitted only when NEXT_PUBLIC_APP_ONLY=1, so the kill switch removes it entirely.
+        */}
+        {APP_ONLY && (
+          <script dangerouslySetInnerHTML={{ __html: buildGateScript() }} />
+        )}
         <PwaRegistrar />
         {children}
         <ToasterProvider />

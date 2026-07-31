@@ -1,5 +1,36 @@
 # Progress
 
+## 2026-07-31 (b) — App-only gate verified + shipped with the flag OFF · dead-app bug caught · attendance breaks were broken on prod
+
+**Deployed with `NEXT_PUBLIC_APP_ONLY` unset, so prod behaviour is unchanged.** Turning it on is a
+VPS env edit + rebuild — the exact commands are in `HANDOFF.md`. Gates: `eslint` 0 errors ·
+`next build` 0 (run twice, flag OFF and flag ON) · `tsc` 0 · **backend 161/161**.
+
+- **Phase 9 done in a real browser against a production build**, not dev: flag OFF is byte-identical
+  to today (gate string absent from the HTML); flag ON bounces `/` to `/get-app` while `/admin`,
+  `/workshop`, `/tv/<key>`, `/privacy`, `/terms`, `/delete-account` all still open; an Android UA on
+  `/join/ABC123` lands on the real Play listing with `&referrer=join_ABC123`.
+- **Caught a bug that would have bricked the app.** The gate keyed off `window.Capacitor` alone, but
+  `Bridge.java:266` only injects it when `DOCUMENT_START_SCRIPT` is supported — **Android WebView
+  105+**. Below that the app would have redirected *itself* to the Play Store forever. Now accepts
+  `window.Capacitor || window.androidBridge`; proved with a controlled comparison where only the
+  injected global changes (Capacitor → holds · androidBridge only → holds · neither → bounces).
+- `TeamKeyEntry` verified with the real staff and workshop keys, a pasted `/s/<key>` link, and a
+  wrong key.
+- **Owner decisions:** PWA users get bounced too; App Store id `6793976053`.
+- **Known and deliberately not fixed:** the gate only runs on full page loads, so `/admin` →
+  (client-side) `/login` escapes it; and the bypass token ships in the page source. Both are
+  properties of a client-side gate, both recorded in `HANDOFF.md` for an owner call.
+
+**Separately — attendance breaks were live-broken on prod since 2026-07-30.** Shipped with 161/161
+tests but never clicked; the first click threw `Cannot read properties of undefined (reading
+'start_time')` at an Arabic-only worker. `staffPayload` returned half a payload while the frontend
+maps every break action through one `mapAttendancePayload`. The write always succeeded (201) — only
+the render died, so workers retried into «لديك خروج مؤقت مفتوح». Fixed by making
+`attendanceController.todayPayload()` the single source of the payload shape. Then walked end to end:
+request → approve → «طلعت» → «رجعت» → balance 10 س → 9 س 59 د, and the money path «خرجت بدون موافقة»
+→ خصم ١٬٠٠٠ د.ع → «أوافق وألغي الخصم» → deduction cleared while the allowance stays spent.
+
 ## 2026-07-30 (b) — Apple rejection fixed: camera crash (2.1a) + in-app account deletion (5.1.1v)
 
 **Uncommitted. Migration 076 applied to the laptop dev DB + mirrored into `db/schema.sql`. The

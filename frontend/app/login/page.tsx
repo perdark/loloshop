@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { AuthCard } from "@/components/auth/AuthCard";
 import { Input } from "@/components/ui/Input";
 import { OtpVerifyForm } from "@/components/auth/OtpVerifyForm";
+import { TeamKeyEntry } from "@/components/auth/TeamKeyEntry";
 import { login, loginVerifyOtp, resendLoginOtp, getApiErrorMessage } from "@/lib/auth-api";
 import { setToken, setUser, safeRedirectTarget } from "@/lib/auth";
 import type { User, UserRole } from "@/lib/types";
@@ -164,6 +165,15 @@ export default function LoginPage() {
               </Link>
             </p>
           </form>
+
+          {/*
+            Sibling of the form, never nested inside it — nested <form> elements are invalid
+            HTML and the inner one silently loses its submit. Gives staff/workshop/design-team
+            a way into their secret-key portals inside the app, which has no address bar.
+          */}
+          <div className="mt-4">
+            <TeamKeyEntry />
+          </div>
         </div>
 
         {/* Step 2 — OTP */}
