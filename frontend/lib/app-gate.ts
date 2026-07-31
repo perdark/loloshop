@@ -71,12 +71,17 @@ export const GATE_BYPASS = process.env.NEXT_PUBLIC_GATE_BYPASS || "";
  * paint. A useEffect gate would flash the real page to every browser visitor first.
  */
 export function buildGateScript(): string {
+  // `<` is escaped because JSON.stringify does NOT escape "</script>", and this string is
+  // interpolated straight into an inline <script>. Every value here comes from an env var the
+  // owner sets, so this is defence in depth rather than a live hole — but a stray "</script>"
+  // in a store URL would close the tag early and turn the rest of the gate into page markup.
+  // < is a valid JS string escape, so the parsed value is unchanged.
   const config = JSON.stringify({
     allow: BROWSER_ALLOWED_PREFIXES,
     play: PLAY_URL,
     ios: APP_STORE_URL,
     bypass: GATE_BYPASS,
-  });
+  }).replace(/</g, "\\u003c");
 
   return `(function(){try{
 var C=${config},p=location.pathname;
