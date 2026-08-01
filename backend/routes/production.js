@@ -2,7 +2,7 @@ const router = require('express').Router();
 const { authRequired, authQuery, requireRole, requireStaffType } = require('../middleware/auth');
 const c = require('../controllers/productionController');
 const designs = require('../controllers/designController');
-const { imageUpload, imageUploadLimit, validateUploadedImage } = require('../lib/upload');
+const { imageUpload, imageUploadLimit, validateUploadedImage, validateUploadedArtwork } = require('../lib/upload');
 
 // EventSource cannot set headers. Exchange the normal bearer token for a 60-second,
 // stream-only ticket, then put only that scoped ticket in the SSE URL.
@@ -73,7 +73,7 @@ router.post('/orders/:id/tailor-complete', c.tailorComplete);
 router.post('/orders/:id/tailor-reopen', c.tailorReopen);
 // Final artwork is produced by the design/embroidery roles — not the read-only tailor/presser.
 // (requireStaffType also auto-passes manager + admin.)
-router.post('/orders/:id/final-design', requireStaffType('designer', 'digitizer', 'embroiderer'), imageUploadLimit, imageUpload.single('file'), validateUploadedImage, c.uploadFinalDesign);
+router.post('/orders/:id/final-design', requireStaffType('designer', 'digitizer', 'embroiderer'), imageUploadLimit, imageUpload.single('file'), validateUploadedArtwork, c.uploadFinalDesign);
 
 // Individual design approval gate — designer (+ manager/admin).
 router.post('/designs/:id/approve', requireStaffType('designer'), designs.approveDesign);

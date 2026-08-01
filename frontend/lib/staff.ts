@@ -966,9 +966,13 @@ export async function uploadFinalDesign(
   // Use apiUploadFile so axios sets the multipart boundary automatically — setting
   // Content-Type: multipart/form-data manually (no boundary) makes multer drop the file.
   // Backend responds { data: { url } } — absolute /uploads URL.
+  // compress:false — this is the artwork the embroiderer works from, so it must stay
+  // pixel-exact. Every other upload path is a phone photo and IS downscaled.
   const data = (await apiUploadFile(
     `/production/orders/${id}/final-design`,
-    file
+    file,
+    "file",
+    { compress: false }
   )) as { data: { url: string } };
   return data.data;
 }

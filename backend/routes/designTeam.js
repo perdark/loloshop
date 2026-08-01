@@ -1,7 +1,7 @@
 const router = require('express').Router();
 const rateLimit = require('express-rate-limit');
 const { authRequired, requireRole } = require('../middleware/auth');
-const { imageUpload, imageUploadLimit, validateUploadedImage } = require('../lib/upload');
+const { imageUpload, imageUploadLimit, validateUploadedArtwork } = require('../lib/upload');
 const { accountLoginLimit } = require('../lib/accountLoginLimit');
 const c = require('../controllers/designTeamController');
 
@@ -32,7 +32,7 @@ router.get('/jobs', c.requireTeamAccess, c.listJobs);
 router.get('/jobs/:orderId', c.requireTeamAccess, c.getJob);
 router.post('/jobs/:orderId/claim', c.requireTeamWorker, c.claimJob);
 router.post('/jobs/:orderId/ready', c.requireTeamWorker, c.markReady);
-router.post('/jobs/:orderId/final-design', c.requireTeamWorker, imageUploadLimit, imageUpload.single('file'), validateUploadedImage, c.uploadFinalDesign);
+router.post('/jobs/:orderId/final-design', c.requireTeamWorker, imageUploadLimit, imageUpload.single('file'), validateUploadedArtwork, c.uploadFinalDesign);
 router.post('/jobs/:orderId/approve', c.requireTeamLead, c.approveJob);
 router.post('/jobs/:orderId/reject', c.requireTeamLead, c.rejectJob);
 
