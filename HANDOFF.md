@@ -6,6 +6,128 @@ follow-ups**. This file is auto-loaded into context via `@HANDOFF.md` in `CLAUDE
 
 ---
 
+## 2026-08-01 — 🖼️ IMAGE WEIGHT: product photos were **4–6 MB each, served raw and uncacheable** · fixed at delivery AND at upload · `priority` was a silent no-op in Next 16
+
+**Uncommitted on main.** No migration. Gates: **backend 167/167** (+6 new) · `tsc` 0 · `eslint` **0 errors**
+(6 warnings, all pre-existing in the Android build artifact) · verified over real HTTP and in a real browser.
+`next build` NOT run locally (disk 93%); it runs on the server at deploy.
+
+**The report.** «the products photos and uploading photos is slow … can u check for everything is a client side or ssr?»
+
+### What was actually wrong — measured on prod, not guessed
+1. **Product photos are 4.3–6.1 MB PNGs.** The وشاح الفراشة hero: **6,003,607 bytes, 1856×2304**, on a 390 px phone.
+2. **Nothing resized on upload.** `lib/upload.js` loaded `sharp` but only called `.metadata()` to validate. A 6 MB
+   phone photo went in and stayed 6 MB on disk forever.
+3. **`/uploads` is `Cache-Control: private, no-store`** (`server.js:73` + `nginx-ssl.conf:57`), so every raw-`<img>`
+   photo re-downloaded in full on **every visit and every back-navigation**.
+4. **The product page bypassed the optimizer** — `ProductMediaGallery` used a raw `<img>` (its comment even said
+   "catalog media is served unoptimized anyway") and passed `unoptimized` on the thumbnails. **The home grid was
+   already correct**, which is exactly why the grid felt fine and the product page didn't.
+5. **Answer to the SSR question: 47 of 54 pages are `"use client"`.** The whole storefront renders client-side —
+   no `generateMetadata`, no server fetching anywhere in `app/(student)/`. The product page is a 4-step waterfall
+   (HTML shell → JS → hydrate → `useEffect` fetch → *only then* the image request). Trace at Slow-4G + 4× CPU:
+   **LCP 3.68 s of which 2.79 s is render delay, CLS 1.10.**
+
+**The optimizer was already installed and working — just unused on the page that needed it.** Measured on prod:
+the same 4.5 MB PNG through `/_next/image` is **96 KB PNG / 13 KB WebP**, `x-nextjs-cache: HIT`,
+`public, max-age=14400`. It also **overrides the upstream `no-store`**, so routing through it fixes caching too.
+
+### What shipped
+- **`ProductMediaGallery`** — hero is now `<Image>` through the optimizer inside a fixed `aspect-[4/5]` box with
+  `object-contain` (photos measured 1856×2304 = 4:5, a few 1792×2400 — `contain` means the odd ratio letterboxes
+  rather than **distorting**, which plain `fill` would have done). The fixed box also reserves space before load,
+  which was the bulk of the 1.10 CLS. Thumbnails dropped `unoptimized` and gained `sizes="64px"`.
+- **⚠️ `priority` IS DEPRECATED IN NEXT 16 AND SILENTLY DOES NOTHING** (`node_modules/next/dist/docs/…/image.md`:
+  deprecated in v16.0.0 in favour of `preload`). My first cut used it and the browser showed **no**
+  `fetchpriority`/`loading` attribute at all. Now `loading="eager" fetchPriority="high"` — `preload` is the wrong
+  replacement *here* because the page is a client component that fetches in an effect, so the src does not exist at
+  SSR time and a `<head>` preload link could never be written. **See follow-ups: ~8 other components still pass the
+  dead `priority` prop.**
+- **`backend/lib/upload.js` — re-encode on upload.** Files **over 500 KB** are auto-oriented from EXIF (which also
+  strips EXIF/GPS), capped at **2000 px** long edge, and re-encoded. **Format policy is deliberately conservative:
+  alpha → PNG, everything else → JPEG q85. No WebP is ever written to disk** — both are universally readable, so
+  nothing downstream (staff downloading artwork, the calligraphy compositor, the ZIP export) can be handed a format
+  it cannot open. Next converts to WebP/AVIF at *delivery*, which is where a modern format actually matters.
+  Never throws: a failure keeps the validated original, because a slow upload beats a rejected one.
+- **Artwork is exempt, on BOTH sides.** New `validateUploadedArtwork` (validate, never re-encode) on the two
+  final-design routes, matched by `compress: false` on `uploadFinalDesign`. Embroidery artwork stays pixel-exact.
+- **`frontend/lib/imageCompress.ts` + wired into `apiUploadFile`** — browser-side downscale before upload, same
+  policy as the server. Put at the **single choke point all 11 callers already pass through** so a new upload screen
+  cannot forget it. Non-images and small files pass through untouched; any failure returns the original file.
+
+### Verified
+- **Server, real HTTP, same file both ways:** the real 6 MB prod photo POSTed to `/api/catalog/uploads/image` →
+  **old code stored 6,003,607 bytes** · **new code stored 208,010 bytes (3.5%), `.jpg`, 1611×2000**, no orphan
+  `.png`, no stray `.tmp`.
+- **Browser, real upload through the real `<input type=file>`:** a 15.53 MB / 2600×3200 PNG left the browser as
+  **content-length 385,548 (2.4%)** with `filename="phone-photo.jpg"` + `Content-Type: image/jpeg` rewritten
+  **together** (a MIME/extension mismatch is a hard 400 in `imageFilter`). **That file would previously have been
+  rejected outright by multer's 10 MB cap.**
+- **Browser, product page:** hero renders through `/_next/image` at `w=640`, `object-contain`, `fetchpriority=high`,
+  `loading=eager`, uncropped.
+- **6 new backend tests** covering the shrink, alpha preservation, the small-file skip, the artwork no-op, the
+  mismatch rejection, and the never-grow guard.
+- **Prod delivery after the fix:** 20–41 KB WebP in 0.6–0.8 s (cold MISS measured at 1.36 s).
+
+**⚠️ A test caught a real design point.** The first fixture used random noise — incompressible, so the JPEG came out
+*larger* and the "never grow the file" guard correctly declined to re-encode. **The code was right and the test was
+wrong.** The fixture is now smooth gradients + grain, which reproduces the real ratio (6.0 MB → 184 KB). Kept the
+noise case as its own regression test.
+
+### ⚠️ SECOND PASS — the HOME page is a different bug, and the field data says it is the worse one
+Owner came back with «at Home page it was loading very fast and now still slow». **First fact: none of the above was
+deployed** (still uncommitted), so prod was unchanged. But measuring the home page turned up a separate, real defect.
+
+**CrUX field data (real users, p75, home page URL): LCP 3905 ms · TTFB 1293 ms · Load delay 2113 ms ·
+Load duration 289 ms · CLS 0.49.** Read that breakdown carefully: **load duration is only 289 ms**, so on the home
+page **image bytes are NOT the problem** — the grid already went through the optimizer. The killer is the **2113 ms
+"load delay"**: the browser cannot even *discover* the product images until the client JS has downloaded, hydrated
+and fetched the catalog. (A lab trace on a warm cache reports LCP 840 ms and hides all of this — trust the field data.)
+
+**Found and fixed: two API round trips were STRICTLY SERIAL.** `app/(student)/page.tsx` chained `loadShop()` *inside*
+`getMaintenance().then()`, so every visitor waited for the maintenance check to come back before the shop feed was
+even requested (~0.5 s each on prod, worse on mobile). They are now fired concurrently — verified in the browser:
+the two requests start **3 ms apart and overlap**, where they were previously back-to-back. Safe because the
+maintenance early-return sits *ahead* of the `loading` gate in the render path, so an active maintenance window still
+wins regardless of how the feed resolved; the only cost is one wasted feed fetch during maintenance.
+`/api/catalog/promo` was checked and is **not** a third serial hop — it belongs to `DiscountPopup` in the layout.
+
+**What is left on the home page is the client-render waterfall itself, and it needs an owner decision** — see below.
+
+### Open follow-ups
+- **▶ NOTHING IS DEPLOYED. Deploy = push.** No migration. This is the single reason the site still felt slow.
+- **⚠️ The real home-page fix is SSR, and it is blocked by an architectural constraint worth knowing:**
+  `getShopFeed()` is role-aware (`optionalAuth` → retail vs wholesaler pricing) and **the JWT lives in
+  `localStorage`, not a cookie — so a Server Component cannot read it** and cannot know who is asking. SSR would
+  therefore have to render the *guest* feed and let the client correct it after hydration, which risks briefly
+  showing the wrong price book to a logged-in wholesaler. Options: (a) move the token to an httpOnly cookie and
+  SSR properly, (b) SSR the guest feed + client re-fetch, accepting the flash, (c) leave it. **Not decided.**
+- **CLS 0.49 on the home page** is also unaddressed — same root cause as the product page had (the skeleton→content
+  swap), but it needs the sizes of the hero/story bands pinned, not just the product tiles.
+- Nothing about the image work is retroactive: **the 54 existing catalog photos stay 4–6 MB on
+  disk** — delivery is fixed for them by the optimizer, but only *new* uploads get shrunk at the source.
+- **Optional backfill of the existing 54 photos** (6 MB → ~200 KB on disk) is NOT done and is **not** a pure file job:
+  re-encoding changes `.png` → `.jpg`, so it needs a matching `products.image_url` / `product_images.url` update in
+  the same transaction. Worth it mainly to make optimizer MISSes cheaper; deliberately left as a separate decision.
+- **~8 components still pass the dead `priority` prop** (`SplashIntro`, `VipHero` ×2, `BrandMark` in the three
+  sidebars/navs, `AutoRotatingImage`, `ui/BrandLogo` which re-exports it as its own prop). All silently lazy-load
+  today. Pre-existing, not touched — `BrandLogo` needs an API decision, so it is a small batch of its own.
+- **The client-side render waterfall is untouched** (fix #5 from the diagnosis). Making `/product/[id]` a Server
+  Component would remove the ~2.79 s render delay, but that file is 600+ lines of client state — a real refactor,
+  and a separate decision.
+- **`/uploads` `no-store` was deliberately NOT relaxed.** `/uploads/images/` is a shared bucket — admin catalog media
+  and customer artwork land in the same directory — so relaxing it would put customer artwork in shared caches. That
+  was the LS-08 decision. Routing catalog media through `/_next/image` gets the caching without touching it.
+- **⚠️ Housekeeping from this session:** a broad `pkill -f next-server` I ran killed a **khatuna-build** dev server
+  as collateral; it came back on its own and now holds **:3000**, so loloshop's dev server was started on **:3001**.
+  The API was restarted with `CORS_ORIGIN` extended for :3001 **via an env var, not a file edit** — `backend/.env` is
+  unchanged, so a plain restart returns it to normal.
+- Local dev only: the dev DB is a prod snapshot holding absolute `lolo-shop96.com` image URLs while local `apiHost`
+  is `localhost`, so with the optimizer on, dev 500s with «hostname not configured». Harmless — prod's `apiHost`
+  is the real host (proven: `/_next/image` returns 200 + WebP live). Just know it if you enable the optimizer in dev.
+
+---
+
 ## 2026-07-31 (b) — ✅ APP-ONLY GATE VERIFIED + DEPLOYED WITH THE FLAG **OFF** · one dead-app bug found in the gate · one live prod bug found in attendance breaks
 
 **Spec: `docs/superpowers/specs/2026-07-31-app-only-gate.md`** (owner decisions, route policy, deferred jobs).

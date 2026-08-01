@@ -1,5 +1,38 @@
 # Progress
 
+## 2026-08-01 — Image weight: product photos were 4–6 MB served raw and uncacheable
+
+**Uncommitted on main. No migration.** Gates: **backend 167/167** (+6) · `tsc` 0 · `eslint` 0 errors.
+Full detail in `HANDOFF.md`.
+
+- **Measured, not guessed:** prod product photos are **4.3–6.1 MB PNGs** (hero: 6,003,607 bytes at
+  1856×2304, on a 390 px phone). Nothing resized them on upload, `/uploads` is `no-store` so they
+  re-downloaded every visit, and the product page used a raw `<img>` that skipped Next's optimizer.
+  The home grid already used the optimizer — that's why only the product page felt broken.
+- **Answer to "client-side or SSR?": 47 of 54 pages are `"use client"`.** The storefront is entirely
+  client-rendered — LCP 3.68 s with **2.79 s of render delay** on Slow-4G + 4× CPU, CLS 1.10.
+- **Fixed at delivery:** hero + thumbnails routed through `/_next/image` inside a fixed `aspect-[4/5]`
+  `object-contain` box (no crop, no distortion, and it reserves space so the CLS goes away).
+- **Fixed at the source:** uploads over 500 KB are auto-oriented, capped at 2000 px and re-encoded
+  (alpha → PNG, else JPEG q85 — no WebP on disk, so no downstream tool can be handed a format it
+  can't open). Embroidery artwork is exempt on both client and server.
+- **Fixed the upload leg:** browser-side downscale wired into `apiUploadFile`, the one choke point all
+  11 upload callers share.
+- **Verified end to end:** same 6 MB photo over real HTTP → **6,003,607 → 208,010 bytes (3.5%)**; a
+  15.53 MB pick left the browser as **385,548 bytes (2.4%)** — a file multer would previously have
+  rejected at its 10 MB cap.
+- **⚠️ `priority` is deprecated in Next 16 and silently does nothing** — caught in the browser (no
+  `fetchpriority` attribute emitted). Now `loading="eager" fetchPriority="high"`. **~8 other
+  components still pass the dead prop** and lazy-load their above-the-fold images; not touched.
+- **Second pass — the home page is a separate bug.** CrUX field data (real users, p75):
+  **LCP 3905 ms, load delay 2113 ms, load duration only 289 ms** — so image bytes are NOT the home
+  page's problem; discovering them late is. Fixed one concrete cause: `app/(student)/page.tsx`
+  chained the shop feed *inside* `getMaintenance().then()`, making two API round trips **strictly
+  serial**. Now concurrent (verified: start 3 ms apart and overlap). The rest is the client-render
+  waterfall — the SSR fix is **blocked on an owner decision** because the JWT lives in `localStorage`,
+  so a Server Component can't know the viewer's price role.
+- **⚠️ None of this is deployed** — still uncommitted, which is why the live site was unchanged.
+
 ## 2026-07-31 (b) — App-only gate verified + shipped with the flag OFF · dead-app bug caught · attendance breaks were broken on prod
 
 **Deployed with `NEXT_PUBLIC_APP_ONLY` unset, so prod behaviour is unchanged.** Turning it on is a

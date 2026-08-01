@@ -171,16 +171,23 @@ export default function StudentHomePage() {
     // Maintenance gate: public visitors see the notice instead of the shop.
     // Admins always bypass so they can preview/manage the live site.
     // Fail open — if the check errors, load the shop normally.
+    //
+    // ⚠️ These two run CONCURRENTLY on purpose. `loadShop()` used to be chained inside
+    // `getMaintenance().then()`, which made every single visitor pay two SERIAL round
+    // trips (~1s on mobile) before the grid could render — and, because the grid is what
+    // introduces the product <img>s, before the browser could even discover the images to
+    // start downloading them. That serial hop is the bulk of the 2113 ms LCP "load delay"
+    // this page shows in CrUX field data.
+    //
+    // The maintenance flag decides whether the shop is DISPLAYED, not whether it is worth
+    // FETCHING, so nothing depends on the order. The render path is unchanged: the
+    // maintenance early-return below still sits ahead of the `loading` gate, so an active
+    // maintenance window shows the notice no matter how the feed fetch resolved. The only
+    // cost is one wasted feed request during maintenance, which is rare and cheap.
+    loadShop();
     getMaintenance()
-      .then((m) => {
-        setMaintenance(m);
-        if (m.active && role !== "admin") return; // skip the shop entirely
-        loadShop();
-      })
-      .catch(() => {
-        setMaintenance({ active: false, message_ar: "الموقع قيد الصيانة" });
-        loadShop();
-      })
+      .then((m) => setMaintenance(m))
+      .catch(() => setMaintenance({ active: false, message_ar: "الموقع قيد الصيانة" }))
       .finally(() => setMaintenanceLoading(false));
   }, [loadShop, router]);
 
