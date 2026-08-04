@@ -45,7 +45,7 @@ export function VipHero({
           images={heroPhotos}
           alt={headline}
           sizes="100vw"
-          priority
+          eager
           showDots={false}
           imgClassName="object-cover object-[50%_18%]"
         />
@@ -54,7 +54,8 @@ export function VipHero({
           src={heroPhotos[0]}
           alt={headline}
           fill
-          priority
+          loading="eager"
+          fetchPriority="high"
           unoptimized
           sizes="100vw"
           className="object-cover object-[50%_18%]"

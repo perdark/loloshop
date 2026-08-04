@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { toast } from "sonner";
 import { getReferralInfo, joinWithCode, type ReferralInfo } from "@/lib/wholesaler";
 import { getApiErrorMessage } from "@/lib/api";
 import { Input } from "@/components/ui/Input";
@@ -40,6 +39,9 @@ export default function JoinPage() {
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  // Submit failure — rendered inline by the button instead of as a toast that floats over
+  // the form and disappears before a slow reader gets to it.
+  const [formError, setFormError] = useState("");
   const [form, setForm] = useState({
     full_name_third: "",
     phone: "",
@@ -82,6 +84,7 @@ export default function JoinPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setFormError("");
     if (!validate()) return;
 
     setLoading(true);
@@ -96,7 +99,7 @@ export default function JoinPage() {
       });
       setSubmitted(true);
     } catch (err) {
-      toast.error(getApiErrorMessage(err, "تعذر إرسال الطلب"));
+      setFormError(getApiErrorMessage(err, "تعذر إرسال الطلب"));
     } finally {
       setLoading(false);
     }
@@ -106,7 +109,11 @@ export default function JoinPage() {
     return (
       <div
         dir="rtl"
-        className="flex min-h-[60vh] flex-col items-center justify-center gap-4"
+        className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-cream px-5"
+        style={{
+          paddingTop: "max(1.5rem, calc(env(safe-area-inset-top, 0px) + 0.75rem))",
+          paddingBottom: "max(1.25rem, calc(env(safe-area-inset-bottom, 0px) + 0.75rem))",
+        }}
       >
         <GradCapLoader size={72} />
         <p className="text-xs font-medium tracking-wide text-[var(--shop-muted)]">
@@ -167,7 +174,8 @@ export default function JoinPage() {
         </p>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="flex w-full flex-1 flex-col">
+        <div className="space-y-4">
         <Input
           label="الاسم الثلاثي"
           placeholder="الاسم + اسم الأب + الجد"
@@ -194,14 +202,14 @@ export default function JoinPage() {
               aria-invalid={!!errors.phone}
               aria-describedby={errors.phone ? "join-phone-error" : undefined}
               className={[
-                "min-h-11 min-w-0 flex-1 rounded-xl border bg-beige px-3.5 py-2.5 text-ink outline-none transition-colors placeholder:text-ink/55",
+                "min-h-12 min-w-0 flex-1 rounded-xl border bg-beige px-3.5 py-2.5 text-base text-ink shadow-[var(--shadow-soft)] outline-none transition-colors placeholder:text-ink/55",
                 "focus:border-orange-ink focus:ring-2 focus:ring-orange-ink/20",
                 errors.phone ? "border-danger" : "border-line",
               ].join(" ")}
             />
           </div>
           {errors.phone && (
-            <p id="join-phone-error" className="text-xs text-danger" role="alert">
+            <p id="join-phone-error" className="text-sm font-medium text-danger" role="alert">
               {errors.phone}
             </p>
           )}
@@ -245,7 +253,7 @@ export default function JoinPage() {
             ))}
           </div>
           {errors.study_type && (
-            <p className="text-xs text-danger" role="alert">{errors.study_type}</p>
+            <p className="text-sm font-medium text-danger" role="alert">{errors.study_type}</p>
           )}
         </div>
 
@@ -271,22 +279,34 @@ export default function JoinPage() {
               aria-invalid={!!errors.instagram_username}
               aria-describedby={errors.instagram_username ? "join-instagram-error" : undefined}
               className={[
-                "min-h-11 min-w-0 flex-1 rounded-e-xl border bg-beige px-3.5 py-2.5 text-ink outline-none transition-colors placeholder:text-ink/55",
+                "min-h-12 min-w-0 flex-1 rounded-e-xl border bg-beige px-3.5 py-2.5 text-base text-ink shadow-[var(--shadow-soft)] outline-none transition-colors placeholder:text-ink/55",
                 "focus:border-orange-ink focus:ring-2 focus:ring-orange-ink/20",
                 errors.instagram_username ? "border-danger" : "border-line",
               ].join(" ")}
             />
           </div>
           {errors.instagram_username && (
-            <p id="join-instagram-error" className="text-xs text-danger" role="alert">
+            <p id="join-instagram-error" className="text-sm font-medium text-danger" role="alert">
               {errors.instagram_username}
             </p>
           )}
         </div>
+        </div>
 
-        <Button type="submit" fullWidth loading={loading}>
-          إرسال الطلب
-        </Button>
+        {/* Primary action anchored at the bottom of the column. */}
+        <div className="mt-auto space-y-4 pt-8">
+          {formError && (
+            <p
+              role="alert"
+              className="rounded-xl border border-danger/25 bg-danger/5 px-3.5 py-2.5 text-sm font-medium text-danger"
+            >
+              {formError}
+            </p>
+          )}
+          <Button type="submit" size="lg" fullWidth loading={loading}>
+            إرسال الطلب
+          </Button>
+        </div>
       </form>
     </AuthCard>
   );

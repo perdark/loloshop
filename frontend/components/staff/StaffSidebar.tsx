@@ -231,7 +231,7 @@ export function StaffSidebar({ user, open, onClose }: StaffSidebarProps) {
       {/* Brand header — warm veil so it reads as a premium header, not a plain bar */}
       <div className="bg-warm-veil border-b border-line px-5 py-5">
         <div className="flex items-center gap-3">
-          <BrandMark size={44} priority />
+          <BrandMark size={44} eager />
           <div>
             <p className="font-display text-sm font-semibold text-ink">لولو شوب</p>
             <p className="mt-0.5 text-xs font-medium text-orange-ink">{typeLabel}</p>

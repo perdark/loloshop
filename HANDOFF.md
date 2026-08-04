@@ -70,6 +70,120 @@ dated entry in the archive when you need the reasoning.
 
 ---
 
+## 2026-08-04 — ⚡ STOREFRONT MOVED SERVER-SIDE (the recorded SSR blocker was wrong) · auth family made native · onboarding gender rows redrawn · **a TEMP debug line that would have locked every user out**
+
+**Committed on main, NOT pushed.** No migration. Spec: `docs/superpowers/specs/2026-08-04-native-app-shell-and-ssr-design.md`.
+Gates on the final tree: **`tsc` 0 · `eslint` 0 errors** (6 warnings, all pre-existing in the Android build
+artifact) · **`next build` exit 0** · **backend 167/167** (backend untouched). Walked in a real browser against a
+**production** build, not just dev.
+
+Built in parallel across three sessions on disjoint file sets; this session owned the performance lane and did the
+merge, gates and commit.
+
+### ⚠️ READ THIS FIRST: the SSR blocker recorded on 2026-08-01 was not real
+The board said: *«getShopFeed() is role-aware and the JWT lives in localStorage, so a Server Component cannot know
+who is asking»* — and therefore SSR risked showing a wholesaler the retail price book. The backend says otherwise:
+
+- `priceRoleForUser(user)` → **`if (!user) return 'retail'`**. A guest already gets the retail price book.
+- `buildShopFeed(audience)` → the visibility filter is the **same string**, `AND p.wholesaler_only = FALSE`, for
+  **both** `guest` and `retail`. Only `wholesaler_student` branches.
+- So the guest feed and a signed-in retail student's feed are **identical** apart from an `audience` label the UI
+  never prices off. The one audience that differs (rep-linked students) is redirected to `/my-order` before the
+  feed renders.
+
+**There was never a price book to leak.** No httpOnly-cookie migration was needed. That migration remains the
+right long-term move (it would let `/wholesaler` SSR too) and is still deferred — it touches every login path for
+1,141 live accounts.
+
+⚠️ **The invariant this now depends on:** if anyone makes the `guest` and `retail` audience filters diverge in
+`buildShopFeed`, `lib/catalog-server.ts` becomes wrong and the home page must go back to fetching per-user. That
+is written at the top of the file too.
+
+### What shipped — performance
+- **`lib/catalog-server.ts`** — unauthenticated server fetch for the feed + maintenance flag. `revalidate: 120`
+  matches the backend's own 120 s `memoCache` exactly; maintenance uses **30 s** because it is a switch the owner
+  flips when something is wrong. **Never throws** — a failed fetch returns `null`/`{active:false}` and the page
+  falls back to the old client path, so a backend hiccup costs the optimisation, not the storefront.
+- **`lib/catalog-map.ts`** — the shop-feed mappers extracted out of `lib/catalog.ts`. The feed is now fetched by
+  **two transports** (axios in the browser, native fetch on the server) and they must produce byte-identical
+  objects or hydration disagrees and React throws away the server HTML. One mapper, imported by both.
+- **`app/(student)/page.tsx` → Server Component** rendering the new client `components/shop/StudentHome.tsx`.
+  **`app/(student)/shop/page.tsx`** feeds `CatalogBrowser` the same way.
+- **Both routes now prerender statically with ISR** — `/` at 30 s, `/shop` at 2 m. Measured on the running server:
+  **106 product images and the LCP hero present in the initial HTML, zero skeleton.** That deletes the 2113 ms
+  "load delay" from the CrUX field data (where load *duration* was only 289 ms — the bytes were never the problem,
+  discovery was), and TTFB becomes a static file read.
+- **CLS needed no new work** — the skeleton→content swap that caused most of 0.49 no longer happens, and
+  `CohortProof` already pins its band height while `ProductTile` uses fixed aspect ratios.
+- **`priority` purged from 8 components.** It is **deprecated and inert in Next 16**, so every one of them was
+  silently lazy-loading an above-the-fold image. `BrandMark`/`BrandLogo`'s prop was **renamed `priority` →
+  `eager`** deliberately: the rename forces each call site to be re-read instead of letting a dead prop keep
+  looking correct.
+- **`turbopack: { root }` pinned in `next.config.ts`.** Next infers the workspace root by walking up for a lockfile
+  and taking the **outermost** match — a stray empty `package-lock.json` in `/home/mint` (no `package.json` beside
+  it) made it treat the entire home directory as the project root. Also deleted a second stray empty lockfile at
+  the repo root. Same trap can happen on the VPS; pinning makes it deterministic.
+
+### What shipped — onboarding + auth (other sessions, reviewed here)
+- **Gender selector redrawn.** Stacked rows (`icon · label · tick`), 76 px, **58 px full-colour figures** in
+  `components/student/GraduateIcons.tsx`. **Three earlier monochrome-silhouette attempts were rejected** —
+  a one-colour shape carries meaning only in its outline, and «graduate wearing a mortarboard» has the same
+  outline for everyone. These use skin/hair/gown/tassel as four channels, and the differentiator is a large dark
+  mass (her hair, drawn wider than her shoulders) because a mass survives blur where a contour does not.
+  **No beard** (owner removed it) and **no hijab** — `public/lookbook/grad-moments-1.jpg` shows rows of hijabi
+  graduates *and* students with hair out, so committing to either excludes real buyers. Working check: shrink to
+  50 % and blur 2 px; the two must still be tellable apart.
+- **Onboarding hero re-cropped** to `onboarding-hero-v2.jpg` — the original put the subject dead-centre with gold
+  embroidery running through the entire lower third, exactly where the headline sits.
+- **Auth family made native by fixing `AuthCard` once**, so login/register/forgot/reset/verify-otp/join all
+  inherit it: floating card killed for a full-bleed screen, **`TeamKeyEntry` collapsed behind «فريق العمل؟»**
+  (it rendered unconditionally, so every student saw a staff secret-key field), inline errors instead of a
+  floating toast, safe-area insets, transform-only step transitions. **No auth logic changed** — phone + password
+  + OTP is untouched.
+
+### 🔴 The bug that every gate passed
+`app/login/page.tsx` shipped with:
+```
+const [step, setStep] = useState<"credentials"|"otp">("otp"); // TEMP-VERIFY
+```
+A verification pass seeded the OTP step to screenshot it and left it in. **The phone/password form was
+unreachable — nobody could log in.** `tsc`, `eslint` and `next build` all passed, because it is perfectly valid
+code. Only opening the page in a browser caught it. Fixed, with a comment explaining why that line must never
+come back, and the whole diff was swept for other `TEMP`/`DEBUG`/`TODO` markers (clean).
+
+### Verified in a browser (production build)
+Fresh visitor → onboarding step 1 (re-cropped hero, «تخطّي» reachable) → step 2 → icons measured **58 px inside
+76 px rows, not clipped** → filled سارة + طالبة → **register flipped feminine**: «أهلاً سارة» ·
+«جاهزة ليوم تخرّجچ؟ خلّينا نجهّز إطلالتچ.» · nav search «دوّري…» → reload: **not asked again**, profile persisted.
+`/login` renders the credentials form, full-bleed, no staff-key field. `/shop` and `/account` hydrate fully.
+Home page hydrates **67/67 interactive elements, 689/732 nodes**.
+
+⚠️ **Hydration on `/` takes ~2 s on this laptop** under two dev servers + Chrome. Reading the DOM before that
+makes the page look dead and the greeting look stuck on the neutral register — it is not. I burned a long
+detour on exactly that false alarm; **wait 2 s before asserting anything about home-page hydration.**
+
+### Open follow-ups
+- **▶ Committed but NOT pushed. Deploy = push + `bash scripts/deploy.sh` on the VPS.** No migration.
+- **Set `API_INTERNAL_URL=http://127.0.0.1:4000` in the VPS frontend `.env`.** Optional but free: without it the
+  server-side fetch falls back to `NEXT_PUBLIC_API_URL`, i.e. the box resolves its own DNS and opens a TLS
+  connection to itself through nginx to reach an API on localhost. Correct either way, just slower.
+- **The API must be reachable during `npm run build`** now, since `/` and `/shop` prerender. It is — PM2 keeps the
+  old backend running through the frontend build — and if it ever is not, the pages prerender with `initialFeed:
+  null` and self-heal on the first revalidation.
+- **`server-only` is not a dependency.** `lib/catalog-server.ts` uses a zero-dependency `typeof window` guard
+  instead. Adding the package would be tidier.
+- **`npm test` does not exist in `backend/`** — the real command is **`node --test test/`**. Worth putting in
+  CLAUDE.md.
+- **The product page (`/product/[id]`) was deliberately NOT converted.** 629 lines of client state; splitting it
+  into a server hero + client configurator was cut as the highest-risk item in a same-day ship. It still pays the
+  full client waterfall.
+- Unchanged and still open: `users.gender` column (gender stays device-local), the «لبسوا تصاميمنا» caption
+  overstating registrations as wearers, the 54 existing 4–6 MB photos on disk, and the `/get-app` landing page
+  (owner is doing that in a separate session).
+- Untracked and must never be committed: `frontend/public/dev-login.html`, `frontend/public/dev-token-tmp.json`.
+
+---
+
 ## 2026-08-02 — 📱 APP SHELL: onboarding + bottom tab bar + storefront-D home (sliders per family) · `/shop` is a real page · a dead gender key found
 
 **Uncommitted on main.** No migration. Gates, all run against the FINAL code: **backend 167/167** · `tsc` 0 ·

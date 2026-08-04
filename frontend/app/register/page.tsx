@@ -34,6 +34,9 @@ export default function RegisterPage() {
   const [step, setStep] = useState<"form" | "otp">("form");
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  // Submit failure the backend did NOT attribute to a field — rendered inline above the
+  // primary action instead of as a toast that floats over the form and then vanishes.
+  const [formError, setFormError] = useState("");
   // OTP challenge pinned to the account register() just created; resending rotates it.
   const [challengeId, setChallengeId] = useState("");
   const [form, setForm] = useState({
@@ -63,6 +66,7 @@ export default function RegisterPage() {
 
   async function handleRegister(e: React.FormEvent) {
     e.preventDefault();
+    setFormError("");
     if (!validate()) return;
     setLoading(true);
     try {
@@ -86,7 +90,9 @@ export default function RegisterPage() {
       const message = getApiErrorMessage(err, "تعذّر إنشاء الحساب");
       const field = err instanceof FieldError ? err.field : undefined;
       if (field) setErrors((prev) => ({ ...prev, [field]: message }));
-      toast.error(message);
+      // Named field → it already renders under that input. Unnamed → one inline alert by
+      // the submit button. Either way it stays on screen until the student fixes it.
+      else setFormError(message);
     } finally {
       setLoading(false);
     }
@@ -104,9 +110,13 @@ export default function RegisterPage() {
   }
 
   return (
-    <AuthCard title={step === "form" ? "إنشاء حساب" : "رمز التحقق"}>
+    <AuthCard
+      title={step === "form" ? "إنشاء حساب" : "رمز التحقق"}
+      subtitle={step === "form" ? "بياناتك تُستخدم لتجهيز وشاحك وتسليمه" : undefined}
+    >
       {step === "form" ? (
-        <form onSubmit={handleRegister} className="space-y-4">
+        <form onSubmit={handleRegister} className="flex w-full flex-1 flex-col">
+          <div className="space-y-4">
           <Input
             label="الاسم الكامل"
             value={form.name}
@@ -137,14 +147,14 @@ export default function RegisterPage() {
                 aria-invalid={!!errors.phone}
                 aria-describedby={errors.phone ? "reg-phone-error" : undefined}
                 className={[
-                  "min-h-11 min-w-0 flex-1 rounded-xl border bg-beige px-3.5 py-2.5 text-ink outline-none transition-colors placeholder:text-ink/55",
+                  "min-h-12 min-w-0 flex-1 rounded-xl border bg-beige px-3.5 py-2.5 text-base text-ink shadow-[var(--shadow-soft)] outline-none transition-colors placeholder:text-ink/55",
                   "focus:border-orange-ink focus:ring-2 focus:ring-orange-ink/20",
                   errors.phone ? "border-danger" : "border-line",
                 ].join(" ")}
               />
             </div>
             {errors.phone && (
-              <p id="reg-phone-error" className="text-xs text-danger" role="alert">
+              <p id="reg-phone-error" className="text-sm font-medium text-danger" role="alert">
                 {errors.phone}
               </p>
             )}
@@ -194,7 +204,7 @@ export default function RegisterPage() {
               ))}
             </div>
             {errors.study_type && (
-              <p className="text-xs text-danger" role="alert">{errors.study_type}</p>
+              <p className="text-sm font-medium text-danger" role="alert">{errors.study_type}</p>
             )}
           </div>
 
@@ -220,14 +230,14 @@ export default function RegisterPage() {
                 aria-invalid={!!errors.instagram_username}
                 aria-describedby={errors.instagram_username ? "reg-instagram-error" : undefined}
                 className={[
-                  "min-h-11 min-w-0 flex-1 rounded-e-xl border bg-beige px-3.5 py-2.5 text-ink outline-none transition-colors placeholder:text-ink/55",
+                  "min-h-12 min-w-0 flex-1 rounded-e-xl border bg-beige px-3.5 py-2.5 text-base text-ink shadow-[var(--shadow-soft)] outline-none transition-colors placeholder:text-ink/55",
                   "focus:border-orange-ink focus:ring-2 focus:ring-orange-ink/20",
                   errors.instagram_username ? "border-danger" : "border-line",
                 ].join(" ")}
               />
             </div>
             {errors.instagram_username && (
-              <p id="reg-instagram-error" className="text-xs text-danger" role="alert">
+              <p id="reg-instagram-error" className="text-sm font-medium text-danger" role="alert">
                 {errors.instagram_username}
               </p>
             )}
@@ -257,19 +267,31 @@ export default function RegisterPage() {
               ))}
             </div>
           </div>
+          </div>
 
-          <Button type="submit" fullWidth loading={loading}>
-            إنشاء الحساب
-          </Button>
-          <p className="text-center text-sm">
-            لديك حساب؟{" "}
-            <Link
-              href="/login"
-              className="font-medium text-orange-ink underline-offset-2 hover:underline"
-            >
-              تسجيل الدخول
-            </Link>
-          </p>
+          {/* Primary action anchored at the bottom of the column. */}
+          <div className="mt-auto space-y-4 pt-8">
+            {formError && (
+              <p
+                role="alert"
+                className="rounded-xl border border-danger/25 bg-danger/5 px-3.5 py-2.5 text-sm font-medium text-danger"
+              >
+                {formError}
+              </p>
+            )}
+            <Button type="submit" size="lg" fullWidth loading={loading}>
+              إنشاء الحساب
+            </Button>
+            <p className="text-center text-sm text-ink-soft">
+              لديك حساب؟{" "}
+              <Link
+                href="/login"
+                className="inline-flex min-h-11 items-center px-1 font-medium text-orange-ink underline-offset-4 hover:underline"
+              >
+                تسجيل الدخول
+              </Link>
+            </p>
+          </div>
         </form>
       ) : (
         <OtpVerifyForm

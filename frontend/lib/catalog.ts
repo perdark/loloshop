@@ -9,19 +9,20 @@ import type {
   PriceRole,
   ProductImage,
   ShopFeed,
-  ShopPackageCard,
-  ShopProductCard,
 } from "./types";
 
-const baseURL =
-  process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ||
-  "http://localhost:4000";
+// The shop-feed mappers moved to ./catalog-map so the Server Component fetch in
+// ./catalog-server can reuse them verbatim — two transports, one shape, or the
+// server HTML and the client hydration disagree. Re-exported here because eight
+// modules already import resolveCatalogMediaUrl from "@/lib/catalog".
+import {
+  mapCompareAtPrice,
+  mapImageFit,
+  mapShopFeed,
+  resolveCatalogMediaUrl,
+} from "./catalog-map";
 
-export function resolveCatalogMediaUrl(url: string | null | undefined): string | null {
-  if (!url) return null;
-  if (url.startsWith("http")) return url;
-  return `${baseURL}${url.startsWith("/") ? "" : "/"}${url}`;
-}
+export { resolveCatalogMediaUrl };
 
 function mapOption(raw: Record<string, unknown>): CatalogOption {
   return {
@@ -82,49 +83,10 @@ function mapGroup(
   };
 }
 
-/** Coerce the raw image_fit value to a known fit, defaulting to "cover". */
-function mapImageFit(raw: unknown): import("./types").ImageFit {
-  return raw === "contain" ? "contain" : "cover";
-}
-
-/** Optional «السعر قبل الخصم» — NULL/absent → null, else a finite number. */
-function mapCompareAtPrice(raw: unknown): number | null {
-  if (raw == null) return null;
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : null;
-}
-
 function mapProductImage(raw: Record<string, unknown>): ProductImage {
   return {
     id: String(raw.id),
     url: resolveCatalogMediaUrl(String(raw.url)) || "",
-    sort: Number(raw.sort ?? 0),
-  };
-}
-
-function mapShopProduct(raw: Record<string, unknown>): ShopProductCard {
-  return {
-    id: String(raw.id),
-    type: raw.type as ShopProductCard["type"],
-    nameAr: String(raw.name_ar ?? raw.nameAr),
-    description: (raw.description as string | null) ?? null,
-    basePrice: Number(raw.base_price ?? raw.basePrice ?? 0),
-    compareAtPrice: mapCompareAtPrice(raw.compare_at_price ?? raw.compareAtPrice),
-    imageUrl: resolveCatalogMediaUrl(raw.image_url as string | null),
-    imageFit: mapImageFit(raw.image_fit ?? raw.imageFit),
-    featured: Boolean(raw.featured),
-    customizable: Boolean(raw.customizable),
-    genderRestriction:
-      (raw.gender_restriction as ShopProductCard["genderRestriction"]) ?? null,
-  };
-}
-
-function mapShopPackage(raw: Record<string, unknown>): ShopPackageCard {
-  return {
-    id: String(raw.id),
-    nameAr: String(raw.name_ar ?? raw.nameAr),
-    price: Number(raw.price ?? 0),
-    imageUrl: resolveCatalogMediaUrl(raw.image_url as string | null),
     sort: Number(raw.sort ?? 0),
   };
 }
@@ -193,25 +155,8 @@ export async function getShopFeed(): Promise<ShopFeed> {
   const { data } = await api.get<{ data: Record<string, unknown> }>(
     "/catalog/shop"
   );
-  const raw = data.data;
-  const byTypeRaw = (raw.by_type as Record<string, Record<string, unknown>[]>) || {};
-  const byType: ShopFeed["byType"] = {};
-  for (const [type, list] of Object.entries(byTypeRaw)) {
-    byType[type as keyof ShopFeed["byType"]] = (list || []).map(mapShopProduct);
-  }
-  const packages = ((raw.packages as Record<string, unknown>[]) || []).map(
-    mapShopPackage
-  );
-  // Old deployments (and any counting failure) send no `graduates` — normalise the
-  // absent case to null so the hero has exactly one "no number" branch to handle.
-  const graduatesRaw = Number(raw.graduates);
-  return {
-    priceRole: (raw.price_role as PriceRole) || "retail",
-    audience: (raw.audience as import("./types").ShopAudience) ?? "guest",
-    packages,
-    byType,
-    graduates: Number.isFinite(graduatesRaw) && graduatesRaw > 0 ? graduatesRaw : null,
-  };
+  // Same mapper the Server Component uses — see ./catalog-map for why that matters.
+  return mapShopFeed(data.data);
 }
 
 export function mapHeroSlide(raw: Record<string, unknown>): HeroSlide {

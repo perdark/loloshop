@@ -1,4 +1,14 @@
 import type { NextConfig } from "next";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+// Pin the workspace root. Next infers it by walking UP for a lockfile and taking the
+// OUTERMOST match — and a stray empty `package-lock.json` in the home directory (no
+// package.json beside it) made it choose `/home/mint`, i.e. the developer's entire home
+// folder, as the project root. That inflates filesystem watching and cache validation on
+// every build, and the same thing happens on the VPS if a stray lockfile exists there.
+// Pinning it makes the build deterministic regardless of what sits above the repo.
+const projectRoot = path.dirname(fileURLToPath(import.meta.url));
 
 const apiHost = process.env.NEXT_PUBLIC_API_URL
   ? new URL(process.env.NEXT_PUBLIC_API_URL).hostname
@@ -7,6 +17,7 @@ const apiHost = process.env.NEXT_PUBLIC_API_URL
 const nextConfig: NextConfig = {
   // Don't advertise the framework (LS-16). nginx needs `server_tokens off;` for its half.
   poweredByHeader: false,
+  turbopack: { root: projectRoot },
   // Allow the dev server's HMR/assets to be served to the LAN IP (phone testing on
   // the same Wi-Fi). Derived from NEXT_PUBLIC_API_URL so it tracks the machine IP
   // automatically. Dev-only; ignored in production.

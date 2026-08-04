@@ -84,22 +84,25 @@ export function TeamKeyEntry() {
     }
   }
 
+  // Collapsed by default. This used to render its field unconditionally, so every student
+  // arriving at /login was shown a secret-key box meant for staff, workshop and the design
+  // team — three groups no student belongs to. It is now one quiet line at the very bottom.
   if (!open) {
     return (
       <p className="text-center text-sm">
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="font-medium text-ink-soft underline-offset-2 transition-colors hover:text-orange-ink hover:underline"
+          className="inline-flex min-h-11 items-center px-3 text-[var(--shop-muted)] underline-offset-4 transition-colors hover:text-orange-ink hover:underline"
         >
-          دخول الفريق برمز خاص
+          فريق العمل؟
         </button>
       </p>
     );
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-3 border-t border-ink/10 pt-4">
+    <form onSubmit={handleSubmit} className="space-y-3 border-t border-line pt-5">
       <Input
         label="رمز الفريق"
         type="password"
@@ -109,7 +112,7 @@ export function TeamKeyEntry() {
         autoComplete="off"
         autoFocus
       />
-      <p className="text-xs text-ink-soft">
+      <p className="text-xs text-[var(--shop-muted)]">
         للموظفين وعمّال الورشة وفريق التصميم — الرمز يعطيك إياه المدير.
       </p>
       <button

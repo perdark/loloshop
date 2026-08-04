@@ -90,8 +90,9 @@ export function OtpVerifyForm({
     } catch (err: unknown) {
       const msg =
         err instanceof Error ? err.message : "رمز غير صحيح";
+      // Inline only. This used to fire a toast as well, so a wrong code produced the same
+      // sentence twice — once under the boxes, once floating over the screen.
       setOtpError(msg);
-      toast.error(msg);
       setDigits(["", "", "", "", "", ""]);
       setTimeout(() => inputsRef.current[0]?.focus(), 50);
     } finally {
@@ -103,7 +104,7 @@ export function OtpVerifyForm({
     e.preventDefault();
     const code = digits.join("");
     if (code.length !== 6) {
-      toast.error("أدخل الرمز المكوّن من ٦ أرقام");
+      setOtpError("أدخل الرمز المكوّن من ٦ أرقام");
       return;
     }
     await submitOtp(code);
@@ -134,88 +135,94 @@ export function OtpVerifyForm({
   }
 
   return (
-    <form onSubmit={handleOtpSubmit} className="space-y-5">
-      {/* WhatsApp hint */}
-      <div className="rounded-[12px] border border-ink/10 bg-cream px-4 py-3.5 text-center text-sm text-ink-soft">
-        <p>أُرسل رمز التحقق عبر واتساب إلى</p>
-        <p className="mt-1 font-bold tracking-widest text-ink" dir="ltr">+964 {phone}</p>
-      </div>
-
-      {/* OTP digit boxes */}
-      <div>
-        <p className="mb-3 text-center text-sm font-medium text-ink-soft">أدخل الرمز المكوّن من ٦ أرقام</p>
-        <div
-          className="flex justify-center gap-2"
-          dir="ltr"
-          onPaste={handleDigitPaste}
-        >
-          {digits.map((d, i) => (
-            <input
-              key={i}
-              ref={(el) => { inputsRef.current[i] = el; }}
-              type="text"
-              inputMode="numeric"
-              maxLength={1}
-              value={d}
-              disabled={otpLoading}
-              onChange={(e) => handleDigitChange(i, e.target.value)}
-              onKeyDown={(e) => handleKeyDown(i, e.key)}
-              aria-label={`رقم ${i + 1}`}
-              aria-describedby={otpError ? "otp-error" : undefined}
-              aria-invalid={!!otpError || undefined}
-              className={[
-                "h-12 w-10 rounded-md border text-center text-xl font-bold text-ink outline-none transition-colors duration-150",
-                "focus:border-orange-ink focus:ring-2 focus:ring-orange-ink/20",
-                otpError ? "border-danger bg-danger/5" : d ? "border-orange-ink bg-orange-ink/5" : "border-ink/15 bg-beige",
-                otpLoading ? "opacity-50" : "",
-              ].join(" ")}
-            />
-          ))}
+    <form onSubmit={handleOtpSubmit} className="flex w-full flex-1 flex-col">
+      <div className="space-y-5">
+        {/* WhatsApp hint */}
+        <div className="rounded-2xl border border-line bg-[var(--shop-sink)] px-4 py-3.5 text-center text-sm text-ink-soft">
+          <p>أُرسل رمز التحقق عبر واتساب إلى</p>
+          <p className="mt-1 font-bold tracking-widest text-ink" dir="ltr">+964 {phone}</p>
         </div>
-        {otpError && (
-          <p id="otp-error" role="alert" className="mt-2 text-center text-xs text-danger">
-            {otpError}
-          </p>
-        )}
+
+        {/* OTP digit boxes */}
+        <div>
+          <p className="mb-3 text-center text-sm font-medium text-ink-soft">أدخل الرمز المكوّن من ٦ أرقام</p>
+          <div
+            className="flex justify-center gap-2"
+            dir="ltr"
+            onPaste={handleDigitPaste}
+          >
+            {digits.map((d, i) => (
+              <input
+                key={i}
+                ref={(el) => { inputsRef.current[i] = el; }}
+                type="text"
+                inputMode="numeric"
+                maxLength={1}
+                value={d}
+                disabled={otpLoading}
+                onChange={(e) => handleDigitChange(i, e.target.value)}
+                onKeyDown={(e) => handleKeyDown(i, e.key)}
+                aria-label={`رقم ${i + 1}`}
+                aria-describedby={otpError ? "otp-error" : undefined}
+                aria-invalid={!!otpError || undefined}
+                className={[
+                  "h-13 w-11 rounded-xl border text-center text-xl font-bold text-ink outline-none transition-colors duration-150",
+                  "focus:border-orange-ink focus:ring-2 focus:ring-orange-ink/20",
+                  otpError ? "border-danger bg-danger/5" : d ? "border-orange-ink bg-orange-ink/5" : "border-line bg-beige",
+                  otpLoading ? "opacity-50" : "",
+                ].join(" ")}
+              />
+            ))}
+          </div>
+          {otpError && (
+            <p id="otp-error" role="alert" className="mt-3 text-center text-sm font-medium text-danger">
+              {otpError}
+            </p>
+          )}
+        </div>
+
+        {/* Resend sits with the code, where someone who never received it is looking. */}
+        <p className="text-center text-sm">
+          <button
+            type="button"
+            onClick={handleResend}
+            disabled={countdown > 0 || resending}
+            className="inline-flex min-h-11 items-center px-3 font-medium text-orange-ink transition-colors hover:text-ink disabled:cursor-not-allowed disabled:text-ink/40"
+          >
+            {resending
+              ? "جارٍ الإرسال…"
+              : countdown > 0
+              ? `إعادة الإرسال (${countdown})`
+              : "إعادة إرسال الرمز"}
+          </button>
+        </p>
       </div>
 
-      {/* Submit button */}
-      <button
-        type="submit"
-        disabled={otpLoading || digits.join("").length < 6}
-        className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-pill bg-orange-ink px-4 text-sm font-semibold text-white transition-[background-color,transform] duration-200 ease-out hover:bg-ink active:translate-y-px disabled:opacity-50 disabled:hover:bg-orange-ink"
-      >
-        {otpLoading ? (
-          <>
-            <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-            <span>جارٍ التحقق…</span>
-          </>
-        ) : (
-          submitLabel
-        )}
-      </button>
-
-      {/* Resend + back */}
-      <div className="flex items-center justify-between text-sm">
+      {/* Primary action anchored at the bottom of the screen. */}
+      <div className="mt-auto space-y-2 pt-8">
         <button
-          type="button"
-          onClick={onBack}
-          className="text-ink-soft transition-colors hover:text-ink"
+          type="submit"
+          disabled={otpLoading || digits.join("").length < 6}
+          className="inline-flex min-h-13 w-full items-center justify-center gap-2 rounded-pill bg-orange-ink px-4 text-base font-semibold text-white shadow-[var(--shadow-soft)] transition-[background-color,transform] duration-200 ease-out hover:bg-ink active:translate-y-px disabled:opacity-50 disabled:hover:bg-orange-ink"
         >
-          {backLabel}
+          {otpLoading ? (
+            <>
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+              <span>جارٍ التحقق…</span>
+            </>
+          ) : (
+            submitLabel
+          )}
         </button>
-        <button
-          type="button"
-          onClick={handleResend}
-          disabled={countdown > 0 || resending}
-          className="font-medium text-orange-ink transition-colors hover:text-ink disabled:cursor-not-allowed disabled:text-ink/40"
-        >
-          {resending
-            ? "جارٍ الإرسال…"
-            : countdown > 0
-            ? `إعادة الإرسال (${countdown})`
-            : "إعادة إرسال الرمز"}
-        </button>
+        <p className="text-center text-sm">
+          <button
+            type="button"
+            onClick={onBack}
+            className="inline-flex min-h-11 items-center px-3 text-ink-soft transition-colors hover:text-ink"
+          >
+            {backLabel}
+          </button>
+        </p>
       </div>
     </form>
   );

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { getApiErrorMessage } from "@/lib/api";
+import { getUser } from "@/lib/auth";
 import { getShopFeed } from "@/lib/catalog";
 import { SHOP_SECTION_TITLES, SHOP_TYPE_ORDER } from "@/lib/constants";
 import { featuredFirst, interleaveByType } from "@/lib/shop-sort";
@@ -22,11 +23,24 @@ type FilterKey = "all" | ProductType;
  * the bar is a button, not an input, so that there is exactly one search
  * implementation in the app rather than one per screen).
  */
-export function CatalogBrowser() {
+interface CatalogBrowserProps {
+  /**
+   * Feed fetched by the parent Server Component. `null` only when the API was
+   * unreachable at render time, in which case this falls back to fetching in an
+   * effect exactly as it used to.
+   *
+   * Why it is passed in: the first grid tiles were the LCP element and lazy-loaded,
+   * because nothing could request them until the client had hydrated and fetched.
+   * Handing the data down means the tiles are in the server HTML.
+   */
+  initialFeed?: ShopFeed | null;
+}
+
+export function CatalogBrowser({ initialFeed = null }: CatalogBrowserProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [feed, setFeed] = useState<ShopFeed | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [feed, setFeed] = useState<ShopFeed | null>(initialFeed);
+  const [loading, setLoading] = useState(initialFeed === null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterKey>("all");
   const [q, setQ] = useState("");
@@ -56,8 +70,37 @@ export function CatalogBrowser() {
   }, [router]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    if (!feed) {
+      // Server fetch failed — fall back to the old client path.
+      load();
+      return;
+    }
+    // ⚠️ Same rep-linked-student hazard as the home page: the server fetches
+    // anonymously, so `initialFeed.audience` is always "guest". Identical output
+    // for guests and ordinary retail students, but a rep-linked student belongs on
+    // /my-order and nothing would otherwise re-check. Only runs when signed in;
+    // does not gate the render, and the backend answer is memo-cached for 120 s.
+    if (!getUser()) return;
+    let cancelled = false;
+    getShopFeed()
+      .then((fresh) => {
+        if (cancelled) return;
+        if (fresh.audience === "wholesaler_student") {
+          router.replace("/my-order");
+          return;
+        }
+        setFeed(fresh);
+      })
+      .catch(() => {
+        // Keep the server-rendered feed — a failed background check must never
+        // blank a grid that is already on screen.
+      });
+    return () => {
+      cancelled = true;
+    };
+    // Runs once on mount: re-running whenever `feed` changes would loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [load, router]);
 
   // Honour ?type= and ?focus=search once, on arrival.
   useEffect(() => {

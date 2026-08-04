@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { getProfile, saveProfile, type Gender } from "@/lib/profile";
+import { GraduateFemaleIcon, GraduateMaleIcon } from "./GraduateIcons";
+import { GenderRow } from "./Onboarding";
 
 /**
  * «تفضيلاتي» — the edit screen for the two answers onboarding collects.
@@ -60,30 +62,28 @@ export function ProfilePreferences() {
       <span className="mt-4 block text-[13px] font-bold text-ink" id="pref-sex">
         طالب لو طالبة؟
       </span>
-      <div className="mt-2 grid grid-cols-2 gap-2.5" role="group" aria-labelledby="pref-sex">
-        {(
-          [
-            ["female", "طالبة"],
-            ["male", "طالب"],
-          ] as const
-        ).map(([value, label]) => (
-          <button
-            key={value}
-            type="button"
-            aria-pressed={gender === value}
-            onClick={() => {
-              setGender(value);
-              setDirty(true);
-            }}
-            className={`min-h-12 rounded-pill border text-sm font-bold transition-colors ${
-              gender === value
-                ? "border-orange-ink bg-orange/10 text-orange-ink"
-                : "border-line bg-beige text-ink-soft"
-            }`}
-          >
-            {label}
-          </button>
-        ))}
+      {/* The same rows onboarding asks with, deliberately — this screen edits
+          that exact answer, and a different-looking control for one field is how
+          a visitor ends up unsure whether they already answered it. */}
+      <div className="mt-2 flex flex-col gap-2.5" role="group" aria-labelledby="pref-sex">
+        <GenderRow
+          label="طالبة"
+          active={gender === "female"}
+          onClick={() => {
+            setGender("female");
+            setDirty(true);
+          }}
+          icon={<GraduateFemaleIcon size={58} />}
+        />
+        <GenderRow
+          label="طالب"
+          active={gender === "male"}
+          onClick={() => {
+            setGender("male");
+            setDirty(true);
+          }}
+          icon={<GraduateMaleIcon size={58} />}
+        />
       </div>
 
       <button

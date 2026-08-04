@@ -15,7 +15,7 @@ export default function NotFound() {
     >
       {/* Brand anchor */}
       <Link href="/" aria-label="لولو شوب — الصفحة الرئيسية" className="mb-12 inline-flex">
-        <BrandMark size={56} priority />
+        <BrandMark size={56} eager />
       </Link>
 
       {/* Error code — minimal, typographic */}

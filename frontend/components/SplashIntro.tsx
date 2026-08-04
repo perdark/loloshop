@@ -110,13 +110,15 @@ export function SplashIntro() {
             style={{ width: "145px", height: "145px", animationDelay: "0.18s" }}
           />
 
-          {/* Logo image */}
+          {/* Logo image. Was `priority`, which is deprecated and inert in Next 16 —
+              so the splash screen's own logo was lazy-loading. */}
           <Image
             src="/logo.png"
             alt="لولو شوب"
             width={168}
             height={168}
-            priority
+            loading="eager"
+            fetchPriority="high"
             className="relative h-36 w-36 object-contain drop-shadow-2xl animate-splash2-logo-rise"
             style={{ filter: "drop-shadow(0 0 18px rgba(255,177,0,0.35))" }}
           />
