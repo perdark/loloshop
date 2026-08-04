@@ -202,11 +202,15 @@ export async function getShopFeed(): Promise<ShopFeed> {
   const packages = ((raw.packages as Record<string, unknown>[]) || []).map(
     mapShopPackage
   );
+  // Old deployments (and any counting failure) send no `graduates` — normalise the
+  // absent case to null so the hero has exactly one "no number" branch to handle.
+  const graduatesRaw = Number(raw.graduates);
   return {
     priceRole: (raw.price_role as PriceRole) || "retail",
     audience: (raw.audience as import("./types").ShopAudience) ?? "guest",
     packages,
     byType,
+    graduates: Number.isFinite(graduatesRaw) && graduatesRaw > 0 ? graduatesRaw : null,
   };
 }
 

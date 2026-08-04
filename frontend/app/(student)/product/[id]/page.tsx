@@ -34,10 +34,17 @@ import { isAuthenticated, loginHref } from "@/lib/auth";
 import { formatIQD, formatDiscountPercent } from "@/lib/format";
 import { backHrefFromParam } from "@/lib/back";
 import type { CatalogProduct, ConfigureOrderResult, RobeMeasurements } from "@/lib/types";
+import { getProfile, PROFILE_CHANGED_EVENT } from "@/lib/profile";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 
-const GENDER_KEY = "loloshop_student_gender";
+/**
+ * ⚠️ This used to read a `loloshop_student_gender` localStorage key that NOTHING
+ * in the app ever wrote — so `gender` was always null here, and since
+ * groupVisibleForGender() shows every group when the gender is unknown, each
+ * student was offered the option groups restricted to the other gender. It now
+ * reads the profile that onboarding actually fills.
+ */
 
 /** Skeleton shaped like the 2-col product layout (gallery + options). */
 function ProductPageSkeleton() {
@@ -109,8 +116,10 @@ export default function StudentProductPage() {
   const [gender, setGender] = useState<"male" | "female" | null>(null);
 
   useEffect(() => {
-    const saved = localStorage.getItem(GENDER_KEY);
-    if (saved === "male" || saved === "female") setGender(saved);
+    const sync = () => setGender(getProfile().gender);
+    sync();
+    window.addEventListener(PROFILE_CHANGED_EVENT, sync);
+    return () => window.removeEventListener(PROFILE_CHANGED_EVENT, sync);
   }, []);
 
   useEffect(() => {

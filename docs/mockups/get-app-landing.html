@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>لولو شوب — حمّل التطبيق</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&family=Amiri:wght@400;700&family=Playfair+Display:wght@500;600;700&family=Great+Vibes&display=swap" rel="stylesheet">
+<style>
+/* ══════════════════════════════════════════════════════════════════════════════
+   LOLOSHOP — «حمّل التطبيق» landing page · DIRECTION B, built out.
+
+   WHAT THIS REPLACES
+   `frontend/app/get-app/page.tsx` says in its own header: "DELIBERATELY MINIMAL:
+   the real marketing landing page is a separate job the owner is doing later."
+   This is that job.
+
+   ⚠️ THE CLAIM B ORIGINALLY MADE, AND WHY IT IS GONE
+   The first cut of B sold a canvas sash DESIGNER — "ارسم وشاحك" — with a drawn
+   mock of an editor screen. That feature does not ship to students. Checked:
+   there is NO `/design` route in `frontend/app/`, and every component in
+   `components/designer/` (Whiteboard, TextEditor, SashSideLockEditor …) is
+   imported ONLY by `app/admin/wholesalers` and `components/staff/DesignViewer`.
+   The Fabric canvas is an ADMIN/STAFF tool. A student never sees it.
+
+   What the student really does — verified by screenshotting the live product page
+   (`app/(student)/product/[id]`) on prod — is fill a FORM:
+     · اكتب لون الوشاح  (required)      · لون التطريز
+     · تطريز الجهة اليمنى / اليسرى / الخلف — the name and college, typed
+     · صورة مرجعية — upload a reference photo / college logo from the device
+     · قياسات + ملاحظات الفصال for robes, then price → cart → track
+   So the page sells THAT, in those words. Same refusal that kept
+   «جاهز خلال ٥ أيام» out of `lib/copy-ar.ts`: if the repo cannot prove it, it is
+   not printed.
+
+   IMAGERY — per the owner: no lookbook/lifestyle photography.
+     · assets/logo.webp        — the brand mark (trimmed from public/logo.png,
+                                 which is 4672² with ~1300px of dead margin)
+     · assets/gown.webp        — clean cut-out render, public/showcase/gown.webp
+     · assets/variants.webp    — the REAL five colourways with their Arabic names
+     · assets/cap.webp         — clean cut-out cap render
+     · assets/app-product.webp ┐ REAL SCREENSHOTS of the live app, captured
+     · assets/app-form.webp    ┘ headless at 414×896 @2x from lolo-shop96.com.
+                                 Nothing here is a drawn approximation of a screen.
+
+   THE CONSTRAINT THAT SHAPES THE CTA
+   The app-only gate (lib/app-gate.ts) sends two different devices to this page:
+     · PHONE  — /get-app is in BROWSER_ALLOWED_PREFIXES, so a link shared on
+                WhatsApp or in the Instagram bio lands here un-bounced → it needs
+                a store button under the thumb.
+     · LAPTOP — you cannot install an Android app on a laptop; a store button is a
+                dead end → it needs the QR (already shipping at /qr-loloshop.png).
+   Both render; which one is the boss flips on width. Driven by @container so the
+   stage toggle in the toolbar is a true preview (production adds UA detection).
+
+   NUMBERS — all verified against the LIVE API this session, not from memory:
+     ٥٤ قطعة = ١١ وشاح · ٢١ روب · ٥ قبعات · ١٧ شال   (GET /api/catalog/shop → by_type)
+     ٣٠٬٠٠٠ د.ع  — سعر أساس, وشاح الفراشة (read off the live product page)
+     ١٥٠٬٠٠٠ د.ع — طقم ميلانو, with its real included_items (live feed)
+     ١٬١٤١       — registered student accounts (`graduatesServed()`), captioned
+                   «سجّلوا معنا» NOT «لبسوا تصاميمنا»: only 554 have an order, so
+                   "wore" overstates it. That is the open HANDOFF question,
+                   answered the honest way.
+
+   DESIGN PHYSICS (design-dna): oklch only · ONE accent hue (orange 38.4°) at
+   chroma .174, neutrals ≤ .022 warm-biased · spacing scale 4/8/12/16/24/32/48/64
+   · Arabic letter-spacing 0 everywhere, body 1.75, Amiri headings 1.45 ·
+   Arabic-Indic digits with tabular-nums · Latin brand strings wrapped in <bdi>.
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+:root{
+  --accent:oklch(55.3% .174 38.4);        /* #c2410c — AA on paper, the boss color */
+  --accent-lift:oklch(71.2% .165 44.1);   /* #f47b42 — logo circle, large fills only */
+  --accent-wash:oklch(55.3% .174 38.4 / .10);
+  --accent-line:oklch(55.3% .174 38.4 / .20);
+  --beige:oklch(99.5% .005 78);
+  --cream:oklch(96.9% .015 81);
+  --sink:oklch(95.6% .014 85);
+  --line:oklch(89.9% .019 86);
+  --ink:oklch(21.8% .008 80);
+  --ink-soft:oklch(31.1% .010 81);
+  --muted:oklch(50.3% .020 80);
+  --shadow-soft:0 1px 2px oklch(21.8% .008 80/.05),0 1px 3px oklch(21.8% .008 80/.07);
+  --shadow-card:0 2px 8px -3px oklch(21.8% .008 80/.10),0 12px 30px -16px oklch(21.8% .008 80/.14);
+  --shadow-float:0 10px 26px -12px oklch(21.8% .008 80/.20),0 3px 10px -5px oklch(21.8% .008 80/.10);
+  --shadow-pop:0 22px 52px -22px oklch(21.8% .008 80/.32),0 8px 20px -10px oklch(21.8% .008 80/.14);
+  --r:1.25rem; --r-sm:12px; --r-pill:9999px;
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-6:24px;
+  --sp-8:32px; --sp-12:48px; --sp-16:64px;
+  --f-ui:"Cairo",ui-sans-serif,system-ui,sans-serif;
+  --f-ar:"Amiri",serif;
+  --f-lat:"Playfair Display",serif;
+  --f-script:"Great Vibes",cursive;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+img{display:block;max-width:100%}
+a{color:inherit;text-decoration:none}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+ul{list-style:none}
+:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.num{font-variant-numeric:tabular-nums}
+html{scroll-behavior:smooth}
+body{font-family:var(--f-ui);font-size:15px;line-height:1.75;letter-spacing:0;
+  background:oklch(26% .012 80);color:var(--ink-soft);-webkit-font-smoothing:antialiased}
+h1,h2,h3{color:var(--ink);line-height:1.35;text-wrap:balance;font-weight:800;letter-spacing:0}
+p{text-wrap:pretty}
+
+/* ══ LAB CHROME — the preview tool, NOT part of the design ══ */
+.lab{position:sticky;top:0;z-index:100;background:oklch(21.8% .008 80);
+  border-bottom:1px solid oklch(32% .010 80);padding:var(--sp-3) var(--sp-4);
+  display:flex;flex-wrap:wrap;gap:var(--sp-3);align-items:center;justify-content:center}
+.lab-brand{color:oklch(78% .02 80);font-size:12.5px;font-weight:700;margin-inline-end:auto}
+.lab-brand b{color:var(--accent-lift)}
+.lab-group{display:flex;gap:var(--sp-1);background:oklch(27% .010 80);
+  padding:var(--sp-1);border-radius:var(--r-pill)}
+.lab-btn{padding:7px var(--sp-4);border-radius:var(--r-pill);font-size:12.5px;
+  font-weight:700;color:oklch(72% .02 80);transition:background-color .18s,color .18s;white-space:nowrap}
+.lab-btn[aria-pressed="true"]{background:var(--accent-lift);color:oklch(18% .01 60)}
+.lab-note{width:100%;text-align:center;color:oklch(62% .02 80);font-size:11.5px;line-height:1.6}
+
+.stage{margin:var(--sp-6) auto var(--sp-16);transition:max-width .3s cubic-bezier(.22,1,.36,1)}
+.stage[data-device="phone"]{max-width:430px}
+.stage[data-device="desktop"]{max-width:1180px}
+.frame{container-type:inline-size;background:var(--cream);overflow:hidden;
+  border-radius:var(--r);box-shadow:var(--shadow-pop)}
+
+/* ══ SHARED ══ */
+.wrap{padding-inline:var(--sp-4)}
+@container (min-width:760px){ .wrap{padding-inline:var(--sp-12);max-width:1100px;margin-inline:auto} }
+.h-ar{font-family:var(--f-ar);font-weight:700;line-height:1.45}   /* Amiri needs 1.45 */
+.eyebrow{font-size:11.5px;font-weight:800;color:var(--accent);display:inline-flex;
+  align-items:center;gap:var(--sp-2)}
+.eyebrow::before{content:"";width:18px;height:2px;background:var(--accent);border-radius:2px}
+.small{font-size:12.5px;color:var(--muted);line-height:1.7}
+
+.stores{display:flex;flex-direction:column;gap:var(--sp-3)}
+@container (min-width:520px){ .stores{flex-direction:row} }
+.store{display:flex;align-items:center;gap:var(--sp-3);min-height:56px;flex:1;
+  padding-inline:var(--sp-6);border-radius:var(--r-pill);
+  transition:translate .2s cubic-bezier(.22,1,.36,1),box-shadow .2s}
+.store:hover{translate:0 -2px;box-shadow:var(--shadow-float)}
+.store svg{width:22px;height:22px;flex:none}
+.store-txt{display:flex;flex-direction:column;line-height:1.3;text-align:start}
+.store-txt small{font-size:10.5px;opacity:.78;font-weight:600}
+.store-txt b{font-size:14.5px;font-weight:800}
+.store--primary{background:var(--ink);color:var(--beige)}
+.store--ghost{background:var(--beige);color:var(--ink);border:1px solid var(--line)}
+
+/* QR: the laptop CTA. Hidden on phone widths, boss on desktop widths. */
+.qr{display:none}
+@container (min-width:760px){
+  .qr{display:flex;align-items:center;gap:var(--sp-6);background:var(--beige);
+    border:1px solid var(--line);border-radius:var(--r);padding:var(--sp-6);
+    box-shadow:var(--shadow-soft);margin-bottom:var(--sp-3)}
+  /* Desktop: the QR is the boss and the store links demote to a quiet row beneath
+     it — they are NOT repeated inside the card. */
+  .stores .store{min-height:48px}
+}
+.qr img{width:120px;height:120px;border-radius:var(--r-sm);flex:none;background:#fff}
+.qr-copy b{display:block;color:var(--ink);font-size:17px;font-weight:800;line-height:1.4}
+.qr-copy p{margin-top:var(--sp-2);font-size:13.5px;color:var(--muted);line-height:1.7;max-width:34ch}
+
+.check{display:flex;gap:var(--sp-3);align-items:flex-start}
+.check svg{width:17px;height:17px;margin-top:5px;flex:none;fill:none;stroke:var(--accent);
+  stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
+.check b{color:var(--ink);font-weight:800}
+.check span{font-size:14px;line-height:1.75}
+
+/* ══ TOP BAR ══ */
+.nav{display:flex;align-items:center;justify-content:space-between;
+  padding:var(--sp-4);background:var(--beige);border-bottom:1px solid var(--line)}
+.nav-logo{display:flex;align-items:center;gap:var(--sp-2)}
+.nav-logo img{width:38px;height:auto}
+.nav-logo span{font-family:var(--f-script);font-size:22px;color:var(--ink);line-height:1}
+.nav-cta{min-height:40px;display:inline-flex;align-items:center;padding-inline:var(--sp-4);
+  border-radius:var(--r-pill);background:var(--accent);color:var(--beige);
+  font-size:13px;font-weight:800}
+
+/* ══ HERO ══ */
+.hero{background:
+    radial-gradient(120% 90% at 85% 0%,oklch(89% .06 66/.5),transparent 60%),
+    radial-gradient(110% 80% at 0% 100%,oklch(91% .04 22/.45),transparent 55%),
+    linear-gradient(180deg,var(--beige),var(--cream));
+  padding:var(--sp-12) 0 var(--sp-8);overflow:hidden}
+.hero-grid{display:grid;gap:var(--sp-12);align-items:center}
+@container (min-width:760px){
+  .hero{padding:var(--sp-16) 0}
+  .hero-grid{grid-template-columns:1.02fr .98fr;gap:var(--sp-12)}
+}
+.hero h1{font-family:var(--f-ar);font-size:clamp(30px,7.4cqw,52px);line-height:1.45;font-weight:700;
+  margin-top:var(--sp-3)}
+.hero h1 em{font-style:normal;color:var(--accent)}
+.hero-lede{margin-top:var(--sp-4);font-size:15.5px;line-height:1.75;max-width:42ch;color:var(--ink-soft)}
+.hero-cta{margin-top:var(--sp-8);max-width:430px}
+.trust{margin-top:var(--sp-6);display:flex;flex-wrap:wrap;gap:var(--sp-2) var(--sp-6);
+  font-size:12.5px;color:var(--muted)}
+.trust b{color:var(--ink);font-weight:800}
+
+/* two real screenshots, staggered. The BOSS of the page. */
+.shots{position:relative;display:grid;place-items:center;padding-block:var(--sp-4)}
+.phone{position:relative;width:min(268px,70cqw);border-radius:36px;background:var(--ink);
+  padding:8px;box-shadow:var(--shadow-pop)}
+.phone img{width:100%;height:auto;border-radius:28px;display:block}
+.phone::after{content:"";position:absolute;top:8px;inset-inline:0;margin-inline:auto;
+  width:96px;height:22px;background:var(--ink);
+  border-end-start-radius:13px;border-end-end-radius:13px}
+.phone--back{position:absolute;width:min(206px,54cqw);rotate:7deg;
+  inset-inline-end:-4%;inset-block-start:14%;opacity:.96;z-index:0}
+.phone--front{rotate:-3deg;z-index:1}
+@container (min-width:760px){
+  .phone{width:270px}
+  .phone--back{width:212px;inset-inline-end:-6%;inset-block-start:12%}
+}
+.shot-tag{position:absolute;z-index:2;inset-block-end:2%;inset-inline-start:0;
+  background:var(--ink);color:var(--beige);font-size:11px;font-weight:700;
+  padding:var(--sp-2) var(--sp-3);border-radius:var(--r-pill);box-shadow:var(--shadow-float)}
+.shot-tag i{font-style:normal;color:var(--accent-lift)}
+
+/* ══ WHAT YOU ACTUALLY DO — the three real steps ══ */
+.flow{margin-top:var(--sp-12)}
+.flow-rail{margin-top:var(--sp-6);display:grid;gap:var(--sp-4)}
+@container (min-width:760px){ .flow-rail{grid-template-columns:repeat(3,1fr);gap:var(--sp-6)} }
+.flow-card{background:var(--beige);border:1px solid var(--line);border-radius:var(--r);
+  padding:var(--sp-6);position:relative;box-shadow:var(--shadow-soft)}
+.flow-card .n{font-family:var(--f-ar);font-size:34px;font-weight:700;color:var(--accent-line);
+  line-height:1;position:absolute;inset-block-start:var(--sp-4);inset-inline-end:var(--sp-4)}
+.flow-card b{display:block;color:var(--ink);font-size:16px;font-weight:800}
+.flow-card p{margin-top:var(--sp-2);font-size:13.5px;color:var(--muted);line-height:1.75}
+.flow-card .field{margin-top:var(--sp-4);display:flex;flex-wrap:wrap;gap:var(--sp-2)}
+.flow-card .field span{font-size:11px;font-weight:700;color:var(--accent);
+  background:var(--accent-wash);border-radius:var(--r-pill);padding:3px var(--sp-3)}
+
+/* ══ COLORWAYS — the real five ══ */
+.colors{margin-top:var(--sp-12);background:var(--beige);border:1px solid var(--line);
+  border-radius:var(--r);padding:var(--sp-8) var(--sp-6);text-align:center;overflow:hidden}
+.colors h2{font-family:var(--f-ar);font-size:clamp(22px,4.6cqw,30px);line-height:1.45;font-weight:700}
+.colors p{margin-top:var(--sp-3);font-size:14px;color:var(--muted);max-width:44ch;margin-inline:auto}
+.colors img{margin-top:var(--sp-6);width:100%;border-radius:var(--r-sm)}
+
+/* ══ CATALOG ══ */
+.cat{margin-top:var(--sp-12);display:grid;gap:var(--sp-8);align-items:center}
+@container (min-width:760px){ .cat{grid-template-columns:.9fr 1.1fr;gap:var(--sp-12)} }
+.cat-art{position:relative;display:grid;place-items:center;background:var(--sink);
+  border-radius:var(--r);padding:var(--sp-6);min-height:240px}
+.cat-art .gown{width:min(210px,60cqw)}
+.cat-art .cap{position:absolute;width:110px;inset-block-end:var(--sp-6);inset-inline-start:var(--sp-4)}
+.cat-nums{display:grid;grid-template-columns:repeat(2,1fr);gap:var(--sp-3);margin-top:var(--sp-6)}
+@container (min-width:760px){ .cat-nums{grid-template-columns:repeat(4,1fr)} }
+.cat-num{background:var(--beige);border:1px solid var(--line);border-radius:var(--r-sm);
+  padding:var(--sp-4);text-align:center}
+.cat-num b{display:block;font-family:var(--f-ar);font-size:26px;color:var(--ink);
+  font-weight:700;line-height:1.3}
+.cat-num span{font-size:12px;color:var(--muted)}
+
+/* ══ PACKAGE ══ */
+.pack{margin-top:var(--sp-12);background:var(--ink);color:oklch(88% .012 80);
+  border-radius:var(--r);padding:var(--sp-8) var(--sp-6)}
+.pack h2{color:var(--beige);font-family:var(--f-ar);font-size:26px;font-weight:700;line-height:1.45}
+.pack ul{margin-top:var(--sp-6);display:grid;gap:var(--sp-3)}
+@container (min-width:760px){ .pack ul{grid-template-columns:repeat(2,1fr);gap:var(--sp-3) var(--sp-8)} }
+.pack li{display:flex;gap:var(--sp-3);align-items:flex-start;font-size:14px;line-height:1.75}
+.pack li svg{width:16px;height:16px;margin-top:5px;flex:none;fill:none;stroke:var(--accent-lift);
+  stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
+.pack .price{margin-top:var(--sp-6);display:inline-flex;align-items:baseline;gap:var(--sp-2);
+  border:1px solid oklch(40% .012 80);border-radius:var(--r-pill);padding:var(--sp-2) var(--sp-6)}
+.pack .price small{font-size:11.5px;color:oklch(66% .015 80)}
+.pack .price b{font-family:var(--f-ar);font-size:24px;color:var(--beige);font-weight:700}
+
+/* ══ WHY ══ */
+.why{margin-top:var(--sp-12)}
+.why-grid{margin-top:var(--sp-6);display:grid;gap:var(--sp-4)}
+@container (min-width:760px){ .why-grid{grid-template-columns:repeat(2,1fr);gap:var(--sp-6)} }
+.why-card{background:var(--beige);border:1px solid var(--line);border-radius:var(--r);
+  padding:var(--sp-6);box-shadow:var(--shadow-soft)}
+
+/* ══ CLOSE ══ */
+.close{margin-top:var(--sp-12);background:var(--sink);border-radius:var(--r);
+  padding:var(--sp-8) var(--sp-6);text-align:center}
+.close-cta{margin:var(--sp-6) auto 0;max-width:430px}
+@container (min-width:760px){ .close-cta{max-width:620px} }
+
+.foot{background:var(--ink);color:oklch(76% .015 80);padding:var(--sp-8) var(--sp-4) var(--sp-12);
+  text-align:center;margin-top:var(--sp-12)}
+.foot img{width:56px;margin:0 auto var(--sp-3)}
+.foot .lnk{display:inline-flex;align-items:center;gap:var(--sp-2);margin-top:var(--sp-2);
+  min-height:44px;padding-inline:var(--sp-4);border-radius:var(--r-pill);
+  border:1px solid oklch(38% .012 80);font-size:13px;font-weight:700;color:var(--beige)}
+.foot .legal{margin-top:var(--sp-6);font-size:11.5px;color:oklch(58% .015 80);line-height:1.9}
+.foot .legal a{border-bottom:1px solid oklch(42% .012 80)}
+</style>
+</head>
+<body>
+
+<!-- ══ PREVIEW TOOL (not part of the design) ══ -->
+<header class="lab">
+  <div class="lab-brand"><b>lolo shop</b> — صفحة تحميل التطبيق · اتجاه ب</div>
+  <div class="lab-group" role="group" aria-label="اختر الجهاز">
+    <button class="lab-btn" data-device="phone" aria-pressed="true">📱 هاتف</button>
+    <button class="lab-btn" data-device="desktop" aria-pressed="false">💻 لابتوب</button>
+  </div>
+  <p class="lab-note">بدّل بين الهاتف واللابتوب — زر المتجر يتحوّل إلى رمز QR، لأن اللابتوب ما ينزّل تطبيق هاتف. اللقطات داخل الهواتف حقيقية من التطبيق المنشور.</p>
+</header>
+
+<div class="stage" id="stage" data-device="phone">
+<div class="frame">
+<main>
+
+  <nav class="nav">
+    <span class="nav-logo">
+      <img src="assets/logo.webp" alt="شعار لولو شوب">
+      <span>lolo shop</span>
+    </span>
+    <a class="nav-cta" href="#get">حمّل التطبيق</a>
+  </nav>
+
+  <!-- ══ HERO ══ -->
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div>
+        <span class="eyebrow">تطبيق لولو شوب</span>
+        <h1>اكتب اسمك، واختر لونك — <em>ونطرّزه إلك</em></h1>
+        <p class="hero-lede">من التطبيق تختار الوشاح أو الروب، تكتب النص اللي تريده مطرّز على كل جهة، تختار لون الخيط، وترفع شعار كليتك من هاتفك. وتشوف السعر قبل ما تأكّد.</p>
+
+        <div class="hero-cta" id="get">
+          <div class="qr">
+            <img src="https://lolo-shop96.com/qr-loloshop.png" alt="رمز QR لتحميل تطبيق لولو شوب">
+            <div class="qr-copy">
+              <b>صوّر الرمز بكاميرا هاتفك</b>
+              <p>التطبيق يشتغل على الهاتف — صوّر الرمز وينفتح المتجر عندك مباشرة، أو استعمل الروابط تحت.</p>
+            </div>
+          </div>
+          <div class="stores">
+            <a class="store store--primary" href="https://play.google.com/store/apps/details?id=com.loloshop96.app">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3.6 1.8a1 1 0 0 0-.5.9v18.6a1 1 0 0 0 .5.9l10-10.2-10-10.2Zm11.1 8.9 2.9-2.9-11-6.3 8.1 9.2Zm0 2.6-8.1 9.2 11-6.3-2.9-2.9Zm4.3-1.3 3-1.7c.8-.5.8-1.6 0-2.1l-2.9-1.7-3.2 3.2 3.1 2.3Z"/></svg>
+              <span class="store-txt"><small>حمّله من</small><b><bdi>Google Play</bdi></b></span></a>
+            <a class="store store--ghost" href="https://apps.apple.com/app/id6793976053">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.4 12.7c0-2.4 2-3.6 2.1-3.6-1.1-1.7-2.9-1.9-3.6-1.9-1.5-.2-3 .9-3.7.9s-2-.9-3.2-.9c-1.7 0-3.2 1-4 2.5-1.7 2.9-.4 7.3 1.2 9.7.8 1.2 1.8 2.5 3 2.4 1.2 0 1.7-.8 3.1-.8s1.9.8 3.2.8 2.2-1.2 3-2.4c.9-1.3 1.3-2.6 1.3-2.7 0 0-2.4-1-2.4-3.9ZM14.1 5c.7-.8 1.1-1.9 1-3-1 0-2.2.6-2.9 1.4-.6.7-1.1 1.9-1 3 1.1.1 2.2-.6 2.9-1.4Z"/></svg>
+              <span class="store-txt"><small>حمّله من</small><b><bdi>App Store</bdi></b></span></a>
+          </div>
+        </div>
+
+        <div class="trust">
+          <span><b class="num">١٬١٤١</b> طالب وطالبة سجّلوا معنا</span>
+          <span><b class="num">٥٤</b> قطعة بالتطبيق</span>
+          <span><b>الدفع نقداً</b> عند التسليم</span>
+        </div>
+      </div>
+
+      <!-- REAL screenshots of the shipped app — not drawn mockups. -->
+      <div class="shots">
+        <div class="phone phone--back" aria-hidden="true">
+          <img src="assets/app-product.webp" alt="">
+        </div>
+        <div class="phone phone--front">
+          <img src="assets/app-form.webp"
+               alt="لقطة من تطبيق لولو شوب: حقول تفاصيل الوشاح — اكتب لون الوشاح، لون التطريز، وتطريز الجهة اليسرى، مع زر اختيار صورة مرجعية من الجهاز">
+        </div>
+        <span class="shot-tag"><i>●</i> لقطة حقيقية من التطبيق</span>
+      </div>
+    </div>
+  </section>
+
+  <div class="wrap">
+
+    <!-- ══ THE REAL THREE STEPS ══ -->
+    <section class="flow">
+      <span class="eyebrow">شنو تسوّي بالتطبيق</span>
+      <h2 class="h-ar" style="font-size:26px;margin-top:var(--sp-3)">ثلاث خطوات، كلها من هاتفك</h2>
+      <div class="flow-rail">
+        <div class="flow-card"><span class="n num">١</span>
+          <b>اختر القطعة</b>
+          <p>وشاح، روب، قبعة أو شال — بالموديلات والألوان، وسعر كل قطعة واضح قبل ما تطلب.</p>
+          <div class="field"><span>٥٤ قطعة</span><span>سعر واضح</span></div>
+        </div>
+        <div class="flow-card"><span class="n num">٢</span>
+          <b>اكتب تفاصيل التطريز</b>
+          <p>اسمك وكليتك بالنص اللي تريده على كل جهة، ولون الخيط، وتكدر ترفع صورة أو شعار كليتك من جهازك.</p>
+          <div class="field"><span>الجهة اليمنى</span><span>اليسرى</span><span>الخلف</span><span>لون التطريز</span></div>
+        </div>
+        <div class="flow-card"><span class="n num">٣</span>
+          <b>اطلب وتابع</b>
+          <p>نخيطه ونطرّزه بورشتنا، وتتابع طلبك بالتطبيق لين ما يوصلك — وتدفع نقداً عند التسليم.</p>
+          <div class="field"><span>متابعة الطلب</span><span>دفع نقدي</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ COLORWAYS — the real five, with their real names ══ -->
+    <section class="colors">
+      <h2>اختر لون وشاحك</h2>
+      <p>ملكي · نيلي · رصاصي · أخضر · أسود — والتطريز بلون الخيط اللي تختاره.</p>
+      <img src="assets/variants.webp"
+           alt="خمسة ألوان لوشاح التخرّج من لولو شوب: ملكي، نيلي، رصاصي، أخضر، أسود — كلها مطرّزة بالاسم والكلية">
+    </section>
+
+    <!-- ══ CATALOG ══ -->
+    <section class="cat">
+      <div class="cat-art">
+        <img class="gown" src="assets/gown.webp" alt="روب تخرّج أسود مع وشاح مطرّز بالاسم بالخط العربي">
+        <img class="cap" src="assets/cap.webp" alt="قبعة تخرّج سوداء بشرّابة">
+      </div>
+      <div>
+        <span class="eyebrow">المتجر</span>
+        <h2 class="h-ar" style="font-size:26px;margin-top:var(--sp-3)">إطلالة التخرّج كاملة</h2>
+        <p style="margin-top:var(--sp-3);font-size:14.5px;line-height:1.75">
+          كلشي تحتاجه ليوم التخرّج بمكان واحد — وكل قطعة تنطرّز باسمك وكليتك.</p>
+        <div class="cat-nums">
+          <div class="cat-num"><b class="num">١١</b><span>وشاح</span></div>
+          <div class="cat-num"><b class="num">٢١</b><span>روب</span></div>
+          <div class="cat-num"><b class="num">٥</b><span>قبعات</span></div>
+          <div class="cat-num"><b class="num">١٧</b><span>شال</span></div>
+        </div>
+        <p class="small" style="margin-top:var(--sp-4)">
+          يبدأ سعر الوشاح من <b class="num" style="color:var(--ink)">٣٠٬٠٠٠</b> د.ع.</p>
+      </div>
+    </section>
+
+    <!-- ══ PACKAGE — live feed values, not invented ══ -->
+    <section class="pack">
+      <span class="eyebrow" style="color:var(--accent-lift)">طقم كامل</span>
+      <h2 style="margin-top:var(--sp-3)">طقم ميلانو</h2>
+      <p style="margin-top:var(--sp-3);font-size:14px;line-height:1.75;max-width:46ch">
+        روب + قبعة + وشاح + شال — خامة قماش ياباني فاخر، بمواصفاتك الكاملة.</p>
+      <ul>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m20 6-11 11-5-5"/></svg>روب تخرج بقياساتك</li>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m20 6-11 11-5-5"/></svg>وشاح مطرّز بالاسم والشعار</li>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m20 6-11 11-5-5"/></svg>قبعة تخرج</li>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m20 6-11 11-5-5"/></svg>شال امريكي</li>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m20 6-11 11-5-5"/></svg>تغيير خامة القماش والألوان حسب طلبك</li>
+      </ul>
+      <div class="price"><small>سعر الطقم</small><b class="num">١٥٠٬٠٠٠</b><small>د.ع</small></div>
+    </section>
+
+    <!-- ══ WHY — verbatim from lib/copy-ar.ts (neutral register) ══ -->
+    <section class="why">
+      <span class="eyebrow">ليش لولو شوب</span>
+      <div class="why-grid">
+        <div class="why-card check">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m20 6-11 11-5-5"/></svg>
+          <span><b>الاسم مطرّز بالخيط</b> — بالخط العربي، مو طباعة تنمسح بعد غسلة.</span></div>
+        <div class="why-card check">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m20 6-11 11-5-5"/></svg>
+          <span><b>نخيطه بورشتنا</b> — إحنا اللي نفصّل ونطرّز، مو وسيط يشتري ويبيع.</span></div>
+        <div class="why-card check">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m20 6-11 11-5-5"/></svg>
+          <span><b>محل حقيقي ببغداد</b> — تعال شوف القماش بعينك قبل الطلب.</span></div>
+        <div class="why-card check">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m20 6-11 11-5-5"/></svg>
+          <span><b>الدفع نقداً عند التسليم</b> — ما تدفع ولا دينار هسه.</span></div>
+      </div>
+    </section>
+
+    <!-- ══ CLOSE ══ -->
+    <section class="close">
+      <h2 class="h-ar" style="font-size:26px">ابدأ من هاتفك هسه</h2>
+      <p class="small" style="margin-top:var(--sp-3)">التحميل مجاناً — وما تدفع إلا عند التسليم.</p>
+      <div class="close-cta">
+        <div class="qr">
+          <img src="https://lolo-shop96.com/qr-loloshop.png" alt="رمز QR لتحميل تطبيق لولو شوب">
+          <div class="qr-copy"><b>صوّر الرمز بكاميرا هاتفك</b>
+            <p>ينفتح متجر التطبيقات على هاتفك مباشرة.</p></div>
+        </div>
+        <div class="stores">
+          <a class="store store--primary" href="https://play.google.com/store/apps/details?id=com.loloshop96.app">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3.6 1.8a1 1 0 0 0-.5.9v18.6a1 1 0 0 0 .5.9l10-10.2-10-10.2Zm11.1 8.9 2.9-2.9-11-6.3 8.1 9.2Zm0 2.6-8.1 9.2 11-6.3-2.9-2.9Zm4.3-1.3 3-1.7c.8-.5.8-1.6 0-2.1l-2.9-1.7-3.2 3.2 3.1 2.3Z"/></svg>
+            <span class="store-txt"><small>حمّله من</small><b><bdi>Google Play</bdi></b></span></a>
+          <a class="store store--ghost" href="https://apps.apple.com/app/id6793976053">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.4 12.7c0-2.4 2-3.6 2.1-3.6-1.1-1.7-2.9-1.9-3.6-1.9-1.5-.2-3 .9-3.7.9s-2-.9-3.2-.9c-1.7 0-3.2 1-4 2.5-1.7 2.9-.4 7.3 1.2 9.7.8 1.2 1.8 2.5 3 2.4 1.2 0 1.7-.8 3.1-.8s1.9.8 3.2.8 2.2-1.2 3-2.4c.9-1.3 1.3-2.6 1.3-2.7 0 0-2.4-1-2.4-3.9ZM14.1 5c.7-.8 1.1-1.9 1-3-1 0-2.2.6-2.9 1.4-.6.7-1.1 1.9-1 3 1.1.1 2.2-.6 2.9-1.4Z"/></svg>
+            <span class="store-txt"><small>حمّله من</small><b><bdi>App Store</bdi></b></span></a>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <footer class="foot">
+    <img src="assets/logo.webp" alt="شعار لولو شوب">
+    <a class="lnk" href="https://instagram.com/lolo_shop96">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1"/></svg>
+      <bdi>@lolo_shop96</bdi>
+    </a>
+    <p class="legal">محل لولو شوب — بغداد · الدفع نقداً عند التسليم<br>
+      <a href="/privacy">سياسة الخصوصية</a> · <a href="/terms">الشروط</a> · <a href="/delete-account">حذف الحساب</a></p>
+  </footer>
+
+</main>
+</div><!-- /frame -->
+</div><!-- /stage -->
+
+<script>
+(function () {
+  var stage = document.getElementById('stage');
+  document.querySelectorAll('[data-device]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      document.querySelectorAll('[data-device]').forEach(function (b) {
+        b.setAttribute('aria-pressed', String(b === btn));
+      });
+      stage.dataset.device = btn.dataset.device;
+    });
+  });
+})();
+</script>
+</body>
+</html>

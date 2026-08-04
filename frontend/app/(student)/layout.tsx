@@ -3,6 +3,7 @@ import { StudentNav } from "@/components/StudentNav";
 import { SplashIntro } from "@/components/SplashIntro";
 import { DiscountPopup } from "@/components/DiscountPopup";
 import { VisitBeacon } from "@/components/VisitBeacon";
+import { Onboarding } from "@/components/student/Onboarding";
 
 export default function StudentLayout({
   children,
@@ -14,6 +15,7 @@ export default function StudentLayout({
       {/* Rendered outside <main> so fixed overlays anchor to the viewport,
           not to <main>'s transformed (animate-page-in) box. */}
       <SplashIntro />
+      <Onboarding />
       <DiscountPopup />
       <VisitBeacon />
       <StudentNav />
@@ -22,7 +24,12 @@ export default function StudentLayout({
       <main className="mx-auto w-full max-w-lg px-4 py-6 animate-page-in md:max-w-3xl lg:max-w-6xl md:px-6 lg:px-8">
         {children}
       </main>
-      <footer className="border-t border-line px-4 py-10 sm:px-6">
+      {/* Clears the fixed bottom tab bar (56px + safe area) so the footer and
+          any page's last row are never trapped underneath it. */}
+      <footer
+        className="border-t border-line px-4 py-10 sm:px-6"
+        style={{ paddingBottom: "calc(6rem + env(safe-area-inset-bottom, 0px))" }}
+      >
         <div className="mx-auto max-w-2xl text-center">
           <p className="font-script text-3xl leading-none text-orange-ink">lolo shop</p>
           <p className="mx-auto mt-4 max-w-[40ch] text-sm leading-relaxed text-ink-soft">

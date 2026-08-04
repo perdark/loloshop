@@ -14,11 +14,18 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { getDeletionPreview, deleteAccount, type DeletionPreview } from "@/lib/auth-api";
 import { getApiErrorMessage } from "@/lib/api";
-import { getUser, isAuthenticated, logoutAndForgetDevice, loginHref } from "@/lib/auth";
+import {
+  getUser,
+  isAuthenticated,
+  logout,
+  logoutAndForgetDevice,
+  loginHref,
+} from "@/lib/auth";
 import type { User } from "@/lib/types";
 import { PageLoader } from "@/components/ui/Spinner";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { ProfilePreferences } from "@/components/student/ProfilePreferences";
 
 export default function AccountPage() {
   const router = useRouter();
@@ -70,14 +77,20 @@ export default function AccountPage() {
 
   if (authed === null) return <PageLoader />;
 
+  // Signed out is NOT an empty screen: the device preferences onboarding
+  // collected are editable here, which is what makes its «تنعدّل بأي وقت من
+  // حسابي» true for a visitor who never made an account.
   if (!authed) {
     return (
-      <section className="py-10 text-center">
+      <section className="py-2">
         <h1 className="font-display text-2xl font-bold text-ink">حسابي</h1>
-        <p className="mt-3 text-sm text-ink-soft">سجّل الدخول لعرض حسابك أو حذفه.</p>
-        <Link href={loginHref("/account")} className="mt-6 inline-block">
-          <Button>تسجيل الدخول</Button>
-        </Link>
+        <div className="mt-5 rounded-2xl border border-line bg-surface p-4 text-center shadow-[var(--shadow-soft)]">
+          <p className="text-sm text-ink-soft">سجّل الدخول لعرض طلباتك وإدارة حسابك.</p>
+          <Link href={loginHref("/account")} className="mt-4 inline-block">
+            <Button>تسجيل الدخول</Button>
+          </Link>
+        </div>
+        <ProfilePreferences />
       </section>
     );
   }
@@ -133,6 +146,35 @@ export default function AccountPage() {
           </Button>
         </Link>
       </div>
+
+      <ProfilePreferences />
+
+      {/* Logout lives here now. It used to sit in the storefront header, which
+          the tab bar replaced — without this there would be no way to sign out. */}
+      <button
+        type="button"
+        onClick={() => {
+          logout();
+          router.push("/login");
+        }}
+        className="mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-pill border border-line bg-surface text-sm font-bold text-ink-soft transition-colors hover:border-orange-ink/30 hover:text-orange-ink"
+      >
+        <svg
+          aria-hidden
+          viewBox="0 0 24 24"
+          className="h-4 w-4"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+          <path d="M16 17l5-5-5-5" />
+          <path d="M21 12H9" />
+        </svg>
+        تسجيل الخروج
+      </button>
 
       {/* ---- Danger zone ---- */}
       <div className="mt-8 rounded-2xl border border-danger/30 bg-surface p-4">

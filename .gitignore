@@ -64,3 +64,6 @@ voice_*
 # public/ is served in production. Never commit these.
 frontend/public/dev-login.html
 frontend/public/dev-token-tmp.json
+
+# Brainstorming visual-companion scratch
+.superpowers/

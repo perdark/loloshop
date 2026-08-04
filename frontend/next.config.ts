@@ -21,8 +21,36 @@ const nextConfig: NextConfig = {
       { protocol: "http", hostname: apiHost, pathname: "/uploads/**" },
       { protocol: "https", hostname: apiHost, pathname: "/uploads/**" },
       { protocol: "http", hostname: "localhost", pathname: "/uploads/**" },
+      // The live host, spelled out. On prod this is what `apiHost` already
+      // resolves to, so it changes nothing there — it is here for LOCAL runs:
+      // the dev database is a production snapshot, so every `image_url` in it is
+      // an absolute https://lolo-shop96.com/uploads/… URL. Without this line a
+      // local production build (`next start`) rejects all 54 catalog photos with
+      // «hostname not configured» → 400, and the storefront renders imageless.
+      { protocol: "https", hostname: "lolo-shop96.com", pathname: "/uploads/**" },
+      { protocol: "https", hostname: "www.lolo-shop96.com", pathname: "/uploads/**" },
       { protocol: "https", hostname: "**.amazonaws.com", pathname: "/**" },
     ],
+    // ⚠️ WHY LOCAL DEV LOADS PHOTOS SLOWLY, AND WHY THIS LINE MUST STAY.
+    // With the optimizer off, every <Image> falls back to a plain <img> on the
+    // RAW url. That is harmless where dev uploads live on disk, and expensive
+    // here: the dev database is a PRODUCTION SNAPSHOT, so every image_url is an
+    // absolute https://lolo-shop96.com/uploads/… and localhost pulls the 4-6 MB
+    // originals off the live VPS — measured 20.0 MB for the four tiles above the
+    // fold, re-fetched on EVERY reload and back-navigation because /uploads is
+    // `private, no-store`. Prod is unaffected: NODE_ENV=production keeps the
+    // optimizer on and serves the same photo as 17,778 B of WebP.
+    //
+    // DO NOT "fix" this by setting it to false. Tried and measured 2026-08-03:
+    // the optimizer must first fetch the original, and Next hard-codes
+    // `AbortSignal.timeout(7000)` on that fetch (server/image-optimizer.js:924)
+    // with NO config surface. One 6,003,607 B photo takes 9.7 s to pull from the
+    // VPS, so every catalog image 500s with «upstream image response timed out»
+    // and dev renders NO photos at all — strictly worse than slow ones.
+    // The real fix is to stop dev pointing at prod: mirror the catalog photos to
+    // the local backend's /uploads (shrunk with the same sharp policy
+    // lib/upload.js applies) and rewrite the dev DB's absolute URLs to
+    // localhost:4000. Then the optimizer works locally and this can go.
     unoptimized: process.env.NODE_ENV === "development",
   },
   // Part of LS-06. These are the headers that are safe to set from the app and can't break

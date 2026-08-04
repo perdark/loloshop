@@ -66,12 +66,9 @@ const HIGHLIGHTS: {
   alt: string;
   span: "wide" | "tall";
 }[] = [
-  {
-    src: "/lookbook/grad-crowd.jpg",
-    caption: "دفعة كاملة بأوشحتنا",
-    alt: "مئات الخرّيجين على مدرّجات الجامعة يرتدون أوشحة تخرّج من تصميمنا",
-    span: "wide",
-  },
+  /* NOTE: grad-crowd is deliberately absent — it is the home hero photo since
+     the "الدفعة" cover shipped (2026-08-02), and repeating the same shot twice on
+     one page reads as a thin photo library. grad-diyala carries the wide slot. */
   {
     src: "/lookbook/grad-moments-1.jpg",
     caption: "لحظات لا تتكرّر",

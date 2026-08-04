@@ -574,6 +574,13 @@ export interface ShopFeed {
   audience: ShopAudience;
   packages: ShopPackageCard[];
   byType: Partial<Record<ProductType, ShopProductCard[]>>;
+  /**
+   * طالب — distinct students with a live order, straight from lib/counts.
+   * The home hero prints it as the shop's proof number. `null` when the
+   * backend could not count it; the hero then omits the stat line rather
+   * than showing a stale or invented figure.
+   */
+  graduates: number | null;
 }
 
 export interface HeroSlide {
