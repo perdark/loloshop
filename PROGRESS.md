@@ -1,5 +1,53 @@
 # Progress
 
+## 2026-08-05 — التجهيز prep console · scroll restore · touch-first buttons · account screen
+
+**Committed to `feat/ssr-storefront-native-auth`. No migration.**
+Gates: **backend 167/167** · `tsc` 0 · `eslint` 0 errors · `next build` exit 0.
+
+- **قائمة التجهيز is now its own console** (`components/staff/prep/PrepConsole.tsx`), reusing the
+  embroiderer's `StudentSheet` verbatim per the owner's «مثله مثل واجهة عامل التطريز». The preparer
+  was packing **blind** — their old queue was a flat `OrderCard` grid with no artwork, and رف التجهيز
+  has no `<img>` either, so verifying a set meant opening every piece's detail page.
+- **Zones are read-only at التجهيز.** The stitching is finished by the time a piece arrives, and the
+  backend exposes no zone-tick endpoint for `preparing`, so the preparer reads the artwork to verify
+  and never ticks it. One detector (`detectZonesForOrders`) still serves both stations.
+- **Two defects found reviewing the batch before commit, both fixed here:**
+  - The **«جاهزة للتسليم» tab claimed «لا تطريز على هذه القطعة» on every packed piece.** The backend
+    attached zones only for `embroidery`/`preparing`, and the sheet cannot tell *"no artwork"* from
+    *"artwork never fetched"* — so an absent list rendered as a statement of fact on pieces that are
+    demonstrably embroidered. `ready` joined `ZONE_STAGES` (no extra round-trip — the detector is one
+    `order_id = ANY($1)` query), and `PrepConsole`/`StudentSheet` stopped collapsing `null` into `[]`
+    so the distinction survives the mapper.
+  - That same tab then read **«لا يمكن إكمال هذه القطعة من هنا حالياً»** on every row — true (تأكيد
+    التسليم needs a delivery method, so it lives on the detail page) but a dead end. Now points at
+    «التفاصيل», via a `noActionHint` prop supplied by the only caller that can tell the tabs apart.
+- **Scroll position survives back-navigation** (`hooks/useScrollRestore.ts`) on staff home, queue,
+  shelf, station and prep. Next's built-in restoration does not cover this: the staff screens navigate
+  in and out with `<Link>` pushes, and a push always lands at the top. The save is frozen on click —
+  without that, leaving the page scrolls to 0, that fires a `scroll` event, and the good offset is
+  overwritten with 0 (measured; the first version of the hook was broken exactly this way).
+- **Buttons work on touch.** Every bit of the CTA's character lived behind `:hover` — invisible on the
+  phones students and reps actually use. `.btn-press` scales under the thumb, `.btn-shine` fires its
+  sheen on `:active`, all transform/shadow only, all collapsing under `prefers-reduced-motion`.
+- **Zone thumbnails go through the optimizer** (`ZoneThumb`): a raw `<img>` was pulling the full 4–6 MB
+  upload for a 44 px box, ~25 MB per student with five zones, uncacheable (`no-store`) over workshop
+  wifi. A broken URL now renders an explicit «؟» marker — never as "this zone has no artwork".
+- **`unoptimized` removed from the 8 staff order-detail images**; the lightbox moved to `next/image`.
+- **حسابي rebuilt**: graduate-figure avatar tied to the onboarding gender answer, destination rows
+  instead of two ghost pills, and a real signed-out screen instead of a login wall. «تفضيلاتي» now
+  *shows* an answered gender as a settled summary with «تغيير» rather than re-asking the question.
+- **`turbopack.root` removed from `next.config.ts`** — it silences a cosmetic warning and breaks
+  `next dev` (`/` 500s on the React Client Manifest). The header comment now says so at length.
+- **Docs:** `HANDOFF.md` 665 → ~180 lines, `PLAN.md` 337 → ~80; history moved verbatim into
+  `docs/HANDOFF-archive.md` and the new `docs/PLAN-archive.md`.
+
+Open:
+- Browser smoke test of the prep console against the real queue (326 students / 429 pieces) —
+  not run this session.
+- The prep-queue **data** gap is untouched: robe colour/fabric/cut, shape, cap colour and
+  `measurements` are in the DB and still unrendered. See `HANDOFF.md`.
+
 ## 2026-08-01 — Image weight: product photos were 4–6 MB served raw and uncacheable
 
 **Uncommitted on main. No migration.** Gates: **backend 167/167** (+6) · `tsc` 0 · `eslint` 0 errors.

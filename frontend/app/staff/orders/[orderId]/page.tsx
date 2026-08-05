@@ -100,7 +100,6 @@ function ProductPhotoCard({
               sizes="(max-width: 1024px) 100vw, 50vw"
               className="object-contain"
               loading="eager"
-              unoptimized
             />
           </div>
         </a>
@@ -1174,7 +1173,6 @@ function ProductionOrderDetailContent() {
                         height={240}
                         className="max-h-56 w-auto rounded-lg border border-line object-contain"
                         loading="lazy"
-                        unoptimized
                       />
                     </a>
                   </div>
@@ -1210,7 +1208,6 @@ function ProductionOrderDetailContent() {
                             height={240}
                             className="max-h-56 w-auto rounded-lg border border-line object-contain"
                             loading="lazy"
-                            unoptimized
                           />
                         </a>
                       )}
@@ -1289,7 +1286,6 @@ function ProductionOrderDetailContent() {
                           height={240}
                           className="max-h-56 w-auto rounded-lg border border-line object-contain"
                           loading="lazy"
-                          unoptimized
                         />
                       </a>
                     )}
@@ -1946,7 +1942,6 @@ function ProductionOrderDetailContent() {
                       height={240}
                       className="max-h-56 w-auto rounded-lg border border-line object-contain"
                       loading="lazy"
-                      unoptimized
                     />
                   </a>
                 </div>
@@ -2042,7 +2037,6 @@ function ProductionOrderDetailContent() {
                               height={240}
                               className="max-h-56 w-auto rounded-lg border border-line object-contain"
                               loading="lazy"
-                              unoptimized
                             />
                           </a>
                           {canEdit && (
@@ -2149,7 +2143,6 @@ function ProductionOrderDetailContent() {
                         sizes="160px"
                         className="object-contain"
                         loading="lazy"
-                        unoptimized
                       />
                     </div>
                     <a
@@ -2172,7 +2165,6 @@ function ProductionOrderDetailContent() {
                         sizes="160px"
                         className="object-contain"
                         loading="lazy"
-                        unoptimized
                       />
                     </div>
                     <a

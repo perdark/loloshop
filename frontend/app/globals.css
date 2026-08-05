@@ -193,6 +193,38 @@
   pointer-events: none;
 }
 .btn-shine:hover::after { transform: translateX(130%) skewX(-18deg); }
+/* ⚠️ The rule above is DESKTOP-ONLY BY NATURE. Students are phone-only, and a
+   touch device has no hover — so for the primary device the sheen never fired and
+   the CTA was a flat pill with no personality. Firing it on :active gives touch the
+   same moment, on the one interaction a finger actually produces. */
+.btn-shine:active::after {
+  transform: translateX(130%) skewX(-18deg);
+  transition-duration: 0.45s;
+}
+
+/* Touch-first press feedback.
+   Rationale as above: `hover:-translate-y-0.5` is invisible on a phone. A press
+   that visibly gives way under the thumb is the whole of "this button feels good"
+   on touch. Transform+shadow only — both compositor-cheap on low-end Android.
+   The easing is the project's existing signature curve (see .animate-page-in). */
+.btn-press {
+  transition:
+    transform 0.18s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.18s cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 0.2s ease-out,
+    border-color 0.2s ease-out,
+    color 0.2s ease-out,
+    opacity 0.2s ease-out;
+}
+.btn-press:active:not(:disabled) {
+  transform: scale(0.965);
+  box-shadow: var(--shadow-soft);
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn-press,
+  .btn-shine::after { transition: none; }
+  .btn-press:active:not(:disabled) { transform: none; }
+}
 
 /* Skeleton shimmer for loading states */
 @keyframes skeleton-shimmer {

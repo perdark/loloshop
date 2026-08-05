@@ -295,6 +295,10 @@ async function getQueue(req, res) {
                     WHERE oi2.order_id = o.id AND oi2.customer_image_url IS NOT NULL) AS has_design_images,
             u.name AS student_name, s.university_name, s.department, s.study_type,
             p.name_ar AS product_name, p.type AS product_type,
+            -- Catalog product photo. Already exposed on the order DETAIL for every staff
+            -- role; carried on the queue row too so a station can show «which item is this»
+            -- beside the embroidery artwork without opening each piece (owner 2026-08-05).
+            p.image_url AS product_image_url,
             b.name_ar AS batch_name, b.deadline,
             d.approval_status, d.rejection_reason,
             CASE WHEN s.wholesaler_id IS NULL THEN 'retail' ELSE 'wholesaler' END AS source,
@@ -329,17 +333,40 @@ async function getQueue(req, res) {
     [stages]
   );
   // Station-console enrichment (?station=1): per-piece embroidery zones (with the stitch
-  // content) for التطريز rows, and a backend-granted advance for الكوي rows — so the console
-  // never re-derives state-machine rules client-side.
+  // content) for التطريز + التجهيز rows, and a backend-granted advance for الكوي + التجهيز
+  // rows — so the console never re-derives state-machine rules client-side.
+  //
+  // WHY التجهيز gets zones too (2026-08-05, owner request): the preparer packs the physical
+  // set and has to check that what is in their hands matches what the student ordered —
+  // sash front AND back, cap top AND side, both robe sleeves. They were packing blind: the
+  // shelf/queue screens carried no artwork at all. Same detector as the embroiderer's
+  // checklist, so both stations read one source of truth for "what is stitched on this
+  // piece"; the DIFFERENCE is that the preparer only ever READS them (no tick endpoint is
+  // exposed for 'preparing'), which is why `done` is irrelevant downstream.
   if (String(req.query.station || '') === '1') {
-    const embIds = rows.filter((r) => r.status === 'embroidery').map((r) => r.id);
+    // 'preparing' rows carry no tick progress of their own — the zones are already
+    // stitched by the time a piece reaches التجهيز — but detectZonesForOrders wants a
+    // progress map keyed by id, so the (empty) jsonb is passed through unchanged.
+    //
+    // 'ready' is in the SAME set, and it has to be: التجهيز's console shows «قيد التجهيز»
+    // and «جاهزة للتسليم» as two tabs of one screen. Enriching only the first made the
+    // second claim «لا تطريز على هذه القطعة» for every packed piece — the sheet cannot
+    // tell "no artwork" from "artwork never fetched", so an absent list reads as a
+    // statement of fact. A bagged piece is exactly when the preparer double-checks the
+    // set against the student at handover, so the artwork belongs there too.
+    // Costs no extra round-trip: detectZonesForOrders is one `order_id = ANY($1)` query.
+    // 'delivered' is deliberately NOT included — it is a history column, not work.
+    const ZONE_STAGES = new Set(['embroidery', 'preparing', 'ready']);
+    const zoneIds = rows.filter((r) => ZONE_STAGES.has(r.status)).map((r) => r.id);
     const zonesById = await detectZonesForOrders(
-      embIds,
+      zoneIds,
       new Map(rows.map((r) => [r.id, r.embroidery_zones || {}]))
     );
     for (const r of rows) {
-      if (r.status === 'embroidery') r.zones = zonesById.get(r.id) || [];
-      if (r.status === 'pressing') {
+      if (ZONE_STAGES.has(r.status)) {
+        r.zones = zonesById.get(r.id) || [];
+      }
+      if (r.status === 'pressing' || r.status === 'preparing') {
         const next = nextStageFor({
           status: r.status,
           design_id: r.design_id,

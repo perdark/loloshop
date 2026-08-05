@@ -1,7 +1,12 @@
 import type { StationZone } from "@/lib/staff-types";
 
-/** Which production station the console is serving. */
-export type StationKind = "embroidery" | "tailor" | "pressing";
+/** Which production station the console is serving.
+ *  'preparing' (التجهيز) reuses this station shell deliberately (owner 2026-08-05:
+ *  «خلي عامل التجهيز مثله مثل واجهة عامل التطريز») — same students list, same sheet.
+ *  Its ONE difference is that zones are read-only: the stitching is already done by
+ *  the time a piece reaches التجهيز, and the backend exposes no zone-tick endpoint
+ *  for it, so the preparer READS the artwork to verify the set and never ticks it. */
+export type StationKind = "embroidery" | "tailor" | "pressing" | "preparing";
 
 /**
  * One work piece (an order) normalized for the station console, whatever the
@@ -14,6 +19,8 @@ export interface StationPiece {
   studentName: string;
   productName: string;
   productType: string;
+  /** Catalog product photo — «which item am I holding», shown beside the zone artwork. */
+  productImageUrl: string | null;
   batchName: string | null;
   wholesalerName: string | null;
   universityName: string | null;

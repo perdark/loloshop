@@ -6,12 +6,13 @@
 // what just moved on. Rendered via portal (stacking-context safety — same fix as
 // the calligraphy preview).
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import type { AdvancedGhost, StationKind, StationPiece } from "./types";
 import { resolveUploadUrl } from "./types";
 import { Lightbox } from "./Lightbox";
+import { ZoneThumb } from "@/components/staff/ZoneThumb";
 import { Button } from "@/components/ui/Button";
 
 interface StudentSheetProps {
@@ -25,6 +26,16 @@ interface StudentSheetProps {
   /** Busy keys: piece id (complete) or `${id}:${zone}` (zone tick). */
   busyKeys: Set<string>;
   fromPath: string;
+  /** Optional sticky footer — التجهيز puts «إنهاء كل القطع» here. Rendered only when
+   *  supplied, so التطريز/الفصال/الكوي are untouched. */
+  footer?: ReactNode;
+  /** Shown in place of the complete button when the backend grants no advance. The
+   *  default is a dead end by nature, so a caller that KNOWS where the action lives
+   *  should say — التجهيز's «جاهزة» tab points at التفاصيل, where تأكيد التسليم collects
+   *  the delivery method. Only that caller can tell the two cases apart: `kind` is the
+   *  same for both of its tabs, and a piece still at التجهيز must not be told to
+   *  confirm a delivery that has not happened. */
+  noActionHint?: string;
   onClose: () => void;
   onTickZone: (piece: StationPiece, zoneKey: string, done: boolean) => void;
   onComplete: (piece: StationPiece) => void;
@@ -39,6 +50,8 @@ export function StudentSheet({
   ghosts,
   busyKeys,
   fromPath,
+  footer,
+  noActionHint = "لا يمكن إكمال هذه القطعة من هنا حالياً.",
   onClose,
   onTickZone,
   onComplete,
@@ -109,6 +122,7 @@ export function StudentSheet({
               piece={piece}
               busyKeys={busyKeys}
               fromPath={fromPath}
+              noActionHint={noActionHint}
               onTickZone={onTickZone}
               onComplete={onComplete}
               onOpenImage={(url, title) => setLightbox({ url, title })}
@@ -131,6 +145,10 @@ export function StudentSheet({
             <p className="py-8 text-center text-sm text-ink-soft">لا قطع لهذا الطالب حالياً.</p>
           )}
         </div>
+
+        {footer && (
+          <div className="shrink-0 border-t border-line bg-surface px-4 py-3">{footer}</div>
+        )}
       </div>
 
       {/* Zone-image lightbox */}
@@ -147,6 +165,7 @@ function PieceCard({
   piece,
   busyKeys,
   fromPath,
+  noActionHint,
   onTickZone,
   onComplete,
   onOpenImage,
@@ -155,17 +174,39 @@ function PieceCard({
   piece: StationPiece;
   busyKeys: Set<string>;
   fromPath: string;
+  noActionHint: string;
   onTickZone: (piece: StationPiece, zoneKey: string, done: boolean) => void;
   onComplete: (piece: StationPiece) => void;
   onOpenImage: (url: string, title: string) => void;
 }) {
-  const zones = kind === "embroidery" ? piece.zones ?? [] : null;
+  // التطريز ticks its zones; التجهيز only READS them to verify the physical set.
+  // `piece.zones` is already `StationZone[] | null` and that null is meaningful — it says
+  // the backend never computed zones for this row, which is NOT the same as computing them
+  // and finding none. Only the latter may claim «لا تطريز على هذه القطعة»; flattening with
+  // `?? []` here would turn silence into a false claim on a piece that IS embroidered.
+  const zones = kind === "embroidery" || kind === "preparing" ? piece.zones : null;
+  const zonesReadOnly = kind === "preparing";
   const completeBusy = busyKeys.has(piece.id);
+  const productPhoto = resolveUploadUrl(piece.productImageUrl);
+  // التطريز auto-advances server-side when the last zone is ticked, so it shows a manual
+  // complete ONLY when no zones were detected. التجهيز can never advance implicitly — its
+  // zones are read-only — so it always needs its own button.
+  const showComplete = zonesReadOnly || (zones !== null && zones.length === 0);
 
   return (
     <div className="rounded-2xl border border-line bg-surface shadow-[var(--shadow-soft)]">
       <div className="flex items-center justify-between gap-3 px-4 pt-3.5">
-        <p className="min-w-0 truncate text-[15px] font-bold text-ink">{piece.productName}</p>
+        {/* Catalog photo — «which item is this». Kept small and beside the name so it adds
+            recognition without pushing the zone artwork (the real content) down the card. */}
+        {productPhoto && (
+          <ZoneThumb
+            url={productPhoto}
+            label={piece.productName}
+            size={44}
+            onOpen={onOpenImage}
+          />
+        )}
+        <p className="min-w-0 flex-1 truncate text-[15px] font-bold text-ink">{piece.productName}</p>
         <Link
           href={`/staff/orders/${piece.id}?from=${encodeURIComponent(fromPath)}`}
           className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-full border border-line bg-beige px-5 text-sm font-bold text-ink transition-colors hover:border-orange/40 hover:text-orange-ink"
@@ -174,7 +215,7 @@ function PieceCard({
         </Link>
       </div>
 
-      {/* التطريز: inline zone checklist with the stitch content */}
+      {/* Zone list — a tickable checklist for التطريز, the same rows read-only for التجهيز */}
       {zones && zones.length > 0 && (
         <ul className="mt-2 divide-y divide-line/70 border-t border-line/70">
           {zones.map((z) => {
@@ -182,49 +223,59 @@ function PieceCard({
             const img = resolveUploadUrl(z.image_url);
             return (
               <li key={z.key} className="flex items-center gap-3 px-4 py-2.5">
-                <button
-                  type="button"
-                  onClick={() => onTickZone(piece, z.key, !z.done)}
-                  disabled={busy}
-                  role="checkbox"
-                  aria-checked={z.done}
-                  aria-label={z.label}
-                  className="flex min-h-11 min-w-11 items-center justify-center disabled:opacity-50"
-                >
-                  <span
-                    className={`flex h-7 w-7 items-center justify-center rounded-lg border-2 text-base transition-colors ${
-                      z.done ? "border-emerald-600 bg-emerald-600 text-white" : "border-ink/30"
-                    }`}
-                    aria-hidden
-                  >
-                    {busy ? "…" : z.done ? "✓" : ""}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onTickZone(piece, z.key, !z.done)}
-                  disabled={busy}
-                  className="min-w-0 flex-1 text-start disabled:opacity-60"
-                >
-                  <p className={`text-sm font-semibold ${z.done ? "text-ink-soft line-through" : "text-ink"}`}>
-                    {z.label}
-                  </p>
-                  {z.text && (
-                    <p className="mt-0.5 truncate text-xs text-ink-soft" title={z.text}>
-                      {z.text}
-                    </p>
-                  )}
-                </button>
-                {img && (
+                {!zonesReadOnly && (
                   <button
                     type="button"
-                    onClick={() => onOpenImage(img, z.label)}
-                    aria-label={`عرض صورة ${z.label}`}
-                    className="shrink-0 overflow-hidden rounded-lg border border-line bg-white focus:outline-none focus:ring-2 focus:ring-orange-ink/40"
+                    onClick={() => onTickZone(piece, z.key, !z.done)}
+                    disabled={busy}
+                    role="checkbox"
+                    aria-checked={z.done}
+                    aria-label={z.label}
+                    className="flex min-h-11 min-w-11 items-center justify-center disabled:opacity-50"
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={img} alt={z.label} className="h-11 w-11 object-cover" loading="lazy" />
+                    <span
+                      className={`flex h-7 w-7 items-center justify-center rounded-lg border-2 text-base transition-colors ${
+                        z.done ? "border-emerald-600 bg-emerald-600 text-white" : "border-ink/30"
+                      }`}
+                      aria-hidden
+                    >
+                      {busy ? "…" : z.done ? "✓" : ""}
+                    </span>
                   </button>
+                )}
+
+                {zonesReadOnly ? (
+                  // No tick target: التجهيز verifies, it does not stitch. The text is shown
+                  // BESIDE the artwork on purpose — a zone can carry both, and the stitch
+                  // text is exactly what the preparer compares against the piece in hand.
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-ink">{z.label}</p>
+                    {z.text && (
+                      <p className="mt-0.5 truncate text-xs text-ink-soft" title={z.text}>
+                        {z.text}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onTickZone(piece, z.key, !z.done)}
+                    disabled={busy}
+                    className="min-w-0 flex-1 text-start disabled:opacity-60"
+                  >
+                    <p className={`text-sm font-semibold ${z.done ? "text-ink-soft line-through" : "text-ink"}`}>
+                      {z.label}
+                    </p>
+                    {z.text && (
+                      <p className="mt-0.5 truncate text-xs text-ink-soft" title={z.text}>
+                        {z.text}
+                      </p>
+                    )}
+                  </button>
+                )}
+
+                {img && (
+                  <ZoneThumb url={img} label={z.label} size={44} onOpen={onOpenImage} />
                 )}
               </li>
             );
@@ -232,27 +283,25 @@ function PieceCard({
         </ul>
       )}
 
-      {/* التطريز with no detected zones (designed retail sash): manual complete */}
+      {/* No zones detected — the reason differs per station, so the copy does too. */}
       {zones && zones.length === 0 && (
-        <div className="border-t border-line/70 px-4 py-3">
-          <p className="mb-2 text-xs text-ink-soft">
-            لا مناطق محددة لهذه القطعة (تصميم على الكانفس) — أكملها يدوياً بعد التطريز.
-          </p>
-          <Button size="sm" onClick={() => onComplete(piece)} loading={completeBusy} className="w-full">
-            {piece.completeLabel}
-          </Button>
-        </div>
+        <p className="border-t border-line/70 px-4 pt-3 text-xs text-ink-soft">
+          {zonesReadOnly
+            ? "لا تطريز على هذه القطعة."
+            : "لا مناطق محددة لهذه القطعة (تصميم على الكانفس) — أكملها يدوياً بعد التطريز."}
+        </p>
       )}
 
-      {/* الفصال / الكوي: one complete action per piece */}
-      {!zones && (
+      {/* One complete action per piece: الفصال/الكوي always, التجهيز always, التطريز only
+          when it has no zones to auto-advance it. */}
+      {(showComplete || !zones) && (
         <div className="px-4 py-3">
           {piece.canComplete ? (
             <Button size="sm" onClick={() => onComplete(piece)} loading={completeBusy} className="w-full">
               {piece.completeLabel}
             </Button>
           ) : (
-            <p className="text-center text-xs text-ink-soft">لا يمكن إكمال هذه القطعة من هنا حالياً.</p>
+            <p className="text-center text-xs text-ink-soft">{noActionHint}</p>
           )}
         </div>
       )}

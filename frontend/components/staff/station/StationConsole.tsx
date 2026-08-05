@@ -34,6 +34,7 @@ import { PlaceSheet } from "@/components/staff/shelf/PlaceSheet";
 import { PRODUCT_TYPE_LABELS, STUDY_TYPE_LABELS } from "@/lib/constants";
 import { usePolling } from "@/lib/hooks/usePolling";
 import { useProductionEvents } from "@/hooks/useProductionEvents";
+import { useScrollRestore } from "@/hooks/useScrollRestore";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
@@ -51,7 +52,12 @@ import {
 } from "./types";
 
 // ─── Per-station copy ─────────────────────────────────────────────────────────
-const META: Record<StationKind, { title: string; subtitle: string; empty: string }> = {
+// NOTE: التجهيز is a StationKind (it reuses StudentSheet) but is NOT served by this
+// console — components/staff/prep/PrepConsole.tsx drives it, because its queue is a
+// status filter (قيد التجهيز / جاهزة) rather than the عرض بالطلب / عرض بالقطع modes here.
+type ConsoleKind = Exclude<StationKind, "preparing">;
+
+const META: Record<ConsoleKind, { title: string; subtitle: string; empty: string }> = {
   embroidery: {
     title: "قائمة التطريز",
     subtitle: "اشتغل طالباً بطالب، أو بالجملة منطقةً منطقة",
@@ -126,6 +132,7 @@ function queueToPiece(r: ProductionQueueItem, kind: StationKind): StationPiece {
     studentName: r.student_name,
     productName: r.product_name,
     productType: r.product_type,
+    productImageUrl: r.product_image_url ?? null,
     batchName: r.batch_name,
     wholesalerName: r.wholesaler_name,
     universityName: r.university_name,
@@ -148,6 +155,8 @@ function tailorToPiece(r: TailorOrderRow): StationPiece {
     studentName: r.studentName,
     productName: r.productName,
     productType: r.productType,
+    // الفصال reads a different endpoint (tailor queue) that carries no catalog photo.
+    productImageUrl: null,
     batchName: r.batchName,
     wholesalerName: null,
     universityName: null,
@@ -189,7 +198,7 @@ export function StationConsole({
   kind,
   showSourceFilter = false,
 }: {
-  kind: StationKind;
+  kind: ConsoleKind;
   showSourceFilter?: boolean;
 }) {
   const pathname = usePathname() || "/staff";
@@ -247,6 +256,11 @@ export function StationConsole({
       /* storage full/unavailable — persistence is best-effort */
     }
   }, [kind, view, search, sourceFilter, repFilter, activeZone, activeType, selected, openStudentKey]);
+
+  // The one part of «getting back perfectly» that was still missing: the scroll offset.
+  // Every filter above was restored and the worker was STILL dropped at the top of the
+  // list. Keyed per station+view so الطلبات and القطع keep separate positions.
+  useScrollRestore(`station:${kind}:${view}`, loadedOnce && !loading);
 
   // ─── Data ───────────────────────────────────────────────────────────────────
   const load = useCallback(

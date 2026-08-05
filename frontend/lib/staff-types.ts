@@ -73,6 +73,8 @@ export interface ProductionQueueItem {
   study_type?: "morning" | "evening" | null;
   product_name: string;
   product_type: string;
+  /** Catalog product photo — same field the order detail exposes. Null when unset. */
+  product_image_url?: string | null;
   batch_name: string | null;
   deadline: string | null;
   approval_status: DesignApprovalStatus | null;
@@ -97,11 +99,15 @@ export interface ProductionQueueItem {
   student_id?: string;
   needs_pressing?: boolean;
   /**
-   * Station console only (?station=1), التطريز rows: the piece's embroidery zones with
-   * the stitch content (text / plate image) so the worker sees WHAT to embroider inline.
+   * Station console only (?station=1). The piece's embroidery zones with the stitch
+   * content (text / plate image).
+   * · التطريز rows — so the worker sees WHAT to embroider inline, and ticks each zone.
+   * · التجهيز rows — READ-ONLY, so the preparer can verify the physical set against the
+   *   order (sash front/back, cap top/side, both robe sleeves) without opening it.
+   *   `done` is meaningless at this stage: the stitching is already finished.
    */
   zones?: StationZone[];
-  /** Station console only, الكوي rows: backend-granted advance (never derived client-side). */
+  /** Station console only, الكوي + التجهيز rows: backend-granted advance (never derived client-side). */
   can_advance?: boolean;
   next_status?: OrderStatus | null;
   advance_label?: string | null;

@@ -1,15 +1,20 @@
 import type { NextConfig } from "next";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-// Pin the workspace root. Next infers it by walking UP for a lockfile and taking the
-// OUTERMOST match — and a stray empty `package-lock.json` in the home directory (no
-// package.json beside it) made it choose `/home/mint`, i.e. the developer's entire home
-// folder, as the project root. That inflates filesystem watching and cache validation on
-// every build, and the same thing happens on the VPS if a stray lockfile exists there.
-// Pinning it makes the build deterministic regardless of what sits above the repo.
-const projectRoot = path.dirname(fileURLToPath(import.meta.url));
-
+// ⚠️ DO NOT ADD `turbopack: { root: … }` HERE. Tried and reverted 2026-08-04.
+//
+// The temptation: `next build` warns «Next.js inferred your workspace root, but it may
+// not be correct» because it walks UP for a lockfile and takes the OUTERMOST match — a
+// stray empty `package-lock.json` in `/home/mint` (with no package.json beside it) makes
+// it treat the whole home directory as the project root.
+//
+// Pinning `turbopack.root` to this directory silences that warning and builds fine, but
+// it BREAKS `next dev`: every request to `/` 500s with «Could not find the module
+// [project]/…/app/error.tsx in the React Client Manifest». Measured both ways — with the
+// option, `/` = 500 every time; without it, `/` = 200 and zero manifest errors.
+//
+// The correct fix is to delete the stray lockfiles instead of overriding the inference.
+// The one at the repo root is already gone; `/home/mint/package-lock.json` is outside
+// this repo and is the machine owner's to remove. The warning is cosmetic — it affects
+// how wide file tracing casts, not correctness.
 const apiHost = process.env.NEXT_PUBLIC_API_URL
   ? new URL(process.env.NEXT_PUBLIC_API_URL).hostname
   : "localhost";
@@ -17,7 +22,6 @@ const apiHost = process.env.NEXT_PUBLIC_API_URL
 const nextConfig: NextConfig = {
   // Don't advertise the framework (LS-16). nginx needs `server_tokens off;` for its half.
   poweredByHeader: false,
-  turbopack: { root: projectRoot },
   // Allow the dev server's HMR/assets to be served to the LAN IP (phone testing on
   // the same Wi-Fi). Derived from NEXT_PUBLIC_API_URL so it tracks the machine IP
   // automatically. Dev-only; ignored in production.

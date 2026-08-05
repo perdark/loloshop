@@ -4,6 +4,7 @@ import { SplashIntro } from "@/components/SplashIntro";
 import { DiscountPopup } from "@/components/DiscountPopup";
 import { VisitBeacon } from "@/components/VisitBeacon";
 import { Onboarding } from "@/components/student/Onboarding";
+import { FooterSignature } from "@/components/shop/FooterSignature";
 
 export default function StudentLayout({
   children,
@@ -56,7 +57,7 @@ export default function StudentLayout({
               شروط الاستخدام
             </Link>
           </nav>
-          <p className="mt-5 text-sm font-semibold text-ink-soft">© RevoArt</p>
+          <FooterSignature />
         </div>
       </footer>
     </div>

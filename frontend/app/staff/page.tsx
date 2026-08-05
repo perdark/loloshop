@@ -4,8 +4,9 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { OrderCard } from "@/components/staff/OrderCard";
-import { StaffAttendancePanel } from "@/components/staff/StaffAttendancePanel";
+import { AttendanceReminder } from "@/components/staff/AttendanceReminder";
 import { StationConsole } from "@/components/staff/station/StationConsole";
+import { PrepConsole } from "@/components/staff/prep/PrepConsole";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { PageLoader } from "@/components/ui/Spinner";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -32,6 +33,7 @@ import {
 } from "@/lib/constants";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 import { useProductionEvents } from "@/hooks/useProductionEvents";
+import { useScrollRestore } from "@/hooks/useScrollRestore";
 import type { ProductionQueueItem, MonitorData } from "@/lib/staff-types";
 import type { StaffOrderScope, StaffType, OrderStatus } from "@/lib/types";
 import Link from "next/link";
@@ -252,6 +254,10 @@ function QueueView({
       /* storage full/unavailable — persistence is best-effort */
     }
   }, [activeTab, sourceFilter, zoneFilter]);
+
+  // …and the scroll offset with it. Restoring the FILTERS but not the position still
+  // dumped the worker at the top of a 100-row queue on every back-navigation.
+  useScrollRestore(`staff-home:${activeTab}`, !loading);
 
   const meta = QUEUE_META[staffType] ?? {
     title: "قائمة الطلبات",
@@ -933,7 +939,7 @@ function StaffPageContent() {
   if (isManager) {
     return (
       <>
-        {user.role === "staff" && <StaffAttendancePanel compact className="mb-4" />}
+        {user.role === "staff" && <AttendanceReminder className="mb-4" />}
         <MonitorDashboard
           showSourceFilter={showSourceFilter}
           isAdmin={user.role === "admin"}
@@ -950,7 +956,7 @@ function StaffPageContent() {
   if (staffType === "embroiderer" || staffType === "presser") {
     return (
       <>
-        <StaffAttendancePanel compact className="mb-4" />
+        <AttendanceReminder className="mb-4" />
         <StationConsole
           kind={staffType === "embroiderer" ? "embroidery" : "pressing"}
           showSourceFilter={showSourceFilter}
@@ -959,10 +965,22 @@ function StaffPageContent() {
     );
   }
 
+  // التجهيز gets its own console (owner 2026-08-05): the preparer must SEE the student's
+  // embroidery — sash front/back, cap top/side, robe sleeves — to verify the set they are
+  // packing. The flat QueueView carried no artwork at all. See components/staff/prep.
+  if (staffType === "preparer") {
+    return (
+      <>
+        <AttendanceReminder className="mb-4" />
+        <PrepConsole showSourceFilter={showSourceFilter} />
+      </>
+    );
+  }
+
   if (staffType && staffType in QUEUE_META) {
     return (
       <>
-        <StaffAttendancePanel compact className="mb-4" />
+        <AttendanceReminder className="mb-4" />
         <QueueView
           staffType={staffType}
           showSourceFilter={showSourceFilter}
@@ -974,7 +992,7 @@ function StaffPageContent() {
 
   return (
     <div dir="rtl" lang="ar">
-      {user.role === "staff" && <StaffAttendancePanel compact className="mb-4" />}
+      {user.role === "staff" && <AttendanceReminder className="mb-4" />}
       <PageHeader title="لوحة الطلبات" subtitle="الطلبات النشطة" />
       <EmptyState
         title="الدور غير محدد"

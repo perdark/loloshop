@@ -19,6 +19,7 @@ import {
   type EmbroideryZone,
 } from "@/lib/constants";
 import { usePolling } from "@/lib/hooks/usePolling";
+import { useScrollRestore } from "@/hooks/useScrollRestore";
 import type { ProductionQueueItem } from "@/lib/staff-types";
 import type { OrderStatus } from "@/lib/types";
 
@@ -832,6 +833,10 @@ function ConsoleContent() {
       /* storage full/unavailable — persistence is best-effort */
     }
   }, [stage, source, repParam, zoneParam, selectedBatch, search, page, zonesOpen]);
+
+  // Scroll offset, restored alongside the filters above. Keyed on stage+page so paging or
+  // switching stage starts at the top (a new list), while «رجوع» from a piece does not.
+  useScrollRestore(`staff-queue:${stage}:${page}`, loadedOnce && !loading);
 
   // `load` only changes identity when `effectiveZone` genuinely changes (the mount-time URL
   // rehydration above never flips it — see storedZoneFallback), so this still fires exactly

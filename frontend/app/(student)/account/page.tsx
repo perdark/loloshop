@@ -26,6 +26,93 @@ import { PageLoader } from "@/components/ui/Spinner";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { ProfilePreferences } from "@/components/student/ProfilePreferences";
+import {
+  GraduateFemaleIcon,
+  GraduateMaleIcon,
+} from "@/components/student/GraduateIcons";
+import { firstName, getProfile, PROFILE_CHANGED_EVENT, type Gender } from "@/lib/profile";
+
+/** Row used for the account's navigation entries — icon · label · chevron. */
+function AccountRow({
+  href,
+  label,
+  hint,
+  icon,
+}: {
+  href: string;
+  label: string;
+  hint: string;
+  icon: React.ReactNode;
+}) {
+  return (
+    <Link
+      href={href}
+      className="btn-press flex items-center gap-3 rounded-[16px] border border-line bg-surface px-4 py-3.5 shadow-[var(--shadow-soft)] [-webkit-tap-highlight-color:transparent] hover:border-orange/40"
+    >
+      <span
+        aria-hidden
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-orange/10 text-orange-ink"
+      >
+        {icon}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-[15px] font-extrabold text-ink">{label}</span>
+        <span className="block truncate text-[12.5px] text-[var(--shop-muted)]">{hint}</span>
+      </span>
+      {/* Points to the page edge in RTL — flipped with the logical direction. */}
+      <svg
+        aria-hidden
+        viewBox="0 0 24 24"
+        className="h-4 w-4 shrink-0 text-[var(--shop-muted)] rtl:rotate-180"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M9 18l6-6-6-6" />
+      </svg>
+    </Link>
+  );
+}
+
+const IconBag = (
+  <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" />
+    <path d="M3 6h18" />
+    <path d="M16 10a4 4 0 0 1-8 0" />
+  </svg>
+);
+
+const IconReturn = (
+  <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 7v6h6" />
+    <path d="M3 13a9 9 0 1 0 3-7.7L3 8" />
+  </svg>
+);
+
+/**
+ * The account avatar. Reuses the onboarding graduate figures so the gender answer
+ * becomes something the student SEES as themselves, not a buried setting.
+ * Falls back to the brand mark when the question was skipped — a neutral disc is
+ * better than picking one of the two on a visitor's behalf.
+ */
+function Avatar({ gender }: { gender: Gender | null }) {
+  return (
+    <span
+      aria-hidden
+      className="flex h-[58px] w-[58px] shrink-0 items-center justify-center overflow-hidden rounded-full bg-beige ring-1 ring-ink/10"
+    >
+      {gender === "female" ? (
+        <GraduateFemaleIcon size={54} />
+      ) : gender === "male" ? (
+        <GraduateMaleIcon size={54} />
+      ) : (
+        <span className="font-script text-[26px] leading-none text-orange-ink">lolo</span>
+      )}
+    </span>
+  );
+}
 
 export default function AccountPage() {
   const router = useRouter();
@@ -35,6 +122,11 @@ export default function AccountPage() {
   // Auth is resolved after mount — reading localStorage during render would
   // mismatch the server-rendered HTML.
   const [authed, setAuthed] = useState<boolean | null>(null);
+  // Device profile — drives the avatar and the greeting. Read after mount (see the
+  // note on `authed`), and re-read on change so editing «تفضيلاتي» updates the
+  // header on this very screen instead of needing a reload.
+  const [profileName, setProfileName] = useState<string | null>(null);
+  const [profileGender, setProfileGender] = useState<Gender | null>(null);
 
   // Deletion is a two-step commitment: read the consequences, then confirm with
   // the password. `confirming` is the second step.
@@ -52,6 +144,17 @@ export default function AccountPage() {
     getDeletionPreview()
       .then(setPreview)
       .catch(() => setLoadError(true));
+  }, []);
+
+  useEffect(() => {
+    const sync = () => {
+      const p = getProfile();
+      setProfileName(firstName(p.name));
+      setProfileGender(p.gender);
+    };
+    sync();
+    window.addEventListener(PROFILE_CHANGED_EVENT, sync);
+    return () => window.removeEventListener(PROFILE_CHANGED_EVENT, sync);
   }, []);
 
   async function handleDelete() {
@@ -82,14 +185,63 @@ export default function AccountPage() {
   // حسابي» true for a visitor who never made an account.
   if (!authed) {
     return (
-      <section className="py-2">
+      <section className="animate-fade-page-in py-2">
         <h1 className="font-display text-2xl font-bold text-ink">حسابي</h1>
-        <div className="mt-5 rounded-2xl border border-line bg-surface p-4 text-center shadow-[var(--shadow-soft)]">
-          <p className="text-sm text-ink-soft">سجّل الدخول لعرض طلباتك وإدارة حسابك.</p>
-          <Link href={loginHref("/account")} className="mt-4 inline-block">
-            <Button>تسجيل الدخول</Button>
-          </Link>
+
+        {/* The signed-out screen is not a login wall with a form on it. A visitor who
+            already went through onboarding has a name and a register — greeting them
+            with it is the difference between "an account page" and "your page". */}
+        <div className="mt-5 overflow-hidden rounded-2xl border border-line bg-surface shadow-[var(--shadow-soft)]">
+          <div className="flex items-center gap-3.5 bg-orange/[0.07] px-4 py-5">
+            <Avatar gender={profileGender} />
+            <div className="min-w-0">
+              <p className="text-[17px] font-extrabold text-ink">
+                {profileName ? `أهلاً ${profileName}` : "أهلاً بك"}
+              </p>
+              <p className="mt-0.5 text-[13px] text-[var(--shop-muted)]">
+                {profileName ? "سجّل الدخول لتتابع طلباتك" : "سجّل الدخول أو أنشئ حساباً"}
+              </p>
+            </div>
+          </div>
+
+          <div className="px-4 py-4">
+            <ul className="space-y-2">
+              {[
+                "تابع حالة طلبك خطوة بخطوة",
+                "احفظ تصاميمك وسلّتك",
+                "اطلب لنفسك أو لدفعتك كاملة",
+              ].map((line) => (
+                <li key={line} className="flex items-start gap-2.5 text-[13.5px] text-ink">
+                  <svg
+                    aria-hidden
+                    viewBox="0 0 24 24"
+                    className="mt-[3px] h-4 w-4 shrink-0 text-orange-ink"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="m20 6-11 11-5-5" />
+                  </svg>
+                  {line}
+                </li>
+              ))}
+            </ul>
+
+            <Link href={loginHref("/account")} className="mt-5 block">
+              <Button fullWidth size="lg">
+                تسجيل الدخول
+              </Button>
+            </Link>
+            <Link href="/register" className="mt-2.5 block">
+              <Button variant="ghost" fullWidth>
+                إنشاء حساب جديد
+              </Button>
+            </Link>
+          </div>
         </div>
+
         <ProfilePreferences />
       </section>
     );
@@ -124,27 +276,37 @@ export default function AccountPage() {
     <section className="py-2">
       <h1 className="font-display text-2xl font-bold text-ink">حسابي</h1>
 
-      {/* Identity card */}
-      <div className="mt-5 rounded-2xl border border-line bg-surface p-4 shadow-[var(--shadow-soft)]">
-        <p className="text-base font-bold text-ink">{user?.name || "—"}</p>
-        {user?.phone && (
-          <p className="mt-1 text-sm text-ink-soft" dir="ltr">
-            {user.phone}
-          </p>
-        )}
+      {/* Identity card — the avatar is the same graduate figure the gender question
+          uses, so the answer a student gave in onboarding visibly becomes *them*
+          rather than a setting filed away somewhere. */}
+      <div className="mt-5 flex items-center gap-3.5 rounded-2xl border border-line bg-surface px-4 py-4 shadow-[var(--shadow-soft)]">
+        <Avatar gender={profileGender} />
+        <div className="min-w-0">
+          <p className="truncate text-[17px] font-extrabold text-ink">{user?.name || "—"}</p>
+          {user?.phone && (
+            <p className="mt-0.5 text-[13.5px] text-[var(--shop-muted)]" dir="ltr">
+              {user.phone}
+            </p>
+          )}
+        </div>
       </div>
 
-      <div className="mt-4 grid gap-2.5 sm:grid-cols-2">
-        <Link href="/my-order" className="block">
-          <Button variant="ghost" fullWidth>
-            طلباتي
-          </Button>
-        </Link>
-        <Link href="/returned-orders" className="block">
-          <Button variant="ghost" fullWidth>
-            الطلبات المُعادة
-          </Button>
-        </Link>
+      {/* Was two ghost pills side by side, which read as actions rather than places.
+          Rows with an icon and a chevron say "this goes somewhere", and give each
+          destination a line of explanation. */}
+      <div className="mt-4 grid gap-2.5">
+        <AccountRow
+          href="/my-order"
+          label="طلباتي"
+          hint="تابع حالة كل طلب"
+          icon={IconBag}
+        />
+        <AccountRow
+          href="/returned-orders"
+          label="الطلبات المُعادة"
+          hint="الطلبات التي رجعت للتعديل"
+          icon={IconReturn}
+        />
       </div>
 
       <ProfilePreferences />
