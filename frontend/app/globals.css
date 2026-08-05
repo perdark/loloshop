@@ -631,6 +631,54 @@ html {
   animation: splash2-curtain-bot-out 0.55s cubic-bezier(0.76, 0, 0.24, 1) forwards;
 }
 
+/* ─── Onboarding stage: the embroidery motif + entrance choreography ───────────
+   The onboarding screen lost its background when the photo step was deleted, and
+   a bare cream panel is `AP-03` (centred everything, nothing carrying weight).
+
+   The motif is a RUNNING STITCH, not a gradient. That is deliberate: per the
+   onboarding pattern, «one motif, reused consistently, does more than any amount
+   of gradient», and the stitch is the one thing on this screen that could not be
+   swapped into a competitor's app — the shop's own world fact is «مخيوطة ومطرّزة
+   بورشتنا» (`L-02`). Inline SVG, no image, so there is no photo to source and
+   nothing to download.
+
+   It continues the SplashIntro's cream stage on purpose. The splash exits with a
+   curtain split; landing on the same warm paper with the same two ambient glows
+   makes the two screens read as one film rather than two designs.
+
+   EVERYTHING here animates `transform` and `opacity` only (`VP-18`) — no
+   stroke-dashoffset, which repaints every frame and is exactly what drops frames
+   on the low-end Androids this audience carries. The stitches therefore appear by
+   staggered fade+rise per group, which reads as "being sewn" without the repaint.
+   All of it collapses under prefers-reduced-motion at the end of this block. */
+@keyframes ob-rise {
+  from { opacity: 0; transform: translate3d(0, 14px, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+/* Staggered entrance for the content rows. 460ms sits inside the 250–350ms
+   screen-transition band once the stagger offset is counted, and the curve is the
+   project's existing signature ease-out. */
+.ob-rise   { animation: ob-rise 460ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.ob-d1     { animation-delay: 60ms; }
+.ob-d2     { animation-delay: 130ms; }
+.ob-d3     { animation-delay: 210ms; }
+.ob-d4     { animation-delay: 300ms; }
+
+/* The crest's halo BREATHES, and that needs its own keyframe: the splash's
+   `splash2-halo-bloom` and `splash2-ring-expand` both END at opacity 0 — correct
+   for a one-shot entrance, useless for a header that stays on screen. Reusing them
+   here would have made the halo bloom once and then leave a bare logo. */
+@keyframes ob-halo-breathe {
+  0%, 100% { opacity: 0.40; transform: scale(1); }
+  50%      { opacity: 0.62; transform: scale(1.07); }
+}
+.ob-halo-breathe { animation: ob-halo-breathe 4.5s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ob-rise { animation: none; opacity: 1; transform: none; }
+  .ob-halo-breathe { animation: none; }
+}
+
 /* ─── Graduation cap loader ─── */
 @keyframes gradcap-bob {
   0%, 100% { transform: translateY(0); }

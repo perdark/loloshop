@@ -5,6 +5,8 @@ import { createPortal } from "react-dom";
 import { getToken } from "@/lib/auth";
 import { getProfile, saveProfile, type Gender } from "@/lib/profile";
 import { GraduateFemaleIcon, GraduateMaleIcon } from "./GraduateIcons";
+import { OnboardingBackdrop } from "./OnboardingBackdrop";
+import { OnboardingCrest } from "./OnboardingCrest";
 
 /**
  * First-run welcome — two questions, then out of the way forever.
@@ -109,8 +111,21 @@ export function Onboarding() {
         aria-hidden
         className="fixed inset-0 z-[69] bg-ink/80 backdrop-blur-md"
       />
+      {/* The decorated stage sits in its OWN fixed layer at the panel's exact
+          geometry, rather than inside the panel. The panel is `overflow-y-auto`,
+          and an absolutely-positioned child of a scroll container scrolls with the
+          content — so the stitches would have slid up and out on a short phone
+          where the form scrolls. Fixed here, they stay put and the content moves
+          over them, which is the intent. The panel below is transparent so this
+          shows through. */}
       <div
-        className="fixed inset-0 z-[70] mx-auto flex max-w-lg flex-col overflow-y-auto bg-cream shadow-[0_0_60px_rgba(0,0,0,0.45)]"
+        aria-hidden
+        className="fixed inset-0 z-[69] mx-auto max-w-lg overflow-hidden shadow-[0_0_60px_rgba(0,0,0,0.45)]"
+      >
+        <OnboardingBackdrop />
+      </div>
+      <div
+        className="fixed inset-0 z-[70] mx-auto flex max-w-lg flex-col overflow-y-auto"
         role="dialog"
         aria-modal="true"
         aria-label="أهلاً بك في لولو شوب"
@@ -131,15 +146,32 @@ export function Onboarding() {
                 asked before the answer is known, so «خلّينا نتعرّف عليك» would
                 address a woman in the masculine on the one screen whose whole
                 job is to stop getting that wrong. */}
-            <h1 className="mt-3 font-display-ar text-[2rem] font-bold leading-[1.35] text-ink">
+            <OnboardingCrest />
+
+            {/* The choreography is a stagger, not a slide: heading → subhead →
+                name → gender, ~70ms apart. It reads as the screen assembling in
+                the order the eye should take it, which is the one thing motion can
+                do here that static layout cannot. Every step is transform+opacity
+                (VP-18) and the whole thing collapses under reduced-motion.
+                Centred, because the crest above is symmetrical — a start-aligned
+                heading hanging directly under a centred mark reads as a mistake. */}
+            <h1 className="ob-rise ob-d1 mt-5 text-center font-display-ar text-[2rem] font-bold leading-[1.35] text-ink">
               قبل ما نبدأ
             </h1>
-            <p className="mt-2 max-w-[34ch] text-[13.5px] leading-relaxed text-[var(--shop-muted)]">
-              هالمعلومتين تخلّي التطبيق يعرض المقاسات والخيارات الصحيحة — ويحچي
-              بالشكل الصحيح. تنعدّل بأي وقت من «حسابي».
+            {/* Cut from three lines to one (owner: «text under logo less»). The
+                long version explained the mechanism — sizes, options, grammatical
+                address — which is the app's business, not the visitor's. What they
+                actually need is how much this costs them and whether they are stuck
+                with the answer. Both survive; nothing else was load-bearing. */}
+            {/* `text-balance` + a wider measure: at 30ch the line broke right before
+                «حسابي», leaving one orphaned word under a centred heading. Balancing
+                splits the two lines evenly instead of filling the first and dumping
+                the remainder. */}
+            <p className="ob-rise ob-d2 mx-auto mt-2 max-w-[38ch] text-balance text-center text-[14px] leading-relaxed text-[var(--shop-muted)]">
+              معلومتين بس، وتنعدّل بأي وقت من «حسابي».
             </p>
 
-            <div className="mt-8">
+            <div className="ob-rise ob-d3 mt-8">
               <label
                 className="mb-3 block text-[13.5px] font-extrabold text-ink"
                 htmlFor="ob-name"
@@ -155,11 +187,14 @@ export function Onboarding() {
                 spellCheck={false}
                 /* 16px minimum — anything smaller makes iOS Safari zoom the
                    whole page on focus and the visitor lands mid-layout. */
-                className="min-h-[52px] w-full rounded-[12px] border border-line bg-beige px-4 text-base font-semibold text-ink placeholder:font-medium placeholder:text-[var(--shop-muted)] focus-visible:border-orange-ink focus-visible:outline-none"
+                /* Same warm translucent surface as the gender rows, for the same
+                   reason — the three fields have to read as one family sitting on
+                   the amber stage, not as white cut-outs over it. */
+                className="min-h-[52px] w-full rounded-[12px] border border-[rgba(244,123,66,0.28)] bg-[rgba(255,251,245,0.72)] px-4 text-base font-semibold text-ink placeholder:font-medium placeholder:text-[var(--shop-muted)] focus-visible:border-orange-ink focus-visible:outline-none"
               />
             </div>
 
-            <div className="mt-8">
+            <div className="ob-rise ob-d4 mt-8">
               <span
                 className="mb-3 block text-[13.5px] font-extrabold text-ink"
                 id="ob-sex-lb"
@@ -183,11 +218,17 @@ export function Onboarding() {
             </div>
           </div>
 
+          {/* Was a flat `bg-cream` band, which drew a hard seam across the stitched
+              stage the moment the panel went transparent. A gradient from
+              transparent to paper keeps the CTA legible over anything scrolling
+              beneath it without cutting the background in half. */}
           <div
-            className="bg-cream pt-6"
+            className="pt-10"
             style={{
               ...sideInsets("1rem"),
               paddingBottom: inset("bottom", "2rem"),
+              background:
+                "linear-gradient(to top, #FBF1E4 0%, #FBF1E4 58%, rgba(251,241,228,0.85) 80%, rgba(251,241,228,0) 100%)",
             }}
           >
             <PrimaryButton onClick={() => finish(true)} disabled={!canContinue}>
@@ -285,8 +326,13 @@ export function GenderRow({
       aria-pressed={active}
       className={`flex min-h-[72px] w-full items-center gap-3 rounded-[16px] py-2 pe-3 ps-3.5 text-start transition-colors ${
         active
-          ? "border-2 border-[#F47B42] bg-[rgba(244,123,66,0.09)]"
-          : "border-[1.5px] border-line bg-white"
+          ? "border-2 border-[#F47B42] bg-[rgba(244,123,66,0.14)]"
+          : /* Was `bg-white` — a hard white slab on a warm stage, which is what
+               «do not keep just a white fields» was pointing at. A translucent warm
+               surface lets the amber behind it come through, so the card belongs to
+               the screen instead of being punched out of it. The border picks up
+               the same hue rather than staying neutral grey. */
+            "border-[1.5px] border-[rgba(244,123,66,0.28)] bg-[rgba(255,251,245,0.72)]"
       }`}
     >
       <span className="shrink-0 leading-none">{icon}</span>

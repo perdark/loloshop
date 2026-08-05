@@ -126,8 +126,13 @@ export function SplashIntro() {
 
         {/* ── Script wordmark: "lolo shop  96" ── */}
         {/* The clip-path reveal sweeps from left→right (RTL page, so end→start visually) */}
+        {/* `dir="ltr"`: the page is RTL, which this flex row inherited, so the
+            first child was landing on the right and the brand rendered as
+            «96 lolo shop». The name is Latin — it reads left-to-right regardless
+            of the page direction. */}
         <div
           className="mt-5 flex items-baseline gap-3 overflow-hidden"
+          dir="ltr"
           aria-hidden
         >
           <span
