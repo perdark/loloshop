@@ -97,6 +97,93 @@ const ZONE_DEFS = [
   { key: 'robe_sleeve_right', label: 'الروب — الردن الأيمن', test: (l) => /ردن/.test(l) && /أيمن/.test(l) },
   { key: 'robe_sleeve_left',  label: 'الروب — الردن الأيسر', test: (l) => /ردن/.test(l) && /أيسر/.test(l) },
 ];
+
+// ---------- التجهيز piece spec ----------
+// WHY THIS EXISTS. The zone detector above answers «what is STITCHED on this piece», and for
+// the التجهيز queue that answer is almost always "nothing": measured on the real queue, the
+// 483 preparing+ready orders are 310 robes · 105 caps · 65 shawls · 3 sashes, and embroidery
+// zones are a sash/cap concept. So the preparer's screen was correct and useless.
+//
+// What they actually need to pull the right garment off the shelf is the SPEC — لون الروب,
+// قماش الروب, فصال الروب, الشكل, لون القبعة — and it was in `order_items` the whole time,
+// invisible for a precise reason: the zone detector skips any line with no `customer_text`
+// and no `customer_image_url`, and a spec line («لون الروب: أسود») has neither. It is a
+// choice, not content. Same rows, opposite filter.
+//
+// Three kinds of line come back, and only two are worth showing:
+//   · grouped (`group_id` set)  → a chosen option. THE spec. 85 robes carry colour/fabric/cut.
+//   · ungrouped WITH text       → a free-text instruction. «كسرة الكتف» is 225 of these, and
+//                                 «نوع القبعة» another 44 — the student's own words.
+//   · ungrouped, no text        → pricing/packaging bookkeeping («السعر الأساسي», «قطعة: روب»).
+//                                 Dropped: the piece card already names the product.
+// Zone lines are dropped too — they render as artwork in `zones`, and showing them twice
+// would pad the card that has to stay fast to read.
+
+/** True when this line is already rendered as embroidery artwork in `zones`. */
+function isZoneLine(label, customerText, customerImageUrl) {
+  const hasContent = (customerText && customerText.trim() !== '') || customerImageUrl;
+  if (!hasContent) return false;
+  return ZONE_DEFS.some((z) => z.test(label || ''));
+}
+
+/**
+ * Build one piece's spec rows from its raw order_items.
+ * Pure (no DB) so the partitioning rules above are unit-testable — see test/prepSpec.test.js.
+ * Rows arrive already ordered; first occurrence of a label wins, so a duplicated option
+ * cannot print twice.
+ */
+function buildPieceSpec(items) {
+  const out = [];
+  const seen = new Set();
+  for (const it of items) {
+    const label = it.label_snapshot || '';
+    const text = (it.customer_text || '').trim();
+    const image = it.customer_image_url || null;
+    if (isZoneLine(label, text, image)) continue;
+
+    const group = it.group_ar || null;
+    // Ungrouped AND silent → bookkeeping, not a spec.
+    if (!group && !text && !image) continue;
+
+    // `label_snapshot` is stored as «المجموعة: القيمة». When the group is known, strip the
+    // prefix so the card can print label/value as two columns instead of repeating the group
+    // inside its own value («لون الروب» → «لون الروب: أسود»). Guarded: a snapshot taken
+    // before the group was renamed will not match, and then the full label is the honest
+    // thing to show.
+    let value = null;
+    if (group) {
+      value = label.startsWith(`${group}: `) ? label.slice(group.length + 2) : label;
+    }
+
+    const key = group || label;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ label: group || label, value, text: text || null, image_url: image });
+  }
+  return out;
+}
+
+/** Batched buildPieceSpec for a queue page: ONE order_items query for every id. */
+async function detectSpecForOrders(ids) {
+  const byOrder = new Map(ids.map((id) => [id, []]));
+  if (!ids.length) return byOrder;
+  const { rows } = await query(
+    `SELECT oi.order_id, oi.label_snapshot, oi.customer_text, oi.customer_image_url,
+            og.name_ar AS group_ar
+     FROM order_items oi
+     LEFT JOIN option_groups og ON og.id = oi.group_id
+     WHERE oi.order_id = ANY($1)
+     ORDER BY oi.order_id, oi.created_at`,
+    [ids]
+  );
+  const grouped = new Map();
+  for (const r of rows) {
+    if (!grouped.has(r.order_id)) grouped.set(r.order_id, []);
+    grouped.get(r.order_id).push(r);
+  }
+  for (const [id, items] of grouped) byOrder.set(id, buildPieceSpec(items));
+  return byOrder;
+}
 async function detectEmbroideryZones(orderId, progress) {
   const { rows } = await query(
     `SELECT label_snapshot, customer_text, customer_image_url FROM order_items WHERE order_id = $1`, [orderId]);
@@ -295,6 +382,10 @@ async function getQueue(req, res) {
                     WHERE oi2.order_id = o.id AND oi2.customer_image_url IS NOT NULL) AS has_design_images,
             u.name AS student_name, s.university_name, s.department, s.study_type,
             p.name_ar AS product_name, p.type AS product_type,
+            -- Robe tailoring measurements, for التجهيز only. Gated in SQL rather than sent
+            -- to every station: the prep queue is ~480 rows and this JSON rides on each of
+            -- them, which is dead weight on a workshop-wifi station that cannot use it.
+            CASE WHEN o.status IN ('preparing', 'ready') THEN o.measurements END AS measurements,
             -- Catalog product photo. Already exposed on the order DETAIL for every staff
             -- role; carried on the queue row too so a station can show «which item is this»
             -- beside the embroidery artwork without opening each piece (owner 2026-08-05).
@@ -357,14 +448,24 @@ async function getQueue(req, res) {
     // Costs no extra round-trip: detectZonesForOrders is one `order_id = ANY($1)` query.
     // 'delivered' is deliberately NOT included — it is a history column, not work.
     const ZONE_STAGES = new Set(['embroidery', 'preparing', 'ready']);
+    // التجهيز also gets the piece SPEC — see buildPieceSpec's header for why zones alone
+    // leave the preparer with an empty screen on a queue that is 64% robes.
+    const SPEC_STAGES = new Set(['preparing', 'ready']);
     const zoneIds = rows.filter((r) => ZONE_STAGES.has(r.status)).map((r) => r.id);
-    const zonesById = await detectZonesForOrders(
-      zoneIds,
-      new Map(rows.map((r) => [r.id, r.embroidery_zones || {}]))
-    );
+    const specIds = rows.filter((r) => SPEC_STAGES.has(r.status)).map((r) => r.id);
+    const [zonesById, specById] = await Promise.all([
+      detectZonesForOrders(
+        zoneIds,
+        new Map(rows.map((r) => [r.id, r.embroidery_zones || {}]))
+      ),
+      detectSpecForOrders(specIds),
+    ]);
     for (const r of rows) {
       if (ZONE_STAGES.has(r.status)) {
         r.zones = zonesById.get(r.id) || [];
+      }
+      if (SPEC_STAGES.has(r.status)) {
+        r.spec = specById.get(r.id) || [];
       }
       if (r.status === 'pressing' || r.status === 'preparing') {
         const next = nextStageFor({
@@ -1589,4 +1690,7 @@ module.exports = {
   deleteOrder,
   // Shared with the calligraphy workbench («تحويل للتطريز» reuses the real state machine).
   loadAdvanceRow, performAdvance, ADVANCE_LABEL_AR, detectZonesWithImages,
+  // Exported for tests: the التجهيز spec partitioning is pure, so it is asserted directly
+  // rather than through an HTTP round trip. See test/prepSpec.test.js.
+  buildPieceSpec,
 };

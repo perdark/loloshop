@@ -16,6 +16,63 @@ written against an uncommitted tree; **(d)** committed it, so that caveat is dis
 
 ---
 
+## 2026-08-05 (e) — 🧾 the prep-queue data gap CLOSED: التجهيز cards now show the garment, not just the stitching
+
+No migration. Gates: backend **177/177** (+10 new) · `tsc` 0 · `eslint` 0 errors · `next build`
+exit 0. Committed to `feat/ssr-storefront-native-auth`.
+
+**The board's framing was right and the fix followed it.** 325 of 326 prep cards read «لا تطريز على
+هذه القطعة» *correctly* — the queue is robes, and zones are a sash/cap concept. The detector was
+**not** touched. What changed is that the console now also answers the preparer's actual question.
+
+**The two questions are different, and that is the whole insight.** The embroiderer asks «ما الذي
+أطرّزه؟» — answered by `order_items` rows that carry `customer_text` or `customer_image_url`. The
+preparer asks «أي روب أرفعه من الرف؟» — answered by rows that carry **neither**, because a spec line
+(«لون الروب: أسود») is a *choice*, not content. Same table, opposite filter. That is why the data
+was "already in the DB and still unrendered": every existing code path filtered on content.
+
+`buildPieceSpec` partitions each order's lines three ways — grouped (a chosen option → the spec),
+ungrouped with text (the student's own instruction), ungrouped and silent (pricing bookkeeping,
+dropped). Zone lines are dropped too, since they already render as artwork. It is pure, so the rules
+are asserted directly in `test/prepSpec.test.js` against **labels measured off the live queue**, not
+invented fixtures.
+
+**Measured before/after, by driving the real `getQueue` with a real preparer user over the real
+435-row queue** — not a re-implementation of the handler:
+
+| | before | after |
+|---|---|---|
+| prep rows with something to show | 3 | **416 (95.6%)** |
+| rows carrying measurements | 0 (never sent) | **281** |
+| empty cards | 432 | **19** |
+
+**All 19 remaining empties are correct** and worth not "fixing": they are American shawls whose only
+order line is «السعر الأساسي», because the product name — *شال امريكي 10* — already IS the spec. The
+card shows the name and photo, which is the complete answer for that product.
+
+**Details worth keeping:**
+- `measurements` is gated **in SQL** (`CASE WHEN o.status IN ('preparing','ready')`), not filtered in
+  JS. The prep queue is ~480 rows and that JSON would otherwise ride on every station's payload —
+  dead weight on workshop wifi for a station that cannot use it.
+- `chest_cm` is `0` on effectively every live order, so `0` is rendered as *absent* rather than
+  «محيط الصدر: 0 سم». Documented on the shared `RobeMeasurements` type.
+- The measurements type was **extracted** from an inline type on the order-detail response into
+  `RobeMeasurements`, so the detail page and the queue row cannot drift. Same Arabic labels on both.
+- `PieceSpec` uses flex rows, **not** `grid-cols-subgrid` — this renders on whatever WebView the
+  workshop's Android phones ship with, and subgrid is too new to bet a production station on.
+- Adding `spec`/`measurements` to `StationPiece` made `tsc` fail on the two *other* mappers
+  (`queueToPiece`, `tailorToPiece`). Both were filled with an explicit `null` and a note, so the
+  types record that التطريز/الفصال/الكوي never ask this question.
+
+**⚠️ Note for anyone using the `postgres` MCP server on this project: it is pointed at a DIFFERENT
+project's database.** Its `orders`/`order_items` carry `guest_claim_token`, `bundle_path`,
+`delivered_inventory_ids` — a digital-goods store, not LoloShop. Every measurement above came from
+LoloShop's own configured DB via `backend/lib/db.js`. Do not trust that MCP tool for this repo.
+
+**Still open:** nobody has clicked the console in a browser.
+
+---
+
 ## 2026-08-05 (d) — ✅ the prep batch reviewed, two defects fixed, committed as one unit
 
 No migration. Gates on the batch as a whole: backend **167/167** · `tsc` 0 · `eslint` 0 errors ·

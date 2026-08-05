@@ -142,6 +142,10 @@ function queueToPiece(r: ProductionQueueItem, kind: StationKind): StationPiece {
     deadline: r.deadline,
     createdAt: r.created_at,
     zones: kind === "embroidery" ? r.zones ?? [] : null,
+    // التجهيز's spec belongs to PrepConsole; this console serves التطريز/الكوي, which ask
+    // "what do I stitch / press", not "which garment is this".
+    spec: null,
+    measurements: null,
     canComplete: kind === "pressing" ? !!r.can_advance : true,
     completeLabel:
       kind === "pressing" ? r.advance_label ?? "إنهاء الكوي" : "إكمال التطريز",
@@ -166,6 +170,8 @@ function tailorToPiece(r: TailorOrderRow): StationPiece {
     deadline: r.deadline,
     createdAt: r.createdAt,
     zones: null,
+    spec: null,
+    measurements: null,
     canComplete: true,
     completeLabel: "تم الفصال",
   };

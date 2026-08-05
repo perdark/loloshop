@@ -13,6 +13,7 @@ import type { AdvancedGhost, StationKind, StationPiece } from "./types";
 import { resolveUploadUrl } from "./types";
 import { Lightbox } from "./Lightbox";
 import { ZoneThumb } from "@/components/staff/ZoneThumb";
+import { PieceSpec } from "@/components/staff/PieceSpec";
 import { Button } from "@/components/ui/Button";
 
 interface StudentSheetProps {
@@ -214,6 +215,12 @@ function PieceCard({
           التفاصيل
         </Link>
       </div>
+
+      {/* التجهيز: what the garment IS, before what is stitched on it. This order is the point
+          — the preparer picks a robe by colour/fabric/cut first, and on a queue that is 64%
+          robes the zone list below is usually empty. Renders nothing for other stations
+          (spec is null there), so التطريز/الفصال/الكوي cards are unchanged. */}
+      <PieceSpec spec={piece.spec} measurements={piece.measurements} onOpenImage={onOpenImage} />
 
       {/* Zone list — a tickable checklist for التطريز, the same rows read-only for التجهيز */}
       {zones && zones.length > 0 && (

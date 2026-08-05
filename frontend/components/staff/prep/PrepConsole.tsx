@@ -116,6 +116,8 @@ function queueToPiece(r: ProductionQueueItem): StationPiece {
     // (see productionController's ZONE_STAGES); this keeps that a backend contract
     // rather than an assumption baked into the mapper.
     zones: r.zones ?? null,
+    spec: r.spec ?? null,
+    measurements: r.measurements ?? null,
     // Never derived client-side — the backend grants the advance on the queue row.
     canComplete: r.can_advance === true,
     completeLabel: r.advance_label ?? "إنهاء التجهيز",

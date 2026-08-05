@@ -1,5 +1,33 @@
 # Progress
 
+## 2026-08-05 (e) — التجهيز cards show the garment, not just the stitching
+
+**Committed to `feat/ssr-storefront-native-auth`. No migration.**
+Gates: **backend 177/177** (+10) · `tsc` 0 · `eslint` 0 errors · `next build` exit 0.
+
+- **Closed the prep-queue data gap.** The زone detector was NOT touched — 325 of 326 cards said
+  «لا تطريز على هذه القطعة» *correctly*, because the queue is robes and zones are a sash/cap thing.
+  The console now also answers the preparer's real question: **لون/قماش/فصال الروب · الشكل · لون
+  القبعة**, the student's free-text lines («كسرة الكتف» — the single most common line in the whole
+  queue at 225) and **قياسات الروب** with ملاحظات الفصال and صورة الوصل.
+- **Why the data was invisible:** a spec line carries no `customer_text` and no `customer_image_url`
+  — it is a *choice*, not content — and every existing code path filtered on content. Same table,
+  opposite filter. `buildPieceSpec` partitions the lines and is pure, so the rules are unit-tested
+  against labels measured off the live queue.
+- **Measured by driving the real `getQueue` with a real preparer over the real 435-row queue:**
+  rows with something to show **3 → 416 (95.6%)**, measurements **0 → 281**, empty cards **432 → 19**.
+  All 19 remaining empties are correct — American shawls whose only line is «السعر الأساسي», because
+  the product name (*شال امريكي 10*) already is the spec.
+- `measurements` is gated in SQL, not JS, so it never rides on the other stations' ~480-row payloads.
+  `chest_cm` is 0 on every live order, so 0 renders as absent. `RobeMeasurements` was extracted from
+  an inline type so the order detail and the queue row cannot drift.
+- `PieceSpec` uses flex rows, not `grid-cols-subgrid` — old Android WebViews in the workshop.
+
+Open:
+- Browser smoke test of the prep console — the payload is verified end to end, the UI is not clicked.
+- ⚠️ The `postgres` MCP server points at a DIFFERENT project's DB (a digital-goods store). All
+  measurements above came from LoloShop's own DB via `backend/lib/db.js`.
+
 ## 2026-08-05 — التجهيز prep console · scroll restore · touch-first buttons · account screen
 
 **Committed to `feat/ssr-storefront-native-auth`. No migration.**

@@ -50,11 +50,13 @@ Confirm on the box before trusting "it's live".
 ## 🚢 SHIP QUEUE
 
 - **Deploy = merge to `main` + push + `bash scripts/deploy.sh` on the VPS.** No migration pending.
-- **One branch is waiting:** `feat/ssr-storefront-native-auth`, 4 commits — the SSR/app-shell batch
-  then the prep-console batch. Merging the branch ships both in the right order.
-- **The prep console has not been browser-smoked** against the real queue (326 students / 429
-  pieces). It typechecks, lints and builds; nobody has clicked it. Worth ten minutes before or
-  right after deploy, since التجهيز is a station a worker uses all day.
+- **One branch is waiting:** `feat/ssr-storefront-native-auth`, 5 commits — the SSR/app-shell batch,
+  then the prep console, then the prep spec. Merging the branch ships them in the right order.
+- **The prep console has not been browser-smoked.** Its *payload* is verified end-to-end (the real
+  `getQueue` handler, a real preparer user, the real 435-row queue — see the 2026-08-05 (e) archive
+  entry), and backend 177/177 · `tsc` 0 · `eslint` 0 · `next build` exit 0 all pass. But nobody has
+  **clicked** it. Worth ten minutes before or right after deploy, since التجهيز is a station a
+  worker uses all day. ⚠️ The Next dev server OOMs on this laptop — see the landmine below.
 - **Set `API_INTERNAL_URL=http://127.0.0.1:4000` in the VPS frontend `.env`** before/with the SSR
   batch. Optional but free: without it the server-side fetch falls back to `NEXT_PUBLIC_API_URL`,
   so the box resolves its own DNS and opens a TLS connection to itself through nginx to reach an
@@ -137,11 +139,12 @@ Confirm on the box before trusting "it's live".
 
 ## 🤔 OPEN DECISIONS + NEXT MOVES
 
-- **The prep-queue data gap is the highest-value next move for التجهيز.** 325 of 326 student cards
-  show «لا تطريز على هذه القطعة» — correctly, because the queue is 71% robes and zone artwork is a
-  sash/cap concept. **Do not "fix" the detector.** What the preparer actually needs is already in
-  the DB and still unrendered: `لون الروب` · `قماش الروب` · `فصال الروب` · `الشكل` · `لون القبعة`,
-  plus `measurements` on 303 of 477 preparing orders and «كسرة الكتف» text on 225 items.
+- ~~The prep-queue data gap~~ — **CLOSED 2026-08-05 (e).** The spec (`لون/قماش/فصال الروب` · `الشكل`
+  · `لون القبعة`), the free-text lines («كسرة الكتف» · «نوع القبعة») and `measurements` now render on
+  the التجهيز card. Verified by driving the real `getQueue` with a real preparer: **416 of 435 prep
+  rows (95.6%) carry a spec**, 281 carry measurements, **19 cards remain empty and all 19 are
+  correct** — they are American shawls whose only order line is «السعر الأساسي», because the product
+  name (*شال امريكي 10*) already IS the spec. The detector was not touched, as the board insisted.
 - **Payout cards are shipped but their numbers are still wrong:** `suggested_amount` is a lifetime
   accrual that manual payouts never reduce · ابو عبدو is listed twice · مضر محمد renders −775,000 ·
   no `audit_log` row is written on card changes. *(The feature itself is committed and on

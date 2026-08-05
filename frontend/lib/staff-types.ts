@@ -107,10 +107,50 @@ export interface ProductionQueueItem {
    *   `done` is meaningless at this stage: the stitching is already finished.
    */
   zones?: StationZone[];
+  /**
+   * Station console only (?station=1), التجهيز rows (قيد التجهيز + جاهزة). The piece's spec —
+   * لون/قماش/فصال الروب, الشكل, لون القبعة, plus free-text lines like «كسرة الكتف».
+   * NOT the same data as `zones`: those are what is *stitched*, this is what the garment *is*.
+   * The prep queue is ~64% robes, so for most pieces this is the only content on the card.
+   */
+  spec?: PieceSpecRow[];
+  /** Station console only, التجهيز rows: robe measurements. Gated in SQL — null elsewhere. */
+  measurements?: RobeMeasurements | null;
   /** Station console only, الكوي + التجهيز rows: backend-granted advance (never derived client-side). */
   can_advance?: boolean;
   next_status?: OrderStatus | null;
   advance_label?: string | null;
+}
+
+/**
+ * Robe tailoring measurements (قياسات الروب), in cm. `chest_cm` and `tailor_notes` are newer
+ * than the rest, so they are optional on legacy orders — and `chest_cm` is `0` on effectively
+ * every live order, which is why every renderer must treat 0 as "not given" rather than print
+ * «محيط الصدر: 0».
+ *
+ * Shared by the order detail and the التجهيز queue row. Extracted from an inline type on the
+ * detail response so the two cannot drift apart.
+ */
+export interface RobeMeasurements {
+  shoulder_cm: number;
+  chest_cm?: number;
+  robe_length_cm: number;
+  sleeve_length_cm: number;
+  tailor_notes?: string;
+  /** صورة الوصل — optional receipt/bill photo URL (retail only). */
+  receipt_image_url?: string;
+}
+
+/**
+ * One spec row on a التجهيز queue row — «which garment do I pull off the shelf».
+ * Either a chosen option (`label` = group, `value` = the choice) or a free-text instruction
+ * the student typed (`label` = the line, `value` null, `text` set). Never both empty.
+ */
+export interface PieceSpecRow {
+  label: string;
+  value: string | null;
+  text: string | null;
+  image_url: string | null;
 }
 
 /** One embroidery zone on a station-console queue row. */
@@ -206,16 +246,8 @@ export interface ProductionOrderDetail {
     /** Routing flags (batch update). */
     has_embroidery?: boolean;
     needs_pressing?: boolean;
-    /** Robe tailoring measurements (قياسات الروب). chest_cm + tailor_notes are newer (optional on legacy orders). */
-    measurements?: {
-      shoulder_cm: number;
-      chest_cm?: number;
-      robe_length_cm: number;
-      sleeve_length_cm: number;
-      tailor_notes?: string;
-      /** صورة الوصل — optional receipt/bill photo URL (retail only). */
-      receipt_image_url?: string;
-    } | null;
+    /** Robe tailoring measurements (قياسات الروب). */
+    measurements?: RobeMeasurements | null;
     /** Final design image uploaded by admin/designer (replaces PDF). */
     final_design_url?: string | null;
     /** Staff presence — who is actively working on this order. */
