@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { getToken } from "@/lib/auth";
@@ -8,15 +7,27 @@ import { getProfile, saveProfile, type Gender } from "@/lib/profile";
 import { GraduateFemaleIcon, GraduateMaleIcon } from "./GraduateIcons";
 
 /**
- * First-run welcome — one emotional beat, then two questions, then out of the
- * way forever.
+ * First-run welcome — two questions, then out of the way forever.
+ *
+ * ⚠️ THE OPENING PHOTO SCREEN WAS REMOVED (owner, 2026-08-05): «remove the first
+ * look of onboarding because photo is bad and i didn't find a good photo for it».
+ * It was a full-bleed hero (`/lookbook/onboarding-hero-v2.jpg`) carrying «يوم
+ * واحد. وصورة تبقى العمر كله.» and a «يلا نبدأ» button, and everything it did was
+ * decorative — it collected nothing. Deleting it removes a whole tap between a
+ * first-time visitor and the shop, which is the right trade even before the photo
+ * quality argument. The asset is left on disk, unreferenced, so restoring the
+ * screen later is a revert rather than a re-shoot.
+ *
+ * With one screen there is no step machine any more: no `step`/`back` state, no
+ * enter animation keyed on the step, no «رجوع», and no progress dots (two dots
+ * for a single screen would be a lie about how much is left).
  *
  * WHAT WAS WRONG WITH THE MOCKUP'S VERSION, and what is different here:
  *
  *  1. IT WAS A WALL. The mockup's continue button stayed disabled until both
  *     fields were filled and offered no way past — a stranger on a slow phone
  *     had to hand over a name and a gender before seeing a single product.
- *     That is a bounce, not an onboarding. Here BOTH steps carry «تخطّي», and
+ *     That is a bounce, not an onboarding. «تخطّي» is always available and
  *     skipping is remembered, so the shop is never more than one tap away.
  *  2. IT ASKED SIGNED-IN STUDENTS WHAT THE DB ALREADY KNOWS. A student with an
  *     account has a name and gender on `users`/`students`; asking again invites
@@ -31,29 +42,12 @@ import { GraduateFemaleIcon, GraduateMaleIcon } from "./GraduateIcons";
  * 2026-07-26 session, silently pricing the wrong order.
  */
 
-/* Its own asset, not one of the `look-*` shots: those are shared with
-   SpotlightReel, and this frame crops far taller than they do. Deliberately
-   carries NO lettering on the sash: the overlay copy is the message here, and
-   an invented university name on the opening screen is a claim the shop never
-   made.
-
-   `-v2` is the SAME photograph re-cropped, not a new one — `onboarding-hero.jpg`
-   stays on disk. The original is a full-length subject in a 1080×1920 plate, so
-   the graduate read as a distant figure and the gold embroidery ran through the
-   entire lower third, which is exactly where the headline sits. v2 is a
-   cap-and-shoulders crop (800×1430 taken from the top of the frame, JPEG q85
-   through the same sharp policy backend/lib/upload.js uses) — it keeps the two
-   things that say "graduation", the mortarboard and the tassel, at a size a
-   thumb-height phone can actually read, and it drops the sash tips and hands.
-   The crop keeps the original 0.56 aspect on purpose: object-cover in a
-   ~0.46 phone frame then shows the full height and trims only the sides. */
-const HERO_SRC = "/lookbook/onboarding-hero-v2.jpg";
-
 /* Safe-area padding. The portal is `fixed inset-0`, so inside the Capacitor
-   webview it runs under the notch and the home bar — without these the logo row
-   is clipped at the top and «يلا نبدأ» sits under the gesture bar. env() is
-   inline rather than a Tailwind class because the value has to be added to the
-   design padding, not replace it. */
+   webview it runs under the notch and the home bar — without these the top row
+   is clipped and «يلا نشوف القطع» sits under the gesture bar. env() is inline
+   rather than the `.safe-top` utility because the value has to be ADDED to the
+   design padding here, not replace it. (It only reports a real value at all
+   because of `viewportFit: "cover"` — see app/layout.tsx.) */
 const inset = (side: "top" | "bottom" | "left" | "right", base: string) =>
   `calc(env(safe-area-inset-${side}, 0px) + ${base})`;
 
@@ -62,46 +56,11 @@ const sideInsets = (base: string) => ({
   paddingRight: inset("right", base),
 });
 
-/* Step transitions animate ONLY transform and opacity — both composited, neither
-   triggers layout. The previous screen unmounts, so this is an enter animation
-   on the incoming step (keyed by `step`, which remounts it) rather than a
-   two-panel slide: a horizontal track would need its own scroll container and
-   would fight the dialog's own overflow on a short phone.
-   RTL: forward comes in from the left, «رجوع» from the right. */
-const STEP_ANIMATION_CSS = `
-.ob-step { will-change: transform; }
-.ob-step-fwd { animation: ob-in-fwd 260ms cubic-bezier(0.22, 0.61, 0.36, 1) both; }
-.ob-step-back { animation: ob-in-back 260ms cubic-bezier(0.22, 0.61, 0.36, 1) both; }
-@keyframes ob-in-fwd {
-  from { opacity: 0; transform: translate3d(-22px, 0, 0); }
-  to { opacity: 1; transform: translate3d(0, 0, 0); }
-}
-@keyframes ob-in-back {
-  from { opacity: 0; transform: translate3d(22px, 0, 0); }
-  to { opacity: 1; transform: translate3d(0, 0, 0); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .ob-step-fwd, .ob-step-back { animation: none; }
-  .ob-step { will-change: auto; }
-}
-`;
-
 export function Onboarding() {
   const [mounted, setMounted] = useState(false);
   const [open, setOpen] = useState(false);
-  const [step, setStep] = useState<1 | 2>(1);
   const [name, setName] = useState("");
   const [gender, setGender] = useState<Gender | null>(null);
-  // Which way the incoming step should slide. State, not a ref: it is read
-  // during render, and a ref read at render time can hold the previous value.
-  // Both setters are batched into one render, so the class and the step always
-  // change together.
-  const [back, setBack] = useState(false);
-
-  function go(next: 1 | 2) {
-    setBack(next < step);
-    setStep(next);
-  }
 
   // Decide AFTER mount: both localStorage and the token are client-only, and
   // reading them during render would hydration-mismatch.
@@ -157,128 +116,15 @@ export function Onboarding() {
         aria-label="أهلاً بك في لولو شوب"
         dir="rtl"
       >
-        <style>{STEP_ANIMATION_CSS}</style>
-        <div
-          key={step}
-          className={`ob-step flex flex-1 flex-col ${
-            back ? "ob-step-back" : "ob-step-fwd"
-          }`}
-        >
-        {step === 1 ? (
-        /* One full-bleed screen, not a photo panel stacked on a cream bar.
-           The first cut faded the photo into a cream footer, which drew a hard
-           seam across the screen and squeezed the headline against it. Everything
-           now sits ON the photo, so it reads as a single opening frame. */
-        <div className="relative isolate flex min-h-[100dvh] flex-1 flex-col overflow-hidden bg-ink">
-          <Image
-            src={HERO_SRC}
-            alt="خرّيجة بروب تخرّج وقبعة بشرّابة ذهبية ووشاح مخملي أحمر مطرّز بخيط ذهبي"
-            fill
-            sizes="(min-width: 512px) 512px, 100vw"
-            loading="eager"
-            fetchPriority="high"
-            className="-z-20 object-cover object-[50%_8%]"
-          />
-          {/* TWO scrims, and the bottom one is cream on purpose. The headline
-              block sits over the sash, which is dense gold embroidery no crop of
-              this photograph can avoid — so contrast has to come from the scrim,
-              not from luck. Cream (the panel's own --color-cream) instead of the
-              old ink wash: it carries the brand palette into a crimson-and-brown
-              frame and lets the copy be ink, which is what the rest of the app
-              reads like. It never reaches full opacity, so the gown still shows
-              through and the screen stays ONE frame with no seam.
-              The top scrim stays dark — the logo and «تخطّي» are cream, and the
-              curtain behind them is light. */}
-          <span
-            aria-hidden
-            className="absolute inset-0 -z-10"
-            style={{
-              background: [
-                "linear-gradient(to top, rgba(250,244,234,0.96) 0%, rgba(250,244,234,0.95) 30%, rgba(250,244,234,0.86) 42%, rgba(250,244,234,0.55) 54%, rgba(250,244,234,0.18) 66%, rgba(250,244,234,0) 78%)",
-                "linear-gradient(to bottom, rgba(18,15,13,0.62) 0%, rgba(18,15,13,0.5) 6%, rgba(18,15,13,0.26) 13%, rgba(18,15,13,0.08) 19%, rgba(18,15,13,0) 25%)",
-              ].join(","),
-            }}
-          />
-
-          <div
-            className="flex items-center justify-between gap-3"
-            style={{ ...sideInsets("1rem"), paddingTop: inset("top", "1.5rem") }}
-          >
-            <span className="flex items-center gap-2">
-              <Image
-                src="/icons/icon-192.png"
-                alt=""
-                width={40}
-                height={40}
-                className="rounded-pill"
-              />
-              <span className="font-display text-[15px] font-bold text-cream">
-                لولو شوب
-              </span>
-            </span>
-            <SkipButton onClick={() => finish(false)} tone="light" />
-          </div>
-
-          {/* mt-auto: the copy hangs off the bottom of the frame no matter how
-              tall the phone is, instead of being pinned to a fixed offset. */}
-          <div
-            className="mt-auto"
-            style={{
-              ...sideInsets("1rem"),
-              paddingBottom: inset("bottom", "1.75rem"),
-            }}
-          >
-            <p className="font-display text-[11px] font-bold tracking-[0.2em] text-orange-ink">
-              CLASS OF 2026
-            </p>
-            <h1 className="mt-2.5 text-balance font-display-ar text-[2.4rem] font-bold leading-[1.28] text-ink">
-              يوم واحد. وصورة تبقى العمر كله.
-            </h1>
-            <p className="mt-3.5 max-w-[32ch] text-[15px] leading-relaxed text-ink-soft">
-              أوشحة وروبات وقبعات تخرّج — مخيوطة ومطرّزة بورشتنا، وتوصلك قبل
-              موعد الحفل.
-            </p>
-
-            <div className="mt-7">
-              <PrimaryButton onClick={() => go(2)}>يلا نبدأ</PrimaryButton>
-              {/* Says what the next screen costs, so «يلا نبدأ» is not a leap
-                  into an unknown form. */}
-              <p className="mt-3 text-center text-xs font-semibold text-[var(--shop-muted)]">
-                سؤالين بس · أقل من دقيقة
-              </p>
-            </div>
-            <div className="mt-5">
-              <Dots step={1} />
-            </div>
-          </div>
-        </div>
-      ) : (
-        <>
           <div
             className="flex-1 pb-6"
             style={{ ...sideInsets("1rem"), paddingTop: inset("top", "2rem") }}
           >
-            <div className="flex items-center justify-between gap-3">
-              <button
-                type="button"
-                onClick={() => go(1)}
-                className="inline-flex min-h-11 items-center gap-1.5 text-[13px] font-bold text-[var(--shop-muted)]"
-              >
-                <svg
-                  aria-hidden
-                  viewBox="0 0 24 24"
-                  className="h-4 w-4"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.4"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M9 18l6-6-6-6" />
-                </svg>
-                رجوع
-              </button>
-              <SkipButton onClick={() => finish(false)} tone="dark" />
+            {/* «رجوع» went with the photo screen — there is nothing behind this
+                one to go back to. «تخطّي» stays, and it is now the only way past,
+                which is the point: the shop is one tap away at all times. */}
+            <div className="flex items-center justify-end">
+              <SkipButton onClick={() => finish(false)} />
             </div>
 
             {/* Every string on THIS screen is gender-neutral on purpose: it is
@@ -344,62 +190,29 @@ export function Onboarding() {
               paddingBottom: inset("bottom", "2rem"),
             }}
           >
-            <div className="mb-4">
-              <Dots step={2} />
-            </div>
             <PrimaryButton onClick={() => finish(true)} disabled={!canContinue}>
               يلا نشوف القطع
             </PrimaryButton>
           </div>
-        </>
-      )}
-        </div>
       </div>
     </>,
     document.body
   );
 }
 
-function SkipButton({
-  onClick,
-  tone,
-}: {
-  onClick: () => void;
-  tone: "light" | "dark";
-}) {
+/* The `tone` prop went with the photo screen. It existed so «تخطّي» could sit as a
+   dark pill on the photograph and as plain text on cream; with only the cream
+   screen left, the light variant was dead code carrying a comment about an image
+   that is no longer rendered. */
+function SkipButton({ onClick }: { onClick: () => void }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`inline-flex min-h-11 items-center rounded-pill px-3 text-[13px] font-bold transition-colors ${
-        tone === "light"
-          ? /* ink, not white/12: the re-cropped photo puts pale curtain behind
-               this corner, and a light pill made cream text vanish into it. */
-            "bg-ink/40 text-cream backdrop-blur-sm hover:bg-ink/60"
-          : "text-[var(--shop-muted)] hover:text-orange-ink"
-      }`}
+      className="inline-flex min-h-11 items-center rounded-pill px-3 text-[13px] font-bold text-[var(--shop-muted)] transition-colors hover:text-orange-ink"
     >
       تخطّي
     </button>
-  );
-}
-
-/* The active dot used to animate its `width`, which is a layout property — on a
-   low-end Android that reflows the whole step on every change. Same look, done
-   with scaleX on a fixed-width track: transform and colour only. */
-function Dots({ step }: { step: 1 | 2 }) {
-  return (
-    <div className="flex justify-center gap-1.5" aria-hidden>
-      {[1, 2].map((n) => (
-        <i key={n} className="block h-1.5 w-[22px] overflow-hidden">
-          <i
-            className={`block h-full w-full origin-center rounded-pill transition-[transform,background-color] duration-200 ${
-              n === step ? "scale-x-100 bg-orange-ink" : "scale-x-[0.27] bg-line"
-            }`}
-          />
-        </i>
-      ))}
-    </div>
   );
 }
 

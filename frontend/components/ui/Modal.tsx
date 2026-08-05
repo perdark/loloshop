@@ -84,7 +84,9 @@ export function Modal({ open, onClose, title, children, footer, descriptionId }:
       // Bottom sheet on mobile (`items-end`): pad past the iPhone home-indicator
       // safe area so the sheet — and its footer buttons — never sit under it.
       // `env()` resolves to 0 on devices without an inset, so this is a no-op there.
-      className="animate-fade-page-in fixed inset-0 z-50 flex items-end justify-center bg-ink/45 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] backdrop-blur-sm sm:items-center sm:pb-4"
+      // pt likewise: a tall modal centred on `sm:` reaches the top edge, and
+      // edge-to-edge would slide its first row under the status bar.
+      className="animate-fade-page-in fixed inset-0 z-50 flex items-end justify-center bg-ink/45 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] backdrop-blur-sm sm:items-center sm:pb-4"
       onClick={() => onCloseRef.current()}
       role="presentation"
     >

@@ -41,7 +41,11 @@ export function Lightbox({
         type="button"
         onClick={onClose}
         aria-label="إغلاق الصورة"
-        className="absolute end-4 top-4 flex h-11 w-11 items-center justify-center rounded-full bg-white/15 text-2xl leading-none text-white transition-colors hover:bg-white/30"
+        /* top: the overlay is `fixed inset-0`, so with `viewport-fit=cover` (see
+           app/layout.tsx) a plain `top-4` puts this button UNDER the status bar on a
+           notched phone — and it is the only way out of a fullscreen viewer. `max()`
+           keeps the designed 1rem everywhere there is no inset. */
+        className="absolute end-4 top-[max(1rem,calc(env(safe-area-inset-top,0px)+0.5rem))] flex h-11 w-11 items-center justify-center rounded-full bg-white/15 text-2xl leading-none text-white transition-colors hover:bg-white/30"
       >
         ✕
       </button>

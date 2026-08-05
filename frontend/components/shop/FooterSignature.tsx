@@ -35,8 +35,24 @@ import { useEffect, useRef } from "react";
 
 /** Resting size, in `em` relative to the paragraph — the size before any scroll. */
 const MIN_EM = 1.6;
-/** Full size once the footer is fully in view. */
+/**
+ * Ceiling for the grown size. ⚠️ NOT the size actually used — see `fitEm()`.
+ *
+ * Owner report (2026-08-05): «revoart need to be smaller because the words out of
+ * screen». This was a hard-coded 6.5em, and «© RevoArt» is a wide string: at 6.5em
+ * on a 390 px phone it measures roughly 470 px against ~358 px of usable width, so
+ * the ends were clipped by the wrapper's `overflow-hidden`. The word did not
+ * overflow the page — it was silently cut, which looks like a bug rather than a
+ * flourish.
+ *
+ * Raising or lowering a constant cannot fix that, because the right size depends on
+ * the device: a number that fits a 320 px phone wastes most of a desktop footer. So
+ * the real maximum is MEASURED from the container at runtime and this only caps how
+ * large it may ever get on a very wide screen.
+ */
 const MAX_EM = 6.5;
+/** Never grow past this fraction of the available width — leaves a breathing margin. */
+const WIDTH_BUDGET = 0.9;
 /** Fraction of viewport height the element travels through to go 0 → 1. */
 const TRAVEL = 0.65;
 
@@ -54,6 +70,33 @@ export function FooterSignature() {
 
     let frame = 0;
     let attached = false;
+    let maxEm = MAX_EM;
+
+    /**
+     * The largest `em` size at which «© RevoArt» still FITS the footer column.
+     *
+     * Measured, not guessed: the string is rendered at a known size, its real
+     * laid-out width is read once, and that gives a width-per-em for this exact
+     * font, weight and letter-spacing. Any hard-coded number would be wrong the
+     * moment the font loads differently, the copy changes, or the phone is 320 px
+     * instead of 430 px.
+     *
+     * Runs inside the same rAF as the first paint, and only on mount/resize — the
+     * scroll path never measures, so this costs nothing while scrolling.
+     */
+    const fitEm = () => {
+      const avail = wrap.clientWidth * WIDTH_BUDGET;
+      if (!avail) return MAX_EM;
+      const probe = 4; // any size works; 4em is large enough to measure accurately
+      const prev = word.style.fontSize;
+      word.style.fontSize = `${probe}em`;
+      const widthPerEm = word.scrollWidth / probe;
+      word.style.fontSize = prev;
+      if (!widthPerEm) return MAX_EM;
+      // Never below MIN_EM: on an absurdly narrow screen a clipped word still beats
+      // one that shrinks below its resting size and reads as broken.
+      return Math.max(MIN_EM, Math.min(MAX_EM, avail / widthPerEm));
+    };
 
     const apply = () => {
       frame = 0;
@@ -65,8 +108,13 @@ export function FooterSignature() {
       // easeOutCubic — most of the growth happens early, so it reads as the word
       // arriving rather than snapping at the end.
       const eased = 1 - Math.pow(1 - p, 3);
-      word.style.setProperty("--sig-scale", String(MIN_EM + (MAX_EM - MIN_EM) * eased));
+      word.style.setProperty("--sig-scale", String(MIN_EM + (maxEm - MIN_EM) * eased));
       word.style.setProperty("--sig-opacity", String(0.35 + 0.65 * eased));
+    };
+
+    const remeasure = () => {
+      maxEm = fitEm();
+      apply();
     };
 
     const onScroll = () => {
@@ -74,17 +122,24 @@ export function FooterSignature() {
       frame = requestAnimationFrame(apply);
     };
 
+    // Rotating the phone or opening the keyboard changes the column width, so the
+    // fitted maximum has to be recomputed — not just re-applied.
+    const onResize = () => {
+      if (frame) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(remeasure);
+    };
+
     // Only listen while the footer is actually near the viewport.
     const io = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting && !attached) {
           window.addEventListener("scroll", onScroll, { passive: true });
-          window.addEventListener("resize", onScroll, { passive: true });
+          window.addEventListener("resize", onResize, { passive: true });
           attached = true;
-          apply();
+          remeasure();
         } else if (!entry.isIntersecting && attached) {
           window.removeEventListener("scroll", onScroll);
-          window.removeEventListener("resize", onScroll);
+          window.removeEventListener("resize", onResize);
           attached = false;
         }
       },
@@ -96,7 +151,7 @@ export function FooterSignature() {
       io.disconnect();
       if (attached) {
         window.removeEventListener("scroll", onScroll);
-        window.removeEventListener("resize", onScroll);
+        window.removeEventListener("resize", onResize);
       }
       if (frame) cancelAnimationFrame(frame);
     };

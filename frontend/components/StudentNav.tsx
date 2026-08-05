@@ -128,7 +128,10 @@ export function StudentNav() {
   return (
     <>
       <header
-        className="sticky top-0 z-40 border-b border-line bg-cream/97 shadow-[var(--shadow-soft)] backdrop-blur-[10px]"
+        /* safe-top: the status bar sits ON this row on Android 15+ and notched
+           iPhones, which put the logo, search and bell out of reach. See
+           app/layout.tsx → viewport.viewportFit. */
+        className="safe-top safe-x sticky top-0 z-40 border-b border-line bg-cream/97 shadow-[var(--shadow-soft)] backdrop-blur-[10px]"
         style={{ viewTransitionName: "student-header" }}
       >
         <div className="mx-auto flex max-w-lg items-center gap-3 px-4 py-2.5 md:max-w-3xl lg:max-w-6xl">

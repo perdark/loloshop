@@ -226,6 +226,29 @@
   .btn-press:active:not(:disabled) { transform: none; }
 }
 
+/* ⚠️ STATUS-BAR CLEARANCE FOR EVERY STICKY/FIXED TOP BAR.
+   Pairs with `viewportFit: "cover"` in app/layout.tsx — read the long note there
+   for why both are required (Android 15+ forces edge-to-edge; without
+   viewport-fit the inset is always 0, so the two halves only work together).
+
+   The padding goes INSIDE the bar, not above it, so the bar's own background
+   fills the status-bar strip. Putting a margin above instead would leave a bare
+   cream gap over a coloured header on a notched phone.
+
+   `0px` fallback: on a desktop browser, and on any phone with no inset, this
+   adds nothing at all — so the bar keeps exactly its designed padding. */
+.safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+/* Same idea for the left/right insets — landscape on a notched phone puts the
+   cutout on one side. Physical left/right, NOT logical: the notch is on a
+   physical edge and does not flip with `dir="rtl"`. */
+.safe-x {
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
 /* Skeleton shimmer for loading states */
 @keyframes skeleton-shimmer {
   0% { background-position: 200% 0; }
