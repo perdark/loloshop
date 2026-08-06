@@ -20,8 +20,11 @@
  *  • /admin  — runs the shop from a laptop AND the phone app; exempting it gives both for free
  *  • /workshop, /tv — the workshop floor display lives on a browser on a real screen
  *  • /s /w /d — secret-key portals for staff/workshop/design-team who have NO phone and so
- *    cannot receive a WhatsApp OTP. Kept as the browser fallback; the in-app route is the
- *    key field on /login (see TeamKeyEntry).
+ *    cannot receive a WhatsApp OTP. ⚠️ These are now the ONLY way in for those three groups:
+ *    the in-app key field on /login (`TeamKeyEntry`) was deleted 2026-08-06 because students
+ *    were being shown a staff entrance. The webview has no address bar, so they must open
+ *    the secret link in a phone BROWSER — which is exactly why these prefixes stay allowed
+ *    here. Do not remove them from this list.
  *  • /privacy, /terms, /delete-account — Apple and Google require these reachable on the
  *    open web. Gating them risks a rejection on the next submission.
  *  • /get-app — the redirect target itself. Omitting it is an infinite redirect loop.

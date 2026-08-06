@@ -9,9 +9,12 @@ interface AuthCardProps {
   children: ReactNode;
   /**
    * Pinned under the content column and rendered OUTSIDE `<main>`. Anything placed here is
-   * therefore a SIBLING of the page's `<form>`, never a descendant — which is what keeps
-   * `TeamKeyEntry`'s own `<form>` legal (nested forms are invalid HTML and the inner one
-   * silently loses its submit).
+   * therefore a SIBLING of the page's `<form>`, never a descendant — so a footer may safely
+   * contain its OWN `<form>` (nested forms are invalid HTML and the inner one silently loses
+   * its submit). That guarantee is why the slot exists; keep it if anything reuses it.
+   *
+   * Currently unused: its only consumer was `TeamKeyEntry` on /login, deleted 2026-08-06
+   * because it showed students a staff entrance. See the note in app/login/page.tsx.
    */
   footer?: ReactNode;
 }

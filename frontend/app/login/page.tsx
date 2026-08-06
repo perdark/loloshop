@@ -7,7 +7,6 @@ import { toast } from "sonner";
 import { AuthCard } from "@/components/auth/AuthCard";
 import { Input } from "@/components/ui/Input";
 import { OtpVerifyForm } from "@/components/auth/OtpVerifyForm";
-import { TeamKeyEntry } from "@/components/auth/TeamKeyEntry";
 import { login, loginVerifyOtp, resendLoginOtp, getApiErrorMessage } from "@/lib/auth-api";
 import { setToken, setUser, safeRedirectTarget } from "@/lib/auth";
 import type { User, UserRole } from "@/lib/types";
@@ -107,12 +106,20 @@ export default function LoginPage() {
       title={onOtp ? "رمز التحقق" : "تسجيل الدخول"}
       subtitle={onOtp ? undefined : "أدخل رقمك وكلمة المرور للمتابعة"}
       /*
-        Rendered in AuthCard's footer slot — a SIBLING of <main>, so it can never end up
-        nested inside the login <form> (invalid HTML; the inner form silently loses its
-        submit). Mounted on both steps so its height is constant and the step transition
-        below has nothing to reflow.
+        ⚠️ NO «فريق العمل؟» ENTRY HERE (owner, 2026-08-06). `TeamKeyEntry` used to sit in
+        AuthCard's footer slot on this screen, which meant every STUDENT arriving at /login
+        was shown a door to the staff / workshop / design-team key portals. Students are the
+        overwhelming majority of who reaches this page, and none of them belong to any of
+        those three groups — a login screen should not advertise a staff entrance to
+        customers.
+
+        ⚠️ CONSEQUENCE, DO NOT REDISCOVER IT THE HARD WAY: the native shells are Capacitor
+        webviews with NO ADDRESS BAR, and that box was the ONLY way those three groups could
+        reach /s/<key>, /w/<key> and /d/<key> from inside the installed app. They must now
+        open the secret link in a phone BROWSER instead. The portals themselves are
+        untouched and still work; only this entrance is gone. If staff-in-app login is ever
+        needed again, put the entry somewhere students never land — not on /login.
       */
-      footer={<TeamKeyEntry />}
     >
       {/*
         Step transition. Both panes sit in the SAME grid cell for the whole life of the
