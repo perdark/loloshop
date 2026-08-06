@@ -44,7 +44,13 @@ export function OrderBreakdownCard({
                       alt=""
                       fill
                       className="object-contain"
-                      unoptimized
+                      sizes="(max-width: 639px) 92vw, 420px"
+                      /* `unoptimized` removed. `photo` is a STORED upload resolved
+                         through `resolveCatalogMediaUrl`, not a blob: preview, so
+                         the optimizer can serve it — and a customer's phone photo is
+                         exactly the multi-MB case that needs it most. `sizes` added
+                         with it: without one, `fill` defaults to 100vw and the
+                         optimizer picks a needlessly large source for a 96px-tall box. */
                     />
                   </div>
                 </div>

@@ -58,9 +58,15 @@ const sideInsets = (base: string) => ({
   paddingRight: inset("right", base),
 });
 
+/* Must match `--ob-leave` in globals.css. The screen animates out for this long
+   before the portal unmounts; if the two ever disagree the visitor sees either a
+   half-faded screen cut off mid-exit (too short) or a blank hold (too long). */
+const LEAVE_MS = 200;
+
 export function Onboarding() {
   const [mounted, setMounted] = useState(false);
   const [open, setOpen] = useState(false);
+  const [closing, setClosing] = useState(false);
   const [name, setName] = useState("");
   const [gender, setGender] = useState<Gender | null>(null);
 
@@ -84,13 +90,19 @@ export function Onboarding() {
   }, [open]);
 
   function finish(save: boolean) {
+    if (closing) return; // a second tap during the exit must not re-save or re-arm
     if (save) {
       saveProfile({ name: name.trim() || null, gender, seen: true });
     } else {
       // Skipping still counts as seen — never ask twice.
       saveProfile({ seen: true });
     }
-    setOpen(false);
+    /* The answer is written to storage IMMEDIATELY and the screen leaves after.
+       Order matters: if the visitor kills the app during the 200ms exit, the
+       profile is already saved and they are not asked again. The animation is
+       never allowed to own data. */
+    setClosing(true);
+    window.setTimeout(() => setOpen(false), LEAVE_MS);
   }
 
   if (!mounted || !open) return null;
@@ -109,7 +121,9 @@ export function Onboarding() {
           record «seen» and the welcome would never come back. */}
       <div
         aria-hidden
-        className="fixed inset-0 z-[69] bg-ink/80 backdrop-blur-md"
+        className={`fixed inset-0 z-[69] bg-ink/80 backdrop-blur-md ${
+          closing ? "ob-fade-out" : "ob-fade-in"
+        }`}
       />
       {/* The decorated stage sits in its OWN fixed layer at the panel's exact
           geometry, rather than inside the panel. The panel is `overflow-y-auto`,
@@ -120,124 +134,185 @@ export function Onboarding() {
           shows through. */}
       <div
         aria-hidden
-        className="fixed inset-0 z-[69] mx-auto max-w-lg overflow-hidden shadow-[0_0_60px_rgba(0,0,0,0.45)]"
+        className={`fixed inset-0 z-[69] mx-auto max-w-lg overflow-hidden shadow-[0_0_60px_rgba(0,0,0,0.45)] ${
+          closing ? "ob-fade-out" : "ob-fade-in"
+        }`}
       >
         <OnboardingBackdrop />
       </div>
+      {/* The exit lives on the PANEL, not on the rows inside it. Each row already
+          owns an `ob-rise` in the `animation` shorthand; a second animation class
+          on the same element would fight it in the cascade, and which one won
+          would depend on rule order in globals.css rather than on intent. */}
       <div
-        className="fixed inset-0 z-[70] mx-auto flex max-w-lg flex-col overflow-y-auto"
+        className={`fixed inset-0 z-[70] mx-auto flex max-w-lg flex-col overflow-y-auto ${
+          closing ? "ob-leave" : ""
+        }`}
         role="dialog"
         aria-modal="true"
         aria-label="أهلاً بك في لولو شوب"
         dir="rtl"
       >
           <div
-            className="flex-1 pb-6"
-            style={{ ...sideInsets("1rem"), paddingTop: inset("top", "2rem") }}
+            className="flex flex-1 flex-col"
+            style={{ ...sideInsets("1.5rem"), paddingTop: inset("top", "0.75rem") }}
           >
-            {/* «رجوع» went with the photo screen — there is nothing behind this
-                one to go back to. «تخطّي» stays, and it is now the only way past,
-                which is the point: the shop is one tap away at all times. */}
-            <div className="flex items-center justify-end">
+            {/* The reference has no skip control. It gets one anyway: hiding skip
+                does not create commitment, it creates uninstalls — so it stays,
+                just quiet enough not to compete with the lockup. */}
+            {/* Wrapped, not classed — see the cascade warning above `.ob-d5`. */}
+            <div className="ob-rise ob-d5 flex items-center justify-start">
               <SkipButton onClick={() => finish(false)} />
             </div>
 
-            {/* Every string on THIS screen is gender-neutral on purpose: it is
-                asked before the answer is known, so «خلّينا نتعرّف عليك» would
-                address a woman in the masculine on the one screen whose whole
-                job is to stop getting that wrong. */}
-            <OnboardingCrest />
-
-            {/* The choreography is a stagger, not a slide: heading → subhead →
-                name → gender, ~70ms apart. It reads as the screen assembling in
-                the order the eye should take it, which is the one thing motion can
-                do here that static layout cannot. Every step is transform+opacity
-                (VP-18) and the whole thing collapses under reduced-motion.
-                Centred, because the crest above is symmetrical — a start-aligned
-                heading hanging directly under a centred mark reads as a mistake. */}
-            <h1 className="ob-rise ob-d1 mt-5 text-center font-display-ar text-[2rem] font-bold leading-[1.35] text-ink">
-              قبل ما نبدأ
-            </h1>
-            {/* Cut from three lines to one (owner: «text under logo less»). The
-                long version explained the mechanism — sizes, options, grammatical
-                address — which is the app's business, not the visitor's. What they
-                actually need is how much this costs them and whether they are stuck
-                with the answer. Both survive; nothing else was load-bearing. */}
-            {/* `text-balance` + a wider measure: at 30ch the line broke right before
-                «حسابي», leaving one orphaned word under a centred heading. Balancing
-                splits the two lines evenly instead of filling the first and dumping
-                the remainder. */}
-            <p className="ob-rise ob-d2 mx-auto mt-2 max-w-[38ch] text-balance text-center text-[14px] leading-relaxed text-[var(--shop-muted)]">
-              معلومتين بس، وتنعدّل بأي وقت من «حسابي».
-            </p>
-
-            <div className="ob-rise ob-d3 mt-8">
-              <label
-                className="mb-3 block text-[13.5px] font-extrabold text-ink"
-                htmlFor="ob-name"
-              >
-                شنو الاسم؟
-              </label>
-              <input
-                id="ob-name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="مثال: سارة أحمد"
-                autoComplete="off"
-                spellCheck={false}
-                /* 16px minimum — anything smaller makes iOS Safari zoom the
-                   whole page on focus and the visitor lands mid-layout. */
-                /* Same warm translucent surface as the gender rows, for the same
-                   reason — the three fields have to read as one family sitting on
-                   the amber stage, not as white cut-outs over it. */
-                className="min-h-[52px] w-full rounded-[12px] border border-[rgba(244,123,66,0.28)] bg-[rgba(255,251,245,0.72)] px-4 text-base font-semibold text-ink placeholder:font-medium placeholder:text-[var(--shop-muted)] focus-visible:border-orange-ink focus-visible:outline-none"
-              />
+            <div className="mt-1">
+              <OnboardingCrest />
             </div>
 
-            <div className="ob-rise ob-d4 mt-8">
-              <span
-                className="mb-3 block text-[13.5px] font-extrabold text-ink"
-                id="ob-sex-lb"
-              >
-                طالب لو طالبة؟
-              </span>
-              <div className="flex flex-col gap-2.5" role="group" aria-labelledby="ob-sex-lb">
-                <GenderRow
-                  label="طالبة"
-                  active={gender === "female"}
-                  onClick={() => setGender("female")}
-                  icon={<GraduateFemaleIcon size={58} />}
-                />
-                <GenderRow
-                  label="طالب"
-                  active={gender === "male"}
-                  onClick={() => setGender("male")}
-                  icon={<GraduateMaleIcon size={58} />}
+            {/* ⚠️ THE ARABIC HERE IS NOT COPIED VERBATIM FROM THE REFERENCE, AND
+                THAT IS DELIBERATE. The reference says «اكتب اسمك» and «اختر جنسك»
+                — both MASCULINE imperatives (the feminine forms are «اكتبي» and
+                «اختاري»). Most of this shop's students are women, and this is the
+                one screen whose entire job is to stop addressing them wrongly; it
+                would be asking «which are you?» in a sentence that already assumed
+                the answer. «مرحبًا بك» and «رحلتك» are kept as-is because unvocalised
+                they read as either gender. So the layout is the reference's, and
+                the wording stays neutral where the reference's would not have. */}
+            <h1 className="ob-rise ob-d2 mt-7 text-center font-display-ar text-[1.65rem] font-bold leading-[1.4] text-ink">
+              مرحبًا بك في لولو شوب
+            </h1>
+            <p className="ob-rise ob-d2 mt-1.5 flex items-center justify-center gap-1.5 text-center text-[13.5px] text-[var(--shop-muted)]">
+              لنبدأ رحلتك معنا
+              <svg aria-hidden viewBox="0 0 24 24" className="h-4 w-4 shrink-0" fill="#F26B1D">
+                <path d="M12 21s-7.5-4.7-9.6-9A5.4 5.4 0 0 1 12 6.3 5.4 5.4 0 0 1 21.6 12c-2.1 4.3-9.6 9-9.6 9Z" />
+              </svg>
+            </p>
+
+            <div className="ob-rise ob-d3 mt-9">
+              <label className="mb-2.5 block text-[14px] font-extrabold text-ink" htmlFor="ob-name">
+                اسمك
+              </label>
+              {/* Icon INSIDE the field at the start edge, as in the reference. The
+                  input carries matching padding so the caret never sits under it. */}
+              <div className="relative">
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute inset-y-0 end-4 flex items-center text-[#E8A268]"
+                >
+                  <svg viewBox="0 0 24 24" className="h-[22px] w-[22px]" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="8" r="3.6" />
+                    <path d="M4.8 20a7.2 7.2 0 0 1 14.4 0" />
+                  </svg>
+                </span>
+                <input
+                  id="ob-name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="مثال: سارة أحمد"
+                  autoComplete="off"
+                  spellCheck={false}
+                  /* 16px minimum — anything smaller makes iOS Safari zoom the whole
+                     page on focus and the visitor lands mid-layout. */
+                  /* `transition-colors` so the focus border grows into orange
+                     instead of snapping — the field is the first thing tapped. */
+                  className="min-h-[58px] w-full rounded-[16px] border-[1.5px] border-[#F3D3B8] bg-[#FFFCF9] pe-[52px] ps-4 text-base font-semibold text-ink transition-colors placeholder:font-medium placeholder:text-[#C3B2A4] focus-visible:border-[#F26B1D] focus-visible:outline-none"
                 />
               </div>
             </div>
-          </div>
 
-          {/* Was a flat `bg-cream` band, which drew a hard seam across the stitched
-              stage the moment the panel went transparent. A gradient from
-              transparent to paper keeps the CTA legible over anything scrolling
-              beneath it without cutting the background in half. */}
-          <div
-            className="pt-10"
-            style={{
-              ...sideInsets("1rem"),
-              paddingBottom: inset("bottom", "2rem"),
-              background:
-                "linear-gradient(to top, #FBF1E4 0%, #FBF1E4 58%, rgba(251,241,228,0.85) 80%, rgba(251,241,228,0) 100%)",
-            }}
-          >
-            <PrimaryButton onClick={() => finish(true)} disabled={!canContinue}>
-              يلا نشوف القطع
-            </PrimaryButton>
+            <div className="ob-rise ob-d4 mt-6">
+              <span className="mb-2.5 block text-[14px] font-extrabold text-ink" id="ob-sex-lb">
+                طالب لو طالبة؟
+              </span>
+              {/* Side by side, radio + label + figure, as in the reference —
+                  replacing the stacked full-width rows. */}
+              <div className="flex gap-3" role="group" aria-labelledby="ob-sex-lb">
+                <GenderCard
+                  label="طالبة"
+                  active={gender === "female"}
+                  onClick={() => setGender("female")}
+                  icon={<GraduateFemaleIcon size={44} />}
+                />
+                <GenderCard
+                  label="طالب"
+                  active={gender === "male"}
+                  onClick={() => setGender("male")}
+                  icon={<GraduateMaleIcon size={44} />}
+                />
+              </div>
+            </div>
+
+            <div
+              className="ob-rise ob-d5 mt-auto"
+              style={{ paddingBottom: inset("bottom", "1.5rem"), paddingTop: "2.25rem" }}
+            >
+              <button
+                type="button"
+                onClick={() => finish(true)}
+                disabled={!canContinue}
+                className="btn-press min-h-[58px] w-full rounded-[16px] bg-[#F26B1D] text-[16px] font-extrabold text-white shadow-[0_10px_24px_-12px_rgba(242,107,29,0.75)] disabled:opacity-40 disabled:shadow-none"
+              >
+                التالي
+              </button>
+            </div>
           </div>
       </div>
     </>,
     document.body
+  );
+}
+
+/**
+ * One gender choice, laid out as in the reference: radio · label · figure, two
+ * side by side.
+ *
+ * Separate from the exported `GenderRow` on purpose — that one is a full-width
+ * stacked row and «تفضيلاتي» on the account screen still uses it, where a
+ * two-across grid would be wrong next to the other settings. Same answer, two
+ * presentations, each suited to its screen.
+ */
+function GenderCard({
+  label,
+  active,
+  onClick,
+  icon,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      /* `btn-press` REPLACES `transition-colors`, it isn't added to it — it already
+         transitions background-color and border-color, and adds the one thing a
+         phone can actually feel: the card gives way under the thumb. This is the
+         only control on the screen the visitor taps to answer, so it was also the
+         only one that answered with nothing but a colour swap. */
+      className={`btn-press flex min-h-[76px] flex-1 items-center gap-2 rounded-[16px] border-[1.5px] px-3 ${
+        active
+          ? "border-[#F26B1D] bg-[rgba(242,107,29,0.08)]"
+          : "border-[#F3D3B8] bg-[#FFFCF9]"
+      }`}
+    >
+      {/* The radio sits on the start edge, mirroring the reference. Presentational
+          only — the button itself carries aria-pressed. */}
+      <span
+        aria-hidden
+        className={`flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full border-[1.5px] transition-colors ${
+          active ? "border-[#F26B1D]" : "border-[#E8C6A8]"
+        }`}
+      >
+        {active && (
+          <span className="ob-dot-in h-[11px] w-[11px] rounded-full bg-[#F26B1D]" />
+        )}
+      </span>
+      <span className="flex-1 text-[15px] font-extrabold text-ink">{label}</span>
+      <span className="shrink-0 leading-none">{icon}</span>
+    </button>
   );
 }
 
@@ -253,40 +328,6 @@ function SkipButton({ onClick }: { onClick: () => void }) {
       className="inline-flex min-h-11 items-center rounded-pill px-3 text-[13px] font-bold text-[var(--shop-muted)] transition-colors hover:text-orange-ink"
     >
       تخطّي
-    </button>
-  );
-}
-
-function PrimaryButton({
-  children,
-  onClick,
-  disabled,
-}: {
-  children: React.ReactNode;
-  onClick: () => void;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className="group inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-pill bg-orange-ink px-6 text-sm font-extrabold text-white shadow-[var(--shadow-float)] transition-[background-color,transform,opacity] duration-200 hover:-translate-y-0.5 hover:bg-ink disabled:pointer-events-none disabled:opacity-40 disabled:shadow-none"
-    >
-      {children}
-      <svg
-        aria-hidden
-        viewBox="0 0 24 24"
-        className="h-4 w-4 transition-transform duration-200 group-hover:-translate-x-0.5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="M19 12H5" />
-        <path d="M12 19l-7-7 7-7" />
-      </svg>
     </button>
   );
 }
@@ -324,7 +365,11 @@ export function GenderRow({
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className={`flex min-h-[72px] w-full items-center gap-3 rounded-[16px] py-2 pe-3 ps-3.5 text-start transition-colors ${
+      /* Same `btn-press` swap as GenderCard, for the same reason — and so that
+         answering in «تفضيلاتي» feels identical to answering in onboarding. Two
+         presentations of one question may look different; they must not respond
+         differently to the same thumb. */
+      className={`btn-press flex min-h-[72px] w-full items-center gap-3 rounded-[16px] py-2 pe-3 ps-3.5 text-start ${
         active
           ? "border-2 border-[#F47B42] bg-[rgba(244,123,66,0.14)]"
           : /* Was `bg-white` — a hard white slab on a warm stage, which is what
@@ -353,7 +398,7 @@ function Tick({ active }: { active: boolean }) {
       {active ? (
         <svg
           viewBox="0 0 24 24"
-          className="h-3.5 w-3.5"
+          className="ob-dot-in h-3.5 w-3.5"
           fill="none"
           stroke="#fff"
           strokeWidth="3.4"

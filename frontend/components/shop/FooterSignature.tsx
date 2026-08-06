@@ -34,23 +34,30 @@ import { useEffect, useRef } from "react";
  */
 
 /** Resting size, in `em` relative to the paragraph — the size before any scroll. */
-const MIN_EM = 1.6;
+const MIN_EM = 0.7;
 /**
  * Ceiling for the grown size. ⚠️ NOT the size actually used — see `fitEm()`.
  *
- * Owner report (2026-08-05): «revoart need to be smaller because the words out of
- * screen». This was a hard-coded 6.5em, and «© RevoArt» is a wide string: at 6.5em
- * on a 390 px phone it measures roughly 470 px against ~358 px of usable width, so
- * the ends were clipped by the wrapper's `overflow-hidden`. The word did not
- * overflow the page — it was silently cut, which looks like a bug rather than a
- * flourish.
+ * ── THIS IS A CREDIT LINE, NOT A HERO (owner, 2026-08-06: «make revoart text at
+ * footer small», then «make revoart smaller more»). Fourth pass on this one
+ * element, and the direction has only ever gone one way: 6.5em → «needs to be
+ * smaller, the words are out of screen» (2026-08-05) → «small» → «smaller more».
+ * It is now BELOW the legal links it sits beside — ~11px at rest, growing to
+ * ~18px — which is what a studio credit should be: findable, never competing.
  *
- * Raising or lowering a constant cannot fix that, because the right size depends on
- * the device: a number that fits a 320 px phone wastes most of a desktop footer. So
- * the real maximum is MEASURED from the container at runtime and this only caps how
- * large it may ever get on a very wide screen.
+ * The scroll-grow itself is KEPT, deliberately. It was an explicit owner ask on
+ * 2026-08-04 («when scroll to footer the RevoArt be bigger and bigger while
+ * scrolling») and «small» is a note about SIZE, not about deleting the effect.
+ * Shrinking the range satisfies the note; removing the mechanism would throw away
+ * a different request that was never withdrawn. Easy to revisit either way — the
+ * whole behaviour is these three constants.
+ *
+ * Still a ceiling and not the size actually used: the real maximum is MEASURED
+ * from the container at runtime (see `fitEm()`), because a number that fits a
+ * 320px phone wastes most of a desktop footer. At this range the measured fit
+ * will essentially never bind, which is the point — it can no longer clip.
  */
-const MAX_EM = 6.5;
+const MAX_EM = 1.15;
 /** Never grow past this fraction of the available width — leaves a breathing margin. */
 const WIDTH_BUDGET = 0.9;
 /** Fraction of viewport height the element travels through to go 0 → 1. */
@@ -161,8 +168,11 @@ export function FooterSignature() {
     <div
       ref={wrapRef}
       /* Fixed height so the growing word never reflows the footer around it —
-         it scales inside a reserved box, which is also why `transform` is safe. */
-      className="mt-6 flex h-[132px] items-center justify-center overflow-hidden"
+         it scales inside a reserved box, which is also why `transform` is safe.
+         The box shrinks with the word: 132px was reserved for a 6.5em headline, and
+         leaving it there under an ~18px credit would hold ~110px of blank footer
+         open for nothing — which reads as a broken image, not as breathing room. */
+      className="mt-5 flex h-[34px] items-center justify-center overflow-hidden"
     >
       <span
         ref={wordRef}

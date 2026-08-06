@@ -101,7 +101,10 @@ function CartRow({
             fill
             className="object-cover"
             sizes="64px"
-            unoptimized
+            /* `unoptimized` removed — the worst ratio in the codebase: this box is
+               64px wide and the prop was shipping the full-resolution catalog
+               original into it. `sizes` was already correct; only the prop was
+               stopping it from being honoured. */
           />
         ) : (
           <div className="flex h-full items-center justify-center font-script text-xl text-orange-ink/30">

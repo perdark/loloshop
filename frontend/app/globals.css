@@ -226,6 +226,32 @@
   .btn-press:active:not(:disabled) { transform: none; }
 }
 
+/* Press feedback for LARGE tappable surfaces — product/package tiles.
+   Same argument as `.btn-press` above, different number. The tiles already had
+   `group-hover:scale-[1.045]` + a float shadow, and on this storefront that is
+   motion **nobody in the audience ever sees**: retail is phone-ONLY (see
+   CLAUDE.md → Device Priority), and a phone has no hover. So the most-tapped
+   surface on the whole site answered a thumb with nothing.
+
+   0.98, not `.btn-press`'s 0.965: the same percentage reads as a gentle
+   acknowledgement on a 120px button and as a lurch on a 44vw tile — the bigger
+   the surface, the smaller the shrink has to be to feel like the same gesture.
+
+   Transform only, so it stays on the compositor and never triggers layout. It is
+   deliberately NOT applied to the <figure> that carries `view-transition-name`:
+   scaling the captured element itself would make the product→detail view
+   transition start from a slightly-off snapshot. */
+.tile-press {
+  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.tile-press:active {
+  transform: scale(0.98);
+}
+@media (prefers-reduced-motion: reduce) {
+  .tile-press { transition: none; }
+  .tile-press:active { transform: none; }
+}
+
 /* ⚠️ STATUS-BAR CLEARANCE FOR EVERY STICKY/FIXED TOP BAR.
    Pairs with `viewportFit: "cover"` in app/layout.tsx — read the long note there
    for why both are required (Android 15+ forces edge-to-edge; without
@@ -663,20 +689,56 @@ html {
 .ob-d2     { animation-delay: 130ms; }
 .ob-d3     { animation-delay: 210ms; }
 .ob-d4     { animation-delay: 300ms; }
+/* The two ways OUT — «تخطّي» and «التالي» — land together on the last beat, after
+   the visitor has seen what is being asked. Leading with the escape hatch is how
+   a screen teaches people to dismiss it before reading it. */
+.ob-d5     { animation-delay: 380ms; }
 
-/* The crest's halo BREATHES, and that needs its own keyframe: the splash's
-   `splash2-halo-bloom` and `splash2-ring-expand` both END at opacity 0 — correct
-   for a one-shot entrance, useless for a header that stays on screen. Reusing them
-   here would have made the halo bloom once and then leave a bare logo. */
-@keyframes ob-halo-breathe {
-  0%, 100% { opacity: 0.40; transform: scale(1); }
-  50%      { opacity: 0.62; transform: scale(1.07); }
+/* ⚠️ NEVER PUT `.ob-rise` ON AN ELEMENT THAT ALSO CARRIES `.btn-press`.
+   `ob-rise` fills `both`, so after it finishes the animation keeps applying its
+   final `transform: translate3d(0,0,0)` — and animated values outrank normal
+   declarations in the cascade, so `.btn-press:active { transform: scale(.965) }`
+   silently stops working, permanently. Wrap the button in a rising <div> instead;
+   that is why the CTA and the skip row here are wrapped rather than classed. */
+
+/* THE SCREEN ARRIVES AND LEAVES — it doesn't blink in and out.
+   The scrim is `bg-ink/80` + `backdrop-blur-md` over a live storefront, and it
+   used to slam on in a single frame; `setOpen(false)` then unmounted the portal
+   just as hard, hard-cutting back. Both ends now cost ~200ms, which is the whole
+   difference between "a screen" and "a flash". Opacity/transform only, so it
+   stays on the compositor on the low-end Androids this audience carries. */
+@keyframes ob-fade-in  { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ob-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes ob-leave {
+  from { opacity: 1; transform: translate3d(0, 0, 0); }
+  to   { opacity: 0; transform: translate3d(0, 12px, 0); }
 }
-.ob-halo-breathe { animation: ob-halo-breathe 4.5s ease-in-out infinite; }
+.ob-fade-in  { animation: ob-fade-in 260ms ease-out both; }
+/* `forwards`, never `both`: these run on elements already painted on screen, and
+   a backwards fill would flash them to opacity 0 for one frame before starting. */
+.ob-fade-out { animation: ob-fade-out var(--ob-leave) ease-out forwards; }
+.ob-leave    { animation: ob-leave var(--ob-leave) cubic-bezier(0.4, 0, 1, 1) forwards; }
+/* Single source of truth for the exit duration — Onboarding.tsx waits exactly this
+   long before unmounting the portal, and reads it from here. Change it once. */
+:root { --ob-leave: 200ms; }
+
+/* The selected radio dot LANDS. At 11px a pure appear/disappear is invisible on a
+   phone in Iraqi sun; the overshoot is the cheapest legible «tap registered». */
+@keyframes ob-dot-in {
+  from { opacity: 0; transform: scale(0.2); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.ob-dot-in { animation: ob-dot-in 220ms cubic-bezier(0.34, 1.56, 0.64, 1) both; }
 
 @media (prefers-reduced-motion: reduce) {
   .ob-rise { animation: none; opacity: 1; transform: none; }
-  .ob-halo-breathe { animation: none; }
+  .ob-dot-in { animation: none; }
+  /* The fades STAY. Cross-fading opacity is not what triggers vestibular
+     discomfort — travel is — and the exit still has to happen: the component
+     unmounts on the same timer regardless, so killing it outright would leave the
+     screen frozen at full opacity for 200ms and then vanish, which is worse than
+     what we started with. Only the 12px drop is dropped. */
+  .ob-leave { animation: ob-fade-out var(--ob-leave) linear forwards; }
 }
 
 /* ─── Graduation cap loader ─── */

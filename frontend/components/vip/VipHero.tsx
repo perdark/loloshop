@@ -56,7 +56,13 @@ export function VipHero({
           fill
           loading="eager"
           fetchPriority="high"
-          unoptimized
+          /* `unoptimized` REMOVED (2026-08-06). This is the VIP page's LCP image at
+             sizes="100vw", and the prop overrides next.config even in production —
+             so it was shipping the 4–6 MB original to a phone. Same fix as the staff
+             order page on 2026-08-05, which measured 724 KB raw → 12 KB WebP (60×).
+             Safe: `heroPhotos` is either a local /lookbook asset or a stored
+             /uploads URL, both covered by images.remotePatterns. NOT an upload
+             preview — a blob:/data: src is the one case that still needs the prop. */
           sizes="100vw"
           className="object-cover object-[50%_18%]"
         />
