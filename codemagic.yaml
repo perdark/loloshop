@@ -92,6 +92,19 @@ workflows:
           plutil -replace NSPhotoLibraryUsageDescription -string \
             "لاختيار صورة الشعار أو التصميم من ألبومك وإرفاقها بطلب الوشاح." "$PLIST"
 
+          # Staff attendance (بصمة) reads the device location to prove the worker is at the
+          # shop. Same class of failure as the camera above: iOS refuses the geolocation
+          # request outright when this key is absent — navigator.geolocation just calls back
+          # with an error, the payload ships `location: null`, and the backend answers 403
+          # ERR_ATTENDANCE_LOCATION. Silent today only because verification_mode is 'none'.
+          #
+          # ⚠️ The key alone does NOT switch GPS on. staff_attendance_settings.shop_latitude
+          # and shop_longitude are still NULL, and flipping verification_mode to
+          # location/both before they are filled 403s EVERY بصمة for EVERY worker on EVERY
+          # platform. Coordinates first, mode last.
+          plutil -replace NSLocationWhenInUseUsageDescription -string \
+            "لتأكيد أنك داخل المحل عند تسجيل الحضور والانصراف." "$PLIST"
+
           # Answers the "Missing Compliance" question once, in the binary, instead of
           # re-answering it in App Store Connect after every single upload. The app
           # implements no cryptography of its own and only uses the OS HTTPS stack,
@@ -100,12 +113,80 @@ workflows:
 
           # FAIL THE BUILD rather than ship another binary that crashes on camera.
           # A silent no-op here is what a rejected submission looks like two days later.
-          for KEY in NSCameraUsageDescription NSPhotoLibraryUsageDescription; do
+          for KEY in NSCameraUsageDescription NSPhotoLibraryUsageDescription \
+                     NSLocationWhenInUseUsageDescription; do
             plutil -extract "$KEY" raw "$PLIST" >/dev/null 2>&1 \
               || { echo "FATAL: $KEY missing from $PLIST — camera would crash on device"; exit 1; }
           done
           echo "=== privacy keys present in Info.plist ==="
-          plutil -p "$PLIST" | grep -E "NSCamera|NSPhotoLibrary|ITSAppUsesNonExempt"
+          plutil -p "$PLIST" | grep -E "NSCamera|NSPhotoLibrary|NSLocation|ITSAppUsesNonExempt"
+
+      - name: Wire the Associated Domains entitlement (Universal Links)
+        script: |
+          set -e
+          ENTITLEMENTS="ios/App/App/App.entitlements"
+          PBXPROJ="ios/App/App.xcodeproj/project.pbxproj"
+
+          # WHY THIS STEP EXISTS. Tapping https://lolo-shop96.com/join/<code> in WhatsApp used
+          # to open the phone browser even with the app installed — the shell is a remote-URL
+          # WebView with no address bar, so a رابط ممثل and the /s /w /d team key portals were
+          # unreachable from inside the app. Universal Links fix that, and they need THREE
+          # things to line up: this entitlement, the AASA document the site serves at
+          # /.well-known/apple-app-site-association, and the capability on the App ID.
+          #
+          # Same regeneration trap as the privacy strings above: `npx cap add ios` rebuilds
+          # ios/ from Capacitor's template every run, so neither the entitlements file nor the
+          # pbxproj reference survives a commit. Both are re-created here, after `cap sync`
+          # and BEFORE code signing — the profile fetched in the next step must already know
+          # about the capability.
+          #
+          # ⚠️ IF THIS BUILD FAILS AT SIGNING, IT IS ALMOST CERTAINLY THE PORTAL, NOT THIS
+          # FILE: "Associated Domains" must be enabled on the com.loloshop96.app App ID at
+          # developer.apple.com → Certificates, Identifiers & Profiles. Without it
+          # `fetch-signing-files --create` builds a profile that lacks the entitlement, and
+          # the archive is rejected for requesting something the profile does not grant.
+          #
+          # ⚠️ MUST MATCH the hosts+paths claimed in
+          # frontend/app/.well-known/apple-app-site-association/route.ts. `applinks:` claims
+          # the HOST; the AASA document narrows it to /join/* /s/* /w/* /d/*.
+          cat > "$ENTITLEMENTS" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>com.apple.developer.associated-domains</key>
+              <array>
+                  <string>applinks:lolo-shop96.com</string>
+                  <string>applinks:www.lolo-shop96.com</string>
+              </array>
+          </dict>
+          </plist>
+          PLIST
+          # Proves the heredoc produced valid XML rather than, say, a file of YAML indentation.
+          plutil -lint "$ENTITLEMENTS"
+
+          # Point the App target's build settings at it. Xcode stores this per build
+          # configuration, and the two blocks that carry PRODUCT_BUNDLE_IDENTIFIER for our
+          # bundle id are exactly the App target's Debug and Release — the SPM plugin targets
+          # have their own ids and must NOT get the app's entitlements.
+          BUNDLE_ID="$BUNDLE_ID" PBXPROJ="$PBXPROJ" python3 <<'PY'
+          import os, sys
+          path, bundle = os.environ["PBXPROJ"], os.environ["BUNDLE_ID"]
+          src = open(path, encoding="utf-8").read()
+          needle = f"PRODUCT_BUNDLE_IDENTIFIER = {bundle};"
+          if needle not in src:
+              sys.exit(f"FATAL: {needle!r} not in {path} — Capacitor's template changed shape")
+          if "CODE_SIGN_ENTITLEMENTS" not in src:
+              src = src.replace(needle, f"CODE_SIGN_ENTITLEMENTS = App/App.entitlements;\n\t\t\t\t{needle}")
+              open(path, "w", encoding="utf-8").write(src)
+          n = src.count("CODE_SIGN_ENTITLEMENTS = App/App.entitlements;")
+          print(f"CODE_SIGN_ENTITLEMENTS wired into {n} build configuration(s)")
+          # 0 means the replace silently missed and the binary would ship WITHOUT the
+          # entitlement — Universal Links would fail soft, exactly the invisible failure this
+          # whole step exists to prevent.
+          if n == 0:
+              sys.exit("FATAL: CODE_SIGN_ENTITLEMENTS not written")
+          PY
 
       - name: Set up code signing (creates cert + profile if missing)
         script: |
