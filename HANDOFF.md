@@ -44,11 +44,36 @@ Android release, one iOS release, one review each. Do not submit until all three
 | **Staff GPS** (بصمة) | ✅ on this branch (Android) + `ios-appstore` (iOS) | same binary, then coordinates, then flip the mode. The admin screen to type them **already exists**: `/admin/attendance` → خط العرض · خط الطول · نطاق الموقع |
 | **Push notifications** | ❌ **not started** | the whole feature — see the cloud board below |
 
-- **Deploy = merge to `main` + push + `bash scripts/deploy.sh` on the VPS.** No migration pending
-  *today*; push notifications will add one (device tokens).
+- **Deploy is AUTOMATIC on merge to `main`.** `.github/workflows/ci.yml:46-58` runs
+  `scripts/deploy.sh` over SSH once the backend + frontend jobs pass — no laptop, no manual SSH.
+  ⚠️ Both jobs run `npm audit --omit=dev --audit-level=moderate`, so **a new dependency carrying
+  an advisory blocks the deploy**, not just the tests. Relevant the moment `firebase-admin` or
+  similar lands.
 - **Nothing about the web half needs a store.** The shells are remote-URL WebViews, so `/join`,
-  the rep directory and the `/get-app` copy go live the moment the site deploys. Only
-  `AndroidManifest.xml` and the iOS entitlements need a binary.
+  the rep directory and the `/get-app` copy reach *already-installed* apps the moment the site
+  deploys. A student with the app can join via `/login` → «ادخل مع ممثلك» **today**. Only
+  `AndroidManifest.xml` and the iOS entitlements need a binary — the binary just adds "tapping
+  the WhatsApp link opens the app" on top of a door that already works.
+
+### Release runbook — the order that works
+
+1. **Owner, first, ~15 min in a browser** (everything downstream blocks on these):
+   Associated Domains **and** Push Notifications capability on the `com.loloshop96.app` App ID ·
+   Firebase project → `google-services.json` → commit to `frontend/android/app/` ·
+   APNs `.p8` key → upload to Firebase.
+2. Merge to `main` → CI auto-deploys → **students unblocked, no store involved**.
+3. **Android binary — owner decision 2026-08-08: built by hand on the laptop, ~20 min.** No
+   Android CI exists and none is wanted. Bump `versionCode 3 → 4` and `versionName` in
+   `frontend/android/app/build.gradle:10-11`, `npx cap sync android`, gradle bundle release
+   (keystore is local, read from `frontend/android/gradle.properties`), upload.
+4. **iOS binary — start Codemagic by hand on `ios-appstore`**; there is no `triggering:` block,
+   so pushing starts nothing. ⚠️ `ios-appstore` is behind `main` and its lockfile is desynced —
+   `npm install` in `frontend/` before merging.
+5. **Verify on a real phone from a store track, not a local build.** App Links verify against the
+   **Play App Signing** key, so a locally-signed APK proves nothing. Play internal testing +
+   TestFlight are fast (no full review) and are the only honest check:
+   `adb shell pm get-app-links com.loloshop96.app`.
+6. Only then submit for review. Apple ~24h–2 days, Google hours–days, a rejection costs days.
 
 ---
 
@@ -93,6 +118,9 @@ cloud session cannot do either, but it can build everything around them.
 
 **3. Then: make the app phone-test-ready.** Once 1 and 2 land, the remaining gates are a real
 device and the store consoles — neither can be done from a cloud sandbox.
+
+**Explicitly NOT cloud work:** do **not** add an Android CI workflow. Owner decided 2026-08-08 to
+keep building the AAB by hand on the laptop; the keystore stays local and off GitHub.
 
 ---
 
