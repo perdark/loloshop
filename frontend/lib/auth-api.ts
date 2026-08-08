@@ -204,10 +204,16 @@ export interface JoinRepresentative {
 }
 
 /**
- * Powers the جامعة → قسم picker on /login. Unauthenticated on purpose — see the ⚠️ block on
+ * Powers the جامعة → قسم picker on /join. Unauthenticated on purpose — see the ⚠️ block on
  * `getRepresentatives` in backend/controllers/joinController.js for what it does and does not
- * disclose. Resolves to [] on failure so a directory outage degrades to "the link still works"
- * rather than blocking the whole login screen.
+ * disclose.
+ *
+ * ⚠️ THIS THROWS ON FAILURE, AND THAT IS THE FIX. It used to swallow every error and resolve
+ * to [], which the page could not tell apart from "there genuinely are no reps" — so a dropped
+ * connection on a phone rendered «لا توجد قائمة ممثلين متاحة الآن» with no retry, telling a
+ * student their rep is not registered when the truth was that the request never arrived. Those
+ * two states need opposite answers (retry vs. ask your rep for the link), so the caller has to
+ * be able to tell them apart.
  */
 export async function getJoinRepresentatives(): Promise<JoinRepresentative[]> {
   try {
@@ -215,8 +221,8 @@ export async function getJoinRepresentatives(): Promise<JoinRepresentative[]> {
       "/join/representatives"
     );
     return data.representatives || [];
-  } catch {
-    return [];
+  } catch (e) {
+    throw new Error(extractMessage(e, "تعذّر تحميل قائمة الممثلين"));
   }
 }
 

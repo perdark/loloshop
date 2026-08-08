@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AuthCard } from "@/components/auth/AuthCard";
@@ -16,7 +16,7 @@ import { getJoinRepresentatives, type JoinRepresentative } from "@/lib/auth-api"
  * the app and it will remember" is not available either
  * (docs/superpowers/specs/2026-08-07-app-entry-deeplinks-gps.md).
  *
- * So: one list, one tap, then hand off to the real /join/[code] flow — which still owns signup,
+ * So: one grouped list, one tap, then hand off to the real /join/[code] flow — which still owns signup,
  * validation and the rep's one-by-one approval. This page only resolves a choice to a code; it
  * grants nothing.
  *
@@ -38,18 +38,42 @@ export default function JoinPickerPage() {
   const router = useRouter();
   const [reps, setReps] = useState<JoinRepresentative[] | null>(null);
   const [code, setCode] = useState("");
+  /**
+   * ⚠️ «FAILED TO LOAD» AND «THERE ARE NO REPS» ARE DIFFERENT SCREENS.
+   *
+   * They used to be the same one: the API wrapper swallowed every error and resolved to [], so
+   * a phone that lost signal for one request told the student «لا توجد قائمة ممثلين» — read as
+   * "your rep is not registered here", which is a dead end they cannot argue with, on the exact
+   * screen that exists because they already lost their link. A flaky mobile connection is the
+   * normal case for this audience, and the right answer to it is a retry button, not an
+   * apology. getJoinRepresentatives now throws (lib/auth-api.ts) so the two can be told apart.
+   */
+  const [failed, setFailed] = useState(false);
+
+  // A sequence number rather than a per-call `cancelled` flag: the retry button calls load()
+  // outside the effect, so there is nobody to run a returned cleanup and a slow first response
+  // could otherwise land on top of a fresh one.
+  const requestId = useRef(0);
+
+  const load = useCallback(() => {
+    const id = ++requestId.current;
+    setFailed(false);
+    setReps(null);
+    getJoinRepresentatives()
+      .then((list) => {
+        if (id === requestId.current) setReps(list);
+      })
+      .catch(() => {
+        if (id === requestId.current) setFailed(true);
+      });
+  }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    // getJoinRepresentatives resolves [] instead of throwing, so a directory outage lands in
-    // the empty state below rather than an unhandled rejection.
-    getJoinRepresentatives().then((list) => {
-      if (!cancelled) setReps(list);
-    });
+    load();
     return () => {
-      cancelled = true;
+      requestId.current += 1; // unmounted — ignore whatever is still in flight
     };
-  }, []);
+  }, [load]);
 
   /** Reps bucketed under their university, both ordered for a reader of Arabic. */
   const groups = useMemo(() => {
@@ -64,16 +88,35 @@ export default function JoinPickerPage() {
     return [...byUniversity.entries()].sort((a, b) => a[0].localeCompare(b[0], "ar"));
   }, [reps]);
 
-  const loading = reps === null;
+  const loading = reps === null && !failed;
   const empty = reps !== null && reps.length === 0;
+  const showPicker = reps !== null && reps.length > 0;
 
   return (
     <AuthCard
       title="ادخل مع ممثلك"
-      subtitle={empty ? undefined : "اختر ممثل جامعتك للانتقال إلى صفحة التسجيل"}
+      subtitle={empty || failed ? undefined : "اختر ممثل جامعتك للانتقال إلى صفحة التسجيل"}
     >
       <div className="flex flex-1 flex-col">
         {loading && <div className="h-[4.4rem] animate-pulse rounded-xl bg-ink/5" aria-busy="true" />}
+
+        {failed && (
+          <div
+            role="alert"
+            className="flex flex-col gap-3 rounded-xl border border-line bg-beige px-3.5 py-3"
+          >
+            <p className="text-sm leading-relaxed text-ink-soft">
+              تعذّر تحميل قائمة الممثلين. تحقق من الاتصال بالإنترنت وحاول مرة أخرى.
+            </p>
+            <button
+              type="button"
+              onClick={load}
+              className="inline-flex min-h-11 items-center justify-center self-start rounded-pill border border-orange-ink px-4 text-sm font-semibold text-orange-ink transition-colors hover:bg-orange-ink hover:text-white"
+            >
+              إعادة المحاولة
+            </button>
+          </div>
+        )}
 
         {empty && (
           <p className="rounded-xl border border-line bg-beige px-3.5 py-3 text-sm leading-relaxed text-ink-soft">
@@ -82,7 +125,7 @@ export default function JoinPickerPage() {
           </p>
         )}
 
-        {!loading && !empty && (
+        {showPicker && (
           <div className="flex flex-col gap-1.5">
             <label htmlFor="representative" className="text-sm font-medium text-ink">
               الجامعة والقسم
@@ -113,7 +156,7 @@ export default function JoinPickerPage() {
         )}
 
         <div className="mt-auto space-y-4 pt-8">
-          {!empty && (
+          {showPicker && (
             <button
               type="button"
               disabled={!code}

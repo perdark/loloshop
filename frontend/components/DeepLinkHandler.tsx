@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { isNativeShell } from "@/lib/native-shell";
 
 /**
  * Routes an incoming App Link / Universal Link to the right page inside the shell.
@@ -41,11 +42,16 @@ export function DeepLinkHandler() {
 
   useEffect(() => {
     // Browsers already resolve these URLs by simply loading them — the handler is only
-    // meaningful inside the native shell. Same signal lib/app-gate.ts uses.
-    const isNative =
-      typeof window !== "undefined" &&
-      Boolean((window as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor);
-    if (!isNative) return;
+    // meaningful inside the native shell.
+    //
+    // ⚠️ FIXED 2026-08-08: this used to test `window.Capacitor` alone while claiming parity
+    // with lib/app-gate.ts, which tests `window.Capacitor || window.androidBridge`. The two
+    // now share one implementation so they cannot drift again — see lib/native-shell.ts,
+    // which also records what widening the test does NOT fix (on Android WebView <105 there
+    // is no Capacitor runtime at all, so `getLaunchUrl()` returns an empty string and an App
+    // Link opens the app with the code already lost; accepted, with the reasoning written
+    // down there).
+    if (!isNativeShell()) return;
 
     let cancelled = false;
     let removeListener: (() => void) | undefined;

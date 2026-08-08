@@ -44,7 +44,14 @@ zero native code. Owner decision, 2026-08-07.
 
 **A3 is the real fix.** `referral_code` is an admin-typed Latin slug (`/^[a-z0-9-]+$/`, e.g.
 `damascus-medicine`). Asking an Arabic-speaking student to type that from memory on a phone is a
-support-ticket machine. Two dropdowns, zero typing.
+support-ticket machine. One list, one tap, zero typing.
+
+> **Shipped shape differs from this line, deliberately (2026-08-08).** It was built as two
+> dependent dropdowns (جامعة → قسم) first and the live data killed it: `university_name` is
+> admin free text and the 12 real rows spell one university three ways, so a student who picks
+> the wrong spelling gets an empty قسم list and concludes their rep is not registered. The
+> shipped picker is ONE `<select>` grouped by `<optgroup>`, which makes a mis-spelled twin
+> visible instead of hidden. Reasoning is in the header of `frontend/app/join/page.tsx`.
 
 **A5 is a correctness fix, not a nicety.** `/join/` is not in `BROWSER_ALLOWED_PREFIXES` today,
 so the moment `NEXT_PUBLIC_APP_ONLY=1` is set, every student without the app is bounced to the
@@ -104,7 +111,8 @@ staff.
 ## Acceptance
 
 - [ ] `/api/join/representatives` returns only `approved_by_admin` reps with a university
-- [ ] `/login` → «ادخل مع ممثلك» → two dropdowns → lands on `/join/<code>`, no typing
+- [x] `/login` → «ادخل مع ممثلك» → one grouped `<select>` (NOT two dropdowns — see A3 above)
+      → lands on `/join/<code>`, no typing
 - [ ] `/join/` in `BROWSER_ALLOWED_PREFIXES`
 - [ ] `/get-app` states the second-tap instruction
 - [ ] manifest + AASA + `DeepLinkHandler` claim the same four prefixes — **all three in sync**

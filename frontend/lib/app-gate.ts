@@ -22,9 +22,12 @@
  *  • /s /w /d — secret-key portals for staff/workshop/design-team who have NO phone and so
  *    cannot receive a WhatsApp OTP. ⚠️ These are now the ONLY way in for those three groups:
  *    the in-app key field on /login (`TeamKeyEntry`) was deleted 2026-08-06 because students
- *    were being shown a staff entrance. The webview has no address bar, so they must open
- *    the secret link in a phone BROWSER — which is exactly why these prefixes stay allowed
- *    here. Do not remove them from this list.
+ *    were being shown a staff entrance. Do not remove them from this list.
+ *    (Updated 2026-08-08: they no longer HAVE to open in a browser — AndroidManifest.xml and
+ *    the AASA document now claim these three prefixes, so on a phone with the new binary the
+ *    link opens the app and DeepLinkHandler routes it. They stay allowed here anyway, because
+ *    that is only true once the store build lands and App Links verify, and because the
+ *    workshop/TV screens still run in a real browser.)
  *  • /privacy, /terms, /delete-account — Apple and Google require these reachable on the
  *    open web. Gating them risks a rejection on the next submission.
  *  • /get-app — the redirect target itself. Omitting it is an infinite redirect loop.
@@ -106,7 +109,9 @@ var C=${config},p=location.pathname;
    redirect ITSELF to the Play Store. window.androidBridge closes exactly that gap:
    MessageHandler.java:25-41 registers it on every path (WebMessageListener on
    WebView 88+, classic addJavascriptInterface below that).
-   iOS needs no equivalent — WKUserScript at document start has no version gate. */
+   iOS needs no equivalent — WKUserScript at document start has no version gate.
+   ⚠️ THIS IS THE ONE UNAVOIDABLE COPY of lib/native-shell.ts isNativeShell(). It cannot import:
+   the whole function is built as a STRING for an inline <head> script. Change one, change both. */
 if(window.Capacitor||window.androidBridge)return;
 for(var i=0;i<C.allow.length;i++){var a=C.allow[i];if(p===a||p.indexOf(a)===0)return;}
 try{
@@ -115,13 +120,14 @@ try{
   if(localStorage.getItem('loloshop_web_ok')==='1')return;
 }catch(e){}
 var ua=navigator.userAgent||'';
-var m=p.match(/^\\/join\\/([^\\/?#]+)/);
+/* REMOVED 2026-08-08: a '&referrer=join_<code>' tail on the Play URL. "/join" is in the
+   allowlist above, so the loop returns before this line for every /join/* path and the branch
+   had become unreachable dead code — it could only ever have fired for a URL that never
+   reaches here. If /join is ever taken OUT of the allowlist, restore it: it was the only
+   thing that could carry a referral code through an Android install (Play Install Referrer),
+   and it cost nothing. It never had a reader on our side either way. */
 if(/android/i.test(ua)){
-  var u=C.play;
-  /* Invisible, free, and the only thing that can make Android joins fully automatic later
-     (Play Install Referrer) without burning another store review. */
-  if(m)u+='&referrer='+encodeURIComponent('join_'+m[1]);
-  location.replace(u);
+  location.replace(C.play);
 }else if(/iphone|ipad|ipod/i.test(ua)||(/Macintosh/.test(ua)&&navigator.maxTouchPoints>1)){
   /* iPadOS reports itself as Macintosh; maxTouchPoints is what separates it from a real Mac. */
   location.replace(C.ios||'/get-app');
