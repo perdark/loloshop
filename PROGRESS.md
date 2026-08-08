@@ -1,5 +1,128 @@
 # Progress
 
+## 2026-08-08 — Push notifications, and the eight open review findings
+
+**Branch `claude/handoff-cloud-board-tasks-v342hb`** (off `feat/deeplinks-and-location`).
+**Migration `077_push_notifications.sql` — pending, not yet applied.**
+Gates: `tsc` 0 · `eslint` 0 · `next build` exit 0 · backend syntax check clean ·
+`node --test test/push.test.js test/joinRouteOrder.test.js test/memoCache.test.js` **13/13**
+(the DB-backed suites were not runnable — this sandbox has no PostgreSQL).
+
+Closes both items on the HANDOFF cloud board. The third ship-queue blocker — push — was the only
+one with no code at all; it now has everything a cloud session can build, and stops at the two
+things that need a browser session in a console (a Firebase project and an APNs key).
+
+### 1 — Push notifications (the last unbuilt blocker)
+
+**What shipped as "notifications" before this:** rows in the `notifications` table, rendered
+in-app. A rep whose student joined at 11pm found out the next time they happened to open the
+app; a closed phone learned nothing at all.
+
+- **`notifications` IS the queue.** New `push_state` / `pushed_at` columns plus
+  `backend/lib/pushOutbox.js`, which claims committed rows and delivers them. Chosen over a send
+  call at each site because there are **thirteen** `INSERT INTO notifications` and several run
+  inside `tx()` — sending from in there pushes work that may still roll back, and sending after
+  means threading a return value through every caller. **No call site changed**, so no future
+  insert can forget to push.
+- **⚠️ Two independent flood guards, and both are load-bearing.** `push_state` defaults to
+  `'pending'`, so the migration retires every pre-existing row to `'skipped'`, **and** the drain
+  only ever looks at the last 15 minutes. Either one alone is a single line away from replaying
+  the shop's entire notification history onto real phones. The backfill is repeated in
+  `db/schema.sql` because that file is what `npm run migrate` applies, to a database that
+  already holds every notification ever written.
+- **Zero new npm dependencies, and that is a deploy requirement.** `ci.yml:22` runs
+  `npm audit --omit=dev --audit-level=moderate` and the deploy job needs it green, so a package
+  that picks up a moderate advisory stops the **site** shipping, not just this feature.
+  `firebase-admin` would put ~40 transitive packages permanently inside that gate to do two
+  things Node already does: sign a JWT and make an HTTP/2 request. `backend/lib/push.js`
+  implements FCM HTTP v1 and APNs HTTP/2 on `crypto` + `http2` + `fetch`.
+- **iOS talks to Apple directly, not through Firebase.** Routing iOS through FCM needs the
+  Firebase iOS SDK *inside the app*, and the iOS project is regenerated from Capacitor's
+  template on every Codemagic run — the same trap that already forces the privacy strings and
+  the entitlement to be re-injected each build. Straight APNs needs nothing in the app: the
+  plugin's stock token IS the APNs token and the `.p8` lives only on the server. So **the
+  Firebase project is Android-only**, and the `.p8` goes in the backend `.env`.
+- **⚠️ `POST_NOTIFICATIONS` added to `AndroidManifest.xml`.** The plugin does **not** declare it
+  — it names it only in a Capacitor `@Permission` annotation, which is a runtime concept; its
+  own manifest carries just the messaging service. Verified by reading both files in
+  `node_modules`. Android denies a runtime request for an undeclared permission **without
+  showing a dialog**, so without this line `requestPermissions()` resolves `'denied'` instantly
+  on every modern phone and nothing anywhere says why — the identical silent failure the two
+  location permissions were added to fix. It is compiled into the AAB, so missing it costs a
+  whole extra store release.
+- **`npx cap update android` run**, so `capacitor.settings.gradle` and `capacitor.build.gradle`
+  now include `capacitor-push-notifications`. They are generated files; the plugin was in
+  `package.json` but had never been synced, so a build would have shipped without it.
+  `app/build.gradle` already applies the google-services plugin only when `google-services.json`
+  exists, so the build still succeeds without the owner's file — silently producing an app that
+  can never register, which is why that is spelled out in the manifest comment.
+- **`POST /api/notifications/devices`** (upsert) and **`/devices/unregister`**. ⚠️ The upsert
+  conflicts on **`token`**, not `(user_id, token)`: phones here are shared and resold and the
+  provider hands the same token to whoever signs in next, so the device **moves** to its new
+  owner instead of leaving the previous account subscribed. `logout()` unregisters **before**
+  clearing the JWT, passing the token explicitly — axios' interceptor reads localStorage in a
+  microtask, by which time it is gone.
+- **Frontend:** `lib/push.ts`, `components/PushRegistrar.tsx` (root layout), both dynamically
+  imported so axios stays out of the root chunk. The permission is asked **after login only** —
+  iOS shows that sheet once per install, and spending it on a browsing student burns it, since
+  a «رفض» can only be undone in system Settings. Foreground arrivals become a sonner toast
+  (Android draws no system notification while the app is foregrounded); taps navigate, and the
+  `link` is validated as a same-origin path because it round-trips through FCM/APNs.
+- **Device rows are deleted on one signal only** — an explicit provider verdict (FCM 404/403,
+  APNs 410/BadDeviceToken). Never on a timeout or a 5xx, which would quietly unsubscribe every
+  phone in the shop during a provider outage.
+- **iOS `aps-environment`** is prepared as `docs/patches/codemagic-ios-push-capability.patch`,
+  because `codemagic.yaml` exists **only** on `ios-appstore` and creating it here would be an
+  add/add conflict on the day that branch merges. Verified `git apply --check` clean against
+  `f1785c0`. See `docs/patches/README.md`.
+
+### 2 — The eight review findings
+
+- **Native detection unified.** New `frontend/lib/native-shell.ts` is the one implementation of
+  the two-signal test. `DeepLinkHandler.tsx` tested `window.Capacitor` alone while its comment
+  claimed parity with the gate; both now import the same function. **The underlying hole is
+  documented, not fixed, and that is a decision:** on Android WebView <105 there is no Capacitor
+  runtime at all, so `AppWeb.getLaunchUrl()` returns `''` and an App Link opens the app with the
+  code already lost. Nothing in JS recovers it — reading the launch intent needs the very bridge
+  that is missing. WebView 105 shipped in Aug 2022 and updates through Play, so the affected
+  phones are largely ones that cannot install from Play either. The real fix is a native change
+  in `MainActivity` that no cloud session can compile or test.
+- **Route order is now pinned** — `backend/test/joinRouteOrder.test.js`, 3 tests, no database
+  (`lib/db` and the controller are stubbed in `require.cache`). The third test builds a
+  deliberately mis-ordered router and asserts `/representatives` really is swallowed, so the
+  other two cannot pass for unrelated reasons.
+- **`join:` caches are invalidated** on rep create / update / deadline / delete
+  (`adminController.invalidateJoinCaches`). An admin creating a rep in front of the owner used
+  to watch it not appear for five minutes. The prefix clears `join:<code>` too, deliberately —
+  a deadline edit changes the referral page a student reads.
+- **The shared limiter is split.** `directoryLimit` 300/15min and `lookupLimit` 200/15min are
+  now separate, and both were raised: Iraqi carriers CGNAT, so one IP is routinely a whole
+  cohort. The enumeration defence the old 60 was tuned for is already spent —
+  `/representatives` publishes every code in one response. **`joinLimit` (10/hour/IP) was left
+  alone**: it is the deliberate bound on approval-queue spam recorded on 2026-08-07, and
+  changing it is an owner call. It has the same CGNAT exposure — flagged in HANDOFF.
+- **`/join` tells a network failure apart from an empty directory.** `getJoinRepresentatives`
+  now throws instead of resolving `[]`, and the page has a real error state with a retry button.
+  The old behaviour told a student on a flaky connection «لا توجد قائمة ممثلين» — read as "your
+  rep is not registered" — on the exact screen that exists because they already lost their link.
+- **Dead code removed** — the `?referrer=join_<code>` branch in `app-gate.ts`, unreachable since
+  `/join` was allowlisted. What it was for, and when to restore it, is recorded in its place.
+- **Stale comments corrected** — `app-gate.ts` no longer says `/s /w /d` must open in a browser
+  (the manifest now claims them), and the spec's «two dropdowns» acceptance line now matches the
+  shipped grouped `<select>`.
+- **The codemagic sharp edge is fixed** in the patch above: the injection is idempotent and
+  ignores foreign targets instead of bailing out with a mystery failure.
+
+**Open — owner actions, unchanged in order:**
+1. Firebase project → `google-services.json` → commit to `frontend/android/app/`.
+2. APNs `.p8` → `APNS_KEY_FILE` + `APNS_KEY_ID` + `APNS_TEAM_ID` in the prod `.env`.
+3. Enable **Push Notifications** on the App ID (alongside Associated Domains).
+4. Apply the patch to `ios-appstore` before the next Codemagic run.
+5. Run `npm run migrate` (or `npm run migrate:file db/migrations/077_push_notifications.sql`).
+6. Declare notifications on the Play Data Safety form and the Apple privacy label.
+
+---
+
 ## 2026-08-07 — «ادخل مع ممثلك», team portals as deep links, and the iOS pipeline
 
 **Branch `feat/deeplinks-and-location`** (+ `codemagic.yaml` on `ios-appstore`). No migration.

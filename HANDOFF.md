@@ -13,23 +13,26 @@ this file if something on the board opened, closed, or changed.
 
 ---
 
-## 📍 WHERE THE TREE IS — 2026-08-08
+## 📍 WHERE THE TREE IS — 2026-08-08 (b)
 
 Verified from git this session, not carried over from a previous entry.
 
 | | |
 |---|---|
-| Checked-out branch | `feat/deeplinks-and-location` — **pushed** |
-| `origin/main` | `bc0c6fe` — identical to local `main` and to this branch's base |
-| `origin/ios-appstore` | `f1785c0` — **pushed 2026-08-08**, carries the associated-domains entitlement |
-| Pending migration | **none** |
+| Checked-out branch | `claude/handoff-cloud-board-tasks-v342hb` — **pushed**. Contains everything on `feat/deeplinks-and-location` plus push notifications and the review fixes. Merge THIS one. |
+| `feat/deeplinks-and-location` | `17660e5` — a strict ancestor of the branch above. Nothing unique left on it. |
+| `origin/main` | `bc0c6fe` |
+| `origin/ios-appstore` | `f1785c0` — carries the associated-domains entitlement. ⚠️ Still needs `docs/patches/codemagic-ios-push-capability.patch` applied before the next build. |
+| Pending migration | **`077_push_notifications.sql`** — NOT applied anywhere |
 
-The old SSR/prep-console queue is **closed** — that work reached `origin/main` (`577a191` is an
-ancestor of `bc0c6fe`). Nothing is waiting to merge except this branch.
-
-⚠️ **What prod is actually *running* was NOT re-verified this session** — the sandbox allows no
-outbound network and no prod SSH. Everything above is git ancestry, which is what's provable here.
+⚠️ **What prod is actually *running* was NOT re-verified** — the sandbox allows no outbound
+network and no prod SSH. Everything above is git ancestry, which is what's provable here.
 Confirm on the box before trusting "it's live".
+
+⚠️ **The DB-backed backend tests have not been run against 077.** This sandbox has no
+PostgreSQL and `lib/db` refuses a Neon URL outside production, so the migration and the outbox
+drain have never touched a live table. The three DB-free suites pass (13/13). Run
+`node --test test/` on a machine with the dev DB before merging.
 
 ---
 
@@ -40,15 +43,17 @@ Android release, one iOS release, one review each. Do not submit until all three
 
 | Blocker | Code | What's left |
 |---|---|---|
-| **Deep links** (`/join/` rep link · `/s/ /w/ /d/` team portals) | ✅ on this branch | deploy · 2 env vars · binary · console steps · phone test |
-| **Staff GPS** (بصمة) | ✅ on this branch (Android) + `ios-appstore` (iOS) | same binary, then coordinates, then flip the mode. The admin screen to type them **already exists**: `/admin/attendance` → خط العرض · خط الطول · نطاق الموقع |
-| **Push notifications** | ❌ **not started** | the whole feature — see the cloud board below |
+| **Deep links** (`/join/` rep link · `/s/ /w/ /d/` team portals) | ✅ on the branch | deploy · 2 env vars · binary · console steps · phone test |
+| **Staff GPS** (بصمة) | ✅ on the branch (Android) + `ios-appstore` (iOS) | same binary, then coordinates, then flip the mode. The admin screen to type them **already exists**: `/admin/attendance` → خط العرض · خط الطول · نطاق الموقع |
+| **Push notifications** | ✅ **built 2026-08-08** — table, migration, sender, outbox drain, endpoints, frontend registration, `POST_NOTIFICATIONS` in the manifest | migration 077 · Firebase project + `google-services.json` · APNs `.p8` in the prod `.env` · Push capability on the App ID · apply the codemagic patch · binary · phone test |
 
 - **Deploy is AUTOMATIC on merge to `main`.** `.github/workflows/ci.yml:46-58` runs
   `scripts/deploy.sh` over SSH once the backend + frontend jobs pass — no laptop, no manual SSH.
   ⚠️ Both jobs run `npm audit --omit=dev --audit-level=moderate`, so **a new dependency carrying
-  an advisory blocks the deploy**, not just the tests. Relevant the moment `firebase-admin` or
-  similar lands.
+  an advisory blocks the deploy**, not just the tests. *(This is exactly why push added **zero**
+  npm packages — `backend/lib/push.js` speaks FCM HTTP v1 and APNs HTTP/2 on Node's own `crypto`
+  and `http2`. Keep it that way; `firebase-admin` would put ~40 transitive packages permanently
+  inside the deploy gate.)*
 - **Nothing about the web half needs a store.** The shells are remote-URL WebViews, so `/join`,
   the rep directory and the `/get-app` copy reach *already-installed* apps the moment the site
   deploys. A student with the app can join via `/login` → «ادخل مع ممثلك» **today**. Only
@@ -60,8 +65,19 @@ Android release, one iOS release, one review each. Do not submit until all three
 1. **Owner, first, ~15 min in a browser** (everything downstream blocks on these):
    Associated Domains **and** Push Notifications capability on the `com.loloshop96.app` App ID ·
    Firebase project → `google-services.json` → commit to `frontend/android/app/` ·
-   APNs `.p8` key → upload to Firebase.
+   APNs `.p8` key → **download it and put it in the prod backend `.env`**.
+   ⚠️ The `.p8` does NOT go to Firebase for this app. iOS talks to Apple directly, because
+   routing it through FCM would need the Firebase SDK inside an Xcode project that Codemagic
+   regenerates on every run — the same trap the privacy strings already live in. Firebase is
+   **Android-only** here. Full reasoning at the top of `backend/lib/push.js`.
 2. Merge to `main` → CI auto-deploys → **students unblocked, no store involved**.
+   ⚠️ **Run the migration after that deploy** — `npm run migrate` applies `db/schema.sql`, which
+   carries 077's columns *and* its flood-guard backfill. Or
+   `npm run migrate:file db/migrations/077_push_notifications.sql`. Nothing pushes until FCM/APNs
+   credentials exist, so the order of these two is safe either way.
+   ⚠️ **Apply `docs/patches/codemagic-ios-push-capability.patch` to `ios-appstore`** before
+   step 4 — without `aps-environment` in the entitlements, iOS registration fails on device from
+   a build that succeeded. See `docs/patches/README.md`.
 3. **Android binary — owner decision 2026-08-08: built by hand on the laptop, ~20 min.** No
    Android CI exists and none is wanted. Bump `versionCode 3 → 4` and `versionName` in
    `frontend/android/app/build.gradle:10-11`, `npx cap sync android`, gradle bundle release
@@ -79,45 +95,26 @@ Android release, one iOS release, one review each. Do not submit until all three
 
 ## ☁️ CLOUD BOARD — what a session with no laptop can do
 
-Everything here is repo work. Start from `feat/deeplinks-and-location` (pushed).
+Everything here is repo work. Start from `claude/handoff-cloud-board-tasks-v342hb` (pushed).
 
-**1. Push notifications — the only unbuilt blocker.** Nothing exists today:
-`@capacitor/push-notifications` is in `package.json` but is referenced **nowhere** in
-`frontend/{app,components,lib}`, there is no `frontend/android/app/google-services.json`, and the
-backend has no FCM/APNs sender or device-token table. What ships today as "notifications" is rows
-in the `notifications` table rendered in-app only — nothing reaches a phone that is closed.
-Needs: token table + migration · backend sender · frontend registration + permission prompt ·
-iOS push capability in `codemagic.yaml` (same regeneration trap as the entitlement) · Android
-`google-services.json`. **Owner must create the Firebase project and the APNs key first** — a
-cloud session cannot do either, but it can build everything around them.
+**Items 1 and 2 are DONE (2026-08-08 b)** — push notifications are built end-to-end and all
+eight review findings are closed. Narrative in `docs/HANDOFF-archive.md`, summary in
+`PROGRESS.md`. What is left below is what a cloud session still *can* pick up.
 
-**2. Review findings from 2026-08-08** (all verified, none blocking a build):
-- `DeepLinkHandler.tsx:45-48` tests only `window.Capacitor`; `app-gate.ts:110` tests
-  `window.Capacitor||window.androidBridge`, and the comment falsely claims parity. On Android
-  WebView <105 the bridge is never injected (`Bridge.java:265-270` vs `MessageHandler.java:36-41`),
-  so an App Link **opens the app and drops the code** — worse than today's browser behaviour on
-  those phones. Matching the signal alone does not fix it (`AppWeb.getLaunchUrl()` returns
-  `{url:''}`); decide between accept-and-document or a device test on the oldest supported phone.
-- **No test pins the `/representatives`-above-`/:code` route order** — the one thing the code
-  shouts about, and the backend count is unchanged at 177.
-- **`join:representatives` is never invalidated** — no `memoCache.del('join:')` caller, so an
-  admin creating or editing a rep is invisible for 5 minutes. `adminController.js:433` already
-  uses the pattern.
-- `lookupLimit` (60/15 min/IP) is now **shared** between the rep directory and referral-code
-  lookups; Iraqi carriers CGNAT, so a cohort shares one egress IP.
-- `/join` shows «لا توجد قائمة ممثلين» for a network failure too (`auth-api.ts:212` swallows the
-  error) — no retry, wrong message.
-- Dead code: the `?referrer=join_<code>` branch at `app-gate.ts:118-123` is now unreachable for
-  `/join/*` because the allowlist returns first.
-- Stale comments: `app-gate.ts:22-27` still says /s /w /d must open in a **browser**; the manifest
-  now claims them for the app. And the spec's acceptance still says «two dropdowns» while the
-  shipped picker is deliberately one grouped `<select>`.
-- Sharp edge in the new codemagic step: `if "CODE_SIGN_ENTITLEMENTS" not in src` skips injection
-  if a *future* Capacitor template ships that key for any target — it then exits 1 rather than
-  shipping unsigned-for-links, which is the right failure, but it will look like a mystery.
+**1. What a cloud session can still do:**
+- **Nothing on push until the owner acts.** The code is complete and inert without credentials.
+  A session with DB access should run `node --test test/` (the ~177 DB-backed tests have never
+  been run against migration 077) and, ideally, drive `pushOutbox.drainOnce()` against a real
+  row to prove the claim query and the flood guard behave.
+- **The 14 remaining `next/image unoptimized` props** (list in the landmines below) — each needs
+  a `blob:`/`data:` check first, since upload previews genuinely need it.
+- **Wire gender to the DB** — `students.gender` exists, onboarding only writes localStorage.
+  Wiring, not a migration.
+- **Unit vocabulary pass 2** — rep + staff screens still say «طلب» for pieces.
+- **The «لبسوا تصاميمنا» caption** — a one-string change in `CohortProof.tsx`.
 
-**3. Then: make the app phone-test-ready.** Once 1 and 2 land, the remaining gates are a real
-device and the store consoles — neither can be done from a cloud sandbox.
+**2. Then: make the app phone-test-ready.** The remaining gates are a real device and the store
+consoles — neither can be done from a cloud sandbox.
 
 **Explicitly NOT cloud work:** do **not** add an Android CI workflow. Owner decided 2026-08-08 to
 keep building the AAB by hand on the laptop; the keystore stays local and off GitHub.
@@ -138,12 +135,22 @@ keep building the AAB by hand on the laptop; the keystore stays local and off Gi
    because App Links fail soft.
 3. **`IOS_TEAM_ID` on the VPS** (10 chars, Apple Developer → Membership). Unset = that route 404s
    and iOS deep links stay off.
-4. **Create the Firebase project + download `google-services.json`, and generate an APNs auth key**
-   — the cloud session cannot build push notifications past a certain point without these.
+4. **Push notifications — the code is done and completely inert until these four exist:**
+   a. Firebase project → `google-services.json` → **commit it to `frontend/android/app/`**.
+      ⚠️ `app/build.gradle` applies the google-services plugin only `if (servicesJSON.text)`, so
+      a build without this file **succeeds** and silently produces an app that can never
+      register. Nothing fails; nothing arrives.
+   b. APNs `.p8` key (developer.apple.com → Keys, **downloadable once**) → `APNS_KEY_FILE` +
+      `APNS_KEY_ID` + `APNS_TEAM_ID` in the prod `.env`, then
+      `pm2 restart loloshop-api --update-env`. Not Firebase — see the runbook note.
+   c. **Push Notifications capability on the App ID**, alongside Associated Domains.
+   d. Apply `docs/patches/codemagic-ios-push-capability.patch` to `ios-appstore`.
+   Each half works alone: set only (a) and Android starts receiving, iOS stays quiet.
 5. **⚠️ Enter the shop coordinates** at `/admin/attendance` (خط العرض · خط الطول · نطاق الموقع)
    **before** moving `verification_mode` off `'none'`. Wrong order 403s every بصمة for every
    worker on every platform.
-6. **Play Data Safety form + Apple privacy label:** declare location, and notifications when they land.
+6. **Play Data Safety form + Apple privacy label:** declare location **and notifications** —
+   both are in the binary now.
 7. **Clean the 12 wholesaler `university_name` rows** — one university is spelled three ways
    («بلاد الرافدين» · «بلاد الرفدين» · «كلية بلاد الرافدين»), same for ديالى. The picker was built
    to survive this, but the list reads badly.
@@ -175,6 +182,25 @@ keep building the AAB by hand on the laptop; the keystore stays local and off Gi
 
 ## 💣 LANDMINES
 
+- **⚠️ `notifications.push_state` DEFAULTS TO `'pending'` — the backfill is not optional.**
+  Migration 077 retires every pre-existing row to `'skipped'`, and the same `UPDATE` is repeated
+  in `db/schema.sql` **on purpose**, because that is the file `npm run migrate` applies to a
+  production database that already holds every notification the shop has ever written. Delete
+  either one and the next drain pushes years of history to every phone at once. The drain's
+  15-minute freshness window is the second guard; neither is redundant. Do not "tidy" that
+  `UPDATE` out of `schema.sql`.
+- **⚠️ `POST_NOTIFICATIONS` and `google-services.json` are BOTH compiled into the AAB.** The
+  plugin does not declare the permission (it is only a Capacitor `@Permission` alias — its own
+  manifest has just the messaging service), and Android denies an undeclared runtime permission
+  **without a dialog**. `npx cap sync android` before every build, or the push plugin is absent
+  from the generated gradle files entirely. Getting any of the three wrong costs a whole extra
+  store release, and all three fail silently.
+- **`joinLimit` is 10 signups/hour/IP and Iraqi carriers CGNAT.** A cohort of 100+ shares one
+  egress address, so a referral wave can hit it and every student after the tenth sees an error
+  with no way to tell it apart from a broken link. Deliberately **not** changed 2026-08-08: it is
+  the accepted bound on approval-queue spam recorded 2026-08-07, and loosening it is an owner
+  call. The two read limiters on the same router were split and raised (`directoryLimit` 300,
+  `lookupLimit` 200 per 15 min) because their enumeration rationale was already spent.
 - **⚠️ Do NOT set `staff_attendance_settings.verification_mode` to `location`/`both`** —
   `shop_latitude`/`shop_longitude` are NULL, so every بصمة would 403 for every user on every
   platform. The Android permission and the iOS usage string now exist, so the *only* thing left
@@ -257,9 +283,12 @@ keep building the AAB by hand on the laptop; the keystore stays local and off Gi
   caused most of it no longer happens), but that batch is not on `main`, so it is **unverified on
   prod**. Re-measure after deploy.
 - **Deferred, unchanged:** move the JWT to an httpOnly cookie (would let `/wholesaler` SSR too;
-  touches every login path for 1,141 live accounts) · Track B deep links (both manifests 404 today;
-  needs new binaries + one review; claim `/join/*` ONLY) · `server-only` is not a dependency, so
+  touches every login path for 1,141 live accounts) · `server-only` is not a dependency, so
   `lib/catalog-server.ts` uses a `typeof window` guard instead.
+  *(Dropped 2026-08-08 (b): "Track B deep links — both manifests 404 today". That work shipped in
+  `57f272f`; the manifests and `DeepLinkHandler` all claim the same four prefixes and the line
+  contradicted the ship queue at the top of this file. What is still true is that it needs new
+  binaries and one review each, which the ship queue already says.)*
 
 ---
 

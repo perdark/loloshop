@@ -1,4 +1,4 @@
-# HANDOFF archive (2026-06-14 → 2026-08-05)
+# HANDOFF archive (2026-06-14 → 2026-08-08)
 
 Full session narratives moved out of `HANDOFF.md` to cut the auto-loaded context (first pass
 2026-07-19, extended 2026-08-04, extended again 2026-08-05). **Nothing here was deleted — this is
@@ -13,6 +13,189 @@ Work below is committed unless its own entry says otherwise. (The **2026-08-05 (
 written against an uncommitted tree; **(d)** committed it, so that caveat is discharged.)
 *Committed is not deployed* — check the board in `HANDOFF.md` for what has actually reached
 `origin/main` and the VPS. Durable facts also live in PROGRESS.md, git history, and Claude's memory.
+
+---
+
+## 2026-08-08 — 🔔 push notifications built end-to-end, and the eight review findings closed
+
+Branch `claude/handoff-cloud-board-tasks-v342hb`, off `feat/deeplinks-and-location`.
+**Migration `077_push_notifications.sql` — pending.** Gates: `tsc` 0 · `eslint` 0 · `next build`
+exit 0 · backend syntax check clean · `node --test` on the three DB-free suites **13/13**.
+⚠️ The DB-backed suites (the other ~177) were **not run** — this sandbox has no PostgreSQL and
+`lib/db` refuses a Neon URL outside production. That is a real gap in the evidence, not an
+omission: the migration and the outbox drain have never touched a live table.
+
+This clears both items the cloud board listed. The full narrative:
+
+### Why the outbox, and not a send call at each site
+
+There are **thirteen** `INSERT INTO notifications` in this codebase and several of them run
+inside `tx()` — `orderController`, `joinController`, `designController`, `productionController`,
+`lib/orderApproval`. Two bad options follow from that. Sending from inside the transaction pushes
+a notification for work that can still roll back: a student gets «تمت الموافقة» for an order that
+does not exist. Sending after it means threading an "and now push this" value out through every
+one of those callers, and the fourteenth insert somebody writes next month forgets.
+
+Making the ROW the queue removes the choice. `push_state` / `pushed_at` on `notifications`, and
+`backend/lib/pushOutbox.js` claims committed rows with `FOR UPDATE SKIP LOCKED`. Only committed
+rows are ever visible, so the rollback case is structurally impossible; a row claimed by a
+process that dies comes back after five minutes; and **no controller changed**, so nothing can
+forget. It is also safe if PM2 ever moves to cluster mode, unlike `memoCache` and `eventBus`.
+
+**⚠️ The flood guard is the part to be careful with.** `push_state` defaults to `'pending'`,
+which means every notification this shop has ever written becomes a send candidate the instant
+the columns exist. Two independent guards: the migration retires everything older than ten
+minutes to `'skipped'`, and the drain only ever claims rows from the last fifteen. The backfill
+is repeated verbatim in `db/schema.sql` — that is the file `npm run migrate` actually applies,
+against the production database, and running the plain migrate command without it would have
+been the accident. A third piece, `retireStale()`, sweeps every five minutes: without it every
+row the drain never reached stays `'pending'` forever and the partial index grows to cover the
+whole table, which is the opposite of why it is partial.
+
+### Why no `firebase-admin`
+
+`.github/workflows/ci.yml:46-58` gates the **deploy** on `npm audit --omit=dev
+--audit-level=moderate` in both jobs. A dependency that picks up a moderate advisory therefore
+stops the *website* shipping, not just the feature that pulled it in — the board already flagged
+this as "relevant the moment `firebase-admin` or similar lands". `firebase-admin` brings ~40
+transitive packages (google-auth-library, gaxios, protobufjs, …) permanently inside that gate,
+to do two things Node already does: sign a JWT and open an HTTP/2 stream.
+
+`backend/lib/push.js` is FCM HTTP v1 + APNs HTTP/2 on `crypto`, `http2` and global `fetch`.
+~330 lines, no new package.json entry.
+
+**The ES256 detail that eats a day if you get it wrong:** Node signs ECDSA as DER by default and
+JOSE wants the raw r‖s pair, so the APNs provider token needs
+`crypto.sign('sha256', data, { key, dsaEncoding: 'ieee-p1363' })`. Without it every request comes
+back 403 InvalidProviderToken while the key, the kid and the team id are all correct and there is
+nothing to read that says why. `backend/test/push.test.js` verifies the signature against the
+public key **and** asserts it is exactly 64 bytes, because the length alone catches it.
+
+### Why iOS does not go through Firebase
+
+The board's plan was "APNs `.p8` → upload to Firebase". That works, but it costs an iOS SDK
+inside the app: with plain `@capacitor/push-notifications` the iOS token IS the APNs token, and
+getting an FCM token instead requires Firebase Messaging linked into the Xcode project plus a
+`GoogleService-Info.plist`. That project is regenerated from Capacitor's template on **every**
+Codemagic run (`npx cap add ios`) — the same trap that already forces the privacy strings and the
+associated-domains entitlement to be re-injected by hand each build. A third thing to lose
+silently, for no gain.
+
+Sending straight to Apple needs nothing in the app at all. So: **the owner's Firebase project is
+Android-only**, and the `.p8` goes in the backend `.env` (`APNS_KEY_FILE` / `APNS_KEY_ID` /
+`APNS_TEAM_ID`), not — or not only — uploaded to Firebase. Documented in `backend/.env.example`
+and at the top of `lib/push.js`.
+
+### The Android permission nobody declares for you
+
+`@capacitor/push-notifications` does **not** put `POST_NOTIFICATIONS` in its manifest. It names
+it only in a Capacitor `@Permission` annotation on `PushNotificationsPlugin.java:29`, which is a
+runtime alias; the plugin's own `AndroidManifest.xml` contains one thing, the
+`FirebaseMessagingService` entry. Both files read in `node_modules`, not assumed.
+
+Android denies a runtime request for a permission the merged manifest does not declare **without
+showing a dialog**. So on every Android 13+ phone `requestPermissions()` would resolve `'denied'`
+instantly, `register()` would never run, no token would ever exist — and nothing anywhere would
+say why. That is precisely the failure mode the two location permissions were added to fix in the
+same file. It is compiled into the AAB, so noticing it after the release costs another one.
+
+Also: `npx cap update android` was run, because `capacitor.settings.gradle` and
+`capacitor.build.gradle` are generated and had never seen the plugin — it was in `package.json`
+since some earlier session and synced nowhere. `app/build.gradle` already applies the
+google-services plugin only `if (servicesJSON.text)`, so a build **without**
+`google-services.json` still succeeds and silently produces an app that can never register. That
+is written into the manifest comment where somebody will actually hit it.
+
+### The device-token rule that matters in this market
+
+The upsert conflicts on **`token`**, not on `(user_id, token)`. Phones here are shared and
+resold, and FCM/APNs hand the same token to whoever signs in next; conflicting per-user would
+leave two live rows and deliver a student's «تمت الموافقة على طلبك» to the person who bought
+their handset. `logout()` also unregisters **before** clearing the JWT and passes the token
+explicitly, because axios' request interceptor reads localStorage in a microtask — by then it is
+gone and the request would be a 401. Account deletion (migration 076 is an *anonymise*, so the
+`ON DELETE CASCADE` never fires) drops device rows explicitly, with the test extended to cover it.
+
+And the only thing that ever deletes a device row is an explicit provider verdict — FCM 404/403,
+APNs 410/BadDeviceToken. Never a timeout, never a 5xx: treating those as fatal would quietly
+unsubscribe every phone in the shop during one FCM outage, and nobody would find out until the
+next notification nobody received. `push.test.js` pins that table both ways.
+
+### The permission prompt is asked once, after login
+
+iOS shows the notification sheet **once per install** and a «رفض» can only be undone in system
+Settings, which nobody does. Spending it on a student who is still browsing the shop, with
+nothing to notify them about, burns it permanently. `PushRegistrar` therefore does nothing until
+`getToken()` is non-null, and re-runs on `AUTH_CHANGED_EVENT` so signing in triggers the ask.
+Both it and `lib/push.ts` are dynamically imported — the component sits in the ROOT layout, and a
+static import would put axios in the first chunk of every page including the SSR storefront that
+was deliberately built not to need it.
+
+### The eight review findings
+
+**Native detection was the interesting one.** `DeepLinkHandler.tsx:45-48` tested
+`window.Capacitor` alone while `app-gate.ts:110` tested `window.Capacitor || window.androidBridge`
+and the comment claimed parity. Both now import `isNativeShell()` from the new
+`frontend/lib/native-shell.ts`, so they cannot drift again; the gate's inline head script is the
+one unavoidable copy (it is built as a *string* for `<head>` and cannot import), and both sides
+now say so.
+
+**The hole underneath it is accepted, not fixed, and the board's own framing was right.** On
+Android WebView <105 there is no Capacitor JS runtime at all, so `@capacitor/app` resolves to its
+web implementation: `AppWeb.getLaunchUrl()` returns `{url: ''}` and `appUrlOpen` never fires. An
+App Link on such a phone opens the app and drops the code — worse than the browser behaviour it
+replaces. No feature detection recovers it, because reading the launch intent needs the bridge
+that is missing. WebView 105 shipped in August 2022 and updates through Play, so the affected
+population is phones with Play Services disabled or never updated — largely the same phones that
+cannot install from Play in the first place. The real fix is navigating the WebView from
+`onNewIntent` in `MainActivity`, which is native code no cloud session can compile or test. The
+reasoning is written at the top of `native-shell.ts` so the next person does not re-derive it.
+
+**Route order is pinned** by `backend/test/joinRouteOrder.test.js` — three tests, no database
+(`lib/db` and the controller are stubbed into `require.cache` before the router loads, so it runs
+anywhere in ~300ms). The third test builds a deliberately mis-ordered router and asserts
+`/representatives` really *is* swallowed by `/:code`, so the first two cannot pass for unrelated
+reasons. That mattered: a test that only asserts the good case is indistinguishable from a test
+that asserts nothing.
+
+**`join:` cache invalidation** now fires on rep create / update / deadline / delete, via a named
+`invalidateJoinCaches()` in `adminController` with the reasoning attached. The prefix clears
+`join:<code>` as well as `join:representatives`, deliberately — a جامعة or deadline edit changes
+the referral page a student reads, not just the picker.
+
+**The shared limiter is split and both halves raised.** `directoryLimit` 300/15min,
+`lookupLimit` 200/15min. Iraqi carriers CGNAT, so one IP is routinely a cohort of 100+; the
+enumeration defence the old shared 60 was tuned for is already spent, since `/representatives`
+publishes every referral code in one unauthenticated response. **`joinLimit` (10/hour/IP) was
+deliberately left alone** — it is the explicit bound on approval-queue spam accepted on
+2026-08-07, and loosening a deliberate control is an owner decision, not a review finding. Its
+identical CGNAT exposure is now on the board instead.
+
+**`/join` can tell a network failure from an empty directory.** `getJoinRepresentatives` threw
+away every error and resolved `[]`, so one dropped request on a phone rendered «لا توجد قائمة
+ممثلين» — which reads as *your rep is not registered here* — on the exact screen that exists
+because the student already lost their link. It throws now, and the page has a real error state
+with a retry button and a request-sequence guard so a slow first response cannot land on a fresh
+one.
+
+**Dead code, stale comments, and the codemagic edge** were the remaining four: the
+`?referrer=join_<code>` branch (unreachable since `/join` was allowlisted — removed, with what it
+was for and when to restore it left in its place), `app-gate.ts` no longer claiming `/s /w /d`
+must open in a browser, the spec's «two dropdowns» acceptance line reconciled with the shipped
+grouped `<select>`, and the pbxproj injection made idempotent instead of bailing out on any
+foreign `CODE_SIGN_ENTITLEMENTS`.
+
+**⚠️ `codemagic.yaml` is not on this branch and could not be.** It exists **only** on
+`ios-appstore` (`git log --all -- codemagic.yaml` — every commit is there; `main` has never had
+it). Creating it here would be an add/add conflict the day that branch merges. So the
+`aps-environment` entitlement and the injection fix are prepared as
+`docs/patches/codemagic-ios-push-capability.patch`, verified `git apply --check` clean against
+`f1785c0`, with the embedded Python executed against a synthetic `project.pbxproj` for three
+cases — fresh template, re-run, and a foreign target with its own entitlements key. All three
+wire exactly 2 configurations. `docs/patches/README.md` explains the whole arrangement.
+
+**Not done, on purpose:** no Android CI workflow. The board says the owner builds the AAB by hand
+and the keystore stays off GitHub.
 
 ---
 
