@@ -231,6 +231,18 @@ export default function LoginPage() {
                   أنشئ حساباً
                 </Link>
               </p>
+              {/*
+                Recovery path for a student whose rep link is buried in WhatsApp. This one DOES
+                belong on /login — unlike the deleted «فريق العمل؟» box above, its audience is
+                students, who are the overwhelming majority of who reaches this screen.
+                /join (no code) only maps جامعة+قسم → referral code; approval is unchanged.
+              */}
+              <p className="text-center text-sm text-ink-soft">
+                طالب مع ممثل جامعتك؟{" "}
+                <Link href="/join" className="inline-flex min-h-11 items-center px-1 font-medium text-orange-ink underline-offset-4 hover:underline">
+                  ادخل مع ممثلك
+                </Link>
+              </p>
             </div>
           </form>
         </div>

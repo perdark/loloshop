@@ -31,6 +31,16 @@
  */
 export const BROWSER_ALLOWED_PREFIXES = [
   "/admin",
+  // ⚠️ /join MUST stay allowed, and this is not a convenience — it is the difference between
+  // a working referral and a lost student. Without it, tapping a rep's link on a phone with no
+  // app installed replaces the page with the store, and NOTHING carries the code through the
+  // install: Play's `?referrer=` (appended below) has no reader on our side, and iOS has no
+  // deferred deep linking at all. The student installs, lands on the home page, and their
+  // cohort is gone — silently, with no error anyone can see.
+  // Allowing it costs nothing once App Links verify: Android intercepts /join/* BEFORE the
+  // browser loads the page, so students who DO have the app still open in the app.
+  // Covers both /join (the جامعة→قسم picker) and /join/<code>.
+  "/join",
   "/workshop",
   "/tv/",
   "/s/",

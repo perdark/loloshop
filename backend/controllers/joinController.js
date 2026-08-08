@@ -4,6 +4,36 @@ const { isValidIqMobile } = require('../lib/otp');
 const memoCache = require('../lib/memoCache');
 const { assertPasswordOk } = require('../lib/password');
 
+/**
+ * Public rep directory behind «ادخل مع ممثلك» on /login.
+ *
+ * WHY THIS EXISTS: `referral_code` is an admin-typed Latin slug (`damascus-medicine`). A student
+ * who lost the WhatsApp link cannot be asked to type that from memory on an Arabic keyboard, and
+ * on iOS there is no way to carry the code through an app install (no deferred deep linking), so
+ * "just re-send the link" is not always available either. Two dropdowns, zero typing.
+ *
+ * ⚠️ THIS IS PUBLIC AND UNAUTHENTICATED — it deliberately discloses the university/department
+ * list. That was accepted 2026-08-07 (docs/superpowers/specs/2026-08-07-app-entry-deeplinks-gps.md)
+ * because joining still gives the student NOTHING until the wholesaler approves them one by one.
+ * Keep it that way: never add pricing, deadlines, counts, or the rep's phone to this payload.
+ */
+async function getRepresentatives(req, res) {
+  // 5 min: the list changes when the admin creates a rep, which is rare, and a whole cohort
+  // hits /login within the same few minutes during a referral wave.
+  const data = await memoCache.wrap('join:representatives', 5 * 60_000, async () => {
+    const { rows } = await query(
+      `SELECT w.referral_code, w.university_name, w.department, u.name AS wholesaler_name
+         FROM wholesalers w
+         JOIN users u ON u.id = w.user_id
+        WHERE w.approved_by_admin = TRUE
+          AND w.university_name IS NOT NULL AND btrim(w.university_name) <> ''
+        ORDER BY w.university_name, w.department NULLS LAST, u.name`
+    );
+    return rows;
+  });
+  res.json({ representatives: data });
+}
+
 async function getReferral(req, res) {
   const { code } = req.params;
   // Hot path during a referral wave (a whole cohort opens the same link within
@@ -136,4 +166,4 @@ async function joinReferral(req, res) {
   });
 }
 
-module.exports = { getReferral, joinReferral };
+module.exports = { getRepresentatives, getReferral, joinReferral };

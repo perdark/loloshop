@@ -48,6 +48,23 @@ export default function GetAppPage() {
       <p className="text-xs text-ink-soft">
         افتح هذه الصفحة من هاتفك لتنتقل مباشرة إلى المتجر.
       </p>
+
+      {/*
+        The one thing neither store can do for us. Google Play carries `?referrer=` through an
+        install (lib/app-gate.ts appends it), but the App Store passes NOTHING into a freshly
+        installed app — deferred deep linking is not an iOS feature, and the workarounds are
+        paid fingerprint SDKs or clipboard sniffing. So a student who installs FROM a link does
+        not land back on it, and the only honest instruction is to tap it again. Cheap, works
+        identically on both platforms, and needs no native code.
+
+        Referral links themselves no longer take this path — `/join` is allowlisted in
+        BROWSER_ALLOWED_PREFIXES, so they open in the browser instead of bouncing to the store.
+        This covers everything else, and laptops, which are the only devices that see this page.
+      */}
+      <p className="mx-auto max-w-md text-xs leading-relaxed text-ink-soft">
+        وصلت من رابط؟ بعد تثبيت التطبيق، ارجع واضغط على الرابط مرة ثانية — سيفتح داخل التطبيق
+        مباشرة.
+      </p>
     </main>
   );
 }

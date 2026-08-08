@@ -1,5 +1,129 @@
 # Progress
 
+## 2026-08-07 — «ادخل مع ممثلك», team portals as deep links, and the iOS pipeline
+
+**Branch `feat/deeplinks-and-location`** (+ `codemagic.yaml` on `ios-appstore`). No migration.
+Spec: `docs/superpowers/specs/2026-08-07-app-entry-deeplinks-gps.md`.
+Gates: backend **177/177** · `tsc` 0 · `eslint` 0 errors · `next build` exit 0 · endpoint and
+both well-known routes curl-verified against real servers.
+
+**The question this answers:** «can a rep's students and the team get into the app without the
+website?» — with the website reduced to admin + a download landing page.
+
+- **Split by what needs a store review.** The binaries are WebView shells on the live site, so
+  HTML/JS/API changes reach installed apps on deploy; only `AndroidManifest.xml` and the iOS
+  entitlements need a new binary. Everything below is sorted by that line.
+
+**Ships on deploy — no store, no review:**
+- **`GET /api/join/representatives`** — public directory of approved reps (جامعة · قسم · code),
+  5-min cached. ⚠️ Registered **above** `/:code`; Express 5 matches in order and the param route
+  would swallow it.
+- **`/join` — «ادخل مع ممثلك»**, linked from `/login`. Recovery for a student whose rep link is
+  buried in WhatsApp. `referral_code` is an admin-typed Latin slug, so typing it is not an
+  option, and iOS has no deferred deep linking, so "install and it remembers" is not either.
+- **⚠️ Built as جامعة→قسم first; the live data killed it.** `university_name` is admin free text
+  and the 12 real rows spell one university three ways («بلاد الرافدين» · «بلاد الرفدين» ·
+  «كلية بلاد الرافدين»; same for «جامعة ديالى» · «ديالى» · «جامعة ديالى كلية العلوم»). Two
+  dependent dropdowns dead-end anyone picking the wrong spelling — empty قسم list, no error,
+  student concludes their rep isn't registered. Now **one `<select>` grouped by `<optgroup>`**,
+  so a mis-spelled twin is visible instead of hidden. **The 12 rows still want cleaning.**
+- **`/join` allowlisted in `BROWSER_ALLOWED_PREFIXES`** — a correctness fix, not a nicety.
+  Without it, flipping `NEXT_PUBLIC_APP_ONLY=1` replaces every referral tap with the store and
+  **nothing carries the code through the install**: Play's `?referrer=` has no reader on our
+  side and iOS has no equivalent. Costs nothing — once App Links verify, Android intercepts
+  `/join/*` before the browser loads it.
+- **`/get-app`** now states the only instruction that works on both platforms: tap the link
+  again after installing.
+
+**Needs one new binary per store (batched with the location permission):**
+- **Deep links extended to `/s/`, `/w/`, `/d/`** — manifest, AASA and `DeepLinkHandler` all
+  claim the same four prefixes. These portals are the **only** way in for staff, workshop and
+  design-team members with no phone for the WhatsApp OTP, and they went browser-only when
+  `TeamKeyEntry` was deleted on 2026-08-06. This puts that entrance back inside the app.
+- **`codemagic.yaml` (`ios-appstore`)** — `NSLocationWhenInUseUsageDescription` added to the
+  existing `plutil` step and its fail-loud check, plus a new step that writes
+  `App.entitlements` (`com.apple.developer.associated-domains`) and wires
+  `CODE_SIGN_ENTITLEMENTS` into `project.pbxproj`. Both re-injected **after `cap sync`**,
+  because `npx cap add ios` regenerates `ios/` every run and wipes committed edits — the same
+  trap the camera-crash fix already documents. Dry-run against a fake project: wired into
+  exactly the 2 App-target configs, left a plugin target with a different bundle id untouched,
+  and exits 1 when the template shape changes.
+
+**Open — owner actions, in this order:**
+1. **⚠️ Enter the shop coordinates.** `staff_attendance_settings.shop_latitude/longitude` are
+   NULL; setting `verification_mode` to `location`/`both` first **403s every بصمة for every
+   worker on every platform**.
+2. **⚠️ Enable "Associated Domains" on the App ID** before the next Codemagic run, or
+   `fetch-signing-files` builds a profile without it and the build dies at signing.
+3. `ANDROID_SHA256_CERT_FINGERPRINTS` (Play **App signing** key, not the upload keystore) and
+   `IOS_TEAM_ID` on the VPS.
+4. Play Data Safety + Apple privacy label: declare location.
+5. Clean the 12 wholesaler `university_name` rows.
+6. Verify on a real phone before flipping either flag — App Links fail **soft**, so a wrong
+   fingerprint is invisible: `adb shell pm get-app-links com.loloshop96.app`.
+
+**Accepted tradeoff:** the rep directory is public and unauthenticated, so the university list
+is disclosed and a rep's approval queue can be spammed without the link leaking. Bounded by
+`joinLimit` (10/h/IP) and the unique-phone check, and joining still grants nothing until the rep
+approves. Note the codes are already 1–3 characters (`g`, `tr`, `ml`), so they were trivially
+enumerable long before this endpoint existed.
+
+---
+
+## 2026-08-06 — Deep links for `/join/*`, and the location permission the app never had
+
+**Branch `feat/deeplinks-and-location`. No migration.**
+Gates: `tsc` 0 · `eslint` 0 · `next build` exit 0 · both well-known routes curl-verified against
+a real `next start`.
+
+- **The problem, stated properly.** The shells are remote-URL WebViews (`capacitor.config.ts`
+  → `server.url`) with **no address bar**, and nothing in the app links to `/join/*`. So a
+  wholesaler's referral link was **browser-only**: `AndroidManifest.xml` had only
+  `MAIN`/`LAUNCHER` — no `VIEW`/`BROWSABLE` — and no `.well-known` file existed for iOS.
+  An installed student had no path to their code at all.
+- **Android:** added an `autoVerify` App Links intent-filter claiming `https://lolo-shop96.com`
+  and `www.` at **`pathPrefix="/join/"` only** (per the 2026-07-31 spec — a wildcard would make
+  the app hijack every shared product link).
+- **iOS:** added `app/.well-known/apple-app-site-association/route.ts`, extensionless and
+  `application/json`, emitting both the iOS 13+ `appIDs`/`components` form and the legacy
+  `appID`/`paths` form. Driven by a new `IOS_TEAM_ID` env var.
+- **`DeepLinkHandler.tsx`** handles **both** arrival paths — `appUrlOpen` (warm) *and*
+  `App.getLaunchUrl()` (cold start, where no event ever fires). Handling only the listener is
+  the classic half-working deep link: fine while you test with the app open, broken for every
+  student tapping from WhatsApp. Host + path allowlisted again in JS, independently of the
+  manifest. Dynamic-imports `@capacitor/app` so browsers never fetch it.
+- **Hardened the pre-existing `assetlinks.json` route**, which accepted any non-empty string.
+  It now normalises case/colons and **drops anything that is not 64 hex chars**, so a pasted
+  SHA-1 or a truncated copy fails loudly instead of serving a document that looks right and
+  never verifies. Verified: a junk `DE:AD:BE:EF` entry is dropped, a lowercase unseparated
+  fingerprint is normalised to `AA:BB:…`.
+- **`ACCESS_FINE_LOCATION` + `ACCESS_COARSE_LOCATION` added to the manifest.** Staff بصمة calls
+  the *web* `navigator.geolocation` (`lib/staff.ts:1377`); Capacitor's bridge already prompts
+  for these two (`BridgeWebChromeClient:246`), but **Android denies a runtime request for an
+  undeclared permission without showing a dialog** — so `getCurrentPosition` always hit its
+  error path and check-in posted `location: null`. Silent, because `verification_mode` is
+  `'none'` and the backend then marks it verified anyway. This is why a **new binary** was
+  unavoidable: `<uses-permission>` compiles into the AAB and the remote-URL trick cannot ship it.
+
+⚠️ **Order of operations for GPS — getting it wrong locks every staff member out.** Ship the
+binary → wait for phones to update → set `shop_latitude`/`shop_longitude` in `/admin` → *only
+then* move `verification_mode` off `'none'`. Flipping it first makes `locationOk` false for
+everyone, and `attendanceController.js:532` + `:619` answer that with a hard
+**403 `ERR_ATTENDANCE_LOCATION`**.
+
+Open / owner actions:
+- `ANDROID_SHA256_CERT_FINGERPRINTS` on the VPS — from Play Console → **App integrity → App
+  signing key certificate**, *not* the upload keystore. Unset today, so the route 404s.
+- `IOS_TEAM_ID` on the VPS. Unset = that route 404s and iOS deep links stay off.
+- **Enable "Associated Domains" on the App ID** in the Apple Developer portal *before* the next
+  Codemagic run, or signing fails with a missing-entitlement error.
+- Update the Play **Data Safety** form (location is now collected).
+- `codemagic.yaml` on `ios-appstore` still needs the entitlement +
+  `NSLocationWhenInUseUsageDescription` injection step.
+- Neither half is smoke-tested on a real device yet — App Links fail *soft* (the link just opens
+  in the browser), so a wrong fingerprint is invisible. Check with
+  `adb shell pm get-app-links com.loloshop96.app`.
+
 ## 2026-08-05 (e) — التجهيز cards show the garment, not just the stitching
 
 **Committed to `feat/ssr-storefront-native-auth`. No migration.**

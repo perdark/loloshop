@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Amiri, Cairo, Great_Vibes, Playfair_Display } from "next/font/google";
+import { DeepLinkHandler } from "@/components/DeepLinkHandler";
 import { PwaRegistrar } from "@/components/PwaRegistrar";
 import { ToasterProvider } from "@/components/providers/ToasterProvider";
 import { APP_ONLY, buildGateScript } from "@/lib/app-gate";
@@ -129,6 +130,12 @@ export default function RootLayout({
           <script dangerouslySetInnerHTML={{ __html: buildGateScript() }} />
         )}
         <PwaRegistrar />
+        {/*
+          Deep-link router for the native shells. Renders nothing; inert in a browser.
+          Mounted in the root layout because a link can arrive at any moment, on any
+          route — including before the student has navigated anywhere themselves.
+        */}
+        <DeepLinkHandler />
         {children}
         <ToasterProvider />
       </body>

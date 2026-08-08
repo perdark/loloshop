@@ -195,6 +195,31 @@ export async function resendVerifyOtp(challengeId: string): Promise<string> {
   }
 }
 
+// ── «ادخل مع ممثلك» — public rep directory for students who lost their link ───
+export interface JoinRepresentative {
+  referral_code: string;
+  university_name: string;
+  department: string | null;
+  wholesaler_name: string;
+}
+
+/**
+ * Powers the جامعة → قسم picker on /login. Unauthenticated on purpose — see the ⚠️ block on
+ * `getRepresentatives` in backend/controllers/joinController.js for what it does and does not
+ * disclose. Resolves to [] on failure so a directory outage degrades to "the link still works"
+ * rather than blocking the whole login screen.
+ */
+export async function getJoinRepresentatives(): Promise<JoinRepresentative[]> {
+  try {
+    const { data } = await api.get<{ representatives: JoinRepresentative[] }>(
+      "/join/representatives"
+    );
+    return data.representatives || [];
+  } catch {
+    return [];
+  }
+}
+
 // ── Private staff portal (phoneless staff: pick name + password, no OTP) ──────
 export interface StaffPortalMember {
   id: string;
