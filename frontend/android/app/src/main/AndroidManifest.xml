@@ -110,4 +110,33 @@
     -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+
+    <!--
+      PUSH NOTIFICATIONS (Android 13 / API 33+).
+
+      ⚠️ THE PLUGIN DOES NOT DECLARE THIS AND CANNOT. @capacitor/push-notifications names
+      POST_NOTIFICATIONS only in a Capacitor `@Permission` annotation on
+      PushNotificationsPlugin.java — a RUNTIME alias — and its own AndroidManifest.xml
+      contains just the FirebaseMessagingService entry. Verified by reading both files in
+      node_modules, not assumed.
+
+      Android denies a runtime request for a permission the merged manifest does not declare
+      WITHOUT showing a dialog. So without this line PushNotifications.requestPermissions()
+      resolves 'denied' instantly on every modern phone, register() is never called, no token
+      ever reaches the backend — and nothing anywhere says why. That is the exact silent
+      failure the two location permissions above were added to fix.
+
+      ⚠️ COMPILED INTO THE AAB. The remote-URL WebView ships web changes instantly but can
+      never add a permission, so forgetting this costs a whole extra store release.
+
+      Also required in the installed binary, and equally invisible when missing:
+        • android/app/google-services.json — the Firebase config. app/build.gradle already
+          applies the google-services plugin only when that file exists, so a build without
+          it succeeds and silently produces an app that can never register.
+        • `npx cap sync android` — capacitor.settings.gradle / capacitor.build.gradle are
+          GENERATED, and the push plugin only appears in them after a sync.
+
+      Adding this also means declaring notifications on the Play Data Safety form.
+    -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 </manifest>

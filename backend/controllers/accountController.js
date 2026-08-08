@@ -154,6 +154,10 @@ async function deleteAccount(req, res) {
     await client.query(`DELETE FROM otp_codes WHERE user_id = $1`, [req.user.id]);
     await client.query(`DELETE FROM password_resets WHERE user_id = $1`, [req.user.id]);
     await client.query(`DELETE FROM trusted_devices WHERE user_id = $1`, [req.user.id]);
+    // Push subscriptions (migration 077). ON DELETE CASCADE does not help here — deletion is
+    // an ANONYMISE, the users row survives — so without this the phone stays subscribed and
+    // would keep buzzing for an account Apple was told no longer exists.
+    await client.query(`DELETE FROM device_tokens WHERE user_id = $1`, [req.user.id]);
 
     await client.query(
       `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)

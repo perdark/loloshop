@@ -338,7 +338,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log(actor_id);
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at DESC);
 
 -- =====================================================
--- NOTIFICATIONS — in-app only (MVP)
+-- NOTIFICATIONS — in-app rows AND the push outbox (migration 077)
 -- =====================================================
 CREATE TABLE IF NOT EXISTS notifications (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -351,6 +351,41 @@ CREATE TABLE IF NOT EXISTS notifications (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, read);
+
+-- Push delivery state for the row above. See db/migrations/077_push_notifications.sql for the
+-- full reasoning; the short version is that thirteen call sites INSERT notifications and
+-- several do it inside a transaction, so the ROW is the queue and backend/lib/pushOutbox.js
+-- drains it after commit.
+-- 'pending' → never attempted · 'sending' → claimed · 'sent' · 'failed' · 'skipped'.
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS push_state TEXT NOT NULL DEFAULT 'pending';
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS pushed_at  TIMESTAMPTZ;
+
+-- ⚠️ KEEP THIS. This file is re-applied on every `npm run migrate`, against a database that
+-- already holds every notification the shop has ever written. Those rows take the 'pending'
+-- default from the ALTER above, and without this line the next drain would push all of them
+-- to real phones at once. Idempotent and cheap after the first run.
+UPDATE notifications SET push_state = 'skipped'
+ WHERE push_state = 'pending' AND created_at < now() - INTERVAL '10 minutes';
+
+-- Covers 'sending' too, not just 'pending': the drain's claim query also has to find rows a
+-- crashed process left mid-flight, and an index that stops at 'pending' would make that
+-- branch a full scan of every notification the shop has ever written.
+CREATE INDEX IF NOT EXISTS idx_notifications_push_pending
+  ON notifications (created_at) WHERE push_state IN ('pending', 'sending');
+
+-- One row per device+install. `token` is UNIQUE table-wide on purpose: phones get handed on
+-- and re-sold here, and the provider reissues the SAME token to the next person who signs in.
+-- The upsert in notificationController.registerDevice therefore MOVES the device to its new
+-- owner instead of leaving the previous account subscribed to it.
+CREATE TABLE IF NOT EXISTS device_tokens (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token        TEXT NOT NULL UNIQUE,
+  platform     TEXT NOT NULL CHECK (platform IN ('android', 'ios')),
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_device_tokens_user ON device_tokens(user_id);
 
 -- =====================================================
 -- TEMPLATES — pre-made designs per university (P3, scaffold now)

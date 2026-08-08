@@ -116,6 +116,13 @@ app.use('/api/track', require('./routes/track'));
 app.use('/api/workshop', require('./routes/workshop'));
 app.use('/api/design-team', require('./routes/designTeam'));
 
+// Push delivery. The drain reads COMMITTED `notifications` rows and sends them to registered
+// phones (backend/lib/pushOutbox.js). Started here rather than in worker.js because the worker
+// exits when pg-boss cannot start, and a calligraphy queue outage must not also silence every
+// notification. It is inert until FCM/APNs credentials exist, and its timer is unref'd so it
+// never delays the SIGTERM shutdown below.
+require('./lib/pushOutbox').start();
+
 // Ensure calligraphy upload dirs exist at boot
 ['calligraphy/sheets', 'calligraphy/plates', 'calligraphy/elements'].forEach((d) => {
   const p = path.join(__dirname, '..', 'uploads', d);

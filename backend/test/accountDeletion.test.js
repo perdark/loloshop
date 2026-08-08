@@ -150,6 +150,13 @@ test('deletion erases the account but keeps the order and its delivery snapshot'
      VALUES ($1, $2, NOW() + INTERVAL '90 days')`,
     [user.id, crypto.randomBytes(32).toString('hex')]
   );
+  // A registered phone (migration 077). Deletion is an ANONYMISE — the users row survives —
+  // so the ON DELETE CASCADE never fires and this has to be scrubbed explicitly, or the
+  // handset keeps buzzing for an account Apple was told is gone.
+  await query(
+    `INSERT INTO device_tokens (user_id, token, platform) VALUES ($1, $2, 'android')`,
+    [user.id, `test-${crypto.randomBytes(16).toString('hex')}`]
+  );
 
   const res = mkRes();
   await account.deleteAccount(mkReq(user, { password: PASSWORD }), res);
@@ -191,7 +198,7 @@ test('deletion erases the account but keeps the order and its delivery snapshot'
   assert.equal(s.rows[0].university_name, null);
   assert.equal(s.rows[0].department, null);
 
-  for (const table of ['carts', 'notifications', 'trusted_devices']) {
+  for (const table of ['carts', 'notifications', 'trusted_devices', 'device_tokens']) {
     const left = await query(`SELECT COUNT(*)::int AS n FROM ${table} WHERE user_id = $1`, [
       user.id,
     ]);

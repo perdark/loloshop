@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Amiri, Cairo, Great_Vibes, Playfair_Display } from "next/font/google";
 import { DeepLinkHandler } from "@/components/DeepLinkHandler";
 import { PwaRegistrar } from "@/components/PwaRegistrar";
+import { PushRegistrar } from "@/components/PushRegistrar";
 import { ToasterProvider } from "@/components/providers/ToasterProvider";
 import { APP_ONLY, buildGateScript } from "@/lib/app-gate";
 import "./globals.css";
@@ -136,6 +137,12 @@ export default function RootLayout({
           route — including before the student has navigated anywhere themselves.
         */}
         <DeepLinkHandler />
+        {/*
+          Push notifications. Renders nothing; inert in a browser and while signed out.
+          Root layout because the tap that OPENS the app has to find a listener already
+          attached, whatever route the shell happens to boot on.
+        */}
+        <PushRegistrar />
         {children}
         <ToasterProvider />
       </body>
