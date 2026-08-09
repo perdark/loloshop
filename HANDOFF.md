@@ -137,12 +137,12 @@ signing** key, `FC:4E:98:…`) and `IOS_TEAM_ID` (`9YY4QWVDUW`) are set in the p
 
 **Still outstanding:**
 
-1. **⏳ UPLOAD THE BUILT AAB — everything else is waiting on this.** The file is
-   `frontend/android/app/build/outputs/bundle/release/app-release.aab` (35 MB, versionCode 5 /
-   1.0.4). A fresh production release is open at track `4697425328072340394`, **releases/3**.
-   ⚠️ It must be dragged **by hand**: the browser-automation file upload caps at 10 MB.
-   ⚠️ Afterwards check the publishing overview and **discard the stale releases/2 draft**
-   (the withdrawn versionCode 4) so it cannot ride along into the submission.
+1. **⏳ Android 1.0.4 (versionCode 5) is IN PRODUCTION REVIEW** — submitted 2026-08-09 with
+   deep links + GPS + push together, full rollout, exactly one queued change (the withdrawn
+   versionCode 4 draft did NOT linger; verified before submitting).
+   ⚠️ **«النشر المُدار» (managed publishing) is ON, so approval does NOT publish it.** Someone
+   must return to the publishing overview and press publish. It will look like "still in review"
+   when it is actually approved and waiting. Check in a day or two.
 2. **Start the Codemagic build by hand on `ios-appstore`** — there is still no `triggering:`
    block, so pushing that branch starts nothing. The branch is fully prepared as of `eb59e21`.
 3. **Push — Android is DONE (2026-08-09).** `google-services.json` is committed, the Firebase
