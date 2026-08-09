@@ -11,6 +11,24 @@ edit a file that is not in its tree, and creating one would produce an add/add c
 
 ## `codemagic-ios-push-capability.patch`
 
+> ## ⛔ APPLIED AND SUPERSEDED — do NOT re-apply this patch
+>
+> Landed on `ios-appstore` as `eb59e21` on 2026-08-09. **It shipped a broken assertion**, which
+> failed the very next Codemagic run on a file that was correct:
+>
+> ```
+> ios/App/App/App.entitlements: OK
+> FATAL: com.apple.developer.associated-domains missing from ios/App/App/App.entitlements
+> ```
+>
+> The verification loop below used `plutil -extract "$KEY" raw`, which cannot check that key for
+> **two** reasons: `plutil -extract` splits its KEYPATH on `.`, so
+> `com.apple.developer.associated-domains` is read as four nested keys and never resolves; and
+> `raw` output cannot represent an array. `aps-environment` (no dots, scalar) passes either way,
+> which is what made the check look sound. Fixed on `ios-appstore` in `d9688a6` by switching to
+> `/usr/libexec/PlistBuddy -c "Print :$KEY"`, whose paths are `:`-separated and which prints
+> arrays. **The live truth is `codemagic.yaml` on `ios-appstore`, not this file.**
+
 Adds the iOS **push notifications** capability to the Codemagic build, and fixes a sharp edge in
 the entitlement-injection step that was flagged in review on 2026-08-08.
 
