@@ -13,26 +13,23 @@ this file if something on the board opened, closed, or changed.
 
 ---
 
-## 📍 WHERE THE TREE IS — 2026-08-08 (b)
+## 📍 WHERE THE TREE IS — 2026-08-09
 
-Verified from git this session, not carried over from a previous entry.
+Verified against git **and against the running box over SSH** this session.
 
 | | |
 |---|---|
-| Checked-out branch | `claude/handoff-cloud-board-tasks-v342hb` — **pushed**. Contains everything on `feat/deeplinks-and-location` plus push notifications and the review fixes. Merge THIS one. |
-| `feat/deeplinks-and-location` | `17660e5` — a strict ancestor of the branch above. Nothing unique left on it. |
-| `origin/main` | `bc0c6fe` |
-| `origin/ios-appstore` | `f1785c0` — carries the associated-domains entitlement. ⚠️ Still needs `docs/patches/codemagic-ios-push-capability.patch` applied before the next build. |
-| Pending migration | **`077_push_notifications.sql`** — NOT applied anywhere |
+| `origin/main` | `2108443` — carries deep links, push code, the rep-directory batch and the join-routing fix |
+| **Prod is running** | `2108443` — confirmed by `ssh root@142.93.110.202`, all 3 PM2 processes online, no errors |
+| `origin/ios-appstore` | `eb59e21` — merged `main`, lockfile reconciled, **codemagic push patch applied**. Ready to build; nothing left to prepare. |
+| Migration 077 | ✅ **applied to prod AND the dev DB** — 3,311 prod rows retired to `skipped` |
+| Android | **v1.0.3 (versionCode 4) live on the internal testing track**, tap→app verified on a real phone |
+| Backend tests | **185/185 pass** against the dev DB with 077 applied |
 
-⚠️ **What prod is actually *running* was NOT re-verified** — the sandbox allows no outbound
-network and no prod SSH. Everything above is git ancestry, which is what's provable here.
-Confirm on the box before trusting "it's live".
-
-⚠️ **The DB-backed backend tests have not been run against 077.** This sandbox has no
-PostgreSQL and `lib/db` refuses a Neon URL outside production, so the migration and the outbox
-drain have never touched a live table. The three DB-free suites pass (13/13). Run
-`node --test test/` on a machine with the dev DB before merging.
+**Prod VPS is `142.93.110.202`.** ⚠️ The `revo` host in `~/.ssh/config` is a DIFFERENT project
+(RevoArt). ⚠️ The prod frontend has **no `.env`** — it reads **`.env.local`**; server-only vars
+there are read at request time, so `pm2 restart loloshop-web --update-env` is enough, **no
+rebuild** (unlike `NEXT_PUBLIC_*`, which is inlined at build time).
 
 ---
 
@@ -41,11 +38,19 @@ drain have never touched a live table. The three DB-free suites pass (13/13). Ru
 Owner decision 2026-08-08: **links + staff GPS + push notifications ride the same binary.** One
 Android release, one iOS release, one review each. Do not submit until all three are in.
 
-| Blocker | Code | What's left |
+⚠️ **The 2026-08-08 "one binary carries all three" decision DID NOT SURVIVE 2026-08-09.** Android
+1.0.3 shipped to internal testing **without** push, because `google-services.json` still does not
+exist and the owner wanted tap→app the same day. Android push therefore needs a **second**
+binary. iOS is still unshipped and CAN carry all three.
+
+| Blocker | Android | iOS |
 |---|---|---|
-| **Deep links** (`/join/` rep link · `/s/ /w/ /d/` team portals) | ✅ on the branch | deploy · 2 env vars · binary · console steps · phone test |
-| **Staff GPS** (بصمة) | ✅ on the branch (Android) + `ios-appstore` (iOS) | same binary, then coordinates, then flip the mode. The admin screen to type them **already exists**: `/admin/attendance` → خط العرض · خط الطول · نطاق الموقع |
-| **Push notifications** | ✅ **built 2026-08-08** — table, migration, sender, outbox drain, endpoints, frontend registration, `POST_NOTIFICATIONS` in the manifest | migration 077 · Firebase project + `google-services.json` · APNs `.p8` in the prod `.env` · Push capability on the App ID · apply the codemagic patch · binary · phone test |
+| **Deep links** (`/join/` · `/s/ /w/ /d/`) | ✅ **DONE** — manifests live, binary on internal testing, **tap→app verified on a real phone 2026-08-09** | manifest live + entitlement ready; needs the Codemagic build |
+| **Staff GPS** (بصمة) | ✅ permission in the 1.0.3 binary | usage string ready; needs the build |
+| **Push notifications** | ❌ **NOT in 1.0.3** — no `google-services.json`, so `app/build.gradle:60-65` skipped the google-services plugin. Needs Firebase **then a new binary** | ready — `aps-environment` is in the patched `codemagic.yaml`; needs the APNs `.p8` in the prod `.env` |
+
+**Both `.well-known` manifests are LIVE and verified** on the apex *and* `www`, HTTP 200,
+`application/json`, zero redirects — which also **closes the `www` landmine** below.
 
 - **Deploy is AUTOMATIC on merge to `main`.** `.github/workflows/ci.yml:46-58` runs
   `scripts/deploy.sh` over SSH once the backend + frontend jobs pass — no laptop, no manual SSH.
@@ -95,17 +100,16 @@ Android release, one iOS release, one review each. Do not submit until all three
 
 ## ☁️ CLOUD BOARD — what a session with no laptop can do
 
-Everything here is repo work. Start from `claude/handoff-cloud-board-tasks-v342hb` (pushed).
+Everything here is repo work. Start from `main` (`2108443`).
 
-**Items 1 and 2 are DONE (2026-08-08 b)** — push notifications are built end-to-end and all
-eight review findings are closed. Narrative in `docs/HANDOFF-archive.md`, summary in
-`PROGRESS.md`. What is left below is what a cloud session still *can* pick up.
+**Push is built, migrated and deployed; the tests have now been run (185/185 against 077).** What
+is left below is what a session can still pick up.
 
 **1. What a cloud session can still do:**
-- **Nothing on push until the owner acts.** The code is complete and inert without credentials.
-  A session with DB access should run `node --test test/` (the ~177 DB-backed tests have never
-  been run against migration 077) and, ideally, drive `pushOutbox.drainOnce()` against a real
-  row to prove the claim query and the flood guard behave.
+- **Nothing on push until the owner acts.** The code is deployed and *deliberately inert*:
+  `pushOutbox.drainOnce()` returns before touching the DB when no FCM/APNs credentials exist
+  (`lib/pushOutbox.js:83-93`), so prod logs one line and never errors. Still unproven: driving
+  the drain against a real row to exercise the claim query and flood guard.
 - **The 14 remaining `next/image unoptimized` props** (list in the landmines below) — each needs
   a `blob:`/`data:` check first, since upload previews genuinely need it.
 - **Wire gender to the DB** — `students.gender` exists, onboarding only writes localStorage.
@@ -123,19 +127,21 @@ keep building the AAB by hand on the laptop; the keystore stays local and off Gi
 
 ## 👤 OWNER ACTIONS — outside the code
 
-**For the one release (all doable from a phone or any browser — no laptop needed):**
+**✅ DONE 2026-08-09 — do not redo these:** Associated Domains **and** Push Notifications are both
+enabled on the `com.loloshop96.app` App ID · `ANDROID_SHA256_CERT_FINGERPRINTS` (the **App
+signing** key, `FC:4E:98:…`) and `IOS_TEAM_ID` (`9YY4QWVDUW`) are set in the prod
+`frontend/.env.local` and both manifests serve 200 · the codemagic push patch is applied to
+`ios-appstore` · migration 077 is applied to prod.
 
-1. **⚠️ Enable "Associated Domains" on the `com.loloshop96.app` App ID** at developer.apple.com →
-   Certificates, Identifiers & Profiles — **before** the next Codemagic run. Without it
-   `fetch-signing-files --create` builds a profile lacking the entitlement and the archive dies
-   at signing.
-2. **`ANDROID_SHA256_CERT_FINGERPRINTS` on the VPS** — Play Console → Test and release → Setup →
-   App integrity → **App signing key** certificate. ⚠️ NOT the upload keystore: Play re-signs the
-   AAB, so the upload key never matches and `/join/` links keep opening in the browser — silently,
-   because App Links fail soft.
-3. **`IOS_TEAM_ID` on the VPS** (10 chars, Apple Developer → Membership). Unset = that route 404s
-   and iOS deep links stay off.
-4. **Push notifications — the code is done and completely inert until these four exist:**
+**Still outstanding:**
+
+1. **Promote Android 1.0.3 from internal testing to production** — internal reaches ~23 testers;
+   the real users are on the production track. «ترقية الإصدار» on the internal-testing page
+   promotes the *same* artifact, no rebuild. ⚠️ This binary has **no push** (see below), so
+   promoting it means Android push needs a second release later.
+2. **Start the Codemagic build by hand on `ios-appstore`** — there is still no `triggering:`
+   block, so pushing that branch starts nothing. The branch is fully prepared as of `eb59e21`.
+3. **Push notifications — the code is deployed and completely inert until these exist:**
    a. Firebase project → `google-services.json` → **commit it to `frontend/android/app/`**.
       ⚠️ `app/build.gradle` applies the google-services plugin only `if (servicesJSON.text)`, so
       a build without this file **succeeds** and silently produces an app that can never
@@ -143,9 +149,11 @@ keep building the AAB by hand on the laptop; the keystore stays local and off Gi
    b. APNs `.p8` key (developer.apple.com → Keys, **downloadable once**) → `APNS_KEY_FILE` +
       `APNS_KEY_ID` + `APNS_TEAM_ID` in the prod `.env`, then
       `pm2 restart loloshop-api --update-env`. Not Firebase — see the runbook note.
-   c. **Push Notifications capability on the App ID**, alongside Associated Domains.
-   d. Apply `docs/patches/codemagic-ios-push-capability.patch` to `ios-appstore`.
+   c. ~~Push Notifications capability on the App ID~~ — ✅ done 2026-08-09.
+   d. ~~Apply the codemagic patch~~ — ✅ applied, on `ios-appstore` at `eb59e21`.
    Each half works alone: set only (a) and Android starts receiving, iOS stays quiet.
+   ⚠️ **(a) also requires a NEW Android binary** — `google-services.json` is compiled in, so
+   dropping the file on the server does nothing for the 1.0.3 already on the store.
 5. **⚠️ Enter the shop coordinates** at `/admin/attendance` (خط العرض · خط الطول · نطاق الموقع)
    **before** moving `verification_mode` off `'none'`. Wrong order 403s every بصمة for every
    worker on every platform.
@@ -205,15 +213,12 @@ keep building the AAB by hand on the laptop; the keystore stays local and off Gi
   `shop_latitude`/`shop_longitude` are NULL, so every بصمة would 403 for every user on every
   platform. The Android permission and the iOS usage string now exist, so the *only* thing left
   is the order: binary → phones updated → coordinates at `/admin/attendance` → mode last.
-- **⚠️ `www.lolo-shop96.com` is claimed by both deep-link manifests but its verification path is
-  unproven.** Digital Asset Links does **not** follow redirects, and on **Android 11 and below
-  verification is all-or-nothing across every host in the filter** — a failing `www` breaks
-  `/join/` for the apex too. `nginx-ssl.conf:30` does serve both names on 443 straight to Next
-  (good), but the cert is `live/lolo-shop96.com/` and nobody has confirmed a `www` SAN or DNS
-  record. Check before shipping the binary:
-  `curl -sI https://www.lolo-shop96.com/.well-known/assetlinks.json` → want 200, `application/json`,
-  **no 301**. If it doesn't serve cleanly, drop the four `www` `<data>` lines and the
-  `applinks:www…` string rather than leave a half-verifying claim.
+- ~~**`www.lolo-shop96.com` verification path is unproven**~~ — **CLEARED 2026-08-09.** Measured
+  from outside: **both** `lolo-shop96.com` and `www.lolo-shop96.com` serve
+  `/.well-known/assetlinks.json` at **HTTP 200, `application/json`, `num_redirects=0`**, so the
+  all-or-nothing rule on Android ≤11 is satisfied and the four `www` `<data>` lines can stay.
+  Re-check with `curl -sI` if DNS or the cert ever changes — Digital Asset Links does not follow
+  redirects, so a future 301 on `www` would silently break `/join/` for the apex too.
 - **⚠️ Do NOT add `turbopack: { root }` to `frontend/next.config.ts`.** Tried and reverted
   2026-08-04 — it silences the workspace-root warning and builds fine, but **breaks `next dev`**
   (`/` 500s with «Could not find the module … app/error.tsx in the React Client Manifest»). The

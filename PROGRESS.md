@@ -1,5 +1,45 @@
 # Progress
 
+## 2026-08-09 — Android tap→app is LIVE, everything deployed, join routing fixed
+
+Everything from the 2026-08-08 cloud session reached `main` and then production. Prod runs
+`2108443`, verified over SSH, not inferred from git.
+
+**Shipped today:**
+- **Deep links work on a real phone.** Android **v1.0.3 (versionCode 4)** built on the laptop and
+  published to the Play **internal testing** track; the owner tapped a WhatsApp `/join/` link and
+  it opened the app. Both `.well-known` manifests serve **200 / `application/json` / 0 redirects**
+  on the apex *and* `www` — which also closes the long-standing `www` landmine.
+- **The two env vars are set** in prod `frontend/.env.local` (⚠️ not `.env` — that file does not
+  exist on the box): the Play **App signing** fingerprint and `IOS_TEAM_ID=9YY4QWVDUW`, read off
+  the consoles directly. Read at request time, so a `pm2 restart --update-env` sufficed.
+- **Migration 077 applied to prod** while no push credentials existed — the safest possible moment,
+  because its backfill retired **3,311** historical notifications to `skipped`. That is 3,311 push
+  messages that would otherwise have hit real phones the instant credentials land.
+- **CI deploy gate unblocked twice.** `25c3c4c` failed `npm audit` in 32s (nanoid high +
+  dompurify moderate via jspdf, both newly published against already-installed packages), so
+  `scripts/deploy.sh` never ran. Fixed by bumping our own `overrides` pin to dompurify 3.4.13.
+  *(Noted: `jspdf` is a declared dependency with zero imports — dropping it removes this chain.)*
+- **`ios-appstore` prepared** (`eb59e21`): merged `main`, reconciled the desynced lockfile, applied
+  the codemagic push-capability patch. Owner enabled Associated Domains + Push on the App ID.
+- **Join routing fix.** A rep-linked student now lands on `/my-order` directly instead of bouncing
+  off the storefront. ⚠️ **The bounce already worked** — `StudentHome`/`CatalogBrowser` redirect on
+  `audience==="wholesaler_student"`, which `priceRoleForUser` derives from `wholesaler_id` alone,
+  status included. The real defect was that the check runs client-side after paint, so a waiting
+  student saw a flash of a shop they cannot buy from and stayed there if that fetch failed.
+  Scoped to `pending_approval` + `rejected` (**29** of 994 rep-linked students); the **965**
+  approved keep their existing landing page.
+
+Gates: **185/185** backend tests against the dev DB with 077 applied · `tsc` 0 · `eslint` 0 errors
+· `next build` exit 0 · prod backup `loloshop-prod-2026-08-09_2143.dump` (3.1 MB, 63 tables)
+verified with `pg_restore -l`.
+
+**Not done:** Android push (no `google-services.json`, so 1.0.3 shipped without it and needs a
+**second** binary) · iOS build not started · Android not promoted to production · GPS mode still
+`none`.
+
+---
+
 ## 2026-08-08 — Push notifications, and the eight open review findings
 
 **Branch `claude/handoff-cloud-board-tasks-v342hb`** (off `feat/deeplinks-and-location`).
