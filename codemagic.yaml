@@ -247,15 +247,70 @@ workflows:
           cd ios/App
           xcode-project use-profiles
 
-      - name: Set a unique, always-increasing build number
+      - name: Set the marketing version and a unique, always-increasing build number
         script: |
           set -e
-          cd ios/App
+
+          # ⚠️ TWO DIFFERENT VERSIONS LIVE HERE. Getting them confused cost the
+          # 2026-08-10 run, which built and signed cleanly and then died at upload:
+          #   90186  Invalid Pre-Release Train. The train version '1.0' is closed
+          #   90062  CFBundleShortVersionString [1.0] must contain a higher version
+          #          than that of the previously approved version [1.0]
+          # Cause: this step only ever set CFBundleVersion (the BUILD number). Nothing
+          # set CFBundleShortVersionString (the MARKETING version), and `ios/` is not
+          # committed — Codemagic regenerates it with `cap add ios` every run, so every
+          # build inherited Capacitor's template default of 1.0 forever. Apple had
+          # already approved a 1.0, which closes that train permanently: no build can
+          # ever be uploaded under it again, no matter how high the build number is.
+          # A build number bump does NOT open a closed train. Only this does.
+
+          # --- build number: unique per upload, never reused -----------------------
           # Unix timestamp: always larger than any previous upload, never collides.
           NEW=$(date +%s)
-          agvtool new-version -all "$NEW"
+          ( cd ios/App && agvtool new-version -all "$NEW" )
           echo "CFBundleVersion set to $NEW (verify below):"
-          agvtool what-version -terse
+          ( cd ios/App && agvtool what-version -terse )
+
+          # --- marketing version: what the App Store shows, and what gates uploads --
+          # Kept in step with Android (frontend/android/app/build.gradle versionName).
+          # The same three features — deep links, staff GPS, push — ride both binaries,
+          # so one number across both platforms keeps "which version are you on?"
+          # answerable. RAISE THIS for every new App Store submission; a repeat closes
+          # the train again. Deliberately set AFTER agvtool, so nothing can clobber it.
+          MARKETING="1.0.4"
+          PLIST="ios/App/App/Info.plist"
+          PBXPROJ="ios/App/App.xcodeproj/project.pbxproj"
+
+          # Capacitor's Info.plist carries the literal string `$(MARKETING_VERSION)`,
+          # so the build SETTING is the real source of the shipped value — patching
+          # the plist alone would be silently overwritten at build time.
+          MARKETING="$MARKETING" PBXPROJ="$PBXPROJ" python3 <<'PY'
+          import os, re, sys
+          path, want = os.environ["PBXPROJ"], os.environ["MARKETING"]
+          src = open(path, encoding="utf-8").read()
+          src, n = re.subn(r"MARKETING_VERSION = [^;]+;", f"MARKETING_VERSION = {want};", src)
+          if n == 0:
+              sys.exit(f"FATAL: no MARKETING_VERSION in {path} — Capacitor's template changed shape")
+          open(path, "w", encoding="utf-8").write(src)
+          # Re-read from disk: a write that reported success but landed nothing is
+          # exactly the invisible failure this whole file is built to refuse.
+          got = re.findall(r"MARKETING_VERSION = ([^;]+);", open(path, encoding="utf-8").read())
+          if set(got) != {want}:
+              sys.exit(f"FATAL: MARKETING_VERSION reads {sorted(set(got))} after write, wanted {want!r}")
+          print(f"MARKETING_VERSION = {want} in {n} build configuration(s)")
+          PY
+
+          # If a future template ever carries a LITERAL here instead of the variable,
+          # the build setting above would be ignored and we would ship 1.0 again while
+          # every log line above claimed success. Catch that shape and overwrite it.
+          CUR=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST" 2>/dev/null || echo "")
+          case "$CUR" in
+            '$('*) echo "Info.plist defers to the build setting ($CUR) — correct" ;;
+            "")    echo "FATAL: CFBundleShortVersionString missing from $PLIST"; exit 1 ;;
+            *)     plutil -replace CFBundleShortVersionString -string "$MARKETING" "$PLIST"
+                   echo "Info.plist carried a literal ($CUR) — overwrote it with $MARKETING" ;;
+          esac
+          echo "=== versions wired: marketing $MARKETING, build $NEW ==="
 
       - name: Build the signed .ipa
         script: |
