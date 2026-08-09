@@ -154,7 +154,10 @@ async function setStatus(req, res, newStatus) {
   );
   await query(
     `INSERT INTO notifications (user_id, type, title_ar, body_ar, link) VALUES ($1, $2, $3, $4, $5)`,
-    [rows[0].user_id, newStatus, title, body, '/']
+    // Deep-link to the rep flow, not '/'. The body says «يمكنك البدء بالتصميم» — sending
+    // them to the retail storefront to act on that is a dead end, because every checkout
+    // there 403s for a rep-linked student (orderController ERR_REP_ORDER_FLOW).
+    [rows[0].user_id, newStatus, title, body, newStatus === 'approved' ? '/my-order' : '/']
   );
   res.json({ data: { id: rows[0].id, status: rows[0].status } });
 }
@@ -195,7 +198,8 @@ async function bulkSetStatus(req, res) {
       );
       await client.query(
         `INSERT INTO notifications (user_id, type, title_ar, body_ar, link) VALUES ($1, $2, $3, $4, $5)`,
-        [r.user_id, newStatus, title, body, '/']
+        // Same reasoning as setStatus above — approved students go to the rep form.
+        [r.user_id, newStatus, title, body, newStatus === 'approved' ? '/my-order' : '/']
       );
     }
     return rows;

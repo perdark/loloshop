@@ -60,6 +60,12 @@ export interface User {
   staff_types?: StaffType[] | null;
   /** Which order source this staff member can see. From GET /auth/me. */
   order_scope?: StaffOrderScope;
+  /**
+   * Approval state of a rep-linked student, from POST /auth/login (and `student.status`
+   * on GET /auth/me). Absent for staff, wholesalers and self-registered retail — only a
+   * student who joined through a rep's link has one. Drives `postLoginPath`.
+   */
+  student_status?: StudentApprovalStatus | null;
 }
 
 export interface LoginResponse {

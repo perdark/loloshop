@@ -102,6 +102,31 @@ export function dashboardPathFor(role: User["role"] | undefined): string | null 
   return null;
 }
 
+/**
+ * Where a rep-linked student belongs right after signing in.
+ *
+ * A student who joined through a rep's `/join/<code>` link is stored with
+ * `students.wholesaler_id` set, and EVERY retail checkout 403s for them
+ * (`orderController` → `ERR_REP_ORDER_FLOW`). Landing them on the storefront — which is
+ * what `retail: "/"` did for everyone — meant the ones still waiting on their rep were
+ * dropped into a shop they cannot buy from, with nothing on screen saying they were
+ * waiting. `/my-order` is the screen built for them: it shows «بانتظار موافقة الممثل»
+ * and polls, so it flips itself the moment the rep approves.
+ *
+ * Deliberately scoped to `pending_approval` and `rejected`. Approved students are not
+ * re-routed — they already have a working habit on the storefront and nothing is broken
+ * for them, so there is no reason to move their landing page.
+ *
+ * Returns null when the caller should use its normal role redirect.
+ */
+export function repStudentLandingPath(user: User | null | undefined): string | null {
+  if (!user || user.role !== "retail") return null;
+  if (user.student_status === "pending_approval" || user.student_status === "rejected") {
+    return "/my-order";
+  }
+  return null;
+}
+
 export function setSkipDashboardRedirect(): void {
   sessionStorage.setItem(SKIP_DASHBOARD_REDIRECT_KEY, "1");
 }

@@ -103,14 +103,17 @@ async function login(req, res) {
   if (!isValidIqMobile(phone)) {
     return res.status(400).json({ error: 'رقم هاتف غير صحيح', code: 'ERR_INVALID_PHONE' });
   }
+  // LEFT JOIN rather than EXISTS because the caller now needs the student's approval
+  // status too, not just whether a rep link exists. Safe against fan-out: students.user_id
+  // is UNIQUE (db/schema.sql:211), so this can never return more than one row per user.
   const { rows } = await query(
     `SELECT u.id, u.name, u.phone, u.email, u.role, u.password_hash, u.phone_verified,
             u.token_version,
-            EXISTS (
-              SELECT 1 FROM students s
-              WHERE s.user_id = u.id AND s.wholesaler_id IS NOT NULL
-            ) AS is_wholesaler_student
-     FROM users u WHERE u.phone = $1`,
+            (s.wholesaler_id IS NOT NULL) AS is_wholesaler_student,
+            s.status AS student_status
+     FROM users u
+     LEFT JOIN students s ON s.user_id = u.id
+     WHERE u.phone = $1`,
     [phone]
   );
   if (!rows.length) {
@@ -131,7 +134,19 @@ async function login(req, res) {
     const token = signToken(user);
     return res.json({
       token,
-      user: { id: user.id, name: user.name, role: user.role, phone_verified: user.phone_verified },
+      // `student_status` is what lets the client land a rep-linked student on the screen
+      // built for them (/my-order) instead of the retail storefront. Without it the app
+      // cannot tell "waiting for the rep" from "approved and shopping" — both used to
+      // land on "/", where a rep-linked student can browse but every checkout 403s
+      // (orderController ERR_REP_ORDER_FLOW). Only pending/rejected are re-routed;
+      // approved students keep the storefront they already know.
+      user: {
+        id: user.id,
+        name: user.name,
+        role: user.role,
+        phone_verified: user.phone_verified,
+        student_status: user.student_status || null,
+      },
     });
   }
   // App-store reviewer demo account → skip the WhatsApp OTP. A Google Play / App Store
@@ -248,7 +263,8 @@ async function me(req, res) {
   // university, …) so forms — e.g. the full-set wizard — can prefill from the login.
   if (req.user.role === 'retail') {
     const { rows } = await query(
-      `SELECT university_name, department, gender, study_type, instagram_username, wholesaler_id
+      `SELECT university_name, department, gender, study_type, instagram_username, wholesaler_id,
+              status
        FROM students WHERE user_id = $1`,
       [req.user.id]
     );

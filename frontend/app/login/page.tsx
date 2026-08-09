@@ -8,7 +8,7 @@ import { AuthCard } from "@/components/auth/AuthCard";
 import { Input } from "@/components/ui/Input";
 import { OtpVerifyForm } from "@/components/auth/OtpVerifyForm";
 import { login, loginVerifyOtp, resendLoginOtp, getApiErrorMessage } from "@/lib/auth-api";
-import { setToken, setUser, safeRedirectTarget } from "@/lib/auth";
+import { setToken, setUser, safeRedirectTarget, repStudentLandingPath } from "@/lib/auth";
 import type { User, UserRole } from "@/lib/types";
 
 const ROLE_REDIRECT: Record<UserRole, string> = {
@@ -54,8 +54,15 @@ export default function LoginPage() {
       typeof window !== "undefined"
         ? safeRedirectTarget(new URLSearchParams(window.location.search).get("redirect"))
         : null;
+    // An explicit ?redirect= still wins — the student asked for a specific page and
+    // honouring that is unchanged behaviour. Only the DEFAULT landing changes, and only
+    // for a rep-linked student who is still waiting on (or was rejected by) their rep;
+    // see repStudentLandingPath for why the storefront is the wrong home for them.
+    const repPath = repStudentLandingPath(user);
     router.replace(
-      redirect && user.role === "retail" ? redirect : ROLE_REDIRECT[user.role]
+      redirect && user.role === "retail"
+        ? redirect
+        : repPath ?? ROLE_REDIRECT[user.role]
     );
   }
 
