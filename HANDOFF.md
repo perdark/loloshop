@@ -23,7 +23,9 @@ Verified against git **and against the running box over SSH** this session.
 | **Prod is running** | `2108443` — confirmed by `ssh root@142.93.110.202`, all 3 PM2 processes online, no errors |
 | `origin/ios-appstore` | `eb59e21` — merged `main`, lockfile reconciled, **codemagic push patch applied**. Ready to build; nothing left to prepare. |
 | Migration 077 | ✅ **applied to prod AND the dev DB** — 3,311 prod rows retired to `skipped` |
-| Android | **v1.0.3 (versionCode 4) live on the internal testing track**, tap→app verified on a real phone |
+| Android | **v1.0.4 (versionCode 5) BUILT, not yet uploaded** — carries deep links + GPS + **push**. v1.0.3/code 4 is on the internal track (tap→app verified on a real phone) and was **withdrawn from production review** so all three ride one review. |
+| Android push | ✅ **working end to end on the backend** — `push.configured()` → `{"android":true,"ios":false}` |
+| iOS push | ❌ blocked on the APNs `.p8` only (downloadable once; owner must generate) |
 | Backend tests | **185/185 pass** against the dev DB with 077 applied |
 
 **Prod VPS is `142.93.110.202`.** ⚠️ The `revo` host in `~/.ssh/config` is a DIFFERENT project
@@ -135,13 +137,20 @@ signing** key, `FC:4E:98:…`) and `IOS_TEAM_ID` (`9YY4QWVDUW`) are set in the p
 
 **Still outstanding:**
 
-1. **Promote Android 1.0.3 from internal testing to production** — internal reaches ~23 testers;
-   the real users are on the production track. «ترقية الإصدار» on the internal-testing page
-   promotes the *same* artifact, no rebuild. ⚠️ This binary has **no push** (see below), so
-   promoting it means Android push needs a second release later.
+1. **⏳ UPLOAD THE BUILT AAB — everything else is waiting on this.** The file is
+   `frontend/android/app/build/outputs/bundle/release/app-release.aab` (35 MB, versionCode 5 /
+   1.0.4). A fresh production release is open at track `4697425328072340394`, **releases/3**.
+   ⚠️ It must be dragged **by hand**: the browser-automation file upload caps at 10 MB.
+   ⚠️ Afterwards check the publishing overview and **discard the stale releases/2 draft**
+   (the withdrawn versionCode 4) so it cannot ride along into the submission.
 2. **Start the Codemagic build by hand on `ios-appstore`** — there is still no `triggering:`
    block, so pushing that branch starts nothing. The branch is fully prepared as of `eb59e21`.
-3. **Push notifications — the code is deployed and completely inert until these exist:**
+3. **Push — Android is DONE (2026-08-09).** `google-services.json` is committed, the Firebase
+   service account key lives at **`/etc/loloshop/fcm-service-account.json`** (`0600`, deliberately
+   OUTSIDE the git checkout so a deploy cannot clobber it and it can never be committed), and
+   `FCM_SERVICE_ACCOUNT_FILE` points at it in the prod `backend/.env`. **Only the iOS half is
+   left:** generate the APNs `.p8` (developer.apple.com → Keys — *downloadable once*) and set
+   `APNS_KEY_FILE` + `APNS_KEY_ID` in the prod `.env`. Historic detail below:
    a. Firebase project → `google-services.json` → **commit it to `frontend/android/app/`**.
       ⚠️ `app/build.gradle` applies the google-services plugin only `if (servicesJSON.text)`, so
       a build without this file **succeeds** and silently produces an app that can never
