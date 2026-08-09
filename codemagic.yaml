@@ -1,0 +1,336 @@
+# Codemagic CI/CD — builds and ships the LoloShop iOS app (لولو شوب) to the
+# App Store WITHOUT needing a Mac locally. The build runs on Codemagic's macOS
+# machines.
+#
+# The Capacitor project lives in ./frontend (appId com.loloshop96.app). This
+# file stays at the REPOSITORY ROOT; `working_directory: frontend` routes every
+# build command into the app folder (and fixes the monorepo scan error).
+#
+# Capacitor 8 uses Swift Package Manager (NOT CocoaPods): there is no Podfile
+# and no .xcworkspace — the build targets ios/App/App.xcodeproj directly, and
+# xcodebuild resolves the SPM plugin packages during the archive.
+#
+# The iOS native project is generated fresh on the build machine each run.
+# Signing is fully automatic: the "Set up code signing" step CREATES the
+# distribution certificate + App Store provisioning profile on first run using
+# the revoart_asc App Store Connect API key.
+
+workflows:
+  ios-appstore:
+    name: LoloShop iOS — App Store
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    working_directory: frontend      # <- app lives here; all scripts run from here
+
+    integrations:
+      # Must match the App Store Connect API key name in the Codemagic UI.
+      # Account-wide (RevoArt) — reuse it for every future app too.
+      app_store_connect: revoart_asc
+
+    environment:
+      groups:
+        - ios_signing        # holds CERTIFICATE_PRIVATE_KEY (add it in the Codemagic UI, marked Secure)
+      vars:
+        BUNDLE_ID: "com.loloshop96.app"
+        # Numeric Apple ID of the app record (NOT the bundle id). Used to auto-bump builds.
+        APP_STORE_APPLE_ID: 6793976053
+        XCODE_SCHEME: "App"
+      node: 22          # Capacitor 8 CLI needs Node >= 22
+      xcode: latest
+
+    scripts:
+      - name: Install JS dependencies
+        script: |
+          set -e
+          npm install
+          # Belt-and-suspenders: make sure the iOS platform package is present
+          npm ls @capacitor/ios || npm install @capacitor/ios@^8.4.1
+
+      - name: Generate + sync the iOS native project
+        script: |
+          set -e
+          echo "node: $(node --version) | cap: $(npx cap --version)"
+          # Add the iOS platform (skip only if the Xcode project is already there)
+          [ -d "ios/App/App.xcodeproj" ] || npx cap add ios
+          npx cap sync ios
+          echo "=== ios/App contents (App.xcodeproj must appear below) ==="
+          ls -la ios/App
+
+      - name: Bake the real LoloShop icon + splash into the app
+        script: |
+          set -e
+          # Generates the iOS AppIcon + launch screen from frontend/resources/
+          # (icon.png / splash.png). Without this the build ships Capacitor's
+          # default placeholder icon, which Apple rejects.
+          npx capacitor-assets generate --ios
+          echo "=== generated AppIcon set ==="
+          ls -la ios/App/App/Assets.xcassets/AppIcon.appiconset || true
+
+      - name: Inject the iOS privacy usage strings (FIXES the camera crash)
+        script: |
+          set -e
+          PLIST="ios/App/App/Info.plist"
+
+          # WHY THIS STEP EXISTS — Apple rejected build 1784823314 under guideline
+          # 2.1(a) on 2026-07-29: "the app crashed when we tapped on Take Photo to
+          # attach a design image from camera" (iPad Air M3 + iPhone 17 Pro Max).
+          #
+          # That is not an app bug. iOS TERMINATES any process the instant it touches
+          # the camera without NSCameraUsageDescription in Info.plist. The storefront
+          # attaches logos/designs with a plain <input type="file" accept="image/*">;
+          # tapping it in WKWebView offers "Take Photo", which opens the camera — and
+          # the app died there on every device, every time.
+          #
+          # The strings CANNOT simply be committed once: `npx cap add ios` above
+          # regenerates ios/ from Capacitor's template on EVERY build, so any manual
+          # edit to Info.plist is wiped before it is ever compiled. They have to be
+          # re-injected here, after `cap sync`, on each run.
+          #
+          # `plutil -replace` inserts the key when missing and overwrites when present.
+          plutil -replace NSCameraUsageDescription -string \
+            "لالتقاط صورة لشعار جامعتك أو تصميمك وإرفاقها بطلب الوشاح." "$PLIST"
+          plutil -replace NSPhotoLibraryUsageDescription -string \
+            "لاختيار صورة الشعار أو التصميم من ألبومك وإرفاقها بطلب الوشاح." "$PLIST"
+
+          # Staff attendance (بصمة) reads the device location to prove the worker is at the
+          # shop. Same class of failure as the camera above: iOS refuses the geolocation
+          # request outright when this key is absent — navigator.geolocation just calls back
+          # with an error, the payload ships `location: null`, and the backend answers 403
+          # ERR_ATTENDANCE_LOCATION. Silent today only because verification_mode is 'none'.
+          #
+          # ⚠️ The key alone does NOT switch GPS on. staff_attendance_settings.shop_latitude
+          # and shop_longitude are still NULL, and flipping verification_mode to
+          # location/both before they are filled 403s EVERY بصمة for EVERY worker on EVERY
+          # platform. Coordinates first, mode last.
+          plutil -replace NSLocationWhenInUseUsageDescription -string \
+            "لتأكيد أنك داخل المحل عند تسجيل الحضور والانصراف." "$PLIST"
+
+          # Answers the "Missing Compliance" question once, in the binary, instead of
+          # re-answering it in App Store Connect after every single upload. The app
+          # implements no cryptography of its own and only uses the OS HTTPS stack,
+          # which is exactly the exemption this key declares.
+          plutil -replace ITSAppUsesNonExemptEncryption -bool false "$PLIST"
+
+          # FAIL THE BUILD rather than ship another binary that crashes on camera.
+          # A silent no-op here is what a rejected submission looks like two days later.
+          for KEY in NSCameraUsageDescription NSPhotoLibraryUsageDescription \
+                     NSLocationWhenInUseUsageDescription; do
+            plutil -extract "$KEY" raw "$PLIST" >/dev/null 2>&1 \
+              || { echo "FATAL: $KEY missing from $PLIST — camera would crash on device"; exit 1; }
+          done
+          echo "=== privacy keys present in Info.plist ==="
+          plutil -p "$PLIST" | grep -E "NSCamera|NSPhotoLibrary|NSLocation|ITSAppUsesNonExempt"
+
+      - name: Wire the App entitlements (Universal Links + Push Notifications)
+        script: |
+          set -e
+          ENTITLEMENTS="ios/App/App/App.entitlements"
+          PBXPROJ="ios/App/App.xcodeproj/project.pbxproj"
+
+          # WHY THIS STEP EXISTS. Tapping https://lolo-shop96.com/join/<code> in WhatsApp used
+          # to open the phone browser even with the app installed — the shell is a remote-URL
+          # WebView with no address bar, so a رابط ممثل and the /s /w /d team key portals were
+          # unreachable from inside the app. Universal Links fix that, and they need THREE
+          # things to line up: this entitlement, the AASA document the site serves at
+          # /.well-known/apple-app-site-association, and the capability on the App ID.
+          #
+          # Same regeneration trap as the privacy strings above: `npx cap add ios` rebuilds
+          # ios/ from Capacitor's template every run, so neither the entitlements file nor the
+          # pbxproj reference survives a commit. Both are re-created here, after `cap sync`
+          # and BEFORE code signing — the profile fetched in the next step must already know
+          # about the capability.
+          #
+          # ⚠️ IF THIS BUILD FAILS AT SIGNING, IT IS ALMOST CERTAINLY THE PORTAL, NOT THIS
+          # FILE: BOTH "Associated Domains" AND "Push Notifications" must be enabled on the
+          # com.loloshop96.app App ID at developer.apple.com → Certificates, Identifiers &
+          # Profiles. Without them `fetch-signing-files --create` builds a profile that lacks
+          # the entitlement, and the archive is rejected for requesting something the profile
+          # does not grant.
+          #
+          # ⚠️ MUST MATCH the hosts+paths claimed in
+          # frontend/app/.well-known/apple-app-site-association/route.ts. `applinks:` claims
+          # the HOST; the AASA document narrows it to /join/* /s/* /w/* /d/*.
+          #
+          # PUSH NOTIFICATIONS ride the same file. `aps-environment` is what makes
+          # PushNotifications.register() return an APNs token at all; without it the plugin
+          # resolves `registrationError` and no device ever reaches the backend — silently,
+          # with a perfectly successful build. Value is `production` because this workflow only
+          # ever produces IOS_APP_STORE archives, and both TestFlight and the App Store use the
+          # production APNs host. A local Xcode debug build would need `development` instead —
+          # that is what APNS_ENV=sandbox on the server is for.
+          #
+          # ⚠️ The backend sends to Apple DIRECTLY with the .p8 key (backend/lib/push.js), not
+          # through Firebase, so nothing here needs a Firebase SDK or a GoogleService-Info.plist.
+          # That is the whole reason iOS avoids a second copy of this regeneration trap.
+          cat > "$ENTITLEMENTS" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>com.apple.developer.associated-domains</key>
+              <array>
+                  <string>applinks:lolo-shop96.com</string>
+                  <string>applinks:www.lolo-shop96.com</string>
+              </array>
+              <key>aps-environment</key>
+              <string>production</string>
+          </dict>
+          </plist>
+          PLIST
+          # Proves the heredoc produced valid XML rather than, say, a file of YAML indentation.
+          plutil -lint "$ENTITLEMENTS"
+          # Both capabilities or fail the build. A missing key here is invisible until a real
+          # phone fails to open a link, or never receives a notification.
+          #
+          # ⚠️ PlistBuddy, NOT `plutil -extract` — that is what failed the 2026-08-09 build, on a
+          # file that was correct. `plutil -extract` splits its KEYPATH on ".", so
+          # `com.apple.developer.associated-domains` is read as four NESTED keys
+          # (com → apple → developer → associated-domains) and never resolves; and its `raw`
+          # output cannot represent an array even when a path does resolve. Both faults land on
+          # that one key, while `aps-environment` — no dots, scalar value — passes happily and
+          # hides the cause. The build reported the entitlement "missing" immediately after
+          # writing it. PlistBuddy separates path components with ":", so a literal dot in a key
+          # name is unremarkable, and it prints arrays without complaint.
+          for KEY in com.apple.developer.associated-domains aps-environment; do
+            /usr/libexec/PlistBuddy -c "Print :$KEY" "$ENTITLEMENTS" >/dev/null 2>&1 \
+              || { echo "FATAL: $KEY missing from $ENTITLEMENTS"; exit 1; }
+          done
+          echo "=== entitlements wired ==="
+          plutil -p "$ENTITLEMENTS"
+
+          # Point the App target's build settings at it. Xcode stores this per build
+          # configuration, and the two blocks that carry PRODUCT_BUNDLE_IDENTIFIER for our
+          # bundle id are exactly the App target's Debug and Release — the SPM plugin targets
+          # have their own ids and must NOT get the app's entitlements.
+          BUNDLE_ID="$BUNDLE_ID" PBXPROJ="$PBXPROJ" python3 <<'PY'
+          import os, sys
+          path, bundle = os.environ["PBXPROJ"], os.environ["BUNDLE_ID"]
+          src = open(path, encoding="utf-8").read()
+          needle = f"PRODUCT_BUNDLE_IDENTIFIER = {bundle};"
+          ours = "CODE_SIGN_ENTITLEMENTS = App/App.entitlements;"
+          indent = "\n\t\t\t\t"
+          if needle not in src:
+              sys.exit(f"FATAL: {needle!r} not in {path} — Capacitor's template changed shape")
+          # An unrelated target (a future widget, a test host) may legitimately carry its own
+          # CODE_SIGN_ENTITLEMENTS. An earlier version of this script bailed out on ANY
+          # occurrence of that key, which would have skipped the injection and then failed with
+          # "not written" — a build that looks broken for a reason nobody can find. Only OUR
+          # exact line is relevant, so strip it and re-add it: idempotent by construction, and
+          # blind to what other targets do.
+          foreign = src.count("CODE_SIGN_ENTITLEMENTS") - src.count(ours)
+          if foreign > 0:
+              print(f"note: {foreign} other target(s) carry their own CODE_SIGN_ENTITLEMENTS — leaving them alone")
+          src = src.replace(f"{ours}{indent}", "")
+          src = src.replace(needle, f"{ours}{indent}{needle}")
+          open(path, "w", encoding="utf-8").write(src)
+          n = src.count(ours)
+          print(f"CODE_SIGN_ENTITLEMENTS wired into {n} build configuration(s)")
+          # Expect exactly the App target's Debug and Release. Fewer means the replace missed
+          # and the binary would ship WITHOUT the entitlements — Universal Links AND push both
+          # fail soft, which is the invisible failure this whole step exists to prevent.
+          if n == 0:
+              sys.exit("FATAL: CODE_SIGN_ENTITLEMENTS not written")
+          if n != 2:
+              print(f"warning: expected 2 build configurations, found {n} — check the App target")
+          PY
+
+      - name: Set up code signing (creates cert + profile if missing)
+        script: |
+          set -e
+          keychain initialize
+          # --create makes the App Store profile (and cert) if they don't exist yet
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --certificate-key=@env:CERTIFICATE_PRIVATE_KEY \
+            --create
+          keychain add-certificates
+          cd ios/App
+          xcode-project use-profiles
+
+      - name: Set the marketing version and a unique, always-increasing build number
+        script: |
+          set -e
+
+          # ⚠️ TWO DIFFERENT VERSIONS LIVE HERE. Getting them confused cost the
+          # 2026-08-10 run, which built and signed cleanly and then died at upload:
+          #   90186  Invalid Pre-Release Train. The train version '1.0' is closed
+          #   90062  CFBundleShortVersionString [1.0] must contain a higher version
+          #          than that of the previously approved version [1.0]
+          # Cause: this step only ever set CFBundleVersion (the BUILD number). Nothing
+          # set CFBundleShortVersionString (the MARKETING version), and `ios/` is not
+          # committed — Codemagic regenerates it with `cap add ios` every run, so every
+          # build inherited Capacitor's template default of 1.0 forever. Apple had
+          # already approved a 1.0, which closes that train permanently: no build can
+          # ever be uploaded under it again, no matter how high the build number is.
+          # A build number bump does NOT open a closed train. Only this does.
+
+          # --- build number: unique per upload, never reused -----------------------
+          # Unix timestamp: always larger than any previous upload, never collides.
+          NEW=$(date +%s)
+          ( cd ios/App && agvtool new-version -all "$NEW" )
+          echo "CFBundleVersion set to $NEW (verify below):"
+          ( cd ios/App && agvtool what-version -terse )
+
+          # --- marketing version: what the App Store shows, and what gates uploads --
+          # Kept in step with Android (frontend/android/app/build.gradle versionName).
+          # The same three features — deep links, staff GPS, push — ride both binaries,
+          # so one number across both platforms keeps "which version are you on?"
+          # answerable. RAISE THIS for every new App Store submission; a repeat closes
+          # the train again. Deliberately set AFTER agvtool, so nothing can clobber it.
+          MARKETING="1.0.4"
+          PLIST="ios/App/App/Info.plist"
+          PBXPROJ="ios/App/App.xcodeproj/project.pbxproj"
+
+          # Capacitor's Info.plist carries the literal string `$(MARKETING_VERSION)`,
+          # so the build SETTING is the real source of the shipped value — patching
+          # the plist alone would be silently overwritten at build time.
+          MARKETING="$MARKETING" PBXPROJ="$PBXPROJ" python3 <<'PY'
+          import os, re, sys
+          path, want = os.environ["PBXPROJ"], os.environ["MARKETING"]
+          src = open(path, encoding="utf-8").read()
+          src, n = re.subn(r"MARKETING_VERSION = [^;]+;", f"MARKETING_VERSION = {want};", src)
+          if n == 0:
+              sys.exit(f"FATAL: no MARKETING_VERSION in {path} — Capacitor's template changed shape")
+          open(path, "w", encoding="utf-8").write(src)
+          # Re-read from disk: a write that reported success but landed nothing is
+          # exactly the invisible failure this whole file is built to refuse.
+          got = re.findall(r"MARKETING_VERSION = ([^;]+);", open(path, encoding="utf-8").read())
+          if set(got) != {want}:
+              sys.exit(f"FATAL: MARKETING_VERSION reads {sorted(set(got))} after write, wanted {want!r}")
+          print(f"MARKETING_VERSION = {want} in {n} build configuration(s)")
+          PY
+
+          # If a future template ever carries a LITERAL here instead of the variable,
+          # the build setting above would be ignored and we would ship 1.0 again while
+          # every log line above claimed success. Catch that shape and overwrite it.
+          CUR=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST" 2>/dev/null || echo "")
+          case "$CUR" in
+            '$('*) echo "Info.plist defers to the build setting ($CUR) — correct" ;;
+            "")    echo "FATAL: CFBundleShortVersionString missing from $PLIST"; exit 1 ;;
+            *)     plutil -replace CFBundleShortVersionString -string "$MARKETING" "$PLIST"
+                   echo "Info.plist carried a literal ($CUR) — overwrote it with $MARKETING" ;;
+          esac
+          echo "=== versions wired: marketing $MARKETING, build $NEW ==="
+
+      - name: Build the signed .ipa
+        script: |
+          set -e
+          # Capacitor 8 = SPM, so build the .xcodeproj directly (no .xcworkspace)
+          xcode-project build-ipa \
+            --project "$CM_BUILD_DIR/frontend/ios/App/App.xcodeproj" \
+            --scheme "$XCODE_SCHEME"
+
+    artifacts:
+      - "**/*.ipa"
+      - /tmp/xcodebuild_logs/*.log
+
+    publishing:
+      app_store_connect:
+        auth: integration
+        # The build always UPLOADS to App Store Connect. submit_to_testflight only
+        # controls the EXTRA external-beta-review submission, which needs TestFlight
+        # "Test Information" filled in. Kept false so builds upload cleanly (no red);
+        # flip to true AND fill test-info if you ever want external beta testers.
+        submit_to_testflight: false
+        # Flip to true once the App Store listing is ready to submit for review.
+        submit_to_app_store: false
