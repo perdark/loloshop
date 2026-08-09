@@ -13,20 +13,46 @@ this file if something on the board opened, closed, or changed.
 
 ---
 
-## 📍 WHERE THE TREE IS — 2026-08-09
+## 📍 WHERE THE TREE IS — 2026-08-10
 
-Verified against git **and against the running box over SSH** this session.
+Verified against git, against the running box over SSH, and against App Store Connect / the
+Apple Developer console in a browser this session.
 
 | | |
 |---|---|
-| `origin/main` | `2108443` — carries deep links, push code, the rep-directory batch and the join-routing fix |
-| **Prod is running** | `2108443` — confirmed by `ssh root@142.93.110.202`, all 3 PM2 processes online, no errors |
-| `origin/ios-appstore` | `eb59e21` — merged `main`, lockfile reconciled, **codemagic push patch applied**. Ready to build; nothing left to prepare. |
-| Migration 077 | ✅ **applied to prod AND the dev DB** — 3,311 prod rows retired to `skipped` |
-| Android | **v1.0.4 (versionCode 5) BUILT, not yet uploaded** — carries deep links + GPS + **push**. v1.0.3/code 4 is on the internal track (tap→app verified on a real phone) and was **withdrawn from production review** so all three ride one review. |
-| Android push | ✅ **working end to end on the backend** — `push.configured()` → `{"android":true,"ios":false}` |
-| iOS push | ❌ blocked on the APNs `.p8` only (downloadable once; owner must generate) |
+| `origin/main` | `11a7a43` — merge of `ios-appstore`; now also carries the **Codemagic iOS pipeline** |
+| `origin/ios-appstore` | `11a7a43` — **fast-forwarded to `main`**, no longer a divergent branch |
+| Migration 077 | ✅ applied to prod AND the dev DB — 3,311 prod rows retired to `skipped` |
+| Android | **v1.0.4 (versionCode 5) IN PRODUCTION REVIEW** — deep links + GPS + push in one review |
+| iOS | **1.0.4 (build 1786309948) UPLOADED** — «Complete» on TestFlight, status *Ready to Submit* |
+| Android push | ✅ working end to end |
+| iOS push | ✅ **APNs key installed and verified against Apple** — `push.configured()` → `{"android":true,"ios":true}` |
 | Backend tests | **185/185 pass** against the dev DB with 077 applied |
+
+**Both platforms are now on the same version (1.0.4) carrying the same three features.**
+
+⚠️ **Neither store build has been opened on a real phone yet.** Android 1.0.4 is in review;
+iOS 1.0.4 is installable from TestFlight *now* (internal group «Testers1», no review needed).
+Until someone installs it and grants the notification prompt there are **zero iOS device
+tokens**, so iOS push is proven only at the credential layer, not end to end.
+
+**Prod VPS is `142.93.110.202`.** ⚠️ The `revo` host in `~/.ssh/config` is a DIFFERENT project
+(RevoArt). ⚠️ The prod frontend has **no `.env`** — it reads **`.env.local`**; server-only vars
+there are read at request time, so `pm2 restart loloshop-web --update-env` is enough, **no
+rebuild** (unlike `NEXT_PUBLIC_*`, which is inlined at build time).
+
+### 🔑 Where the credentials are
+
+Both prod push secrets live in **`/etc/loloshop/`**, deliberately outside the git checkout so a
+deploy cannot clobber them and they can never be committed:
+`AuthKey_72D98R3MFC.p8` (APNs) and `fcm-service-account.json` (FCM). The laptop's copies — plus
+the App Store Connect API key Codemagic uploads with — are in
+**`~/Desktop/_private/loloshop-credentials/`**, which has its own `README.md` naming each file.
+
+⚠️ **An Apple `.p8` downloads exactly once. Never delete those files.** The two `.p8`s look
+identical (both EC private keys) and are told apart only by which console issued them:
+`72D98R3MFC` is **APNs** (developer.apple.com → Keys); `WLABBTJQT2` is the **App Store Connect
+API key** (App Store Connect → Users and Access → Integrations) and has nothing to do with push.
 
 **Prod VPS is `142.93.110.202`.** ⚠️ The `revo` host in `~/.ssh/config` is a DIFFERENT project
 (RevoArt). ⚠️ The prod frontend has **no `.env`** — it reads **`.env.local`**; server-only vars
@@ -35,21 +61,26 @@ rebuild** (unlike `NEXT_PUBLIC_*`, which is inlined at build time).
 
 ---
 
-## 🚢 SHIP QUEUE — ONE release carrying all three blockers
+## 🚢 SHIP QUEUE — both binaries built, both awaiting a human
 
-Owner decision 2026-08-08: **links + staff GPS + push notifications ride the same binary.** One
-Android release, one iOS release, one review each. Do not submit until all three are in.
+Owner decision 2026-08-08 was that links + staff GPS + push ride one binary per platform. That
+held for Android 1.0.4 and for iOS 1.0.4. **All three features are now in both binaries** — the
+code side of this queue is closed.
 
-⚠️ **The 2026-08-08 "one binary carries all three" decision DID NOT SURVIVE 2026-08-09.** Android
-1.0.3 shipped to internal testing **without** push, because `google-services.json` still does not
-exist and the owner wanted tap→app the same day. Android push therefore needs a **second**
-binary. iOS is still unshipped and CAN carry all three.
-
-| Blocker | Android | iOS |
+| Blocker | Android 1.0.4 (code 5) | iOS 1.0.4 (build 1786309948) |
 |---|---|---|
-| **Deep links** (`/join/` · `/s/ /w/ /d/`) | ✅ **DONE** — manifests live, binary on internal testing, **tap→app verified on a real phone 2026-08-09** | manifest live + entitlement ready; needs the Codemagic build |
-| **Staff GPS** (بصمة) | ✅ permission in the 1.0.3 binary | usage string ready; needs the build |
-| **Push notifications** | ❌ **NOT in 1.0.3** — no `google-services.json`, so `app/build.gradle:60-65` skipped the google-services plugin. Needs Firebase **then a new binary** | ready — `aps-environment` is in the patched `codemagic.yaml`; needs the APNs `.p8` in the prod `.env` |
+| **Deep links** (`/join/` · `/s/ /w/ /d/`) | ✅ in the binary; **tap→app verified on a real phone** on 1.0.3 | ✅ `associated-domains` entitlement in the uploaded build |
+| **Staff GPS** (بصمة) | ✅ permission in the binary | ✅ usage string in the uploaded build |
+| **Push notifications** | ✅ `google-services.json` compiled in; backend sends | ✅ `aps-environment` in the build; APNs key live on prod |
+
+**Both `.well-known` manifests are LIVE and verified** on the apex *and* `www`, HTTP 200,
+`application/json`, zero redirects — which also **closes the `www` landmine** below.
+
+**What is left is not code:**
+1. Android — press publish once Play approves (managed publishing is ON, see owner actions).
+2. iOS — submit 1.0.4 for review in App Store Connect (`submit_to_app_store` is `false` in
+   `codemagic.yaml`, so Codemagic uploads and deliberately stops there).
+3. Install from a **store track** on a real phone and confirm links + push actually fire.
 
 **Both `.well-known` manifests are LIVE and verified** on the apex *and* `www`, HTTP 200,
 `application/json`, zero redirects — which also **closes the `www` landmine** below.
@@ -102,18 +133,21 @@ binary. iOS is still unshipped and CAN carry all three.
 
 ## ☁️ CLOUD BOARD — what a session with no laptop can do
 
-Everything here is repo work. Start from `main` (`2108443`).
+Everything here is repo work. Start from `main` (`11a7a43`).
 
-**Push is built, migrated and deployed; the tests have now been run (185/185 against 077).** What
-is left below is what a session can still pick up.
+**Push is fully credentialed on both platforms now.** Both binaries are built. What is left below
+is what a session can still pick up without a phone or a store console.
 
 **1. What a cloud session can still do:**
-- **Nothing on push until the owner acts.** The code is deployed and *deliberately inert*:
-  `pushOutbox.drainOnce()` returns before touching the DB when no FCM/APNs credentials exist
-  (`lib/pushOutbox.js:83-93`), so prod logs one line and never errors. Still unproven: driving
-  the drain against a real row to exercise the claim query and flood guard.
-- **The 14 remaining `next/image unoptimized` props** (list in the landmines below) — each needs
-  a `blob:`/`data:` check first, since upload previews genuinely need it.
+- **Drive `pushOutbox.drainOnce()` against a real row.** No longer blocked on credentials — both
+  are live. Still unproven: the claim query and the flood guard under an actual row. There are
+  zero device tokens, so a real send needs a seeded token or a stub.
+- **The remaining `next/image unoptimized` props** — grep finds **12 source files**, two of which
+  are missing from the landmine list below (`components/catalog/ProductMediaGallery.tsx`,
+  `components/staff/ZoneThumb.tsx`). Each needs a `blob:`/`data:` check first, since upload
+  previews genuinely need it.
+- **Drop `jspdf`** — a declared dependency with zero imports anywhere. Removing it takes the whole
+  dompurify chain out of the `npm audit` deploy gate.
 - **Wire gender to the DB** — `students.gender` exists, onboarding only writes localStorage.
   Wiring, not a migration.
 - **Unit vocabulary pass 2** — rep + staff screens still say «طلب» for pieces.
@@ -135,6 +169,14 @@ signing** key, `FC:4E:98:…`) and `IOS_TEAM_ID` (`9YY4QWVDUW`) are set in the p
 `frontend/.env.local` and both manifests serve 200 · the codemagic push patch is applied to
 `ios-appstore` · migration 077 is applied to prod.
 
+**✅ DONE 2026-08-10 — do not redo these:** the **APNs key is created and live** (`72D98R3MFC`,
+Sandbox & Production, Team Scoped) — `.p8` at `/etc/loloshop/`, `APNS_KEY_FILE`/`APNS_KEY_ID`/
+`APNS_TEAM_ID` in the prod backend `.env`, API restarted, and **verified against Apple's
+production endpoint**, not just parsed · the **iOS 1.0.4 binary is built and uploaded** ·
+`ios-appstore` is merged into `main` and fast-forwarded to it, so the Codemagic pipeline is no
+longer stranded on a branch · the laptop's loose credentials are filed in
+`~/Desktop/_private/loloshop-credentials/`.
+
 **Still outstanding:**
 
 1. **⏳ Android 1.0.4 (versionCode 5) is IN PRODUCTION REVIEW** — submitted 2026-08-09 with
@@ -143,26 +185,13 @@ signing** key, `FC:4E:98:…`) and `IOS_TEAM_ID` (`9YY4QWVDUW`) are set in the p
    ⚠️ **«النشر المُدار» (managed publishing) is ON, so approval does NOT publish it.** Someone
    must return to the publishing overview and press publish. It will look like "still in review"
    when it is actually approved and waiting. Check in a day or two.
-2. **Start the Codemagic build by hand on `ios-appstore`** — there is still no `triggering:`
-   block, so pushing that branch starts nothing. The branch is fully prepared as of `eb59e21`.
-3. **Push — Android is DONE (2026-08-09).** `google-services.json` is committed, the Firebase
-   service account key lives at **`/etc/loloshop/fcm-service-account.json`** (`0600`, deliberately
-   OUTSIDE the git checkout so a deploy cannot clobber it and it can never be committed), and
-   `FCM_SERVICE_ACCOUNT_FILE` points at it in the prod `backend/.env`. **Only the iOS half is
-   left:** generate the APNs `.p8` (developer.apple.com → Keys — *downloadable once*) and set
-   `APNS_KEY_FILE` + `APNS_KEY_ID` in the prod `.env`. Historic detail below:
-   a. Firebase project → `google-services.json` → **commit it to `frontend/android/app/`**.
-      ⚠️ `app/build.gradle` applies the google-services plugin only `if (servicesJSON.text)`, so
-      a build without this file **succeeds** and silently produces an app that can never
-      register. Nothing fails; nothing arrives.
-   b. APNs `.p8` key (developer.apple.com → Keys, **downloadable once**) → `APNS_KEY_FILE` +
-      `APNS_KEY_ID` + `APNS_TEAM_ID` in the prod `.env`, then
-      `pm2 restart loloshop-api --update-env`. Not Firebase — see the runbook note.
-   c. ~~Push Notifications capability on the App ID~~ — ✅ done 2026-08-09.
-   d. ~~Apply the codemagic patch~~ — ✅ applied, on `ios-appstore` at `eb59e21`.
-   Each half works alone: set only (a) and Android starts receiving, iOS stays quiet.
-   ⚠️ **(a) also requires a NEW Android binary** — `google-services.json` is compiled in, so
-   dropping the file on the server does nothing for the 1.0.3 already on the store.
+2. **⏳ Submit iOS 1.0.4 for review in App Store Connect.** Build `1786309948` is uploaded and
+   sits at *Ready to Submit*; `codemagic.yaml` sets `submit_to_app_store: false` on purpose, so
+   Codemagic uploads and stops. Nothing else is needed from a build.
+3. **📱 Install iOS 1.0.4 from TestFlight and grant the notification prompt.** Internal group
+   «Testers1», no review wait. This is the ONLY way a first iOS device token exists — until then
+   iOS push is proven at the credential layer and nowhere else. While you are in there, tap a
+   `/join/` WhatsApp link and confirm it opens the app rather than Safari.
 5. **⚠️ Enter the shop coordinates** at `/admin/attendance` (خط العرض · خط الطول · نطاق الموقع)
    **before** moving `verification_mode` off `'none'`. Wrong order 403s every بصمة for every
    worker on every platform.
@@ -179,11 +208,17 @@ signing** key, `FC:4E:98:…`) and `IOS_TEAM_ID` (`9YY4QWVDUW`) are set in the p
   `.env`; past that date `07700000000` hits the WhatsApp OTP wall and the submission fails. Push
   the date forward + `pm2 restart loloshop-api --update-env`. Setting only `DEMO_LOGIN_PHONES`
   looks configured and is **silently inert**.
-- **iOS — nothing left to code:** start the Codemagic build by hand on `ios-appstore` (there is no
-  `triggering:` block, so pushing started nothing) → select the new binary in ASC → reply to Apple
-  with a physical-device screen recording of the deletion flow → tap the camera once on TestFlight.
-  **After a reviewer walks deletion the demo account is really gone — run `npm run demo-account` on
-  prod before the next submission.**
+- **iOS — the binary exists; what is left is the submission paperwork:** select build `1786309948`
+  in ASC → reply to Apple with a physical-device screen recording of the deletion flow → tap the
+  camera once on TestFlight. **After a reviewer walks deletion the demo account is really gone —
+  run `npm run demo-account` on prod before the next submission.**
+- **⚠️ RAISE `MARKETING="1.0.4"` in `codemagic.yaml` before every future iOS submission.** Apple
+  closes a version train permanently once it approves it, and a build number bump does **not**
+  reopen one. Re-uploading the same marketing version fails at publish with `90186` + `90062`
+  *after* a full successful build and sign — the most expensive place to discover it. The line is
+  in the «Set the marketing version…» step and carries this warning inline.
+- **Codemagic has no `triggering:` block** — pushing any branch starts nothing, by design. Every
+  iOS build is started by hand from the Codemagic UI.
 - **Enter the real تجزئة piece rates** at `/admin/workshop → أسعار القطع`. Migration 072 seeded them
   equal to the ممثلين rates, so retail work still pays the wholesale wage.
 - **The app-only gate is deployed with the flag OFF.** Turning it on is an env edit **plus a

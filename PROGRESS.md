@@ -1,5 +1,42 @@
 # Progress
 
+## 2026-08-10 — iOS 1.0.4 uploaded, APNs verified against Apple, both platforms at parity
+
+Prod runs `11a7a43`, confirmed over SSH. CI green, all 3 PM2 processes online, site 200.
+
+**Shipped today:**
+- **iOS 1.0.4 (build 1786309948) is on App Store Connect** — «Complete», *Ready to Submit*. Two
+  Codemagic bugs fixed, both of which produced successful-looking runs that failed later:
+  `d9688a6` — the entitlement assertion used `plutil -extract`, which splits its keypath on `.`
+  and cannot represent an array, so it failed on a **correct** file; `PlistBuddy` separates on `:`.
+  `b68eb94` — nothing ever set `CFBundleShortVersionString`, so every build shipped as `1.0` while
+  `agvtool new-version` only ever set the **build number**. Apple had approved a 1.0, which closes
+  that train permanently. `MARKETING_VERSION = 1.0.4` is now written to the pbxproj build setting
+  (not the plist — Capacitor's plist carries the literal `$(MARKETING_VERSION)` and would be
+  overwritten at build time). Both fixes ship with assertions that fail the build rather than the
+  upload. Verified on Linux without a Mac before pushing.
+- **iOS push credentials are live and proven.** Key `72D98R3MFC`, Sandbox & Production, Team
+  Scoped. `push.configured()` → `{"android":true,"ios":true}`. ⚠️ Apple's form defaults Environment
+  to **Sandbox alone**, which would deliver nothing to any store build while looking correct.
+  Proof beyond parsing: a send to a fake device token returned **`BadDeviceToken`**, which only
+  happens *after* Apple authenticates the JWT — a bad key returns `403 InvalidProviderToken`.
+- **`ios-appstore` merged into `main`** (`11a7a43`) and fast-forwarded, so the Codemagic pipeline
+  is no longer stranded on a branch. The merge adds `@capacitor/ios` as a **dependency**, so all
+  four CI gates were run locally first (audit clean, lockfile in sync, 0 lint errors, build
+  completes) before the push that triggers the auto-deploy.
+- **Credentials filed.** All four LoloShop keys moved from `~/Downloads` to
+  `~/Desktop/_private/loloshop-credentials/` with a README naming each. The two `.p8`s were
+  indistinguishable by content — `72D98R3MFC` is APNs, `WLABBTJQT2` is the **App Store Connect API
+  key** Codemagic uploads with. ⚠️ A `.p8` downloads exactly once; deleting the wrong one would
+  have broken uploads entirely.
+- **Board correction:** iOS was recorded as "unshipped". ASC shows **iOS 1.0 Ready for
+  Distribution** — approved, which is exactly what closed the 1.0 train.
+
+**Not done:** no iOS device token exists until 1.0.4 is installed from TestFlight and the
+notification prompt granted, so iOS push is proven only at the credential layer. Android 1.0.4 is
+in production review with managed publishing ON — approval will **not** publish it. iOS 1.0.4 still
+needs submitting in ASC.
+
 ## 2026-08-09 — Android tap→app is LIVE, everything deployed, join routing fixed
 
 Everything from the 2026-08-08 cloud session reached `main` and then production. Prod runs

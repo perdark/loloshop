@@ -16,6 +16,87 @@ written against an uncommitted tree; **(d)** committed it, so that caveat is dis
 
 ---
 
+## 2026-08-10 — 🍎 iOS 1.0.4 uploaded, APNs verified against Apple, both platforms at parity
+
+**Two bugs, both of which produced a *successful-looking* run that failed later.** That is the
+theme of the day and the reason both fixes ship with assertions.
+
+**1. The entitlement assertion failed on a correct file.** The 2026-08-09 Codemagic run died at
+step 6 «Wire the App entitlements». The entitlements file was fine; the *check* was wrong.
+`plutil -extract` splits its keypath on `.`, so `com.apple.developer.associated-domains` was read
+as four nested keys and never resolved — and `raw` output cannot represent an array anyway. The
+neighbouring `aps-environment` (no dots, scalar) passed happily and hid the cause, so the build
+reported the entitlement "missing" immediately after writing it. Fixed in `d9688a6` with
+`PlistBuddy -c "Print :$KEY"`, which separates path components on `:` and treats dots literally.
+**This run proved it:** the build got past step 6 and all the way to publishing.
+
+**2. Nothing had ever set the marketing version.** The build then archived and signed cleanly and
+died at App Store Connect with `90186` (train `1.0` is closed) + `90062` (`CFBundleShortVersionString`
+must exceed the approved `1.0`). One cause: the version step only ran `agvtool new-version`, which
+sets **`CFBundleVersion`** — the build number. `CFBundleShortVersionString` was set by nothing, and
+`frontend/ios/` is not committed, so Codemagic regenerates it with `cap add ios` every run and
+re-inherited Capacitor's template default of `1.0` **every time**. Apple had already approved a
+1.0, which closes that train permanently — a build number bump does not reopen one.
+
+Fixed in `b68eb94`: `MARKETING_VERSION = 1.0.4`, matching Android's `versionName`, written to the
+**pbxproj build setting** rather than the plist, because Capacitor's `Info.plist` carries the
+literal `$(MARKETING_VERSION)` and a plist-only patch would be silently overwritten at build time.
+Applied *after* `agvtool` so nothing clobbers it. Both silent-failure modes now fail the build:
+the pbxproj is re-read after writing, and an `Info.plist` that ever carries a literal instead of
+the variable is detected and overwritten.
+
+Validated on Linux without a Mac before pushing — YAML parses, `bash -n` clean, the heredoc
+terminator dedents to column 0, the embedded Python rewrites a realistic pbxproj (2 configs) and
+exits non-zero when `MARKETING_VERSION` is absent, and all three plist branches behave.
+**Result: TestFlight shows `1.0.4 (1786309948)` Complete**, against three earlier uploads all
+stamped `1.0` — the diagnosis confirmed from Apple's side, not inferred.
+
+**APNs went live and was actually proven.** Key `72D98R3MFC` («LoloShop APNs Push», Team Scoped
+(All topics), **Sandbox & Production**). ⚠️ The Apple form defaults Environment to **Sandbox
+alone**, which would have registered fine, accepted the key, and delivered nothing to any store
+build — the same silent shape as the missing `google-services.json`. There is no "Unrestricted"
+restriction option; **Team Scoped (All topics)** is that choice and is the default.
+
+`.p8` → `/etc/loloshop/AuthKey_72D98R3MFC.p8` (`0600`, md5-verified, outside the git checkout),
+`APNS_KEY_FILE`/`APNS_KEY_ID`/`APNS_TEAM_ID` appended to the prod backend `.env` (backup
+`.env.bak.2026-08-10-apns`, confirmed caught by `.gitignore:10`), API restarted →
+`push.configured()` = `{"android":true,"ios":true}`.
+
+But *configured* only means the file parsed. **The real check: a push to a deliberately fake
+device token returned `apns_400:BadDeviceToken`.** Apple must authenticate a request before it can
+judge the token, so that error proves the JWT signed with the `.p8` was accepted and that
+`apns-topic: com.loloshop96.app` matched. A wrong key/keyId/teamId returns `403
+InvalidProviderToken` instead. `dead: true` also confirmed the device-cleanup path.
+*(A false start: `/proc/<pid>/environ` showed no `APNS_` vars and looked like a failed restart.
+It was the wrong instrument — `server.js:1` calls `dotenv.config()`, which populates `process.env`
+at runtime and never touches the startup environment that `/proc` reports.)*
+
+**Credential hygiene.** Both `.p8` files in `~/Downloads` were EC private keys, indistinguishable
+by content. Checking both Apple consoles settled it: `72D98R3MFC` is **APNs**
+(developer.apple.com → Keys) and `WLABBTJQT2` is the **App Store Connect API key** («RevoArt»,
+Admin, last used today — it is what Codemagic uploads with). Deleting the wrong one would have
+broken uploads entirely. All four LoloShop credentials moved to
+`~/Desktop/_private/loloshop-credentials/` (dir `700`, files `600`, md5-verified before and
+after) with a `README.md` naming each. Three **awtar** files left alone — different project.
+
+**Merged and deployed.** `ios-appstore` → `main` (`11a7a43`), then `ios-appstore`
+fast-forwarded to it so the pipeline is no longer stranded on a branch. The merge adds
+`@capacitor/ios` as a **dependency**, so it passes through the `npm audit` deploy gate that
+blocked deploys twice on 2026-08-09 — all four CI gates were therefore run locally first (audit
+0 vulnerabilities, `npm ci --dry-run` in sync, 0 lint errors, build completes) before the push
+that triggers the auto-deploy. Prod confirmed on `11a7a43`.
+
+**Also corrected:** the board called iOS "unshipped". App Store Connect shows **iOS 1.0 Ready for
+Distribution** — it was approved, which is precisely what closed the 1.0 train.
+
+**Open follow-ups:** no iOS device token exists until someone installs 1.0.4 from TestFlight and
+grants the prompt, so iOS push is proven only at the credential layer · Android 1.0.4 is in
+production review with managed publishing ON (approval will not publish it) · iOS 1.0.4 still
+needs submitting in ASC · **every future iOS submission must raise `MARKETING`** or it fails at
+publish after a full successful build.
+
+---
+
 ## 2026-08-08 — 🔔 push notifications built end-to-end, and the eight review findings closed
 
 Branch `claude/handoff-cloud-board-tasks-v342hb`, off `feat/deeplinks-and-location`.
