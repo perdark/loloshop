@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "34256597259",
+    "project_id": "loloshop-4548a",
+    "storage_bucket": "loloshop-4548a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:34256597259:android:193b5b2eb567392418b20e",
+        "android_client_info": {
+          "package_name": "com.loloshop96.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCZLnNFs-AESSc2U9eGtEdbRtAE-1fF8Ak"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
