@@ -181,10 +181,22 @@ workflows:
           plutil -lint "$ENTITLEMENTS"
           # Both capabilities or fail the build. A missing key here is invisible until a real
           # phone fails to open a link, or never receives a notification.
+          #
+          # ⚠️ PlistBuddy, NOT `plutil -extract` — that is what failed the 2026-08-09 build, on a
+          # file that was correct. `plutil -extract` splits its KEYPATH on ".", so
+          # `com.apple.developer.associated-domains` is read as four NESTED keys
+          # (com → apple → developer → associated-domains) and never resolves; and its `raw`
+          # output cannot represent an array even when a path does resolve. Both faults land on
+          # that one key, while `aps-environment` — no dots, scalar value — passes happily and
+          # hides the cause. The build reported the entitlement "missing" immediately after
+          # writing it. PlistBuddy separates path components with ":", so a literal dot in a key
+          # name is unremarkable, and it prints arrays without complaint.
           for KEY in com.apple.developer.associated-domains aps-environment; do
-            plutil -extract "$KEY" raw "$ENTITLEMENTS" >/dev/null 2>&1 \
+            /usr/libexec/PlistBuddy -c "Print :$KEY" "$ENTITLEMENTS" >/dev/null 2>&1 \
               || { echo "FATAL: $KEY missing from $ENTITLEMENTS"; exit 1; }
           done
+          echo "=== entitlements wired ==="
+          plutil -p "$ENTITLEMENTS"
 
           # Point the App target's build settings at it. Xcode stores this per build
           # configuration, and the two blocks that carry PRODUCT_BUNDLE_IDENTIFIER for our
