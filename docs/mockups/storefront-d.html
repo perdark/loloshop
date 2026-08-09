@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>لولو شوب — تطبيق المتجر (D)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://lolo-shop96.com">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&family=Amiri:wght@400;700&family=Playfair+Display:wght@500;600;700&family=Great+Vibes&display=swap" rel="stylesheet">
+<style>
+/* ══════════════════════════════════════════════════════════════════════════
+   LOLOSHOP — direction D, built out.
+
+   D's thesis is SPEED: no marketing hero on home, the goods start above the
+   fold. D's one weakness in the bake-off was that it never answered "ليش لولو
+   شوب؟". The fix is the owner's own layout idea — a slider per family with a
+   SECTION between each one. The gaps between sliders are exactly where the
+   answers go, so the page earns its story without ever pushing product down:
+
+     تحية → وعد → [أوشحة ⇄] → ليش لولو شوب → [روبات ⇄] → الطقم الكامل
+          → [قبعات ⇄] → دفعتك/الممثل → [شالات ⇄] → موقعنا + واتساب
+
+   ONBOARDING carries the emotion ONCE (the thing variant B was good at), then
+   gets out of the way forever. It asks two things:
+     · الاسم    — so the app can speak to a person, not a session
+     · طالب/طالبة — NOT decoration. The backend's priceSelections() rejects
+       gender-restricted options when studentGender is null, and the 2026-07-26
+       session had to convert this field from <select> to radio because Chrome
+       autofilled it and silently built the WRONG order. Big tap targets here
+       are a bug fix, so it is asked once, up front, and never guessed.
+
+   Arabic is gendered, so every second-person string is gendered too, in the
+   Iraqi register the house already uses (چ: «وشاحچ», «تخرّجچ»). All of it lives
+   in ONE dictionary (T below) — no gendered string is hardcoded in markup.
+
+   Tokens in oklch per design-dna: ONE accent hue (orange) at chroma .174;
+   neutrals ≤ .022 chroma, hue-biased warm; gold deliberately unused (a second
+   accent hue). Arabic: letter-spacing 0 everywhere, body 1.75, Amiri 1.45.
+   Real photos + the real 53-product retail feed. No CSS-drawn product art.
+   ══════════════════════════════════════════════════════════════════════════ */
+:root{
+  --accent:oklch(55.3% .174 38.4);
+  --accent-lift:oklch(71.2% .165 44.1);
+  --accent-wash:oklch(55.3% .174 38.4 / .10);
+  --beige:oklch(99.5% .005 78);
+  --cream:oklch(96.9% .015 81);
+  --sink:oklch(95.6% .014 85);
+  --line:oklch(89.9% .019 86);
+  --ink:oklch(21.8% .008 80);
+  --ink-soft:oklch(31.1% .010 81);
+  --muted:oklch(50.3% .020 80);
+  /* a SECOND accent hue, and therefore a deliberate exception to the
+     one-hue rule: it is scoped to the VIP card alone, which is a sub-brand. */
+  --gold:oklch(76.7% .139 91.1);
+  --shadow-soft:0 1px 2px oklch(21.8% .008 80/.05),0 1px 3px oklch(21.8% .008 80/.07);
+  --shadow-card:0 2px 8px -3px oklch(21.8% .008 80/.10),0 12px 30px -16px oklch(21.8% .008 80/.14);
+  --shadow-float:0 10px 26px -12px oklch(21.8% .008 80/.20),0 3px 10px -5px oklch(21.8% .008 80/.10);
+  --r:1.25rem; --r-sm:12px; --r-pill:9999px;
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-6:24px; --sp-8:32px; --sp-12:48px;
+  --tab-h:70px;
+  --f-ui:"Cairo",ui-sans-serif,system-ui,sans-serif;
+  --f-ar:"Amiri",serif;
+  --f-lat:"Playfair Display",serif;
+  --f-script:"Great Vibes",cursive;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+img{display:block;max-width:100%}
+a{color:inherit;text-decoration:none}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+ul,ol{list-style:none}
+input{font:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.num{font-variant-numeric:tabular-nums}
+body{font-family:var(--f-ui);font-size:15px;line-height:1.75;letter-spacing:0;
+  background:oklch(88% .018 82);color:var(--ink-soft);-webkit-font-smoothing:antialiased}
+h1,h2,h3{color:var(--ink);line-height:1.35;text-wrap:balance;font-weight:800;letter-spacing:0}
+
+#app{position:relative;max-width:430px;margin-inline:auto;min-height:100vh;
+  background:var(--cream);overflow-x:clip;box-shadow:0 0 60px oklch(21.8% .008 80/.18)}
+
+/* ── shared type + buttons ───────────────────────────────────────────── */
+/* Amiri needs 1.45, not the doctrine's 1.3 for Arabic headings — measured
+   scrollHeight 36 vs clientHeight 31 at 1.3. This is the "+0.25" caveat. */
+.h-ar{font-family:var(--f-ar);font-size:1.5rem;line-height:1.45;font-weight:700}
+.small{font-size:12.5px;color:var(--muted);line-height:1.7}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:var(--sp-2);
+  min-height:48px;padding:0 var(--sp-6);border-radius:var(--r-pill);
+  font-size:14.5px;font-weight:800;transition:background-color .2s,translate .2s,opacity .2s}
+.btn svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2.2;
+  stroke-linecap:round;stroke-linejoin:round;transition:translate .2s}
+.btn:hover svg{translate:-3px 0}
+.btn-1{background:var(--accent);color:var(--beige);box-shadow:var(--shadow-float)}
+.btn-1:hover{background:var(--ink);translate:0 -2px}
+.btn-1[disabled]{opacity:.4;pointer-events:none;box-shadow:none}
+.btn-2{background:var(--beige);color:var(--accent);border:1px solid var(--accent-wash);
+  box-shadow:var(--shadow-soft)}
+.btn-w{width:100%}
+.pad{padding-inline:var(--sp-4)}
+
+/* ══ ONBOARDING ════════════════════════════════════════════════════════ */
+/* FIXED, not absolute: #app is as tall as the whole storefront (~6000px), so
+   an absolutely-positioned inset:0 overlay inherited that height — .ob-hero
+   flex-grew to thousands of px and `cover` zoomed the photo to a single eye.
+   Pinning to the viewport (100dvh) is what makes it a screen, not a banner. */
+#onb{position:fixed;inset-block:0;inset-inline:0;z-index:60;
+  max-width:430px;margin-inline:auto;height:100dvh;background:var(--cream);
+  display:flex;flex-direction:column;overflow-y:auto}
+#app[data-onb="done"] #onb{display:none}
+/* the page behind must not scroll while onboarding owns the screen */
+body:has(#app[data-onb="1"]){overflow:hidden}
+.ob{display:none;flex-direction:column;flex:1;animation:rise .32s cubic-bezier(.16,1,.3,1)}
+.ob.on{display:flex}
+@keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+
+/* step 1 — the ONE emotional moment; after this the app is all business */
+.ob-hero{position:relative;isolation:isolate;flex:1;min-height:420px;overflow:hidden;background:var(--ink)}
+.ob-hero img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
+  object-position:50% 10%;z-index:-2}
+.ob-hero::after{content:"";position:absolute;inset:0;z-index:-1;
+  background:linear-gradient(to top,oklch(16% .01 80/.96) 0%,oklch(16% .01 80/.88) 28%,
+    oklch(16% .01 80/.45) 48%,oklch(16% .01 80/.05) 70%,oklch(16% .01 80/.30) 100%)}
+.ob-hero .mark{display:flex;align-items:center;gap:var(--sp-2);padding:var(--sp-6) var(--sp-4) 0}
+.ob-hero .mark img{position:static;width:40px;height:40px;border-radius:var(--r-pill);object-fit:cover}
+.ob-hero .mark span{font-family:var(--f-lat);font-weight:700;font-size:15px;color:var(--beige)}
+.ob-hero .say{position:absolute;inset-inline:0;bottom:0;padding:var(--sp-6) var(--sp-4) var(--sp-8)}
+.ob-hero .say .kick{font-family:var(--f-lat);font-size:11px;font-weight:700;letter-spacing:.2em;
+  color:oklch(88% .03 70)}
+.ob-hero .say h1{font-family:var(--f-ar);font-size:2.3rem;line-height:1.3;color:var(--beige);
+  margin-block-start:var(--sp-2)}
+.ob-hero .say p{margin-block-start:var(--sp-3);max-width:31ch;font-size:14px;color:oklch(89% .012 82)}
+.ob-foot{padding:var(--sp-6) var(--sp-4) var(--sp-8);background:var(--cream)}
+.dots{display:flex;justify-content:center;gap:6px;margin-block-end:var(--sp-4)}
+.dots i{width:6px;height:6px;border-radius:50%;background:var(--line)}
+.dots i.on{width:22px;border-radius:var(--r-pill);background:var(--accent)}
+
+/* step 2 — name + gender. Two fields, one tap each, then in. */
+.ob-form{padding:var(--sp-8) var(--sp-4) var(--sp-6)}
+.ob-form .back{display:inline-flex;align-items:center;gap:6px;min-height:44px;
+  font-size:13px;font-weight:700;color:var(--muted)}
+.ob-form .back svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2.4;
+  stroke-linecap:round;stroke-linejoin:round}
+.ob-form h1{font-family:var(--f-ar);font-size:2rem;line-height:1.35;margin-block-start:var(--sp-3)}
+/* .ob-note, NOT .why — `.why` is the «ليش لولو شوب» SECTION further down, and
+   reusing the name here inherited that section's sink panel, padding and
+   inline margin, so this note rendered as an indented box out of line with
+   the fields under it. */
+.ob-note{margin-block-start:var(--sp-2);max-width:34ch;font-size:13.5px;color:var(--muted)}
+.fld{margin-block-start:var(--sp-8)}
+.fld > .lb{display:block;margin-block-end:var(--sp-3);font-size:13.5px;font-weight:800;color:var(--ink)}
+.inp{width:100%;min-height:52px;padding:0 var(--sp-4);border:1px solid var(--line);
+  border-radius:var(--r-sm);background:var(--beige);font-size:16px;font-weight:600;color:var(--ink)}
+.inp::placeholder{color:var(--muted);font-weight:500}
+.inp:focus-visible{border-color:var(--accent)}
+/* radio cards, never a <select>: a guessable required field in a bare select is
+   how Chrome autofilled «ذكر» and silently priced the wrong order (2026-07-26). */
+.gcards{display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-3)}
+.gcard{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--sp-2);
+  min-height:118px;padding:var(--sp-4);border:1.5px solid var(--line);border-radius:var(--r);
+  background:var(--beige);font-size:15px;font-weight:800;color:var(--ink-soft);
+  transition:border-color .18s,background-color .18s,color .18s}
+.gcard svg{width:30px;height:30px;fill:none;stroke:currentColor;stroke-width:1.7;
+  stroke-linecap:round;stroke-linejoin:round;color:var(--muted);transition:color .18s}
+.gcard[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-wash);color:var(--accent)}
+.gcard[aria-pressed="true"] svg{color:var(--accent)}
+
+/* ══ APP CHROME ════════════════════════════════════════════════════════ */
+.topbar{position:sticky;top:0;z-index:40;background:oklch(96.9% .015 81/.97);
+  backdrop-filter:blur(10px);border-block-end:1px solid var(--line)}
+.tb-row{display:flex;align-items:center;gap:var(--sp-3);padding:10px var(--sp-4)}
+.tb-row .bm{flex:0 0 auto}
+.tb-row .bm img{width:36px;height:36px;border-radius:var(--r-pill)}
+.search{flex:1;display:flex;align-items:center;gap:var(--sp-2);min-height:44px;padding:0 var(--sp-3);
+  border:1px solid var(--line);border-radius:var(--r-pill);background:var(--beige);
+  color:var(--muted);font-size:13.5px;font-weight:600;box-shadow:var(--shadow-soft);text-align:start}
+.search svg{flex:0 0 auto;width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.2}
+.iconbtn{position:relative;display:grid;place-items:center;width:44px;height:44px;flex:0 0 auto;
+  border-radius:var(--r-pill);color:var(--ink-soft);transition:background-color .18s,color .18s}
+.iconbtn:hover{background:var(--beige);color:var(--accent)}
+.iconbtn svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;
+  stroke-linecap:round;stroke-linejoin:round}
+.badge{position:absolute;top:5px;inset-inline-end:5px;min-width:17px;height:17px;padding:0 4px;
+  border-radius:var(--r-pill);background:var(--accent);color:var(--beige);
+  border:1.5px solid var(--cream);font-size:9.5px;font-weight:800;line-height:14px;text-align:center}
+
+/* greeting — the payoff of asking the name */
+.hello{padding:var(--sp-4) var(--sp-4) 0}
+.hello h1{font-family:var(--f-ar);font-size:1.7rem;line-height:1.4}
+.hello p{margin-block-start:2px;font-size:13.5px;color:var(--muted)}
+
+/* the promise — D's one line of marketing, and it is all fear-answers */
+.promise{display:flex;align-items:center;gap:var(--sp-2);margin:var(--sp-4) var(--sp-4) 0;
+  padding:var(--sp-3) var(--sp-4);border-radius:var(--r-sm);background:var(--accent-wash);
+  font-size:12.5px;font-weight:700;color:var(--ink);line-height:1.65}
+.promise svg{flex:0 0 auto;width:17px;height:17px;fill:none;stroke:var(--accent);stroke-width:2.4;
+  stroke-linecap:round;stroke-linejoin:round}
+
+/* ── family slider ── */
+.fam{margin-block-start:var(--sp-8)}
+.fam-head{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-3);
+  padding-inline:var(--sp-4);margin-block-end:var(--sp-3)}
+.fam-head .t{display:flex;align-items:baseline;gap:var(--sp-2);min-width:0}
+.fam-head h2{font-family:var(--f-ar);font-size:1.5rem;line-height:1.45;font-weight:700}
+.fam-head .n{font-size:11.5px;font-weight:700;color:var(--muted);white-space:nowrap}
+.fam-nav{display:flex;align-items:center;gap:var(--sp-1);flex:0 0 auto}
+.arw{display:grid;place-items:center;width:34px;height:34px;border-radius:var(--r-pill);
+  border:1px solid var(--line);background:var(--beige);color:var(--ink-soft);
+  transition:background-color .18s,color .18s,opacity .18s}
+.arw:hover{background:var(--accent);border-color:var(--accent);color:var(--beige)}
+.arw[disabled]{opacity:.3;pointer-events:none}
+.arw svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2.6;
+  stroke-linecap:round;stroke-linejoin:round}
+.more{display:inline-flex;align-items:center;gap:3px;min-height:44px;padding-inline:var(--sp-2);
+  font-size:12.5px;font-weight:800;color:var(--accent);white-space:nowrap}
+.more svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2.6;
+  stroke-linecap:round;stroke-linejoin:round}
+/* align-items:flex-start is load-bearing. A <button> flex item defaults to
+   `stretch`, and Chrome hands the extra height to the button's anonymous
+   content box — the .ph grew from 319px to 380px and shoved the name and
+   price below the slider's own bottom edge, so every card lost its label. */
+/* scroll-padding-inline matters: with `mandatory` snapping the snapport starts
+   at the container edge, so the first card snapped INTO the 16px gutter — it
+   sat flush to the screen edge, out of line with the heading above it, and
+   left the rail resting at scrollLeft 16 so «السابق» looked available at the
+   very start. Insetting the snapport restores the gutter and a true zero. */
+.slider{display:flex;align-items:flex-start;gap:var(--sp-3);overflow-x:auto;
+  scroll-snap-type:x mandatory;padding:2px var(--sp-4) var(--sp-2);
+  scroll-padding-inline:var(--sp-4);scrollbar-width:none;scroll-behavior:smooth}
+.slider::-webkit-scrollbar{display:none}
+/* 60% keeps the next card peeking — the affordance that says "this scrolls" */
+.slider > *{flex:0 0 60%;scroll-snap-align:start}
+
+/* flex column so the photo/name/price stack is explicit rather than relying on
+   a <button>'s inline layout, which is what broke above. */
+.tile{display:flex;flex-direction:column;align-items:stretch;text-align:start;width:100%}
+.tile .ph{display:block;flex:0 0 auto;position:relative;overflow:hidden;border-radius:10px;
+  aspect-ratio:3/4;background:var(--beige);
+  box-shadow:inset 0 0 0 1px oklch(21.8% .008 80/.10);transition:box-shadow .3s}
+.tile:hover .ph{box-shadow:inset 0 0 0 1px oklch(21.8% .008 80/.10),var(--shadow-float)}
+.tile img{width:100%;height:100%;object-fit:cover;transition:scale .8s cubic-bezier(.16,1,.3,1)}
+.tile img.contain{object-fit:contain;padding:6px}
+.tile:hover img{scale:1.04}
+.tile .flag{position:absolute;top:8px;inset-inline-start:8px;padding:2px 9px;border-radius:var(--r-pill);
+  background:oklch(99.5% .005 78/.93);backdrop-filter:blur(4px);font-size:10px;font-weight:800;color:var(--accent)}
+/* 1.8, not 1.5 — overflow:hidden pins this to one line and Arabic ascenders
+   overflow a 1.5 box, which renders the names visibly decapitated. */
+.tile h3{margin-block-start:8px;font-size:14.5px;font-weight:700;line-height:1.8;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
+.price{display:flex;align-items:baseline;gap:5px;direction:ltr}
+.price .from{font-size:11px;font-weight:500;color:var(--muted)}
+.price .now{font-size:15px;font-weight:800;color:var(--ink)}
+
+/* ── section: ليش لولو شوب ── */
+.why{margin:var(--sp-8) var(--sp-4) 0;padding:var(--sp-6) var(--sp-4);
+  border-radius:var(--r);background:var(--sink)}
+.why h2{font-family:var(--f-ar);font-size:1.5rem;line-height:1.45;font-weight:700}
+.why ul{margin-block-start:var(--sp-4);display:flex;flex-direction:column;gap:var(--sp-3)}
+.why li{display:flex;gap:var(--sp-3);font-size:14px;line-height:1.7;color:var(--ink-soft)}
+.why li svg{flex:0 0 auto;width:17px;height:17px;margin-block-start:5px;fill:none;stroke:var(--accent);
+  stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
+.why li b{color:var(--ink)}
+
+/* ── section: باقة VIP ──────────────────────────────────────────────────
+   No photograph, by owner decision. What replaces it is not empty space but a
+   TIER SHIFT: this is the one dark card on a cream page, so it reads as a
+   different class of product before a word is read. Gold appears ONLY here —
+   the documented carve-out to the one-accent-hue rule, because VIP is a
+   deliberate sub-brand rather than another orange CTA.
+   The card sells with a priced manifest instead of a picture: the three real
+   pieces it contains, then the saving against buying them separately. */
+.vip{display:block;position:relative;isolation:isolate;overflow:hidden;
+  margin:var(--sp-8) var(--sp-4) 0;padding:var(--sp-6) var(--sp-4);border-radius:var(--r);
+  text-align:start;color:oklch(93% .012 82);
+  background:linear-gradient(158deg,oklch(30% .014 60),oklch(20% .010 80) 62%);
+  box-shadow:var(--shadow-card)}
+.vip::before{content:"";position:absolute;inset:0;z-index:-1;
+  background:radial-gradient(120% 80% at 88% 0%,oklch(76.7% .139 91/.16),transparent 62%)}
+.vip::after{content:"";position:absolute;inset:0;border-radius:var(--r);pointer-events:none;
+  box-shadow:inset 0 0 0 1px oklch(76.7% .139 91/.34)}
+.vip .eyebrow{display:flex;align-items:center;gap:var(--sp-2);font-family:var(--f-lat);
+  font-size:11px;font-weight:700;letter-spacing:.22em;color:var(--gold)}
+.vip .eyebrow i{flex:1;height:1px;background:linear-gradient(to left,oklch(76.7% .139 91/.5),transparent)}
+.vip h2{font-family:var(--f-ar);font-size:1.75rem;line-height:1.4;font-weight:700;
+  color:oklch(98% .008 82);margin-block-start:var(--sp-3)}
+.vip .lede{margin-block-start:var(--sp-2);font-size:13.5px;line-height:1.75;color:oklch(82% .012 82)}
+/* the manifest — real catalog rows, so the package is legible as a sum */
+.vip .incl{margin-block-start:var(--sp-6);border-block-start:1px solid oklch(99% .005 78/.14)}
+.vip .incl li{display:flex;align-items:baseline;gap:var(--sp-3);padding-block:var(--sp-3);
+  border-block-end:1px solid oklch(99% .005 78/.14);font-size:13.5px}
+.vip .incl .nm{flex:1;color:oklch(94% .010 82);font-weight:600}
+.vip .incl .nm span{display:block;font-size:11.5px;font-weight:500;color:oklch(70% .012 82)}
+.vip .incl .vl{font-variant-numeric:tabular-nums;font-size:13px;color:oklch(74% .012 82);direction:ltr}
+.vip .perks{display:flex;flex-wrap:wrap;gap:var(--sp-2);margin-block-start:var(--sp-4)}
+.vip .perks li{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;
+  border-radius:var(--r-pill);background:oklch(99% .005 78/.10);font-size:11.5px;font-weight:700;
+  color:oklch(90% .010 82)}
+.vip .perks svg{width:13px;height:13px;fill:none;stroke:var(--gold);stroke-width:3;
+  stroke-linecap:round;stroke-linejoin:round}
+.vip .money{display:flex;align-items:flex-end;justify-content:space-between;gap:var(--sp-3);
+  margin-block-start:var(--sp-6)}
+.vip .money .was{font-size:12px;color:oklch(68% .012 82);text-decoration:line-through;
+  font-variant-numeric:tabular-nums;direction:ltr}
+.vip .money .now{display:block;font-size:23px;font-weight:800;color:oklch(98% .008 82);
+  font-variant-numeric:tabular-nums;direction:ltr}
+.vip .save{padding:4px 10px;border-radius:var(--r-pill);background:oklch(76.7% .139 91/.18);
+  color:var(--gold);font-size:11.5px;font-weight:800;font-variant-numeric:tabular-nums}
+.vip .btn{margin-block-start:var(--sp-6);background:var(--gold);color:oklch(20% .010 80);
+  box-shadow:0 10px 26px -12px oklch(76.7% .139 91/.5)}
+.vip .btn:hover{background:oklch(85% .12 91);translate:0 -2px}
+
+/* ── section: موقعنا + واتساب ── */
+.visit{margin:var(--sp-8) var(--sp-4) 0}
+.map{overflow:hidden;border-radius:var(--r);border:1px solid var(--line);
+  background:var(--beige);box-shadow:var(--shadow-soft)}
+.map .ratio{position:relative;aspect-ratio:4/3}
+.map iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+.map-fb{position:absolute;inset:0;display:grid;place-items:center;padding:var(--sp-4);
+  background:var(--sink);color:var(--muted);font-size:12.5px;text-align:center}
+.visit .row{display:flex;gap:var(--sp-2);margin-block-start:var(--sp-3)}
+.visit .row .btn{flex:1;padding-inline:var(--sp-3);font-size:13.5px}
+.wa{background:oklch(58% .14 150);color:var(--beige);box-shadow:var(--shadow-float)}
+.wa:hover{background:oklch(48% .13 150)}
+
+.foot{border-block-start:1px solid var(--line);margin-block-start:var(--sp-12);
+  padding:var(--sp-8) var(--sp-4);text-align:center}
+.foot .word{font-family:var(--f-script);font-size:2rem;line-height:1.4;color:var(--accent)}
+.foot p{margin-block-start:var(--sp-2);font-size:13.5px}
+.foot .ig{font-weight:800;color:var(--accent)}
+.foot nav{display:flex;flex-wrap:wrap;justify-content:center;gap:4px var(--sp-4);
+  margin-block-start:var(--sp-4);font-size:12px;font-weight:700;color:var(--muted)}
+.foot .cr{margin-block-start:var(--sp-4);font-weight:700;color:var(--ink-soft)}
+
+/* ── tab bar ── */
+.tabs{position:sticky;bottom:0;z-index:38;display:flex;background:var(--beige);
+  border-block-start:1px solid var(--line);
+  padding:6px 6px calc(6px + env(safe-area-inset-bottom,0px));
+  box-shadow:0 -6px 18px -12px oklch(21.8% .008 80/.2)}
+.tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;min-height:56px;
+  padding-block:4px;font-size:10.5px;font-weight:600;color:var(--muted)}
+.tab .cap{display:grid;place-items:center;position:relative;width:46px;height:30px;
+  border-radius:var(--r-pill);transition:background-color .2s}
+.tab svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.9;
+  stroke-linecap:round;stroke-linejoin:round}
+.tab.on{color:var(--accent);font-weight:800}
+.tab.on .cap{background:var(--accent);color:var(--beige)}
+.tab .cnt{position:absolute;top:-2px;inset-inline-end:2px;min-width:16px;height:16px;padding:0 4px;
+  border-radius:var(--r-pill);background:var(--accent);color:var(--beige);
+  border:1.5px solid var(--beige);font-size:9px;font-weight:800;line-height:13px}
+.tab.on .cnt{background:var(--ink)}
+
+/* ── mockup-only control (NOT part of the product) ── */
+.devbar{position:fixed;inset-block-start:var(--sp-3);inset-inline-start:var(--sp-3);z-index:90;
+  display:flex;align-items:center;gap:var(--sp-2);padding:var(--sp-2) var(--sp-3);
+  border-radius:var(--r-pill);background:oklch(28% .012 80/.94);backdrop-filter:blur(10px);
+  box-shadow:var(--shadow-float);font-size:11.5px;font-weight:700;color:oklch(80% .012 82)}
+.devbar button{min-height:32px;padding:0 var(--sp-3);border-radius:var(--r-pill);
+  font-size:11.5px;font-weight:800;color:oklch(84% .012 82)}
+.devbar button[aria-pressed="true"]{background:var(--accent);color:var(--beige)}
+.devbar .sep{width:1px;height:18px;background:oklch(45% .012 80)}
+@media(max-width:900px){.devbar{inset-inline-start:auto;inset-inline-end:var(--sp-3)}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition-duration:0ms!important;
+  scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+
+<div class="devbar">
+  <span>معاينة:</span>
+  <button type="button" data-sex="f" aria-pressed="true">طالبة</button>
+  <button type="button" data-sex="m" aria-pressed="false">طالب</button>
+  <span class="sep"></span>
+  <button type="button" id="replay">إعادة الترحيب</button>
+</div>
+
+<div id="app" data-onb="1">
+
+<!-- ══════════ ONBOARDING ══════════ -->
+<div id="onb">
+
+  <!-- step 1 — the single emotional beat, shown once ever -->
+  <section class="ob on" data-ob="1">
+    <div class="ob-hero">
+      <img src="../../frontend/public/lookbook/look-english-red.jpg"
+           alt="خرّيجة بروب أسود وقبعة تخرّج ووشاح مخملي أحمر مطرّز باسمها وقسم اللغة الإنجليزية ودفعة 2026">
+      <p class="mark">
+        <img src="../../frontend/public/icons/icon-192.png" alt="" width="40" height="40">
+        <span>لولو شوب</span>
+      </p>
+      <div class="say">
+        <p class="kick">CLASS OF 2026</p>
+        <h1>يوم واحد. وصورة تبقى العمر كله.</h1>
+        <p>أوشحة وروبات وقبعات تخرّج — مخيوطة ومطرّزة بورشتنا، وتوصلك قبل موعد الحفل.</p>
+      </div>
+    </div>
+    <div class="ob-foot">
+      <div class="dots"><i class="on"></i><i></i></div>
+      <button class="btn btn-1 btn-w" type="button" data-goto="2">يلا نبدأ
+        <svg viewBox="0 0 24 24"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg></button>
+    </div>
+  </section>
+
+  <!-- step 2 — name + gender. Both are real inputs the backend needs. -->
+  <section class="ob" data-ob="2">
+    <div class="ob-form" style="flex:1">
+      <button class="back" type="button" data-goto="1">
+        <svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>رجوع</button>
+      <!-- Every string on this screen is gender-NEUTRAL on purpose: it is asked
+           before the answer is known, so «خلّينا نتعرّف عليك» / «شنو اسمك؟»
+           would address a woman in the masculine on the one screen whose whole
+           job is to stop getting that wrong. -->
+      <h1>قبل ما نبدأ</h1>
+      <p class="ob-note">هالمعلومتين تخلّي التطبيق يعرض المقاسات والخيارات والأسعار
+        الصحيحة — ويحچي بالشكل الصحيح. تنعدّل بأي وقت من «حسابي».</p>
+
+      <div class="fld">
+        <label class="lb" for="ob-name">شنو الاسم؟</label>
+        <input class="inp" id="ob-name" placeholder="مثال: سارة أحمد" autocomplete="off" spellcheck="false">
+      </div>
+
+      <div class="fld">
+        <span class="lb" id="ob-sex-lb">طالب لو طالبة؟</span>
+        <div class="gcards" role="group" aria-labelledby="ob-sex-lb">
+          <button class="gcard" type="button" data-pick="f" aria-pressed="false">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="5"/><path d="M12 13v8"/><path d="M9 18h6"/></svg>
+            طالبة</button>
+          <button class="gcard" type="button" data-pick="m" aria-pressed="false">
+            <svg viewBox="0 0 24 24"><circle cx="10" cy="14" r="5"/><path d="M14.5 9.5 20 4"/><path d="M15 4h5v5"/></svg>
+            طالب</button>
+        </div>
+      </div>
+    </div>
+    <div class="ob-foot">
+      <div class="dots"><i></i><i class="on"></i></div>
+      <button class="btn btn-1 btn-w" type="button" id="ob-go" disabled>يلا نشوف القطع
+        <svg viewBox="0 0 24 24"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg></button>
+    </div>
+  </section>
+</div>
+
+<!-- ══════════ APP ══════════ -->
+<header class="topbar">
+  <div class="tb-row">
+    <span class="bm"><img src="../../frontend/public/icons/icon-192.png" alt="لولو شوب" width="36" height="36"></span>
+    <button class="search" type="button">
+      <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <span data-t="search">—</span>
+    </button>
+    <button class="iconbtn" type="button" aria-label="الإشعارات">
+      <svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+      <span class="badge">2</span>
+    </button>
+  </div>
+</header>
+
+<div class="hello">
+  <h1 data-t="greet">—</h1>
+  <p data-t="greetSub">—</p>
+</div>
+
+<p class="promise">
+  <svg viewBox="0 0 24 24"><path d="m20 6-11 11-5-5"/></svg>
+  <span data-t="promise">—</span>
+</p>
+
+<!-- أوشحة -->
+<section class="fam" data-fam="sash"></section>
+
+<!-- ليش لولو شوب -->
+<section class="why">
+  <h2>ليش لولو شوب؟</h2>
+  <ul>
+    <li><svg viewBox="0 0 24 24"><path d="m20 6-11 11-5-5"/></svg>
+      <span data-t="why1">—</span></li>
+    <li><svg viewBox="0 0 24 24"><path d="m20 6-11 11-5-5"/></svg>
+      <span><b>نخيطه بورشتنا</b> — إحنا اللي نفصّل ونطرّز، مو وسيط يشتري ويبيع.</span></li>
+    <li><svg viewBox="0 0 24 24"><path d="m20 6-11 11-5-5"/></svg>
+      <span data-t="why3">—</span></li>
+    <li><svg viewBox="0 0 24 24"><path d="m20 6-11 11-5-5"/></svg>
+      <span data-t="why4">—</span></li>
+  </ul>
+</section>
+
+<!-- روبات -->
+<section class="fam" data-fam="robe"></section>
+
+<!-- باقة VIP — no photo (owner decision); the manifest carries it instead -->
+<a class="vip" href="#">
+  <span class="eyebrow">VIP<i></i></span>
+  <h2 data-t="vipH">—</h2>
+  <span class="lede" data-t="vipP">—</span>
+
+  <ul class="incl" data-vip-incl></ul>
+
+  <ul class="perks">
+    <li><svg viewBox="0 0 24 24"><path d="m20 6-11 11-5-5"/></svg>أولوية بالتنفيذ</li>
+    <li><svg viewBox="0 0 24 24"><path d="m20 6-11 11-5-5"/></svg>تطريز كامل</li>
+    <li><svg viewBox="0 0 24 24"><path d="m20 6-11 11-5-5"/></svg>حقيبة هدية</li>
+  </ul>
+
+  <span class="money">
+    <span>
+      <span class="was" data-vip-was>—</span>
+      <b class="now" data-vip-now>—</b>
+    </span>
+    <span class="save" data-vip-save>—</span>
+  </span>
+  <span class="btn btn-w" data-t="vipCta">—</span>
+</a>
+
+<!-- قبعات -->
+<section class="fam" data-fam="cap"></section>
+
+<!-- شالات -->
+<section class="fam" data-fam="shawl"></section>
+
+<!-- موقعنا + واتساب -->
+<section class="visit">
+  <div class="fam-head" style="padding-inline:0">
+    <span class="t"><h2 class="h-ar" data-t="visitH">—</h2></span>
+  </div>
+  <p style="font-size:14px;margin-block-end:var(--sp-3);color:var(--ink-soft)" data-t="visitP">—</p>
+  <div class="map">
+    <div class="ratio">
+      <div class="map-fb" aria-hidden="true">خريطة جوجل — محل لولو شوب<br><small>تظهر عند الاتصال بالإنترنت</small></div>
+      <iframe title="موقع محل لولو شوب على خرائط جوجل" loading="lazy"
+        referrerpolicy="strict-origin-when-cross-origin" allowfullscreen
+        src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d424.89915383447516!2d44.61802836441445!3d33.74918965285756!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x15564d00690c2b6b%3A0xeb2473a6cc5904ab!2z2YXYt9io2LnYqSDZhNmI2YTZiCDYtNmI2Kg!5e1!3m2!1sar!2siq!4v1782573991001!5m2!1sar!2siq"></iframe>
+    </div>
+  </div>
+  <div class="row">
+    <a class="btn wa" href="https://wa.me/9647713644460" target="_blank" rel="noopener noreferrer">
+      <svg viewBox="0 0 24 24" style="stroke-width:1.9"><path d="M21 11.5a8.5 8.5 0 0 1-12.7 7.4L3 20.5l1.7-5.1A8.5 8.5 0 1 1 21 11.5z"/></svg>
+      واتساب</a>
+    <a class="btn btn-2" href="https://maps.app.goo.gl/tjfh7JuSQGqNVUEd9" target="_blank" rel="noopener noreferrer">
+      <svg viewBox="0 0 24 24"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></svg>
+      الموقع</a>
+  </div>
+</section>
+
+<footer class="foot">
+  <p class="word">lolo shop</p>
+  <p>افضل اللحظات تطرز من اصحاب الخبرة<br>
+    <a class="ig" href="https://instagram.com/lolo_shop96" target="_blank" rel="noopener noreferrer">@lolo_shop96</a></p>
+  <nav aria-label="روابط قانونية"><a href="#">سياسة الخصوصية</a><a href="#">شروط الاستخدام</a></nav>
+  <p class="cr">© RevoArt</p>
+</footer>
+
+<nav class="tabs" aria-label="التنقّل الرئيسي">
+  <button class="tab on" type="button">
+    <span class="cap"><svg viewBox="0 0 24 24"><path d="M3 9.5 12 3l9 6.5"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></svg></span>الرئيسية</button>
+  <button class="tab" type="button">
+    <span class="cap"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/></svg></span>القطع</button>
+  <button class="tab" type="button">
+    <span class="cap"><svg viewBox="0 0 24 24"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg><span class="cnt num">2</span></span>السلة</button>
+  <button class="tab" type="button">
+    <span class="cap"><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>حسابي</button>
+</nav>
+
+</div><!-- /#app -->
+
+<script>
+/* ══ REAL retail feed — 53 products from the dev DB, same query the storefront
+      runs (buildShopFeed, role='retail'). Photos go through prod's next/image
+      optimizer (~27 KB webp instead of the 4–6 MB originals on disk). ══ */
+var PRODUCTS = [{"t":"sash","n":"وشاح الفراشة","p":30000,"cmp":40000,"f":true,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2Fbc150ab4881131926d66393611470ce0.png&w=640&q=75"},{"t":"robe","n":"روب فصال خليجي مبطن سن","p":35000,"cmp":40000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2Fa96dc9aa022ffc775a6f66abd58f8e9d.png&w=640&q=75"},{"t":"cap","n":"قبعة ملكة","p":15000,"cmp":20000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2F585b11f5310e196951919c7c5a2b9b9e.png&w=640&q=75"},{"t":"shawl","n":"شال امريكي 17","p":25000,"cmp":30000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2Ff2fb87b5543e2a277202505bceab964e.png&w=640&q=75"},{"t":"sash","n":"وشاح مثلث ملكي","p":25000,"cmp":30000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2F31d90300ec723af87dd0ff27478d93f2.png&w=640&q=75"},{"t":"robe","n":"روب فصال عادي 2","p":40000,"cmp":null,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2F3442b4ccfbd912fdb8f72e34176e4cb5.png&w=640&q=75"},{"t":"cap","n":"قبعة توكسيدو lolo","p":25000,"cmp":30000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2Ff9fdb8366cca7ff9db39d3ec8ffbf7c9.png&w=640&q=75"},{"t":"shawl","n":"شال امريكي 16","p":25000,"cmp":30000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2F539054982b8439b1f1f9c175325ff60a.png&w=640&q=75"},{"t":"sash","n":"وشاح مثلث حاد","p":25000,"cmp":30000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2F920f14a35d1bc57ff23ed31b8b18ed61.png&w=640&q=75"},{"t":"robe","n":"روب فصال تركي","p":40000,"cmp":50000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2Fa3c6e6614ce1a4aad176d68e0798688e.png&w=640&q=75"},{"t":"cap","n":"قبعة سادة","p":15000,"cmp":20000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2F563f56d1b294758e6a2d8a3d6a1bd504.jpg&w=640&q=75"},{"t":"shawl","n":"شال امريكي 15","p":25000,"cmp":30000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2Fcb3f61cedfed609e61823be6a2115331.png&w=640&q=75"},{"t":"sash","n":"وشاح ملكي فارسي","p":25000,"cmp":30000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2Faa1ecaeac8ed89095a9dd6c5feee3560.png&w=640&q=75"},{"t":"robe","n":"روب فصال ياخة","p":40000,"cmp":50000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2Feae06bb5164087ffc2a9fb7af362a16c.png&w=640&q=75"},{"t":"cap","n":"قبعة توكسيدو 2","p":25000,"cmp":30000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2Fd0f4bfd120d9474a4d99e40345714f37.jpg&w=640&q=75"},{"t":"shawl","n":"شال امريكي 14","p":25000,"cmp":30000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2F8d700a9c87be2cb8e49ab7ea9c4e85e7.png&w=640&q=75"},{"t":"sash","n":"وشاح منحني","p":25000,"cmp":30000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2Fb2dd947eefe0679841ac4970e2787b73.png&w=640&q=75"},{"t":"robe","n":"روب فصال دريم","p":40000,"cmp":50000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2Fb870bfdeb2fbf3003eef0e3d0c5219b6.png&w=640&q=75"},{"t":"cap","n":"قبعة توكسيدو","p":20000,"cmp":25000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2F43445131ced269d8236596cc7e2e0eac.jpg&w=640&q=75"},{"t":"shawl","n":"شال امريكي 13","p":25000,"cmp":30000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2F5e3f5f290b78b5c7105cd1c627c28852.png&w=640&q=75"},{"t":"sash","n":"وشاح عدل حلقة","p":25000,"cmp":30000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2Fcdbe0ea6840a95cf3a18253349154ff1.png&w=640&q=75"},{"t":"robe","n":"روب فصال خليجي تطعيم ردن","p":40000,"cmp":50000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2F960bb4f053cc07ece682f46c699a551d.png&w=640&q=75"},{"t":"shawl","n":"شال امريكي 12","p":25000,"cmp":30000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2F943b5f491fc827cebd9eac7739e9a9fb.png&w=640&q=75"},{"t":"sash","n":"وشاح ملكي","p":25000,"cmp":30000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2F0f37e895a2d198bf21f8cbacdd6c44b7.png&w=640&q=75"},{"t":"robe","n":"روب فصال هرمي","p":40000,"cmp":50000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2F4ca49b86631cbae9e297680b1a5318c3.png&w=640&q=75"},{"t":"shawl","n":"شال امريكي 11","p":25000,"cmp":30000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2Feb7287abc772ece4390d12d872bea4ee.png&w=640&q=75"},{"t":"sash","n":"وشاح امريكي","p":25000,"cmp":30000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2F17ace03474a027221e7bbeb56e370530.png&w=640&q=75"},{"t":"robe","n":"روب فصال شمس","p":50000,"cmp":null,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2F1cd5d3a2fc58f345963377fd7c39bc8b.png&w=640&q=75"},{"t":"shawl","n":"شال امريكي 3","p":25000,"cmp":30000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2Fab41b7693e597eaf4ecc6a95074fa7a9.png&w=640&q=75"},{"t":"sash","n":"وشاح دائري","p":25000,"cmp":30000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2F901b8c0ae7f797a0b2bb70a13017b951.png&w=640&q=75"},{"t":"robe","n":"روب فصال امريكي خاص","p":40000,"cmp":50000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2F70f071dfa23b0bca2fa5fe13ef39c97e.png&w=640&q=75"},{"t":"shawl","n":"شال امريكي 10","p":25000,"cmp":30000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2Fd95cc2cbb7a40ab6856832937294b91b.png&w=640&q=75"},{"t":"sash","n":"وشاح مثلث صغير","p":25000,"cmp":30000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2Fe4047a601f58797c3a3bcf0007bd29c2.png&w=640&q=75"},{"t":"robe","n":"روب فاصل فراشة","p":40000,"cmp":50000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2F6f9f9de125d51854b6e4a06bca3fa5cf.png&w=640&q=75"},{"t":"shawl","n":"شال امريكي 9","p":25000,"cmp":30000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2F388d89f04a11447bd77d2a87851a4a06.png&w=640&q=75"},{"t":"sash","n":"وشاح عدل","p":15000,"cmp":20000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2Fad60b60ab59cd935010c555cc77d9a07.png&w=640&q=75"},{"t":"robe","n":"روب فصال زارا","p":40000,"cmp":50000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2F35720ab699252db46ea6dbc7a8b09365.png&w=640&q=75"},{"t":"shawl","n":"شال امريكي 8","p":25000,"cmp":30000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2Fb05b8625965cc05928a41c6b2d482f41.png&w=640&q=75"},{"t":"robe","n":"روب فصال بشت 2","p":45000,"cmp":50000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2F1223d3c227063c328302b85d714a3462.png&w=640&q=75"},{"t":"shawl","n":"شال امريكي 7","p":25000,"cmp":30000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2F571a517ba50b82eced076854ce46bda3.png&w=640&q=75"},{"t":"robe","n":"روب فصال امريكي كسرات خاصة","p":40000,"cmp":50000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2F5c84c4b5dc5a682dccbcfca7ec5018a3.png&w=640&q=75"},{"t":"shawl","n":"شال امريكي 6","p":25000,"cmp":30000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2Fb7a1e9383768ddc0bdddce4a230c93ea.png&w=640&q=75"},{"t":"robe","n":"روب فصال خليجي قلم","p":40000,"cmp":45000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2Fbeabeb801b98ce88f14cffc9883ef5fe.png&w=640&q=75"},{"t":"shawl","n":"شال امريكي 5","p":25000,"cmp":30000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2F5284906cdc27e4d0b90f39c91de8eb76.png&w=640&q=75"},{"t":"robe","n":"روب فصال امريكي","p":30000,"cmp":35000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2Fc575fc390ce1c4578ff307ce81121907.jpg&w=640&q=75"},{"t":"shawl","n":"شال امريكي 4","p":25000,"cmp":30000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2F77be281fcaa99e6be1e82e6af4be4ddf.png&w=640&q=75"},{"t":"robe","n":"روب فصال خليجي مبطن","p":30000,"cmp":35000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2Fd5574a017291cadb13ca9f0142c714c9.png&w=640&q=75"},{"t":"shawl","n":"شال امريكي 2","p":25000,"cmp":30000,"f":false,"fit":"contain","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2Fee27dea065e9b775aa3527ce1e71cd53.png&w=640&q=75"},{"t":"robe","n":"روب فصال كسرات كتف","p":20000,"cmp":25000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2F647462141ea7723e02c6fc2e34fa9511.jpg&w=640&q=75"},{"t":"shawl","n":"شال امريكي 1","p":25000,"cmp":30000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2Fe12e9932efe8f437341e0a46069cdf62.png&w=640&q=75"},{"t":"robe","n":"روب فصال بشت","p":45000,"cmp":50000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2Fbc3d8895ff7c743681d9645296e69396.png&w=640&q=75"},{"t":"robe","n":"روب فصال عادي","p":20000,"cmp":25000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2Fcf91a1db18c969b2b3c0ef22335fcde9.jpg&w=640&q=75"},{"t":"robe","n":"روب فصال توكسيدو","p":40000,"cmp":45000,"f":false,"fit":"cover","img":"https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2F1532b3b9492ab1bcf5c68bfac460e200.png&w=640&q=75"}];
+
+var FAMILY = {
+  sash:  { ar:'أوشحة',  one:'وشاح' },
+  robe:  { ar:'روبات',  one:'روب'  },
+  cap:   { ar:'قبعات',  one:'قبعة' },
+  shawl: { ar:'شالات',  one:'شال'  }
+};
+
+/* ══ GENDERED COPY — every second-person string lives here, none in markup.
+      Iraqi register, the same one the house already uses («وشاحچ», «تخرّجچ»). ══ */
+var T = {
+  f: {
+    greet:   function (n) { return 'أهلاً ' + n; },
+    greetSub:'جاهزة ليوم تخرّجچ؟ خلّينا نجهّز إطلالتچ.',
+    promise: 'اسمچ وكليتچ مطرّزين بالخيط · جاهز خلال 5 أيام · الدفع نقداً عند التسليم',
+    search:  'دوّري على وشاح، روب، قبعة…',
+    why1:    '<b>اسمچ مطرّز بالخيط</b> — بالخط العربي، مو طباعة تنمسح بعد غسلة.',
+    why3:    '<b>محل حقيقي ببغداد</b> — تكدرين تجين تشوفين القماش بعينچ قبل ما تطلبين.',
+    why4:    '<b>الدفع نقداً عند التسليم</b> — ما تدفعين ولا دينار هسه.',
+    vipH:    'إطلالتچ كاملة، بباقة وحدة',
+    vipP:    'أفخم روب ووشاح وقبعة عدنا — باسمچ وكليتچ، بتطريز كامل وتجهيز بأولوية قبل الحفل.',
+    vipCta:  'احجزي باقة VIP',
+    visitH:  'تعالي شوفينا',
+    visitP:  'محل لولو شوب ببغداد — تعالي شوفي القماش والألوان بعينچ قبل ما تطلبين.',
+    seeAll:  function (f) { return 'كل ال' + f; }
+  },
+  m: {
+    greet:   function (n) { return 'أهلاً ' + n; },
+    greetSub:'جاهز ليوم تخرّجك؟ خلّينا نجهّز إطلالتك.',
+    promise: 'اسمك وكليتك مطرّزين بالخيط · جاهز خلال 5 أيام · الدفع نقداً عند التسليم',
+    search:  'دوّر على وشاح، روب، قبعة…',
+    why1:    '<b>اسمك مطرّز بالخيط</b> — بالخط العربي، مو طباعة تنمسح بعد غسلة.',
+    why3:    '<b>محل حقيقي ببغداد</b> — تكدر تجي تشوف القماش بعينك قبل ما تطلب.',
+    why4:    '<b>الدفع نقداً عند التسليم</b> — ما تدفع ولا دينار هسه.',
+    vipH:    'إطلالتك كاملة، بباقة وحدة',
+    vipP:    'أفخم روب ووشاح وقبعة عدنا — باسمك وكليتك، بتطريز كامل وتجهيز بأولوية قبل الحفل.',
+    vipCta:  'احجز باقة VIP',
+    visitH:  'تعال شوفنا',
+    visitP:  'محل لولو شوب ببغداد — تعال شوف القماش والألوان بعينك قبل ما تطلب.',
+    seeAll:  function (f) { return 'كل ال' + f; }
+  }
+};
+
+/* Arabic counted nouns do NOT work like English. 3–10 takes the PLURAL
+   (5 موديلات) while 11+ reverts to the SINGULAR (11 موديل) — writing
+   "5 موديل" is a grammatical error a native reader notices immediately. */
+function models(n) {
+  if (n === 1) return 'موديل واحد';
+  if (n === 2) return 'موديلان';
+  if (n <= 10) return n + ' موديلات';
+  return n + ' موديل';
+}
+
+var app  = document.getElementById('app');
+var state = { sex: 'f', name: 'سارة' };
+var iqd = function (n) { return n.toLocaleString('en-US') + ' د.ع'; };
+
+/* ── build one family slider ─────────────────────────────────────────── */
+function tileHTML(p) {
+  var img = p.img
+    ? '<img class="' + (p.fit === 'contain' ? 'contain' : '') + '" src="' + p.img +
+      '" alt="' + p.n + '" loading="lazy">'
+    : '';
+  return '<button class="tile" type="button">' +
+    '<span class="ph">' + img + (p.f ? '<span class="flag">مميّز</span>' : '') + '</span>' +
+    '<h3>' + p.n + '</h3>' +
+    '<p class="price num"><span class="from">يبدأ من</span><span class="now">' + iqd(p.p) + '</span></p>' +
+    '</button>';
+}
+
+document.querySelectorAll('[data-fam]').forEach(function (sec) {
+  var key  = sec.dataset.fam;
+  var meta = FAMILY[key];
+  var rows = PRODUCTS.filter(function (p) { return p.t === key; });
+  var low  = rows.reduce(function (a, p) { return Math.min(a, p.p); }, Infinity);
+
+  sec.innerHTML =
+    '<div class="fam-head">' +
+      '<span class="t"><h2>' + meta.ar + '</h2>' +
+        '<span class="n num">' + models(rows.length) + ' · من ' + iqd(low) + '</span></span>' +
+      '<span class="fam-nav">' +
+        '<button class="arw" type="button" data-dir="prev" aria-label="السابق">' +
+          '<svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>' +
+        '<button class="arw" type="button" data-dir="next" aria-label="التالي">' +
+          '<svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>' +
+        '<button class="more" type="button">' + T[state.sex].seeAll(meta.ar) +
+          '<svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>' +
+      '</span>' +
+    '</div>' +
+    '<div class="slider">' + rows.map(tileHTML).join('') + '</div>';
+
+  var rail = sec.querySelector('.slider');
+
+  /* RTL scroll maths: Chrome reports scrollLeft as 0 → -max in RTL, so "next"
+     (visually leftward) is a NEGATIVE delta. Deriving the step from the real
+     card width keeps it correct if the 60% flex-basis ever changes. */
+  function step() {
+    var card = rail.querySelector('.tile');
+    var gap  = parseFloat(getComputedStyle(rail).columnGap) || 12;
+    return card ? card.getBoundingClientRect().width + gap : 200;
+  }
+  function sync() {
+    var max  = rail.scrollWidth - rail.clientWidth;
+    var pos  = Math.abs(rail.scrollLeft);
+    sec.querySelector('[data-dir="prev"]').disabled = pos <= 2;
+    sec.querySelector('[data-dir="next"]').disabled = pos >= max - 2;
+  }
+  sec.querySelectorAll('.arw').forEach(function (b) {
+    b.addEventListener('click', function () {
+      rail.scrollBy({ left: (b.dataset.dir === 'next' ? -1 : 1) * step() });
+    });
+  });
+  rail.addEventListener('scroll', sync, { passive: true });
+  sync();
+});
+
+/* ── apply gendered copy ─────────────────────────────────────────────── */
+function paint() {
+  var t = T[state.sex];
+  document.querySelectorAll('[data-t]').forEach(function (el) {
+    var v = t[el.dataset.t];
+    if (typeof v === 'function') v = v(state.name);
+    if (v == null) return;
+    if (/<[a-z]/i.test(v)) el.innerHTML = v; else el.textContent = v;
+  });
+  document.querySelectorAll('[data-fam]').forEach(function (sec) {
+    sec.querySelector('.more').firstChild.nodeValue = t.seeAll(FAMILY[sec.dataset.fam].ar);
+  });
+  document.querySelectorAll('.devbar [data-sex]').forEach(function (b) {
+    b.setAttribute('aria-pressed', String(b.dataset.sex === state.sex));
+  });
+}
+
+/* ── onboarding ──────────────────────────────────────────────────────── */
+var nameInput = document.getElementById('ob-name');
+var goBtn     = document.getElementById('ob-go');
+var picked    = null;
+
+function showStep(n) {
+  document.querySelectorAll('.ob').forEach(function (s) {
+    s.classList.toggle('on', s.dataset.ob === String(n));
+  });
+  document.getElementById('onb').scrollTop = 0;
+}
+function validate() {
+  goBtn.disabled = !(picked && nameInput.value.trim().length >= 2);
+}
+document.querySelectorAll('[data-goto]').forEach(function (b) {
+  b.addEventListener('click', function () { showStep(b.dataset.goto); });
+});
+document.querySelectorAll('.gcard').forEach(function (c) {
+  c.addEventListener('click', function () {
+    picked = c.dataset.pick;
+    document.querySelectorAll('.gcard').forEach(function (x) {
+      x.setAttribute('aria-pressed', String(x === c));
+    });
+    validate();
+  });
+});
+nameInput.addEventListener('input', validate);
+goBtn.addEventListener('click', function () {
+  state.sex  = picked;
+  state.name = nameInput.value.trim();
+  paint();
+  app.dataset.onb = 'done';
+  window.scrollTo({ top: 0 });
+});
+
+/* ── mockup-only: flip gender without redoing onboarding ─────────────── */
+document.querySelectorAll('.devbar [data-sex]').forEach(function (b) {
+  b.addEventListener('click', function () {
+    state.sex  = b.dataset.sex;
+    /* keep a plausible name so the greeting never reads as a placeholder */
+    if (state.name === 'سارة' || state.name === 'محمد')
+      state.name = b.dataset.sex === 'f' ? 'سارة' : 'محمد';
+    paint();
+  });
+});
+document.getElementById('replay').addEventListener('click', function () {
+  picked = null; nameInput.value = ''; validate();
+  document.querySelectorAll('.gcard').forEach(function (x) { x.setAttribute('aria-pressed', 'false'); });
+  app.dataset.onb = '1';
+  showStep(1);
+});
+
+/* ══ VIP manifest — assembled from the REAL feed, not invented. It takes the
+      dearest live product in each family (that is what a VIP tier contains),
+      sums them for the "buy separately" figure, and prices the package at a
+      round 15% under. ⚠️ THE 15% IS THE ONE NUMBER THE OWNER MUST CONFIRM —
+      the true full-set price lives in the backend's full_set packages, which
+      this mockup has no access to. Every other figure here is real. ══ */
+(function () {
+  var VIP_DISCOUNT = 0.15;
+  var top = ['robe', 'sash', 'cap'].map(function (t) {
+    return PRODUCTS.filter(function (p) { return p.t === t; })
+                   .reduce(function (a, p) { return p.p > a.p ? p : a; });
+  });
+  var was  = top.reduce(function (a, p) { return a + p.p; }, 0);
+  var now  = Math.round(was * (1 - VIP_DISCOUNT) / 500) * 500;
+  document.querySelector('[data-vip-incl]').innerHTML = top.map(function (p) {
+    return '<li><span class="nm">' + p.n +
+           '<span>' + FAMILY[p.t].one + '</span></span>' +
+           '<span class="vl">' + iqd(p.p) + '</span></li>';
+  }).join('');
+  document.querySelector('[data-vip-was]').textContent  = iqd(was);
+  document.querySelector('[data-vip-now]').textContent  = iqd(now);
+  document.querySelector('[data-vip-save]').textContent = 'توفير ' + iqd(was - now);
+})();
+
+paint();
+</script>
+</body>
+</html>

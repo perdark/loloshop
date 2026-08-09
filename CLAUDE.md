@@ -3,8 +3,9 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Latest handoff (read first)
-The most recent session handoff — what was just changed, how it works, and open
-follow-ups. Read it before starting any work. It is auto-loaded via this import:
+Current tree state, the ship queue, owner actions and landmines — **only what is still
+actionable**. Read it before starting any work. Full session history lives in
+`docs/HANDOFF-archive.md`, which is deliberately NOT auto-loaded. Auto-loaded via this import:
 @HANDOFF.md
 
 ## Commands
@@ -46,10 +47,18 @@ Two separate apps, no shared package. Frontend talks to backend over HTTP.
 - `components/ui/*` shared primitives, `components/designer/*` Fabric canvas pieces.
 
 ## Workflow files
-- `PLAN.md` — features broken into self-contained tasks; read before starting a feature.
+Only `HANDOFF.md` is auto-loaded. Everything else is read on demand — keep it that way.
+
+- `PLAN.md` — the **domain model** (products, option groups, role pricing, packages, batches).
+  The original eleven build phases all shipped and moved to `docs/PLAN-archive.md` (2026-08-05).
+  New work does **not** go in PLAN.md — write a spec in `docs/superpowers/specs/` instead.
 - `PROGRESS.md` — what's done/next; **update after every task**.
-- `API.md` — endpoint reference. `open.md` — answered open questions.
+- `API.md` — endpoint reference.
 - `PRODUCT.md` — product/catalog model. `DESIGN.md` — design-system/brand spec (see also `.impeccable.md`).
+- **Archives (never auto-loaded, never deleted):** `docs/HANDOFF-archive.md` — full session
+  narratives, 2026-06-14 → 2026-08-05. `docs/PLAN-archive.md` — the shipped build phases.
+  A dated entry there is a **snapshot of its day, not current state**; check `HANDOFF.md` and git
+  before acting on any line in it.
 
 ## What is LoloShop?
 An e-commerce + design platform for graduation sashes (أوشحة تخرج) and graduation robes (روبات تخرج).

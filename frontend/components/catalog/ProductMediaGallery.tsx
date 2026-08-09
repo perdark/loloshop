@@ -44,19 +44,33 @@ export function ProductMediaGallery({
 
   return (
     <div className="space-y-3">
-      {/* The full product photo at its natural size — never cropped, no zoom. */}
+      {/* The full product photo — never cropped, no zoom.
+          `object-contain` inside a fixed 4/5 box keeps the whole garment visible (the
+          catalog is shot portrait: measured 2026-08-01, photos are 1856x2304 = 4:5, a few
+          1792x2400) while reserving the space BEFORE the image loads. The previous
+          natural-height <img> reserved nothing and was the bulk of a 1.10 CLS.
+          It also goes through next/image now: these originals are 4-6 MB PNGs and the
+          optimizer serves them as ~13-30 KB WebP with a 4h cache — the raw /uploads URL
+          is `Cache-Control: private, no-store`, so it re-downloaded in full every visit. */}
       <div
-        className="overflow-hidden rounded-2xl bg-beige ring-1 ring-orange/10"
+        className="relative aspect-[4/5] overflow-hidden rounded-2xl bg-beige ring-1 ring-orange/10"
         style={heroVT}
       >
         {hero && (
-          // Natural-aspect <img> (not next/image fill) so the whole photo shows
-          // without a fixed crop box. Catalog media is served unoptimized anyway.
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <Image
             src={resolveCatalogMediaUrl(hero) || hero}
             alt={nameAr}
-            className="block h-auto w-full"
+            fill
+            // The hero is the LCP element — the default `loading="lazy"` would make the
+            // browser wait for the intersection observer before even starting it.
+            // NOT `priority`: that prop is deprecated in Next 16 (it silently does
+            // nothing). Its replacement `preload` is also wrong here — this page is a
+            // client component that fetches the product in an effect, so the src does not
+            // exist at SSR time and a <head> preload link could never be written.
+            loading="eager"
+            fetchPriority="high"
+            sizes="(max-width: 767px) 100vw, 640px"
+            className="object-contain"
           />
         )}
       </div>
@@ -80,8 +94,11 @@ export function ProductMediaGallery({
                 alt=""
                 fill
                 loading="lazy"
+                // 64px thumbnail off a multi-megabyte original — `unoptimized` here was
+                // pulling the whole file down per thumb. `sizes` pins the optimizer to
+                // the actual rendered size (64 CSS px, 3x on a phone).
+                sizes="64px"
                 className="object-cover"
-                unoptimized
               />
             </button>
           ))}

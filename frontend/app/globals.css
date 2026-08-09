@@ -193,6 +193,87 @@
   pointer-events: none;
 }
 .btn-shine:hover::after { transform: translateX(130%) skewX(-18deg); }
+/* ⚠️ The rule above is DESKTOP-ONLY BY NATURE. Students are phone-only, and a
+   touch device has no hover — so for the primary device the sheen never fired and
+   the CTA was a flat pill with no personality. Firing it on :active gives touch the
+   same moment, on the one interaction a finger actually produces. */
+.btn-shine:active::after {
+  transform: translateX(130%) skewX(-18deg);
+  transition-duration: 0.45s;
+}
+
+/* Touch-first press feedback.
+   Rationale as above: `hover:-translate-y-0.5` is invisible on a phone. A press
+   that visibly gives way under the thumb is the whole of "this button feels good"
+   on touch. Transform+shadow only — both compositor-cheap on low-end Android.
+   The easing is the project's existing signature curve (see .animate-page-in). */
+.btn-press {
+  transition:
+    transform 0.18s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.18s cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 0.2s ease-out,
+    border-color 0.2s ease-out,
+    color 0.2s ease-out,
+    opacity 0.2s ease-out;
+}
+.btn-press:active:not(:disabled) {
+  transform: scale(0.965);
+  box-shadow: var(--shadow-soft);
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn-press,
+  .btn-shine::after { transition: none; }
+  .btn-press:active:not(:disabled) { transform: none; }
+}
+
+/* Press feedback for LARGE tappable surfaces — product/package tiles.
+   Same argument as `.btn-press` above, different number. The tiles already had
+   `group-hover:scale-[1.045]` + a float shadow, and on this storefront that is
+   motion **nobody in the audience ever sees**: retail is phone-ONLY (see
+   CLAUDE.md → Device Priority), and a phone has no hover. So the most-tapped
+   surface on the whole site answered a thumb with nothing.
+
+   0.98, not `.btn-press`'s 0.965: the same percentage reads as a gentle
+   acknowledgement on a 120px button and as a lurch on a 44vw tile — the bigger
+   the surface, the smaller the shrink has to be to feel like the same gesture.
+
+   Transform only, so it stays on the compositor and never triggers layout. It is
+   deliberately NOT applied to the <figure> that carries `view-transition-name`:
+   scaling the captured element itself would make the product→detail view
+   transition start from a slightly-off snapshot. */
+.tile-press {
+  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.tile-press:active {
+  transform: scale(0.98);
+}
+@media (prefers-reduced-motion: reduce) {
+  .tile-press { transition: none; }
+  .tile-press:active { transform: none; }
+}
+
+/* ⚠️ STATUS-BAR CLEARANCE FOR EVERY STICKY/FIXED TOP BAR.
+   Pairs with `viewportFit: "cover"` in app/layout.tsx — read the long note there
+   for why both are required (Android 15+ forces edge-to-edge; without
+   viewport-fit the inset is always 0, so the two halves only work together).
+
+   The padding goes INSIDE the bar, not above it, so the bar's own background
+   fills the status-bar strip. Putting a margin above instead would leave a bare
+   cream gap over a coloured header on a notched phone.
+
+   `0px` fallback: on a desktop browser, and on any phone with no inset, this
+   adds nothing at all — so the bar keeps exactly its designed padding. */
+.safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+/* Same idea for the left/right insets — landscape on a notched phone puts the
+   cutout on one side. Physical left/right, NOT logical: the notch is on a
+   physical edge and does not flip with `dir="rtl"`. */
+.safe-x {
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
 
 /* Skeleton shimmer for loading states */
 @keyframes skeleton-shimmer {
@@ -574,6 +655,90 @@ html {
 }
 .animate-splash2-curtain-bot-out {
   animation: splash2-curtain-bot-out 0.55s cubic-bezier(0.76, 0, 0.24, 1) forwards;
+}
+
+/* ─── Onboarding stage: the embroidery motif + entrance choreography ───────────
+   The onboarding screen lost its background when the photo step was deleted, and
+   a bare cream panel is `AP-03` (centred everything, nothing carrying weight).
+
+   The motif is a RUNNING STITCH, not a gradient. That is deliberate: per the
+   onboarding pattern, «one motif, reused consistently, does more than any amount
+   of gradient», and the stitch is the one thing on this screen that could not be
+   swapped into a competitor's app — the shop's own world fact is «مخيوطة ومطرّزة
+   بورشتنا» (`L-02`). Inline SVG, no image, so there is no photo to source and
+   nothing to download.
+
+   It continues the SplashIntro's cream stage on purpose. The splash exits with a
+   curtain split; landing on the same warm paper with the same two ambient glows
+   makes the two screens read as one film rather than two designs.
+
+   EVERYTHING here animates `transform` and `opacity` only (`VP-18`) — no
+   stroke-dashoffset, which repaints every frame and is exactly what drops frames
+   on the low-end Androids this audience carries. The stitches therefore appear by
+   staggered fade+rise per group, which reads as "being sewn" without the repaint.
+   All of it collapses under prefers-reduced-motion at the end of this block. */
+@keyframes ob-rise {
+  from { opacity: 0; transform: translate3d(0, 14px, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+/* Staggered entrance for the content rows. 460ms sits inside the 250–350ms
+   screen-transition band once the stagger offset is counted, and the curve is the
+   project's existing signature ease-out. */
+.ob-rise   { animation: ob-rise 460ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.ob-d1     { animation-delay: 60ms; }
+.ob-d2     { animation-delay: 130ms; }
+.ob-d3     { animation-delay: 210ms; }
+.ob-d4     { animation-delay: 300ms; }
+/* The two ways OUT — «تخطّي» and «التالي» — land together on the last beat, after
+   the visitor has seen what is being asked. Leading with the escape hatch is how
+   a screen teaches people to dismiss it before reading it. */
+.ob-d5     { animation-delay: 380ms; }
+
+/* ⚠️ NEVER PUT `.ob-rise` ON AN ELEMENT THAT ALSO CARRIES `.btn-press`.
+   `ob-rise` fills `both`, so after it finishes the animation keeps applying its
+   final `transform: translate3d(0,0,0)` — and animated values outrank normal
+   declarations in the cascade, so `.btn-press:active { transform: scale(.965) }`
+   silently stops working, permanently. Wrap the button in a rising <div> instead;
+   that is why the CTA and the skip row here are wrapped rather than classed. */
+
+/* THE SCREEN ARRIVES AND LEAVES — it doesn't blink in and out.
+   The scrim is `bg-ink/80` + `backdrop-blur-md` over a live storefront, and it
+   used to slam on in a single frame; `setOpen(false)` then unmounted the portal
+   just as hard, hard-cutting back. Both ends now cost ~200ms, which is the whole
+   difference between "a screen" and "a flash". Opacity/transform only, so it
+   stays on the compositor on the low-end Androids this audience carries. */
+@keyframes ob-fade-in  { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ob-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes ob-leave {
+  from { opacity: 1; transform: translate3d(0, 0, 0); }
+  to   { opacity: 0; transform: translate3d(0, 12px, 0); }
+}
+.ob-fade-in  { animation: ob-fade-in 260ms ease-out both; }
+/* `forwards`, never `both`: these run on elements already painted on screen, and
+   a backwards fill would flash them to opacity 0 for one frame before starting. */
+.ob-fade-out { animation: ob-fade-out var(--ob-leave) ease-out forwards; }
+.ob-leave    { animation: ob-leave var(--ob-leave) cubic-bezier(0.4, 0, 1, 1) forwards; }
+/* Single source of truth for the exit duration — Onboarding.tsx waits exactly this
+   long before unmounting the portal, and reads it from here. Change it once. */
+:root { --ob-leave: 200ms; }
+
+/* The selected radio dot LANDS. At 11px a pure appear/disappear is invisible on a
+   phone in Iraqi sun; the overshoot is the cheapest legible «tap registered». */
+@keyframes ob-dot-in {
+  from { opacity: 0; transform: scale(0.2); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.ob-dot-in { animation: ob-dot-in 220ms cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ob-rise { animation: none; opacity: 1; transform: none; }
+  .ob-dot-in { animation: none; }
+  /* The fades STAY. Cross-fading opacity is not what triggers vestibular
+     discomfort — travel is — and the exit still has to happen: the component
+     unmounts on the same timer regardless, so killing it outright would leave the
+     screen frozen at full opacity for 200ms and then vanish, which is worse than
+     what we started with. Only the 12px drop is dropped. */
+  .ob-leave { animation: ob-fade-out var(--ob-leave) linear forwards; }
 }
 
 /* ─── Graduation cap loader ─── */

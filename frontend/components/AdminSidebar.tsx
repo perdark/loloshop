@@ -18,6 +18,7 @@ const navItems: {
   { href: "/design-support", label: "أيادي التصميم", exact: false },
   { href: "/admin/custom-order", label: "طلب مخصص", exact: false },
   { href: "/admin/attendance", label: "بصمة الموظفين", exact: false },
+  { href: "/admin/payouts", label: "تحويل الرواتب", exact: false },
   { href: "/admin/wholesalers", label: "الممثلون", exact: false },
   { href: "/admin/products", label: "الكتالوج", exact: false },
   { href: "/admin/packages", label: "باقات VIP", exact: false },
@@ -114,7 +115,7 @@ export function AdminSidebar({ user, open, onClose }: AdminSidebarProps) {
     <aside className="relative flex h-full w-64 flex-col overflow-hidden bg-ink text-cream">
       <div className="relative border-b border-cream/10 px-5 py-6">
         <div className="flex items-center gap-3">
-          <BrandMark size={56} priority />
+          <BrandMark size={56} eager />
           <div>
             <p className="font-display text-base font-semibold text-cream/90">لولو شوب</p>
             <p className="text-xs tracking-wide text-cream/55">لوحة المدير</p>

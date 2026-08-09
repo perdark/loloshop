@@ -20,6 +20,8 @@ const OP_LABEL_AR = {
   robe_sew: 'خياطة الروب', shawl_close: 'تسكير الشال', american_shawl: 'شال امريكي',
 };
 const PRODUCT_LABEL_AR = { robe: 'روب', cap: 'قبعة', shawl: 'شال', sash: 'وشاح' };
+const AUDIENCES = ['wholesale', 'retail'];
+const AUDIENCE_LABEL_AR = { wholesale: 'ممثلين', retail: 'تجزئة' };
 const n = (v) => Number(v || 0);
 const validInt = (v, min = 0) => Number.isInteger(v) && v >= min;
 const validDate = (v) => !v || /^\d{4}-\d{2}-\d{2}$/.test(String(v));
@@ -76,10 +78,13 @@ async function portalLogin(req, res) {
 }
 
 function validatePiece(body) {
-  const { product, operation, qty, work_date } = body || {};
+  const { product, operation, qty, work_date, audience } = body || {};
   if (!PRODUCTS.includes(product) || !OPERATIONS.includes(operation) || !PRODUCT_OPS[product]?.includes(operation)) {
     return 'نوع القطعة أو الشغل غير صحيح';
   }
+  // No default on purpose: the audience decides the wage, so an unstated one is an
+  // error rather than a guess.
+  if (!AUDIENCES.includes(audience)) return 'حدد لمين هالشغل: ممثلين أو تجزئة';
   if (!validInt(qty, 1)) return 'الكمية غير صحيحة';
   if (!validDate(work_date)) return 'التاريخ غير صحيح';
   return null;
@@ -89,17 +94,17 @@ async function insertProduction({ workerId, body, actorUserId }) {
   const error = validatePiece(body);
   if (error) return { error };
   const rate = await query(
-    `SELECT amount FROM workshop_piece_rates WHERE operation = $1 AND product = $2`,
-    [body.operation, body.product]
+    `SELECT amount FROM workshop_piece_rates WHERE operation = $1 AND product = $2 AND audience = $3`,
+    [body.operation, body.product, body.audience]
   );
   const unitRate = n(rate.rows[0]?.amount);
   const amount = unitRate * body.qty;
   const { rows } = await query(
     `INSERT INTO workshop_production_entries
-       (worker_id, product, operation, qty, rate, amount, work_date, note, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7::date,CURRENT_DATE),$8,$9)
-     RETURNING id, qty, rate, amount, work_date, created_at`,
-    [workerId, body.product, body.operation, body.qty, unitRate, amount,
+       (worker_id, product, operation, audience, qty, rate, amount, work_date, note, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8::date,CURRENT_DATE),$9,$10)
+     RETURNING id, qty, rate, amount, audience, work_date, created_at`,
+    [workerId, body.product, body.operation, body.audience, body.qty, unitRate, amount,
       body.work_date || null, String(body.note || '').trim() || null, actorUserId]
   );
   return { data: rows[0] };
@@ -109,29 +114,35 @@ async function ledgerFor(workerId, limit = 100) {
   const totals = await query(
     `SELECT
        COALESCE((SELECT SUM(amount) FROM workshop_production_entries WHERE worker_id=$1),0) AS production,
+       COALESCE((SELECT SUM(amount) FROM workshop_production_entries WHERE worker_id=$1 AND audience='wholesale'),0) AS production_wholesale,
+       COALESCE((SELECT SUM(amount) FROM workshop_production_entries WHERE worker_id=$1 AND audience='retail'),0) AS production_retail,
        COALESCE((SELECT SUM(amount) FROM workshop_adjustments WHERE worker_id=$1 AND kind='bonus'),0) AS bonuses,
        COALESCE((SELECT SUM(amount) FROM workshop_adjustments WHERE worker_id=$1 AND kind='deduction'),0) AS deductions,
        COALESCE((SELECT SUM(qty) FROM workshop_production_entries WHERE worker_id=$1),0)::int AS pieces`,
     [workerId]
   );
   const entries = await query(
-    `SELECT id, 'production' AS kind, product, operation, qty, rate, amount,
+    `SELECT id, 'production' AS kind, product, operation, audience, qty, rate, amount,
             work_date AS entry_date, note AS reason, created_at
        FROM workshop_production_entries WHERE worker_id=$1
      UNION ALL
-     SELECT id, kind, NULL, NULL, 0, 0, amount, entry_date, reason, created_at
+     SELECT id, kind, NULL, NULL, NULL, 0, 0, amount, entry_date, reason, created_at
        FROM workshop_adjustments WHERE worker_id=$1
      ORDER BY created_at DESC LIMIT $2`, [workerId, limit]
   );
   const t = totals.rows[0];
   const production = n(t.production), bonuses = n(t.bonuses), deductions = n(t.deductions);
   return {
-    production, bonuses, deductions, payable: production + bonuses - deductions,
+    production,
+    production_wholesale: n(t.production_wholesale),
+    production_retail: n(t.production_retail),
+    bonuses, deductions, payable: production + bonuses - deductions,
     pieces: n(t.pieces),
     entries: entries.rows.map((r) => ({
       ...r, qty: n(r.qty), rate: n(r.rate), amount: n(r.amount),
       product_label_ar: r.product ? PRODUCT_LABEL_AR[r.product] : null,
       operation_label_ar: r.operation ? OP_LABEL_AR[r.operation] : null,
+      audience_label_ar: r.audience ? AUDIENCE_LABEL_AR[r.audience] : null,
     })),
   };
 }
@@ -228,25 +239,30 @@ async function linkCandidates(req, res) {
 }
 
 async function ratesMatrix() {
-  const { rows } = await query(`SELECT operation,product,amount FROM workshop_piece_rates`);
-  const saved = Object.fromEntries(rows.map((r) => [`${r.operation}:${r.product}`, n(r.amount)]));
-  return PRODUCTS.flatMap((product) => PRODUCT_OPS[product].map((operation) => ({
-    operation, product, operation_label_ar: OP_LABEL_AR[operation], product_label_ar: PRODUCT_LABEL_AR[product],
-    amount: saved[`${operation}:${product}`] || 0,
-  })));
+  const { rows } = await query(`SELECT operation,product,audience,amount FROM workshop_piece_rates`);
+  const saved = Object.fromEntries(rows.map((r) => [`${r.operation}:${r.product}:${r.audience}`, n(r.amount)]));
+  return PRODUCTS.flatMap((product) => PRODUCT_OPS[product].flatMap((operation) =>
+    AUDIENCES.map((audience) => ({
+      operation, product, audience,
+      operation_label_ar: OP_LABEL_AR[operation],
+      product_label_ar: PRODUCT_LABEL_AR[product],
+      audience_label_ar: AUDIENCE_LABEL_AR[audience],
+      amount: saved[`${operation}:${product}:${audience}`] || 0,
+    }))));
 }
 
 async function listRates(req, res) { res.json({ data: await ratesMatrix() }); }
 
 async function upsertRate(req, res) {
-  const { operation, product, amount } = req.body || {};
-  if (!PRODUCTS.includes(product) || !PRODUCT_OPS[product]?.includes(operation) || !validInt(amount)) {
+  const { operation, product, audience, amount } = req.body || {};
+  if (!PRODUCTS.includes(product) || !PRODUCT_OPS[product]?.includes(operation)
+      || !AUDIENCES.includes(audience) || !validInt(amount)) {
     return res.status(400).json({ error: 'العملية أو السعر غير صحيح', code: 'ERR_VALIDATION' });
   }
   await query(
-    `INSERT INTO workshop_piece_rates(operation,product,amount,updated_by) VALUES($1,$2,$3,$4)
-     ON CONFLICT(operation,product) DO UPDATE SET amount=EXCLUDED.amount,updated_at=NOW(),updated_by=EXCLUDED.updated_by`,
-    [operation, product, amount, req.user.id]
+    `INSERT INTO workshop_piece_rates(operation,product,audience,amount,updated_by) VALUES($1,$2,$3,$4,$5)
+     ON CONFLICT(operation,product,audience) DO UPDATE SET amount=EXCLUDED.amount,updated_at=NOW(),updated_by=EXCLUDED.updated_by`,
+    [operation, product, audience, amount, req.user.id]
   );
   res.json({ ok: true });
 }
@@ -285,27 +301,35 @@ async function dashboard(req, res) {
   const totals = await query(
     `SELECT
        COALESCE((SELECT SUM(qty) FROM workshop_production_entries),0)::int pieces,
+       COALESCE((SELECT SUM(qty) FROM workshop_production_entries WHERE audience='wholesale'),0)::int pieces_wholesale,
+       COALESCE((SELECT SUM(qty) FROM workshop_production_entries WHERE audience='retail'),0)::int pieces_retail,
        COALESCE((SELECT SUM(amount) FROM workshop_production_entries),0) production,
+       COALESCE((SELECT SUM(amount) FROM workshop_production_entries WHERE audience='wholesale'),0) production_wholesale,
+       COALESCE((SELECT SUM(amount) FROM workshop_production_entries WHERE audience='retail'),0) production_retail,
        COALESCE((SELECT SUM(amount) FROM workshop_adjustments WHERE kind='bonus'),0) bonuses,
        COALESCE((SELECT SUM(amount) FROM workshop_adjustments WHERE kind='deduction'),0) deductions`
   );
   const t = totals.rows[0];
   const recent = await query(
-    `SELECT p.id,'production' kind,u.name worker_name,p.product,p.operation,p.qty,p.rate,p.amount,
+    `SELECT p.id,'production' kind,u.name worker_name,p.product,p.operation,p.audience,p.qty,p.rate,p.amount,
             p.work_date entry_date,p.note reason,p.created_at
        FROM workshop_production_entries p JOIN workshop_workers w ON w.id=p.worker_id JOIN users u ON u.id=w.user_id
      UNION ALL
-     SELECT a.id,a.kind,u.name,NULL,NULL,0,0,a.amount,a.entry_date,a.reason,a.created_at
+     SELECT a.id,a.kind,u.name,NULL,NULL,NULL,0,0,a.amount,a.entry_date,a.reason,a.created_at
        FROM workshop_adjustments a JOIN workshop_workers w ON w.id=a.worker_id JOIN users u ON u.id=w.user_id
      ORDER BY created_at DESC LIMIT 100`
   );
   res.json({ totals: {
-    active_workers: n(workers.rows[0].active_workers), pieces: n(t.pieces), production: n(t.production),
+    active_workers: n(workers.rows[0].active_workers), pieces: n(t.pieces),
+    pieces_wholesale: n(t.pieces_wholesale), pieces_retail: n(t.pieces_retail),
+    production: n(t.production),
+    production_wholesale: n(t.production_wholesale), production_retail: n(t.production_retail),
     bonuses: n(t.bonuses), deductions: n(t.deductions), payable: n(t.production) + n(t.bonuses) - n(t.deductions),
   }, workers: (await workerRows()).data,
   recent: recent.rows.map((r) => ({ ...r, qty: n(r.qty), rate: n(r.rate), amount: n(r.amount),
     product_label_ar: r.product ? PRODUCT_LABEL_AR[r.product] : null,
     operation_label_ar: r.operation ? OP_LABEL_AR[r.operation] : null,
+    audience_label_ar: r.audience ? AUDIENCE_LABEL_AR[r.audience] : null,
   })) });
 }
 
@@ -320,5 +344,6 @@ module.exports = {
   attachWorker, requireLead, requireWorkerSelf, portalMembers, portalLogin,
   mySummary, myProduction, listWorkers, createWorker, updateWorker, linkCandidates,
   listRates, upsertRate, createProduction, createAdjustment, workerLedger, dashboard,
-  OPERATIONS, PRODUCTS, PRODUCT_OPS,
+  validatePiece, insertProduction, ratesMatrix, ledgerFor,
+  OPERATIONS, PRODUCTS, PRODUCT_OPS, AUDIENCES, AUDIENCE_LABEL_AR,
 };

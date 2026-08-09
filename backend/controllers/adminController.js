@@ -15,6 +15,24 @@ const { revokeUserDevices } = require('../lib/trustedDevice');
 const SALT_ROUNDS = 10;
 
 // «التسعيرة» — a base price is a non-negative integer (IQD). null = invalid.
+/**
+ * Drop the public /join caches. Call after ANY write that changes what a student sees there.
+ *
+ * WHY THIS EXISTS: joinController caches `join:representatives` for 5 minutes and each
+ * `join:<code>` for 60 seconds, both keyed off the `wholesalers` table this controller edits.
+ * Nothing invalidated them, so an admin who created a rep in front of the owner watched the
+ * new entry NOT appear in «ادخل مع ممثلك» for five minutes and reasonably concluded it had
+ * not saved. Same for a corrected جامعة/قسم, an extended deadline, or a deleted rep whose
+ * link kept working.
+ *
+ * The `join:` prefix deliberately clears BOTH caches, not just the directory: a deadline or
+ * جامعة edit changes `getReferral`'s payload too, and the referral page is where a student
+ * reads the deadline they are racing.
+ */
+function invalidateJoinCaches() {
+  memoCache.del('join:');
+}
+
 function parsePrice(v) {
   if (v == null || v === '') return 0;
   const n = Number(v);
@@ -337,6 +355,7 @@ async function createWholesaler(req, res) {
     );
     return w.rows[0];
   });
+  invalidateJoinCaches(); // the new rep must be pickable on /join immediately
   res.status(201).json({
     data: {
       id: result.id,
@@ -385,6 +404,7 @@ async function updateWholesaler(req, res) {
       embroidery_color: rows[0].embroidery_color,
     })]
   );
+  invalidateJoinCaches(); // جامعة/قسم are exactly what the /join picker groups and labels by
   res.json({ data: rows[0] });
 }
 
@@ -409,6 +429,7 @@ async function updateDeadline(req, res) {
      VALUES ($1, 'extend_deadline', 'wholesaler', $2, $3)`,
     [req.user.id, id, JSON.stringify({ deadline, extend_days })]
   );
+  invalidateJoinCaches(); // /join/<code> shows the deadline the student is racing
   res.json({ data: rows[0] });
 }
 
@@ -466,6 +487,7 @@ async function deleteWholesaler(req, res) {
     );
     await client.query(`DELETE FROM users WHERE id = $1`, [userId]);
   });
+  invalidateJoinCaches(); // a deleted rep's link must stop resolving now, not in 60 seconds
   res.json({ data: { id } });
 }
 // ── Sash side lock config (per wholesaler) ──

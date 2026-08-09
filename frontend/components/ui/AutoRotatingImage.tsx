@@ -20,7 +20,7 @@ export function AutoRotatingImage({
   intervalMs = 4000,
   imgClassName = "object-cover",
   className = "",
-  priority = false,
+  eager = false,
   showDots = true,
   controls = false,
   autoRotate = true,
@@ -31,7 +31,8 @@ export function AutoRotatingImage({
   intervalMs?: number;
   imgClassName?: string;
   className?: string;
-  priority?: boolean;
+  /** Load the first frame immediately — renamed from the Next-16-dead `priority`. */
+  eager?: boolean;
   showDots?: boolean;
   controls?: boolean;
   /** Auto-cycle on a timer. Off = manual only (swipe/arrows) — used on the
@@ -106,7 +107,8 @@ export function AutoRotatingImage({
               src={src}
               alt={i === 0 ? alt : ""}
               fill
-              priority={priority && i === 0}
+              loading={eager && i === 0 ? "eager" : undefined}
+              fetchPriority={eager && i === 0 ? "high" : undefined}
               sizes={sizes}
               aria-hidden={i !== active}
               className={`${imgClassName} transition-opacity duration-700 ease-out ${

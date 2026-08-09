@@ -16,6 +16,7 @@ import {
 import type { StudyType } from "@/lib/types";
 import type { CreateFullSetPayload } from "@/lib/wholesaler";
 import { FullSetOrderForm } from "@/components/wholesaler/FullSetOrderForm";
+import { RetailOrderEditForm } from "@/components/admin/RetailOrderEditForm";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
@@ -151,9 +152,8 @@ export default function StaffOrderEditPage() {
     );
   }
 
-  // Full طقم form (wholesaler/admin-created, design-less bundles) vs the limited
-  // (quick) editor for everything else, incl. retail orders — same header either way.
-  const isLimited = !ctx.can_edit_full_set;
+  const isRetail = ctx.edit_mode === "retail";
+  const isLimited = ctx.edit_mode === "limited";
 
   return (
     <div dir="rtl" lang="ar" className="space-y-5 animate-fade-page-in">
@@ -162,7 +162,11 @@ export default function StaffOrderEditPage() {
           <h1 className="section-heading font-display-ar text-xl font-bold text-ink">تعديل الطلب</h1>
           <p className="mt-0.5 truncate text-sm text-ink-soft">
             {ctx.student.name}
-            {ctx.student.rep_name ? ` — ممثل: ${ctx.student.rep_name}` : " — طلب مخصص"}
+            {ctx.student.rep_name
+              ? ` — ممثل: ${ctx.student.rep_name}`
+              : isRetail
+                ? " — طلب تجزئة"
+                : " — طلب مخصص"}
             {ctx.student.university_name ? ` · ${ctx.student.university_name}` : ""}
           </p>
         </div>
@@ -229,7 +233,32 @@ export default function StaffOrderEditPage() {
         </div>
       </section>
 
-      {isLimited ? (
+      {isRetail ? (
+        <RetailOrderEditForm
+          orderId={orderId}
+          context={ctx}
+          student={{
+            name,
+            instagram,
+            phonePrimary,
+            phoneSecondary,
+            universityName,
+            department,
+            studyType,
+          }}
+          onSaved={(result) => {
+            if (result.productChanged) {
+              toast.info(`تم تبديل نوع القطعة إلى ${result.productName}`);
+            }
+            if (result.designRework) {
+              toast.info("أُعيد الطلب إلى بانتظار التصميم بسبب التعديل");
+            } else if (result.tailorReopened) {
+              toast.info("أُعيد فتح مهمة الفصال بسبب تغيير القياسات");
+            }
+            router.push(`/staff/orders/${orderId}`);
+          }}
+        />
+      ) : isLimited ? (
         <>
           <section className="rounded-2xl border border-line bg-surface p-4 shadow-[var(--shadow-soft)]">
             <h2 className="mb-3 text-sm font-bold text-ink">القطع</h2>

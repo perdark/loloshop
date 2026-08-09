@@ -10,6 +10,7 @@ import type {
   StudentSearchHit,
 } from "@/lib/staff";
 import { FullSetOrderForm } from "@/components/wholesaler/FullSetOrderForm";
+import { RetailOrderBuilder } from "@/components/staff/RetailOrderBuilder";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Spinner } from "@/components/ui/Spinner";
@@ -24,6 +25,13 @@ interface CustomOrderFormProps {
   /** Loads a picked student's existing طقم + effective pricing (pre-fills the form so
    *  a save EDITS the order — a blank form would wipe it via the optional-everything upsert). */
   onLoadStudentContext: (studentId: string) => Promise<StudentFullSetContext>;
+  /** A تجزئة order is created by RetailOrderBuilder itself (its own endpoint), so the page
+   *  is told after the fact instead of via onSubmit. */
+  onRetailCreated: (result: {
+    studentId: string;
+    orders: { id: string }[];
+    total: number;
+  }) => void;
 }
 
 /**
@@ -39,6 +47,7 @@ export function CustomOrderForm({
   onUploadImage,
   onSearchStudents,
   onLoadStudentContext,
+  onRetailCreated,
 }: CustomOrderFormProps) {
   const [mode, setMode] = useState<"new" | "existing">("new");
   const [studentName, setStudentName] = useState("");
@@ -53,6 +62,9 @@ export function CustomOrderForm({
   function pickStudent(hit: StudentSearchHit) {
     setPicked(hit);
     setPickedCtx(null);
+    // A تجزئة student gets the single-piece retail form instead, and the طقم read-back
+    // 403s for them by design — so don't ask for it.
+    if (!hit.full_set_eligible) return;
     setPickedLoading(true);
     onLoadStudentContext(hit.id)
       .then(setPickedCtx)
@@ -80,6 +92,15 @@ export function CustomOrderForm({
     }, 300);
     return () => clearTimeout(t);
   }, [mode, searchQ, picked, onSearchStudents]);
+
+  // Which form the picked student gets is the server's call, mirrored here from the flag it
+  // returns — the طقم endpoints 403 for a تجزئة student and the retail one 403s for everyone
+  // else, so guessing would just produce a form that cannot save.
+  const retailPick = mode === "existing" && picked && !picked.full_set_eligible ? picked : null;
+  // A brand-new student with NO rep is a تجزئة order, so it gets the retail builder. Picking a
+  // rep keeps the طقم form — that path is priced from the rep's التسعيرة and enters their
+  // approval flow, which the retail builder deliberately does not do.
+  const independentNew = mode === "new" && !wholesalerId;
 
   const selectedWholesaler = useMemo(
     () => config.wholesalers.find((w) => w.id === wholesalerId) || null,
@@ -143,14 +164,19 @@ export function CustomOrderForm({
         {mode === "new" ? (
           <>
             <div className="grid gap-3 md:grid-cols-2">
-              <Input
-                label="اسم الطالب"
-                value={studentName}
-                onChange={(e) => setStudentName(e.target.value)}
-                placeholder="الاسم الكامل للطالب"
-                maxLength={120}
-                autoFocus
-              />
+              {/* An independent order collects the full student record inside the retail
+                  builder below (name + phone + gender + …), so this lone name field would
+                  be a second, conflicting source for the same value. */}
+              {!independentNew && (
+                <Input
+                  label="اسم الطالب"
+                  value={studentName}
+                  onChange={(e) => setStudentName(e.target.value)}
+                  placeholder="الاسم الكامل للطالب"
+                  maxLength={120}
+                  autoFocus
+                />
+              )}
               <Select
                 label="ربط الطلب"
                 value={wholesalerId}
@@ -159,8 +185,9 @@ export function CustomOrderForm({
               />
             </div>
             <p className="mt-2 text-xs text-muted">
-              الطلب المستقل يظهر مباشرة في الإنتاج. عند ربطه بممثل، يرث الجامعة والقسم وتسعيرة ذلك
-              الممثل.
+              {independentNew
+                ? "طلب تجزئة بأسعار المفرد — نفس منتجات وخيارات المتجر. عند ربطه بممثل يتحوّل إلى طقم بتسعيرة ذلك الممثل."
+                : "يرث الطلب الجامعة والقسم وتسعيرة الممثل المختار."}
             </p>
           </>
         ) : picked ? (
@@ -172,11 +199,15 @@ export function CustomOrderForm({
                   .filter(Boolean)
                   .join(" · ")}
               </p>
-              {picked.has_full_set && (
+              {!picked.full_set_eligible ? (
+                <p className="mt-1 text-xs font-semibold text-orange-ink">
+                  طالب تجزئة — يُنشأ له طلب قطعة واحدة بأسعار المفرد، مستقل عن طلباته الحالية.
+                </p>
+              ) : picked.has_full_set ? (
                 <p className="mt-1 text-xs font-semibold text-orange-ink">
                   لديه طقم مسجّل — الحقول معبّأة بطلبه الحالي والحفظ يعدّله.
                 </p>
-              )}
+              ) : null}
             </div>
             <button
               type="button"
@@ -201,9 +232,11 @@ export function CustomOrderForm({
               autoFocus
             />
             {searching && (
-              <p className="flex items-center gap-2 text-xs text-muted">
+              // <div>, not <p> — Spinner renders a <div> and a <div> inside a <p> is
+              // invalid HTML, which React reports as a hydration error.
+              <div className="flex items-center gap-2 text-xs text-muted">
                 <Spinner className="h-4 w-4" /> جارٍ البحث…
-              </p>
+              </div>
             )}
             {!searching && searchQ.trim().length >= 2 && !results.length && (
               <p className="text-xs text-muted">لا نتائج مطابقة.</p>
@@ -246,9 +279,25 @@ export function CustomOrderForm({
       </section>
 
       {mode === "existing" && pickedLoading ? (
-        <p className="flex items-center gap-2 rounded-2xl border border-line bg-surface p-4 text-sm text-ink-soft">
+        <div className="flex items-center gap-2 rounded-2xl border border-line bg-surface p-4 text-sm text-ink-soft">
           <Spinner className="h-4 w-4" /> جارٍ تحميل طلب الطالب…
-        </p>
+        </div>
+      ) : retailPick ? (
+        <RetailOrderBuilder
+          key={retailPick.id}
+          student={{
+            id: retailPick.id,
+            name: retailPick.name,
+            phone: retailPick.phone,
+            gender: retailPick.gender,
+          }}
+          onCreated={onRetailCreated}
+        />
+      ) : independentNew ? (
+        // «طلب مستقل بدون ممثل» — a real retail order (full catalog, catalog option groups,
+        // retail prices), NOT the rep طقم form. The student is created by the builder with a
+        // phone + gender, which is what keeps the RETAIL edit path owning these orders.
+        <RetailOrderBuilder key="independent-new" onCreated={onRetailCreated} />
       ) : (
         <FullSetOrderForm
           key={mode === "existing" ? picked?.id ?? "none" : "new"}

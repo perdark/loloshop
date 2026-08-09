@@ -2,7 +2,7 @@ const router = require('express').Router();
 const { authRequired, authQuery, requireRole, requireStaffType } = require('../middleware/auth');
 const c = require('../controllers/productionController');
 const designs = require('../controllers/designController');
-const { imageUpload, imageUploadLimit, validateUploadedImage } = require('../lib/upload');
+const { imageUpload, imageUploadLimit, validateUploadedImage, validateUploadedArtwork } = require('../lib/upload');
 
 // EventSource cannot set headers. Exchange the normal bearer token for a 60-second,
 // stream-only ticket, then put only that scoped ticket in the SSE URL.
@@ -41,6 +41,14 @@ router.get('/students-search', requireStaffType(), edit.studentsSearch);
 router.get('/students/:studentId/full-set-order', requireStaffType(), edit.getStudentFullSet);
 router.get('/orders/:id/edit-context', requireStaffType(), edit.editContext);
 router.post('/students/:studentId/full-set-order', requireStaffType(), edit.saveFullSetOrder);
+// «طلب مخصص» for a self-registered تجزئة student — the exact complement of the طقم path
+// above (retail pricing, always a NEW checkout_group, never touches existing orders).
+router.post('/students/:studentId/retail-order', requireStaffType(), edit.createRetailOrder);
+// Multi-piece «طلب مخصص» — one bundle, N pieces, retail pricing. Serves BOTH an existing
+// تجزئة student (`student_id`) and a brand-new independent one (`student`), which is what
+// makes «طلب مستقل بدون ممثل» a real retail order instead of a rep طقم.
+router.post('/retail-orders', requireStaffType(), edit.createRetailOrders);
+router.put('/orders/:id/retail-configuration', requireStaffType(), edit.saveRetailConfiguration);
 router.patch('/orders/:id/details', requireStaffType(), edit.patchOrderDetails);
 router.post('/uploads/image', requireStaffType(), imageUploadLimit, imageUpload.single('file'), validateUploadedImage, edit.uploadImage);
 
@@ -65,7 +73,7 @@ router.post('/orders/:id/tailor-complete', c.tailorComplete);
 router.post('/orders/:id/tailor-reopen', c.tailorReopen);
 // Final artwork is produced by the design/embroidery roles — not the read-only tailor/presser.
 // (requireStaffType also auto-passes manager + admin.)
-router.post('/orders/:id/final-design', requireStaffType('designer', 'digitizer', 'embroiderer'), imageUploadLimit, imageUpload.single('file'), validateUploadedImage, c.uploadFinalDesign);
+router.post('/orders/:id/final-design', requireStaffType('designer', 'digitizer', 'embroiderer'), imageUploadLimit, imageUpload.single('file'), validateUploadedArtwork, c.uploadFinalDesign);
 
 // Individual design approval gate — designer (+ manager/admin).
 router.post('/designs/:id/approve', requireStaffType('designer'), designs.approveDesign);

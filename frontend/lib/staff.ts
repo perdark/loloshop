@@ -11,10 +11,15 @@ import type {
   StaffActivity,
   StaffAttendanceRecord,
   StaffAttendanceSettings,
+  StaffBreak,
+  StaffBreakBalance,
   StaffGoal,
   StaffSalary,
   StudyType,
+  ProductType,
+  RobeMeasurements,
 } from "./types";
+import type { ConfigureSelectionPayload } from "./orders";
 import {
   mapApiOrderRow,
   type MonitorData,
@@ -145,7 +150,13 @@ export interface StudentSearchHit {
   university_name: string | null;
   wholesaler_id: string | null;
   rep_name: string | null;
+  /** Needed by the single-piece retail form: option groups are gender-scoped. */
+  gender: "male" | "female";
   has_full_set: boolean;
+  /** true → rep-linked or admin-created name-only → the طقم form.
+   *  false → self-registered تجزئة student → the single-piece retail form. The two
+   *  server guards are exact complements, so this flag picks the ONLY form that works. */
+  full_set_eligible: boolean;
 }
 
 export async function searchProductionStudents(q: string): Promise<StudentSearchHit[]> {
@@ -172,6 +183,7 @@ export interface OrderEditStudent {
   id: string;
   name: string;
   phone: string | null;
+  gender: "male" | "female";
   instagram_username: string | null;
   university_name: string | null;
   department: string | null;
@@ -195,9 +207,46 @@ export interface OrderEditContext {
   existing: FullSetExistingOrder | null;
   pricing: FullSetPricing | null;
   can_edit_full_set: boolean;
+  edit_mode: "full_set" | "retail" | "limited";
   /** The order's own typed spec lines (e.g. «تطريز الوشاح» → «احمد») — editable via
    *  the limited (quick) editor when `can_edit_full_set` is false (retail orders). */
   editable_items: { id: string; label: string; text: string }[];
+  retail_order: RetailOrderEditSnapshot | null;
+}
+
+/** A sibling product this piece may be re-pointed at («وشاح الفراشة» → «وشاح ملكي»).
+ *  Same family + same type only, and never one the student already holds a live piece of. */
+export interface ProductSwapCandidate {
+  id: string;
+  name_ar: string;
+  image_url: string | null;
+  retail_price: number;
+}
+
+export interface RetailOrderEditSnapshot {
+  id: string;
+  product_id: string;
+  product_parent_id: string | null;
+  swap_candidates: ProductSwapCandidate[];
+  product_type: ProductType;
+  product_name: string;
+  status: OrderStatus;
+  /** Backend-owned: is «أرجع الطلب إلى بانتظار التصميم» meaningful at this stage? */
+  can_force_rework: boolean;
+  price: number;
+  cost: number;
+  measurements: RobeMeasurements | null;
+  has_embroidery: boolean;
+  needs_pressing: boolean;
+  tailor_status: "pending" | "done";
+  quantity: number;
+  selections: Array<{
+    group_id: string;
+    option_id: string;
+    qty: number;
+    customer_text: string | null;
+    customer_image_url: string | null;
+  }>;
 }
 
 export async function getOrderEditContext(orderId: string): Promise<OrderEditContext> {
@@ -244,6 +293,153 @@ export interface QuickEditPayload {
 
 export async function patchOrderDetails(orderId: string, body: QuickEditPayload): Promise<void> {
   await api.patch(`/production/orders/${orderId}/details`, body);
+}
+
+export interface SaveRetailOrderResult {
+  id: string;
+  oldPrice: number;
+  /** What the selections re-price to — reported even when the price was frozen. */
+  newPrice: number;
+  priceDifference: number;
+  /** What was actually written to the order (equals oldPrice when keepPrice was set). */
+  priceApplied: number;
+  priceKept: boolean;
+  productChanged: boolean;
+  productId: string;
+  productName: string;
+  cost: number;
+  profit: number;
+  status: OrderStatus;
+  designRework: boolean;
+  tailorReopened: boolean;
+}
+
+export async function saveRetailOrderConfiguration(
+  orderId: string,
+  body: {
+    selections: ConfigureSelectionPayload[];
+    /** Same-family sibling to move the piece onto. Omit to keep the current product. */
+    product_id?: string;
+    /** Freeze orders.price at its current value (an agreed price the admin already quoted). */
+    keep_price?: boolean;
+    /** Explicitly send the piece back to «بانتظار التصميم» for rework. */
+    force_design_rework?: boolean;
+    measurements?: RobeMeasurements;
+    student?: {
+      name?: string;
+      instagram_username?: string;
+      university_name?: string;
+      department?: string;
+      study_type?: StudyType | "";
+    };
+    group?: { phone_primary?: string; phone_secondary?: string };
+  }
+): Promise<SaveRetailOrderResult> {
+  const { data } = await api.put<{
+    data: {
+      id: string;
+      old_price: number;
+      new_price: number;
+      price_difference: number;
+      price_applied: number;
+      price_kept: boolean;
+      product_changed: boolean;
+      product_id: string;
+      product_name: string;
+      cost: number;
+      profit: number;
+      status: OrderStatus;
+      design_rework: boolean;
+      tailor_reopened: boolean;
+    };
+  }>(`/production/orders/${orderId}/retail-configuration`, body);
+  return {
+    id: data.data.id,
+    oldPrice: Number(data.data.old_price),
+    newPrice: Number(data.data.new_price),
+    priceDifference: Number(data.data.price_difference),
+    priceApplied: Number(data.data.price_applied),
+    priceKept: Boolean(data.data.price_kept),
+    productChanged: Boolean(data.data.product_changed),
+    productId: data.data.product_id,
+    productName: data.data.product_name,
+    cost: Number(data.data.cost),
+    profit: Number(data.data.profit),
+    status: data.data.status,
+    designRework: Boolean(data.data.design_rework),
+    tailorReopened: Boolean(data.data.tailor_reopened),
+  };
+}
+
+/** One piece of a «طلب مخصص» — a catalog product plus the student's choices on it. */
+export interface RetailOrderPiecePayload {
+  product_id: string;
+  selections: ConfigureSelectionPayload[];
+  measurements?: RobeMeasurements;
+}
+
+/** The student block when «طلب مخصص» is creating an independent (بدون ممثل) student.
+ *  name/phone/gender are REQUIRED server-side: the phone is what makes this a تجزئة
+ *  student the retail edit path owns for life, and gender decides which option groups
+ *  exist at all. */
+export interface NewRetailStudentPayload {
+  name: string;
+  phone: string;
+  gender: "male" | "female";
+  instagram_username?: string;
+  university_name?: string;
+  department?: string;
+  study_type?: "morning" | "evening";
+}
+
+export interface RetailOrderDeliveryPayload {
+  customer_name?: string;
+  instagram_username?: string;
+  phone_primary?: string;
+  phone_secondary?: string;
+  governorate?: string;
+  area_details?: string;
+  event_date?: string;
+  notes?: string;
+}
+
+export interface CreatedRetailOrder {
+  id: string;
+  product_id: string;
+  product_name: string;
+  price: number;
+  status: OrderStatus;
+}
+
+/** «طلب مخصص» priced at the retail book — one brand-new bundle holding every piece.
+ *  Pass `student_id` for an existing تجزئة student, or `student` to create an independent
+ *  one. The complement of `saveStudentFullSetOrder`: exactly one of the two works for any
+ *  given student (see `StudentSearchHit.full_set_eligible`). */
+export async function createRetailOrders(body: {
+  student_id?: string;
+  student?: NewRetailStudentPayload;
+  pieces: RetailOrderPiecePayload[];
+  group?: RetailOrderDeliveryPayload;
+}): Promise<{
+  studentId: string;
+  checkoutGroupId: string;
+  orders: CreatedRetailOrder[];
+  total: number;
+}> {
+  const { data } = await api.post<{
+    data: {
+      student_id: string;
+      checkout_group_id: string;
+      orders: CreatedRetailOrder[];
+      total: number;
+    };
+  }>(`/production/retail-orders`, body);
+  return {
+    studentId: data.data.student_id,
+    checkoutGroupId: data.data.checkout_group_id,
+    orders: data.data.orders,
+    total: Number(data.data.total),
+  };
 }
 
 export async function uploadProductionImage(file: File): Promise<string> {
@@ -407,16 +603,31 @@ export interface WholesalerOrderRow {
   nextLabel: string | null;
   adminAmount: number | null;
   wholesalerAmount: number | null;
-  /** Money-line breakdown (money-eligible roles only; 0 otherwise). Lets the admin page
-   *  explain the admin/rep totals: packages + شال + other add-ons + single pieces. */
-  pkgCount: number;
-  pkgStudent: number;
-  shawlCount: number;
-  shawlStudent: number;
-  otherStudent: number;
-  pieceStudent: number;
-  /** Historical/non-standard paid lines that do not match the named pricing categories. */
-  unclassifiedStudent: number;
+}
+
+export interface WholesalerAccountLine {
+  label: string;
+  qty: number;
+  studentAmount: number;
+  adminAmount: number;
+  representativeProfit: number;
+  kind: "saved" | "adjustment";
+}
+
+export interface WholesalerAccountSummary {
+  scope: "approved_non_cancelled";
+  inventory: {
+    sashRoyal: number;
+    sashNormal: number;
+    capRoyal: number;
+    capNormal: number;
+  };
+  money: {
+    studentTotal: number;
+    adminTotal: number;
+    representativeProfit: number;
+    lines: WholesalerAccountLine[];
+  };
 }
 
 interface WholesalerOrderApiRow {
@@ -435,13 +646,29 @@ interface WholesalerOrderApiRow {
   next_label: string | null;
   admin_amount: number | null;
   wholesaler_amount: number | null;
-  pkg_count?: number;
-  pkg_student?: number;
-  shawl_count?: number;
-  shawl_student?: number;
-  other_student?: number;
-  piece_student?: number;
-  unclassified_student?: number;
+}
+
+interface WholesalerAccountSummaryApi {
+  scope: "approved_non_cancelled";
+  confirmed_inventory: {
+    sash_royal: number;
+    sash_normal: number;
+    cap_royal: number;
+    cap_normal: number;
+  };
+  money: {
+    student_total: number;
+    admin_total: number;
+    representative_profit: number;
+    lines: Array<{
+      label: string;
+      qty: number;
+      student_amount: number;
+      admin_amount: number;
+      representative_profit: number;
+      kind: "saved" | "adjustment";
+    }>;
+  };
 }
 
 /**
@@ -452,13 +679,16 @@ interface WholesalerOrderApiRow {
 export async function getWholesalerOrders(
   wholesalerId: string,
   opts: { zone?: string; isAdmin?: boolean } = {}
-): Promise<WholesalerOrderRow[]> {
+): Promise<{ orders: WholesalerOrderRow[]; summary: WholesalerAccountSummary | null }> {
   const base = opts.isAdmin ? "/admin" : "/staff";
-  const { data } = await api.get<{ data: WholesalerOrderApiRow[] }>(
+  const { data } = await api.get<{
+    data: WholesalerOrderApiRow[];
+    summary: WholesalerAccountSummaryApi | null;
+  }>(
     `${base}/wholesalers/${wholesalerId}/orders`,
     { params: opts.zone ? { zone: opts.zone } : undefined }
   );
-  return (data.data || []).map((r) => ({
+  const orders = (data.data || []).map((r) => ({
     id: r.id,
     studentId: r.student_id,
     studentName: r.student_name,
@@ -474,14 +704,35 @@ export async function getWholesalerOrders(
     nextLabel: r.next_label,
     adminAmount: r.admin_amount == null ? null : Number(r.admin_amount),
     wholesalerAmount: r.wholesaler_amount == null ? null : Number(r.wholesaler_amount),
-    pkgCount: Number(r.pkg_count || 0),
-    pkgStudent: Number(r.pkg_student || 0),
-    shawlCount: Number(r.shawl_count || 0),
-    shawlStudent: Number(r.shawl_student || 0),
-    otherStudent: Number(r.other_student || 0),
-    pieceStudent: Number(r.piece_student || 0),
-    unclassifiedStudent: Number(r.unclassified_student || 0),
   }));
+  const raw = data.summary;
+  return {
+    orders,
+    summary: raw
+      ? {
+          scope: raw.scope,
+          inventory: {
+            sashRoyal: Number(raw.confirmed_inventory.sash_royal || 0),
+            sashNormal: Number(raw.confirmed_inventory.sash_normal || 0),
+            capRoyal: Number(raw.confirmed_inventory.cap_royal || 0),
+            capNormal: Number(raw.confirmed_inventory.cap_normal || 0),
+          },
+          money: {
+            studentTotal: Number(raw.money.student_total || 0),
+            adminTotal: Number(raw.money.admin_total || 0),
+            representativeProfit: Number(raw.money.representative_profit || 0),
+            lines: (raw.money.lines || []).map((line) => ({
+              label: line.label,
+              qty: Number(line.qty || 0),
+              studentAmount: Number(line.student_amount || 0),
+              adminAmount: Number(line.admin_amount || 0),
+              representativeProfit: Number(line.representative_profit || 0),
+              kind: line.kind,
+            })),
+          },
+        }
+      : null,
+  };
 }
 
 export interface BulkAdvanceResult {
@@ -715,9 +966,13 @@ export async function uploadFinalDesign(
   // Use apiUploadFile so axios sets the multipart boundary automatically — setting
   // Content-Type: multipart/form-data manually (no boundary) makes multer drop the file.
   // Backend responds { data: { url } } — absolute /uploads URL.
+  // compress:false — this is the artwork the embroiderer works from, so it must stay
+  // pixel-exact. Every other upload path is a phone photo and IS downscaled.
   const data = (await apiUploadFile(
     `/production/orders/${id}/final-design`,
-    file
+    file,
+    "file",
+    { compress: false }
   )) as { data: { url: string } };
   return data.data;
 }
@@ -853,6 +1108,7 @@ interface ApiAttendanceSettings {
   shop_longitude: number | null;
   shop_radius_meters: number;
   timezone: string;
+  break_monthly_minutes?: number;
 }
 
 interface ApiAttendanceRecord {
@@ -882,6 +1138,8 @@ interface ApiAttendanceRecord {
   admin_note_ar: string | null;
   note_ar: string | null;
   worked_minutes: number;
+  present_minutes?: number;
+  break_minutes?: number;
   scheduled_minutes: number;
   overtime_minutes: number;
   open_too_long: boolean;
@@ -904,6 +1162,7 @@ function mapAttendanceSettings(r: ApiAttendanceSettings): StaffAttendanceSetting
     shopLongitude: r.shop_longitude == null ? null : Number(r.shop_longitude),
     shopRadiusMeters: Number(r.shop_radius_meters),
     timezone: r.timezone,
+    breakMonthlyMinutes: Number(r.break_monthly_minutes ?? 0),
   };
 }
 
@@ -937,6 +1196,8 @@ function mapAttendanceRecord(r: ApiAttendanceRecord | null): StaffAttendanceReco
     adminNoteAr: r.admin_note_ar,
     noteAr: r.note_ar,
     workedMinutes: Number(r.worked_minutes) || 0,
+    presentMinutes: Number(r.present_minutes ?? r.worked_minutes) || 0,
+    breakMinutes: Number(r.break_minutes ?? 0) || 0,
     scheduledMinutes: Number(r.scheduled_minutes) || 0,
     overtimeMinutes: Number(r.overtime_minutes) || 0,
     openTooLong: Boolean(r.open_too_long),
@@ -950,6 +1211,161 @@ function mapAttendanceRecord(r: ApiAttendanceRecord | null): StaffAttendanceReco
 export interface MyAttendanceToday {
   settings: StaffAttendanceSettings;
   record: StaffAttendanceRecord | null;
+  /** the open الخروج المؤقت, if the worker is out or waiting for approval */
+  break: StaffBreak | null;
+  breakBalance: StaffBreakBalance;
+}
+
+interface ApiBreak {
+  id: string;
+  user_id: string;
+  staff_name: string | null;
+  work_date: string;
+  month_key: string;
+  reason_ar: string | null;
+  requested_minutes: number | null;
+  requested_at: string;
+  left_at: string | null;
+  returned_at: string | null;
+  minutes: number;
+  state: StaffBreak["state"];
+  approval: StaffBreak["approval"];
+  left_without_approval: boolean;
+  decided_at: string | null;
+  decision_note_ar: string | null;
+  free_minutes: number;
+  deducted_minutes: number;
+  deduction_per_minute: number;
+  deduction_amount: number;
+  auto_closed: boolean;
+  admin_note_ar: string | null;
+  open_minutes: number;
+  open_too_long: boolean;
+}
+
+interface ApiBreakBalance {
+  month_key: string;
+  monthly_minutes: number;
+  used_minutes: number;
+  remaining_minutes: number;
+  deducted_minutes: number;
+  deduction_amount: number;
+  break_count: number;
+}
+
+export function mapBreak(r: ApiBreak | null): StaffBreak | null {
+  if (!r) return null;
+  return {
+    id: r.id,
+    userId: r.user_id,
+    staffName: r.staff_name,
+    workDate: r.work_date,
+    monthKey: r.month_key,
+    reasonAr: r.reason_ar,
+    requestedMinutes: r.requested_minutes == null ? null : Number(r.requested_minutes),
+    requestedAt: r.requested_at,
+    leftAt: r.left_at,
+    returnedAt: r.returned_at,
+    minutes: Number(r.minutes) || 0,
+    state: r.state,
+    approval: r.approval,
+    leftWithoutApproval: Boolean(r.left_without_approval),
+    decidedAt: r.decided_at,
+    decisionNoteAr: r.decision_note_ar,
+    freeMinutes: Number(r.free_minutes) || 0,
+    deductedMinutes: Number(r.deducted_minutes) || 0,
+    deductionPerMinute: Number(r.deduction_per_minute) || 0,
+    deductionAmount: Number(r.deduction_amount) || 0,
+    autoClosed: Boolean(r.auto_closed),
+    adminNoteAr: r.admin_note_ar,
+    openMinutes: Number(r.open_minutes) || 0,
+    openTooLong: Boolean(r.open_too_long),
+  };
+}
+
+export function mapBreakBalance(r: ApiBreakBalance): StaffBreakBalance {
+  return {
+    monthKey: r.month_key,
+    monthlyMinutes: Number(r.monthly_minutes) || 0,
+    usedMinutes: Number(r.used_minutes) || 0,
+    remainingMinutes: Number(r.remaining_minutes) || 0,
+    deductedMinutes: Number(r.deducted_minutes) || 0,
+    deductionAmount: Number(r.deduction_amount) || 0,
+    breakCount: Number(r.break_count) || 0,
+  };
+}
+
+interface ApiAttendancePayload {
+  settings: ApiAttendanceSettings;
+  record: ApiAttendanceRecord | null;
+  break: ApiBreak | null;
+  break_balance: ApiBreakBalance;
+}
+
+function mapAttendancePayload(d: ApiAttendancePayload): MyAttendanceToday {
+  return {
+    settings: mapAttendanceSettings(d.settings),
+    record: mapAttendanceRecord(d.record),
+    break: mapBreak(d.break),
+    breakBalance: mapBreakBalance(d.break_balance),
+  };
+}
+
+/** Ask to step out. The clock does not start until `startBreak`. */
+export async function requestBreak(input: {
+  reasonAr?: string;
+  requestedMinutes?: number | null;
+}): Promise<MyAttendanceToday> {
+  const { data } = await api.post<{ data: ApiAttendancePayload }>("/staff/attendance/breaks", {
+    reason_ar: input.reasonAr || null,
+    requested_minutes: input.requestedMinutes ?? null,
+  });
+  return mapAttendancePayload(data.data);
+}
+
+/**
+ * Actually leave — this is when the clock starts. `withoutApproval` records a
+ * break the admin never approved, where every minute is deductible.
+ */
+export async function startBreak(
+  breakId: string,
+  withoutApproval = false
+): Promise<MyAttendanceToday> {
+  const { data } = await api.post<{ data: ApiAttendancePayload }>(
+    `/staff/attendance/breaks/${breakId}/leave`,
+    { without_approval: withoutApproval }
+  );
+  return mapAttendancePayload(data.data);
+}
+
+export async function endBreak(breakId: string): Promise<MyAttendanceToday> {
+  const { data } = await api.post<{ data: ApiAttendancePayload }>(
+    `/staff/attendance/breaks/${breakId}/return`,
+    {}
+  );
+  return mapAttendancePayload(data.data);
+}
+
+export async function cancelBreakRequest(breakId: string): Promise<MyAttendanceToday> {
+  const { data } = await api.delete<{ data: ApiAttendancePayload }>(
+    `/staff/attendance/breaks/${breakId}`
+  );
+  return mapAttendancePayload(data.data);
+}
+
+export async function getMyBreaks(month?: string): Promise<{
+  monthKey: string;
+  breaks: StaffBreak[];
+  balance: StaffBreakBalance;
+}> {
+  const { data } = await api.get<{
+    data: { month_key: string; breaks: ApiBreak[]; break_balance: ApiBreakBalance };
+  }>("/staff/attendance/breaks/mine", { params: month ? { month } : undefined });
+  return {
+    monthKey: data.data.month_key,
+    breaks: data.data.breaks.map((b) => mapBreak(b)!).filter(Boolean),
+    balance: mapBreakBalance(data.data.break_balance),
+  };
 }
 
 export interface AttendanceLocationPayload {
@@ -977,35 +1393,24 @@ export function getBrowserAttendanceLocation(): Promise<AttendanceLocationPayloa
 }
 
 export async function getMyAttendanceToday(): Promise<MyAttendanceToday> {
-  const { data } = await api.get<{
-    data: { settings: ApiAttendanceSettings; record: ApiAttendanceRecord | null };
-  }>("/staff/attendance/today");
-  return {
-    settings: mapAttendanceSettings(data.data.settings),
-    record: mapAttendanceRecord(data.data.record),
-  };
+  const { data } = await api.get<{ data: ApiAttendancePayload }>("/staff/attendance/today");
+  return mapAttendancePayload(data.data);
 }
 
 export async function checkInAttendance(
   location: AttendanceLocationPayload | null
 ): Promise<MyAttendanceToday> {
-  const { data } = await api.post<{
-    data: { settings: ApiAttendanceSettings; record: ApiAttendanceRecord | null };
-  }>("/staff/attendance/check-in", { location });
-  return {
-    settings: mapAttendanceSettings(data.data.settings),
-    record: mapAttendanceRecord(data.data.record),
-  };
+  const { data } = await api.post<{ data: ApiAttendancePayload }>("/staff/attendance/check-in", {
+    location,
+  });
+  return mapAttendancePayload(data.data);
 }
 
 export async function checkOutAttendance(
   location: AttendanceLocationPayload | null
 ): Promise<MyAttendanceToday> {
-  const { data } = await api.post<{
-    data: { settings: ApiAttendanceSettings; record: ApiAttendanceRecord | null };
-  }>("/staff/attendance/check-out", { location });
-  return {
-    settings: mapAttendanceSettings(data.data.settings),
-    record: mapAttendanceRecord(data.data.record),
-  };
+  const { data } = await api.post<{ data: ApiAttendancePayload }>("/staff/attendance/check-out", {
+    location,
+  });
+  return mapAttendancePayload(data.data);
 }

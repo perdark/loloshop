@@ -24,7 +24,7 @@ export function ProductTile({
     : null;
   const href = `/product/${product.id}${from ? `?from=${from}` : ""}`;
   return (
-    <Link href={href} className="group block">
+    <Link href={href} className="tile-press group block">
       <figure
         className="relative aspect-[3/4] overflow-hidden rounded-[10px] bg-beige ring-1 ring-ink/10 transition-shadow duration-300 group-hover:shadow-[var(--shadow-float)]"
         style={{ viewTransitionName: productImageVT(product.id) }}
@@ -83,7 +83,7 @@ export function ProductTile({
  */
 export function PackageTile({ pkg }: { pkg: ShopPackageCard }) {
   return (
-    <article className="group block">
+    <article className="tile-press group block">
       <figure className="relative aspect-[4/5] overflow-hidden rounded-[10px] bg-beige ring-1 ring-ink/10 transition-shadow duration-300 group-hover:shadow-[var(--shadow-float)]">
         {pkg.imageUrl ? (
           <Image

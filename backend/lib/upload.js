@@ -53,30 +53,107 @@ function uploadValidationError(message) {
   return err;
 }
 
+// Anything at or below this is already cheap to ship — leave it byte-for-byte alone.
+// Deliberate: it keeps re-encoding away from small line-art PNGs and logos (designer
+// final-design artwork lives in that band) and confines it to the multi-megabyte camera
+// photos that are the actual problem. Measured 2026-08-01: a real catalog photo was a
+// 6.0 MB / 1856x2304 PNG.
+const REENCODE_MIN_BYTES = 500 * 1024;
+// Long-edge cap. The largest surface that ever renders one of these is the product hero
+// at roughly 800 CSS px, so 2000 still leaves >2x headroom on a 2x display.
+const MAX_IMAGE_DIMENSION = 2000;
+const IMAGE_QUALITY = 85;
+
+// Shrink an oversized upload in place. Format policy is deliberately conservative: images
+// WITH transparency stay PNG, everything else becomes JPEG. Both are universally readable,
+// so nothing downstream (staff downloading artwork, the calligraphy compositor, the ZIP
+// export) can be handed a format it cannot open. WebP is intentionally NOT written to disk
+// — Next's image optimizer already converts to WebP/AVIF at delivery time, which is where
+// the format actually needs to be modern.
+//
+// Never throws: a re-encode failure leaves the validated original in place, because a
+// slow upload is a far better outcome than a rejected one.
+async function reencodeUpload(file, metadata) {
+  if (!file.size || file.size <= REENCODE_MIN_BYTES) return;
+  const keepAlpha = Boolean(metadata.hasAlpha);
+  const ext = keepAlpha ? '.png' : '.jpg';
+  const nextPath = path.join(
+    path.dirname(file.path),
+    path.basename(file.path, path.extname(file.path)) + ext
+  );
+  // sharp cannot write over the file it is reading, so stage to a sibling then swap.
+  const tmpPath = `${nextPath}.tmp`;
+  try {
+    // .rotate() with no argument applies the EXIF orientation and then drops the EXIF
+    // block — phone photos stop arriving sideways, and GPS tags stop being republished.
+    const pipeline = sharp(file.path, { limitInputPixels: 40_000_000 })
+      .rotate()
+      .resize({
+        width: MAX_IMAGE_DIMENSION,
+        height: MAX_IMAGE_DIMENSION,
+        fit: 'inside',
+        withoutEnlargement: true,
+      });
+    const out = keepAlpha
+      ? pipeline.png({ compressionLevel: 9, palette: true })
+      : pipeline.jpeg({ quality: IMAGE_QUALITY, mozjpeg: true });
+    const { size } = await out.toFile(tmpPath);
+    // A re-encode that made the file bigger is not an optimisation.
+    if (size >= file.size) {
+      await fs.promises.unlink(tmpPath).catch(() => {});
+      return;
+    }
+    const previousPath = file.path;
+    await fs.promises.rename(tmpPath, nextPath);
+    if (previousPath !== nextPath) {
+      await fs.promises.unlink(previousPath).catch(() => {});
+    }
+    // Controllers build the public URL from req.file.filename, so it has to track the
+    // new extension or every link 404s.
+    file.path = nextPath;
+    file.filename = path.basename(nextPath);
+    file.mimetype = keepAlpha ? 'image/png' : 'image/jpeg';
+    file.size = size;
+  } catch (err) {
+    await fs.promises.unlink(tmpPath).catch(() => {});
+    console.error('Image re-encode failed, keeping original:', err?.message);
+  }
+}
+
 // File extensions and multipart MIME values are caller-controlled. After Multer writes
 // the bounded file, make libvips parse its real header and enforce the expected format and
 // pixel count. Invalid files are removed before any controller can publish their URL.
-async function validateUploadedImage(req, _res, next) {
-  if (!req.file?.path) return next();
-  try {
-    const metadata = await sharp(req.file.path, { limitInputPixels: 40_000_000 }).metadata();
-    const expected = {
-      'image/png': 'png',
-      'image/jpeg': 'jpeg',
-      'image/jpg': 'jpeg',
-      'image/webp': 'webp',
-      'image/heic': 'heif',
-      'image/heif': 'heif',
-    }[String(req.file.mimetype).toLowerCase()];
-    if (!expected || metadata.format !== expected || !metadata.width || !metadata.height) {
-      throw uploadValidationError('ملف الصورة لا يطابق نوعه');
+function makeImageValidator({ reencode }) {
+  return async function validateImage(req, _res, next) {
+    if (!req.file?.path) return next();
+    try {
+      const metadata = await sharp(req.file.path, { limitInputPixels: 40_000_000 }).metadata();
+      const expected = {
+        'image/png': 'png',
+        'image/jpeg': 'jpeg',
+        'image/jpg': 'jpeg',
+        'image/webp': 'webp',
+        'image/heic': 'heif',
+        'image/heif': 'heif',
+      }[String(req.file.mimetype).toLowerCase()];
+      if (!expected || metadata.format !== expected || !metadata.width || !metadata.height) {
+        throw uploadValidationError('ملف الصورة لا يطابق نوعه');
+      }
+      // Only runs once the bytes are proven to be the image type they claim to be.
+      if (reencode) await reencodeUpload(req.file, metadata);
+      next();
+    } catch (err) {
+      try { await fs.promises.unlink(req.file.path); } catch { /* already gone */ }
+      next(err?.expose ? err : uploadValidationError('ملف الصورة غير صالح'));
     }
-    next();
-  } catch (err) {
-    try { await fs.promises.unlink(req.file.path); } catch { /* already gone */ }
-    next(err?.expose ? err : uploadValidationError('ملف الصورة غير صالح'));
-  }
+  };
 }
+
+// Default for every customer/catalog photo route: validate, then shrink.
+const validateUploadedImage = makeImageValidator({ reencode: true });
+// Final-design artwork the embroiderer works from — validate only, never re-encode.
+// Must stay in step with the `compress: false` on the matching frontend upload calls.
+const validateUploadedArtwork = makeImageValidator({ reencode: false });
 
 // Bound authenticated storage abuse as well as individual file size. Account-based keys
 // also stop simple IP rotation; the IP fallback only applies if a route is mis-ordered.
@@ -147,6 +224,7 @@ module.exports = {
   imageUpload,
   imageUploadLimit,
   validateUploadedImage,
+  validateUploadedArtwork,
   publicUrl,
   saveBufferToUploads,
   absFromUrl,

@@ -195,6 +195,37 @@ export async function resendVerifyOtp(challengeId: string): Promise<string> {
   }
 }
 
+// ── «ادخل مع ممثلك» — public rep directory for students who lost their link ───
+export interface JoinRepresentative {
+  referral_code: string;
+  university_name: string;
+  department: string | null;
+  wholesaler_name: string;
+}
+
+/**
+ * Powers the جامعة → قسم picker on /join. Unauthenticated on purpose — see the ⚠️ block on
+ * `getRepresentatives` in backend/controllers/joinController.js for what it does and does not
+ * disclose.
+ *
+ * ⚠️ THIS THROWS ON FAILURE, AND THAT IS THE FIX. It used to swallow every error and resolve
+ * to [], which the page could not tell apart from "there genuinely are no reps" — so a dropped
+ * connection on a phone rendered «لا توجد قائمة ممثلين متاحة الآن» with no retry, telling a
+ * student their rep is not registered when the truth was that the request never arrived. Those
+ * two states need opposite answers (retry vs. ask your rep for the link), so the caller has to
+ * be able to tell them apart.
+ */
+export async function getJoinRepresentatives(): Promise<JoinRepresentative[]> {
+  try {
+    const { data } = await api.get<{ representatives: JoinRepresentative[] }>(
+      "/join/representatives"
+    );
+    return data.representatives || [];
+  } catch (e) {
+    throw new Error(extractMessage(e, "تعذّر تحميل قائمة الممثلين"));
+  }
+}
+
 // ── Private staff portal (phoneless staff: pick name + password, no OTP) ──────
 export interface StaffPortalMember {
   id: string;
@@ -227,6 +258,40 @@ export async function staffPortalLogin(
     return data;
   } catch (e) {
     throw new Error(extractMessage(e, "بيانات الدخول غير صحيحة"));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Account deletion (Apple App Store guideline 5.1.1(v))
+// ---------------------------------------------------------------------------
+
+export type DeletionPreview = {
+  eligible: boolean;
+  /** Present only when eligible is false — why this account is admin-managed. */
+  reason_ar?: string;
+  /** Orders the shop is still working on. Deleting does NOT cancel them. */
+  active_orders: number;
+  total_orders: number;
+};
+
+export async function getDeletionPreview(): Promise<DeletionPreview> {
+  const { data } = await api.get<DeletionPreview>("/auth/account/deletion-preview");
+  return data;
+}
+
+/**
+ * Erases the account for good. The backend bumps token_version, so the JWT this
+ * call was made with is dead the moment it returns — the caller must clear local
+ * storage and leave the authenticated area rather than making another request.
+ */
+export async function deleteAccount(password: string): Promise<{ retained_orders: number }> {
+  try {
+    const { data } = await api.post<{
+      data: { deleted: boolean; retained_orders: number };
+    }>("/auth/account/delete", { password });
+    return { retained_orders: data.data.retained_orders };
+  } catch (e) {
+    throw fieldError(e, "تعذر حذف الحساب");
   }
 }
 

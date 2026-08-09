@@ -110,7 +110,9 @@ export function DesignGallery({
               type="button"
               onClick={close}
               aria-label="إغلاق"
-              className="absolute end-4 top-4 flex h-11 w-11 items-center justify-center rounded-full bg-white/15 text-2xl leading-none text-white transition-colors hover:bg-white/30"
+              /* Status-bar clearance — same reason as Lightbox.tsx: this is the only
+                 way out of a fullscreen viewer, and edge-to-edge would bury it. */
+              className="absolute end-4 top-[max(1rem,calc(env(safe-area-inset-top,0px)+0.5rem))] flex h-11 w-11 items-center justify-center rounded-full bg-white/15 text-2xl leading-none text-white transition-colors hover:bg-white/30"
             >
               ✕
             </button>

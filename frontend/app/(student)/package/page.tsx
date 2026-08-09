@@ -182,7 +182,7 @@ export default function PackagePage() {
                       fill
                       className="object-cover"
                       sizes="(max-width: 1023px) 100vw, 640px"
-                      unoptimized
+                      /* `unoptimized` removed — stored catalog image, see VipHero. */
                     />
                   </div>
                 )}

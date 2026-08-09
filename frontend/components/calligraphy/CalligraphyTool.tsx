@@ -117,6 +117,13 @@ function PlateCard({
             {plate.error ?? "فشل التوليد"}
           </p>
         </div>
+      ) : plate.status === "done" ? (
+        // done but no usable image — never show a spinner here, it can never resolve
+        <div className="flex min-h-[80px] items-center justify-center rounded-xl bg-gray-50 p-3">
+          <p className="text-center text-xs text-ink-soft">
+            لا توجد صورة — أعد التوليد
+          </p>
+        </div>
       ) : (
         <div className="flex min-h-[80px] items-center justify-center rounded-xl bg-amber-50">
           <span className="h-5 w-5 animate-spin rounded-full border-2 border-amber-400 border-t-transparent" />
@@ -671,7 +678,6 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
 
     async function restore() {
       const savedJobId = localStorage.getItem("cal_last_job");
-      let jobRestored = false;
 
       if (savedJobId) {
         try {
@@ -680,22 +686,41 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
           setPlates(job.plates);
           setDone(job.done);
           setTotal(job.total);
-          jobRestored = true;
+
+          // THE BUG: restoring a job painted its plates but never started the
+          // poller, so any plate still 'pending' span an amber spinner forever —
+          // reloading the page reproduced it identically. runCreatedJob is the
+          // ONLY poller and the only ~2-min worker-stall fallback, so resume it
+          // when the restored job still has unfinished work. A finished job is
+          // dropped from localStorage so it stops being resurrected.
+          if (job.plates.some((p) => p.status === "pending")) {
+            setRunning(true);
+            void runCreatedJob(job).finally(() => setRunning(false));
+          } else {
+            localStorage.removeItem("cal_last_job");
+          }
         } catch {
           // job not found or expired — clear the key
           localStorage.removeItem("cal_last_job");
         }
       }
 
-      if (!jobRestored) {
-        try {
-          const recent = await getRecentPlates(60);
-          if (recent.length > 0) {
-            setPlates(recent);
-          }
-        } catch {
-          // silent — recent plates are best-effort
+      // ALWAYS load the recent finished plates, even when a job was restored.
+      // Gating this behind `!jobRestored` meant a single stuck job in localStorage
+      // hid every successfully-generated design: the grid showed only that job's
+      // pending spinners and nothing else. Merge by id so the restored job's own
+      // rows (which carry live status) win over the recent snapshot.
+      try {
+        const recent = await getRecentPlates(60);
+        if (recent.length > 0) {
+          setPlates((prev) => {
+            if (prev.length === 0) return recent;
+            const seen = new Set(prev.map((p) => p.id));
+            return [...prev, ...recent.filter((r) => !seen.has(r.id))];
+          });
         }
+      } catch {
+        // silent — recent plates are best-effort
       }
       // Results restored → tuck the generation controls behind the sticky bar, unless
       // the worker already had a controlsOpen preference restored this session (their

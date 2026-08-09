@@ -2,10 +2,130 @@ const { query } = require('../lib/db');
 const { staffScopeAllows, staffTypesOf } = require('../middleware/auth');
 const { canStaffTransition, STATUS_LABEL_AR, orderZoneClause } = require('./orderController');
 const { nextStageFor } = require('./productionController');
+const { moneyCalculations, calculationFor } = require('../lib/moneyCalculation');
 
 const COMPLETED_STATUSES = ['design_complete', 'staff_review', 'printing', 'embroidery', 'pressing', 'preparing', 'ready', 'delivered'];
 // "Done" for the orders console = handed over or ready to hand over.
 const DONE_STATUSES = new Set(['ready', 'delivered']);
+
+function buildWholesalerAccountSummary(rows, byId) {
+  const inventory = {
+    sash_royal: 0,
+    sash_normal: 0,
+    cap_royal: 0,
+    cap_normal: 0,
+  };
+  let studentTotal = 0;
+  let adminTotal = 0;
+  const grouped = new Map();
+  let priceAdjustment = 0;
+  let costAdjustment = 0;
+
+  for (const row of rows) {
+    studentTotal += Number(row.price || 0);
+    adminTotal += Number(row.cost || 0);
+    if (row.product_type === 'sash') {
+      inventory[row.piece_variant === 'royal' ? 'sash_royal' : 'sash_normal'] += 1;
+    } else if (row.product_type === 'cap') {
+      inventory[row.piece_variant === 'royal' ? 'cap_royal' : 'cap_normal'] += 1;
+    }
+
+    const calculation = calculationFor(row, byId);
+    for (const line of calculation.lines) {
+      const key = line.label;
+      const current = grouped.get(key) || {
+        label: line.label,
+        qty: 0,
+        student_amount: 0,
+        admin_amount: 0,
+        representative_profit: 0,
+        kind: 'saved',
+      };
+      current.qty += Number(line.qty || 1);
+      current.student_amount += Number(line.price || 0);
+      current.admin_amount += Number(line.admin_price || 0);
+      current.representative_profit = current.student_amount - current.admin_amount;
+      grouped.set(key, current);
+    }
+    priceAdjustment += calculation.price_adjustment;
+    costAdjustment += calculation.cost_adjustment;
+  }
+
+  const lines = [...grouped.values()];
+  if (priceAdjustment !== 0 || costAdjustment !== 0) {
+    lines.push({
+      label: 'تسوية / سجل قديم',
+      qty: 0,
+      student_amount: priceAdjustment,
+      admin_amount: costAdjustment,
+      representative_profit: priceAdjustment - costAdjustment,
+      kind: 'adjustment',
+    });
+  }
+  return {
+    scope: 'approved_non_cancelled',
+    confirmed_inventory: inventory,
+    money: {
+      student_total: studentTotal,
+      admin_total: adminTotal,
+      representative_profit: studentTotal - adminTotal,
+      lines,
+    },
+  };
+}
+
+async function wholesalerAccountSummary(wholesalerId) {
+  const { rows } = await query(
+    `SELECT o.id, o.price, o.cost, p.type::text AS product_type,
+            COALESCE((
+              SELECT CASE
+                       WHEN COALESCE(NULLIF(btrim(oi.customer_text), ''), opt.label_ar, oi.label_snapshot)
+                              ILIKE '%ملكي%' THEN 'royal'
+                       WHEN COALESCE(NULLIF(btrim(oi.customer_text), ''), opt.label_ar, oi.label_snapshot)
+                              ILIKE '%عادي%' THEN 'normal'
+                     END
+                FROM order_items oi
+                LEFT JOIN options opt ON opt.id = oi.option_id
+                LEFT JOIN option_groups og ON og.id = oi.group_id
+               WHERE oi.order_id = o.id
+                 AND (
+                   (p.type = 'sash' AND (
+                     oi.label_snapshot ILIKE '%نوع%وشاح%'
+                     OR oi.label_snapshot ILIKE 'قطعة:%وشاح%'
+                     OR og.name_ar ILIKE '%نوع%وشاح%'
+                     OR og.name_ar ILIKE '%شكل%وشاح%'
+                     OR (oi.group_id IS NULL AND opt.label_ar ~* '(ملكي|عادي)')
+                   ))
+                   OR
+                   (p.type = 'cap' AND (
+                     oi.label_snapshot ILIKE '%نوع%قبعة%'
+                     OR oi.label_snapshot ILIKE 'قطعة:%قبعة%'
+                     OR og.name_ar ILIKE '%نوع%قبعة%'
+                     OR og.name_ar ILIKE '%شكل%قبعة%'
+                     OR og.name_ar ILIKE '%القبعة عادية%'
+                     OR (oi.group_id IS NULL AND opt.label_ar ~* '(ملكي|عادي)')
+                   ))
+                 )
+                 AND COALESCE(NULLIF(btrim(oi.customer_text), ''), opt.label_ar, oi.label_snapshot)
+                       ~* '(ملكي|عادي)'
+               ORDER BY CASE WHEN oi.label_snapshot ILIKE '%نوع%' THEN 0
+                             WHEN oi.option_id IS NOT NULL THEN 1 ELSE 2 END,
+                        oi.created_at, oi.id
+               LIMIT 1
+            ), 'normal') AS piece_variant
+       FROM orders o
+       JOIN students s ON s.id = o.student_id
+       JOIN products p ON p.id = o.product_id
+      WHERE s.wholesaler_id = $1
+        AND o.status::text <> 'cancelled'
+        AND o.wholesaler_approval = 'approved'
+      ORDER BY o.created_at, o.id`,
+    [wholesalerId]
+  );
+
+  const byId = await moneyCalculations(rows);
+  return buildWholesalerAccountSummary(rows, byId);
+}
 
 // Safe staff-facing representative index. This intentionally excludes referral codes,
 // pricing, commission and email fields returned by the admin-only endpoint.
@@ -57,6 +177,9 @@ async function wholesalerOrders(req, res) {
     return res.status(403).json({ error: 'هذا خارج نطاقك', code: 'ERR_FORBIDDEN' });
   }
   const canSeeMoney = req.user.role === 'admin' || staffTypesOf(req.user).includes('manager');
+  // Account/inventory are whole-wholesaler confirmed totals. They deliberately do not
+  // inherit the work-list's zone filter.
+  const summary = canSeeMoney ? await wholesalerAccountSummary(id) : null;
   // Validate the zone key up front: an unknown key would otherwise be silently dropped
   // (orderZoneClause → null) and the console would look like "filter broken" by returning all.
   let zoneClause = null;
@@ -113,45 +236,14 @@ async function wholesalerOrders(req, res) {
     };
   });
 
-  // Per-order money breakdown (only for money-eligible roles) so the admin page can show
-  // WHY the admin/rep totals are what they are: packages (rep keeps the base spread),
-  // شال امريكي (admin fixed 20,000 → rep keeps the rest), other add-ons + single pieces
-  // (100% to admin). pkg_admin is derived on the client from admin_amount, so no admin_price
-  // round-trip is needed and the split always reconciles to orders.cost/price.
-  if (canSeeMoney && data.length) {
-    const ids = rows.map((r) => r.id);
-    const { rows: bd } = await query(
-      `SELECT oi.order_id,
-              COUNT(*) FILTER (WHERE oi.label_snapshot = 'طقم كامل')::int AS pkg_count,
-              COALESCE(SUM(oi.price_snapshot) FILTER (WHERE oi.label_snapshot = 'طقم كامل'),0)::bigint AS pkg_student,
-              COUNT(*) FILTER (WHERE oi.label_snapshot ILIKE 'إضافة%شال%')::int AS shawl_count,
-              COALESCE(SUM(oi.price_snapshot) FILTER (WHERE oi.label_snapshot ILIKE 'إضافة%شال%'),0)::bigint AS shawl_student,
-              COALESCE(SUM(oi.price_snapshot) FILTER (WHERE oi.label_snapshot ILIKE 'إضافة%' AND oi.label_snapshot NOT ILIKE '%شال%'),0)::bigint AS other_student,
-              COALESCE(SUM(oi.price_snapshot) FILTER (WHERE oi.label_snapshot ILIKE 'قطعة:%'),0)::bigint AS piece_student,
-              COALESCE(SUM(oi.price_snapshot) FILTER (
-                WHERE oi.price_snapshot <> 0
-                  AND oi.label_snapshot <> 'طقم كامل'
-                  AND oi.label_snapshot NOT ILIKE 'إضافة%'
-                  AND oi.label_snapshot NOT ILIKE 'قطعة:%'
-              ),0)::bigint AS unclassified_student
-         FROM order_items oi
-        WHERE oi.order_id = ANY($1::uuid[])
-        GROUP BY oi.order_id`,
-      [ids]
-    );
-    const byId = new Map(bd.map((b) => [b.order_id, b]));
-    for (const d of data) {
-      const b = byId.get(d.id);
-      d.pkg_count = b ? Number(b.pkg_count) : 0;
-      d.pkg_student = b ? Number(b.pkg_student) : 0;
-      d.shawl_count = b ? Number(b.shawl_count) : 0;
-      d.shawl_student = b ? Number(b.shawl_student) : 0;
-      d.other_student = b ? Number(b.other_student) : 0;
-      d.piece_student = b ? Number(b.piece_student) : 0;
-      d.unclassified_student = b ? Number(b.unclassified_student) : 0;
-    }
-  }
-  res.json({ data });
+  res.json({ data, summary });
 }
 
-module.exports = { listWholesalers, wholesalerStudents, wholesalerOrders };
+module.exports = {
+  listWholesalers,
+  wholesalerStudents,
+  wholesalerOrders,
+  // Exported for focused tests of confirmed-only inventory/account math.
+  wholesalerAccountSummary,
+  buildWholesalerAccountSummary,
+};

@@ -25,6 +25,7 @@ import { revertOrder } from "@/lib/staff";
 import { ORDER_STATUS_LABELS } from "@/lib/constants";
 import type { OrderStatus } from "@/lib/types";
 import { usePolling } from "@/lib/hooks/usePolling";
+import { useScrollRestore } from "@/hooks/useScrollRestore";
 import { PlaceSheet } from "./PlaceSheet";
 import { ShelfMap } from "./ShelfMap";
 
@@ -87,6 +88,10 @@ export function ShelfConsole() {
   useEffect(() => {
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ search, showAllInbox }));
   }, [search, showAllInbox]);
+
+  // Land the preparer back where they were after opening a piece — the shelf map is long
+  // and «رجوع» used to return them to the top of it every time.
+  useScrollRestore("shelf", !!board);
 
   const flash = useCallback((msg: string) => {
     setToast(msg);

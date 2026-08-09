@@ -11,6 +11,8 @@ interface ReceiptUploadProps {
   /** The uploaded receipt image URL ("" / undefined when none). */
   value: string | undefined;
   onChange: (url: string) => void;
+  /** Privileged editors can supply their own authenticated upload endpoint. */
+  uploadImage?: (file: File) => Promise<string>;
 }
 
 /**
@@ -19,7 +21,11 @@ interface ReceiptUploadProps {
  * retail design-image upload endpoint; the URL rides the robe order's
  * measurements JSON (receipt_image_url).
  */
-export function ReceiptUpload({ value, onChange }: ReceiptUploadProps) {
+export function ReceiptUpload({
+  value,
+  onChange,
+  uploadImage = uploadDesignImage,
+}: ReceiptUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const previewUrl = value ? resolveCatalogMediaUrl(value) : null;
@@ -27,7 +33,7 @@ export function ReceiptUpload({ value, onChange }: ReceiptUploadProps) {
   async function handleFile(file: File) {
     setUploading(true);
     try {
-      const url = await uploadDesignImage(file);
+      const url = await uploadImage(file);
       onChange(url);
       toast.success("تم رفع صورة الوصل");
     } catch (e) {

@@ -51,7 +51,9 @@ export default function ForgotPasswordPage() {
         setPhoneStep("verify");
         toast.success("إذا كان الرقم مسجّلاً، ستصلك رسالة واتساب بالرمز");
       } catch (err) {
-        toast.error(getApiErrorMessage(err, "تعذّر إرسال الرمز"));
+        // Inline, under the phone field it belongs to — the toast put the only failure
+        // message on the screen somewhere the eye isn't, then took it away again.
+        setPhoneError(getApiErrorMessage(err, "تعذّر إرسال الرمز"));
       } finally {
         setLoading(false);
       }
@@ -74,15 +76,23 @@ export default function ForgotPasswordPage() {
       toast.success("تم تعيين كلمة المرور، سجّل الدخول الآن");
       router.push("/login");
     } catch (err) {
-      toast.error(getApiErrorMessage(err, "تعذّر إعادة التعيين"));
+      setPhoneError(getApiErrorMessage(err, "تعذّر إعادة التعيين"));
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <AuthCard title="استعادة كلمة المرور">
-      <form onSubmit={handleSubmit} className="space-y-4">
+    <AuthCard
+      title="استعادة كلمة المرور"
+      subtitle={
+        phoneStep === "request"
+          ? "نرسل لك رمزاً على واتساب لتعيين كلمة مرور جديدة"
+          : undefined
+      }
+    >
+      <form onSubmit={handleSubmit} className="flex w-full flex-1 flex-col">
+        <div className="space-y-4">
         {phoneStep === "request" ? (
           <div className="flex flex-col gap-1.5">
             <label htmlFor="fp-phone" className="text-sm font-medium text-ink">
@@ -92,7 +102,7 @@ export default function ForgotPasswordPage() {
               <span
                 id="fp-phone-country"
                 aria-label="رمز الدولة العراق"
-                className="inline-flex select-none items-center rounded-xl border border-ink/15 bg-beige px-3 text-sm font-semibold text-ink"
+                className="inline-flex select-none items-center rounded-xl border border-line bg-beige px-3 text-sm font-semibold text-ink"
               >
                 +964
               </span>
@@ -107,14 +117,14 @@ export default function ForgotPasswordPage() {
                 aria-invalid={!!phoneError}
                 aria-describedby={`fp-phone-country${phoneError ? " fp-phone-error" : ""}`}
                 className={[
-                  "min-h-11 min-w-0 flex-1 rounded-xl border bg-white px-3.5 py-2.5 text-ink outline-none transition-colors placeholder:text-ink/55",
+                  "min-h-12 min-w-0 flex-1 rounded-xl border bg-beige px-3.5 py-2.5 text-base text-ink shadow-[var(--shadow-soft)] outline-none transition-colors placeholder:text-ink/55",
                   "focus:border-orange-ink focus:ring-2 focus:ring-orange-ink/20",
-                  phoneError ? "border-danger" : "border-ink/15",
+                  phoneError ? "border-danger" : "border-line",
                 ].join(" ")}
               />
             </div>
             {phoneError && (
-              <p id="fp-phone-error" className="text-xs text-danger" role="alert">
+              <p id="fp-phone-error" className="text-sm font-medium text-danger" role="alert">
                 {phoneError}
               </p>
             )}
@@ -148,7 +158,7 @@ export default function ForgotPasswordPage() {
               onChange={(e) => setNewPassword(e.target.value)}
             />
             {phoneError && (
-              <p className="text-xs text-danger" role="alert">
+              <p className="text-sm font-medium text-danger" role="alert">
                 {phoneError}
               </p>
             )}
@@ -160,21 +170,28 @@ export default function ForgotPasswordPage() {
                 setNewPassword("");
                 setPhoneError("");
               }}
-              className="text-xs font-medium text-orange-ink hover:underline"
+              className="inline-flex min-h-11 items-center text-sm font-medium text-orange-ink underline-offset-4 hover:underline"
             >
               تغيير الرقم
             </button>
           </>
         )}
+        </div>
 
-        <Button type="submit" fullWidth loading={loading}>
-          {phoneStep === "request" ? "إرسال الرمز" : "تعيين كلمة المرور"}
-        </Button>
-        <p className="text-center text-sm">
-          <Link href="/login" className="text-orange-ink hover:underline">
-            العودة لتسجيل الدخول
-          </Link>
-        </p>
+        {/* Primary action anchored at the bottom of the column. */}
+        <div className="mt-auto space-y-4 pt-8">
+          <Button type="submit" size="lg" fullWidth loading={loading}>
+            {phoneStep === "request" ? "إرسال الرمز" : "تعيين كلمة المرور"}
+          </Button>
+          <p className="text-center text-sm">
+            <Link
+              href="/login"
+              className="inline-flex min-h-11 items-center px-1 font-medium text-orange-ink underline-offset-4 hover:underline"
+            >
+              العودة لتسجيل الدخول
+            </Link>
+          </p>
+        </div>
       </form>
     </AuthCard>
   );

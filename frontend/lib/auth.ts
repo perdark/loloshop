@@ -43,12 +43,54 @@ export function setDeviceToken(token: string): void {
   localStorage.setItem(DEVICE_TOKEN_KEY, token);
 }
 
+/**
+ * Fired whenever the signed-in state changes without a route change. Chrome's native
+ * `storage` event only reaches OTHER tabs, so a component in THIS tab (the header)
+ * has no way to notice that the session ended under it — after account deletion it
+ * would keep offering «خروج» and «حسابي» for a user who no longer has an account.
+ */
+export const AUTH_CHANGED_EVENT = "loloshop:auth-changed";
+
+function notifyAuthChanged(): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
+}
+
 export function logout(): void {
+  // ⚠️ READ THE JWT FIRST. The push unregister below needs a live token, and everything after
+  // this line destroys it. On a shared or resold phone — normal here — skipping that call
+  // leaves the handset subscribed to the account that just left, so the next person to sign in
+  // keeps receiving the previous student's «تمت الموافقة على طلبك».
+  const jwt = localStorage.getItem(TOKEN_KEY);
+
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
   // NOTE: device token is intentionally NOT cleared — a normal logout keeps the device
-  // trusted so the user skips the OTP on their next login.
+  // trusted so the user skips the OTP on their next login. (That is the OTP trust token,
+  // unrelated to the push device token handled below.)
   clearSkipDashboardRedirect();
+  notifyAuthChanged();
+
+  // Fire-and-forget, and dynamically imported on purpose: lib/push.ts pulls in lib/api.ts,
+  // which imports THIS module for the 401 handler. A static import would close that cycle.
+  if (jwt) {
+    void import("./push")
+      .then((push) => push.unregisterPushToken(jwt))
+      .catch(() => {
+        // A logout must never fail because a notification could not be detached.
+      });
+  }
+}
+
+/**
+ * Full sign-out for account DELETION, where the "keep this device trusted" tradeoff
+ * that `logout()` makes no longer applies: there is no account left to come back to.
+ * The backend already dropped the matching trusted_devices row, so a leftover token
+ * here would only be dead weight that the next person to use the phone inherits.
+ */
+export function logoutAndForgetDevice(): void {
+  logout();
+  localStorage.removeItem(DEVICE_TOKEN_KEY);
 }
 
 /** Panel home for dashboard roles; null for retail/wholesaler. */

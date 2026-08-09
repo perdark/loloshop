@@ -96,6 +96,16 @@ CREATE TABLE IF NOT EXISTS users (
 ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
 
+-- 076: in-app account deletion (Apple 5.1.1(v)). A deleted account is ANONYMISED,
+-- never row-deleted: orders.student_id is ON DELETE RESTRICT, so removing the row
+-- is refused as soon as the student has one order — and would take the shop's sales
+-- records with it. The account dies (phone/e-mail NULLed, password replaced,
+-- token_version bumped so every issued JWT dies at once); the order survives on the
+-- checkout_groups delivery snapshot so an in-flight sash still ships.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_users_deleted_at
+  ON users(deleted_at) WHERE deleted_at IS NOT NULL;
+
 -- =====================================================
 -- OTP CODES — phone verification via Zentramsg WhatsApp
 -- =====================================================
@@ -328,7 +338,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log(actor_id);
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at DESC);
 
 -- =====================================================
--- NOTIFICATIONS — in-app only (MVP)
+-- NOTIFICATIONS — in-app rows AND the push outbox (migration 077)
 -- =====================================================
 CREATE TABLE IF NOT EXISTS notifications (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -341,6 +351,41 @@ CREATE TABLE IF NOT EXISTS notifications (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, read);
+
+-- Push delivery state for the row above. See db/migrations/077_push_notifications.sql for the
+-- full reasoning; the short version is that thirteen call sites INSERT notifications and
+-- several do it inside a transaction, so the ROW is the queue and backend/lib/pushOutbox.js
+-- drains it after commit.
+-- 'pending' → never attempted · 'sending' → claimed · 'sent' · 'failed' · 'skipped'.
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS push_state TEXT NOT NULL DEFAULT 'pending';
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS pushed_at  TIMESTAMPTZ;
+
+-- ⚠️ KEEP THIS. This file is re-applied on every `npm run migrate`, against a database that
+-- already holds every notification the shop has ever written. Those rows take the 'pending'
+-- default from the ALTER above, and without this line the next drain would push all of them
+-- to real phones at once. Idempotent and cheap after the first run.
+UPDATE notifications SET push_state = 'skipped'
+ WHERE push_state = 'pending' AND created_at < now() - INTERVAL '10 minutes';
+
+-- Covers 'sending' too, not just 'pending': the drain's claim query also has to find rows a
+-- crashed process left mid-flight, and an index that stops at 'pending' would make that
+-- branch a full scan of every notification the shop has ever written.
+CREATE INDEX IF NOT EXISTS idx_notifications_push_pending
+  ON notifications (created_at) WHERE push_state IN ('pending', 'sending');
+
+-- One row per device+install. `token` is UNIQUE table-wide on purpose: phones get handed on
+-- and re-sold here, and the provider reissues the SAME token to the next person who signs in.
+-- The upsert in notificationController.registerDevice therefore MOVES the device to its new
+-- owner instead of leaving the previous account subscribed to it.
+CREATE TABLE IF NOT EXISTS device_tokens (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token        TEXT NOT NULL UNIQUE,
+  platform     TEXT NOT NULL CHECK (platform IN ('android', 'ios')),
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_device_tokens_user ON device_tokens(user_id);
 
 -- =====================================================
 -- TEMPLATES — pre-made designs per university (P3, scaffold now)
@@ -726,6 +771,59 @@ CREATE TABLE IF NOT EXISTS staff_goals (
 CREATE INDEX IF NOT EXISTS idx_staff_goals_user ON staff_goals(user_id, created_at DESC);
 
 -- =====================================================
+-- PAYOUT DESTINATIONS — SuperQi Mastercard + manual admin transfer log
+-- =====================================================
+-- No banking API is used. Recipients save a 16-digit card number; an admin
+-- transfers externally and records the completed manual transfer for audit.
+CREATE TABLE IF NOT EXISTS payout_accounts (
+  user_id          UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  provider         TEXT NOT NULL DEFAULT 'superqi_mastercard'
+    CHECK (provider = 'superqi_mastercard'),
+  card_number      TEXT NOT NULL CHECK (card_number ~ '^[0-9]{16}$'),
+  account_number   TEXT CONSTRAINT payout_accounts_account_number_format
+    CHECK (account_number IS NULL OR account_number ~ '^[0-9]{1,24}$'),
+  cardholder_name  TEXT CHECK (cardholder_name IS NULL OR char_length(cardholder_name) <= 120),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_by       UUID REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS manual_payouts (
+  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id               UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  recipient_kind        TEXT NOT NULL
+    CHECK (recipient_kind IN ('staff', 'tailor', 'workshop')),
+  source_id             UUID NOT NULL,
+  amount                BIGINT NOT NULL CHECK (amount > 0),
+  card_number_snapshot  TEXT NOT NULL CHECK (card_number_snapshot ~ '^[0-9]{16}$'),
+  account_number_snapshot TEXT CONSTRAINT manual_payouts_account_number_snapshot_format
+    CHECK (account_number_snapshot IS NULL OR account_number_snapshot ~ '^[0-9]{1,24}$'),
+  note                  TEXT CHECK (note IS NULL OR char_length(note) <= 500),
+  paid_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_by            UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_manual_payouts_recipient
+  ON manual_payouts(recipient_kind, source_id, paid_at DESC);
+CREATE INDEX IF NOT EXISTS idx_manual_payouts_user
+  ON manual_payouts(user_id, paid_at DESC);
+
+-- 073: SuperQi account number beside the 16-digit card. Nullable in the DB because
+-- rows written before 073 hold only a card; "both required" is enforced on every
+-- save by payoutController.validateAccountBody.
+-- 074: no fixed length — real account numbers are 9, 10 and 12 digits. The 24 cap
+-- is a storage guard, not a format rule.
+ALTER TABLE payout_accounts ADD COLUMN IF NOT EXISTS account_number TEXT;
+ALTER TABLE payout_accounts DROP CONSTRAINT IF EXISTS payout_accounts_account_number_format;
+ALTER TABLE payout_accounts ADD CONSTRAINT payout_accounts_account_number_format
+  CHECK (account_number IS NULL OR account_number ~ '^[0-9]{1,24}$');
+
+ALTER TABLE manual_payouts ADD COLUMN IF NOT EXISTS account_number_snapshot TEXT;
+ALTER TABLE manual_payouts DROP CONSTRAINT IF EXISTS manual_payouts_account_number_snapshot_format;
+ALTER TABLE manual_payouts ADD CONSTRAINT manual_payouts_account_number_snapshot_format
+  CHECK (account_number_snapshot IS NULL OR account_number_snapshot ~ '^[0-9]{1,24}$');
+
+-- =====================================================
 -- STAFF ATTENDANCE — بصمة الموظفين
 -- Admin controls the required shift window, grace minutes, per-minute late
 -- penalty marker, and shop verification requirements (network/GPS/both/none).
@@ -746,9 +844,14 @@ CREATE TABLE IF NOT EXISTS staff_attendance_settings (
   shop_longitude             DOUBLE PRECISION,
   shop_radius_meters         INTEGER NOT NULL DEFAULT 120 CHECK (shop_radius_meters > 0),
   timezone                   TEXT NOT NULL DEFAULT 'Asia/Baghdad',
+  -- migration 075: monthly الخروج المؤقت allowance (10 hours)
+  break_monthly_minutes      INTEGER NOT NULL DEFAULT 600 CHECK (break_monthly_minutes >= 0),
   updated_by                 UUID REFERENCES users(id) ON DELETE SET NULL,
   updated_at                 TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE staff_attendance_settings
+  ADD COLUMN IF NOT EXISTS break_monthly_minutes INTEGER NOT NULL DEFAULT 600
+    CHECK (break_monthly_minutes >= 0);
 INSERT INTO staff_attendance_settings (id)
 VALUES (TRUE)
 ON CONFLICT (id) DO NOTHING;
@@ -760,9 +863,14 @@ CREATE TABLE IF NOT EXISTS staff_attendance_user_settings (
   grace_minutes              INTEGER NOT NULL DEFAULT 15 CHECK (grace_minutes >= 0),
   deduction_per_minute       BIGINT NOT NULL DEFAULT 0 CHECK (deduction_per_minute >= 0),
   attendance_required        BOOLEAN NOT NULL DEFAULT TRUE,
+  -- migration 075: NULL = inherit the global الخروج المؤقت allowance
+  break_monthly_minutes      INTEGER CHECK (break_monthly_minutes IS NULL OR break_monthly_minutes >= 0),
   updated_by                 UUID REFERENCES users(id) ON DELETE SET NULL,
   updated_at                 TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE staff_attendance_user_settings
+  ADD COLUMN IF NOT EXISTS break_monthly_minutes INTEGER
+    CHECK (break_monthly_minutes IS NULL OR break_monthly_minutes >= 0);
 CREATE INDEX IF NOT EXISTS idx_staff_attendance_user_settings_updated
   ON staff_attendance_user_settings(updated_at DESC);
 
@@ -799,6 +907,58 @@ CREATE TABLE IF NOT EXISTS staff_attendance_records (
 );
 CREATE INDEX IF NOT EXISTS idx_staff_attendance_date ON staff_attendance_records(work_date DESC);
 CREATE INDEX IF NOT EXISTS idx_staff_attendance_user ON staff_attendance_records(user_id, work_date DESC);
+
+-- =====================================================
+-- Migration 075 — الخروج المؤقت (temporary leave during the shift)
+-- Money rule lives in backend/lib/attendanceBreak.js:
+--   the monthly balance always decrements by the FULL real minutes of a break
+--   free     = approved ? min(minutes, remaining_before_this_break) : 0
+--   deducted = minutes - free
+--   amount   = deducted * deduction_per_minute  (frozen on the row at return time)
+-- =====================================================
+CREATE TABLE IF NOT EXISTS staff_attendance_breaks (
+  id                        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id                   UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  attendance_id             UUID NOT NULL REFERENCES staff_attendance_records(id) ON DELETE CASCADE,
+  work_date                 DATE NOT NULL,
+  month_key                 TEXT NOT NULL CHECK (month_key ~ '^[0-9]{4}-[0-9]{2}$'),
+  reason_ar                 TEXT,
+  requested_minutes         INTEGER CHECK (requested_minutes IS NULL OR requested_minutes > 0),
+  requested_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  left_at                   TIMESTAMPTZ,
+  returned_at               TIMESTAMPTZ,
+  minutes                   INTEGER NOT NULL DEFAULT 0 CHECK (minutes >= 0),
+  state                     TEXT NOT NULL DEFAULT 'requested'
+    CHECK (state IN ('requested', 'out', 'returned', 'cancelled')),
+  approval                  TEXT NOT NULL DEFAULT 'pending'
+    CHECK (approval IN ('pending', 'approved', 'rejected')),
+  left_without_approval     BOOLEAN NOT NULL DEFAULT FALSE,
+  decided_by                UUID REFERENCES users(id) ON DELETE SET NULL,
+  decided_at                TIMESTAMPTZ,
+  decision_note_ar          TEXT,
+  free_minutes              INTEGER NOT NULL DEFAULT 0 CHECK (free_minutes >= 0),
+  deducted_minutes          INTEGER NOT NULL DEFAULT 0 CHECK (deducted_minutes >= 0),
+  deduction_per_minute      BIGINT NOT NULL DEFAULT 0 CHECK (deduction_per_minute >= 0),
+  deduction_amount          BIGINT NOT NULL DEFAULT 0 CHECK (deduction_amount >= 0),
+  deduction_transaction_id  UUID REFERENCES staff_salary_transactions(id) ON DELETE SET NULL,
+  auto_closed               BOOLEAN NOT NULL DEFAULT FALSE,
+  admin_note_ar             TEXT,
+  created_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at                TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+-- One live break per worker, enforced by the DB and not just by a JS check.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_attendance_break_open
+  ON staff_attendance_breaks(user_id)
+  WHERE state IN ('requested', 'out');
+CREATE INDEX IF NOT EXISTS idx_attendance_break_month
+  ON staff_attendance_breaks(user_id, month_key);
+CREATE INDEX IF NOT EXISTS idx_attendance_break_date
+  ON staff_attendance_breaks(work_date DESC);
+CREATE INDEX IF NOT EXISTS idx_attendance_break_record
+  ON staff_attendance_breaks(attendance_id);
+CREATE INDEX IF NOT EXISTS idx_attendance_break_pending
+  ON staff_attendance_breaks(requested_at DESC)
+  WHERE approval = 'pending' AND state <> 'cancelled';
 
 -- =====================================================
 -- Migration 021 — Full-set packages (طقم التخرج الكامل) + checkout intake groups
@@ -963,20 +1123,51 @@ CREATE TABLE IF NOT EXISTS workshop_piece_rates (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   operation  TEXT NOT NULL,
   product    TEXT NOT NULL,
+  audience   TEXT NOT NULL DEFAULT 'wholesale' CHECK (audience IN ('wholesale','retail')),
   amount     BIGINT NOT NULL DEFAULT 0 CHECK (amount >= 0),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
-  UNIQUE (operation, product)
+  updated_by UUID REFERENCES users(id) ON DELETE SET NULL
 );
+-- Migration 072: a rate is identified by job AND customer type.
+ALTER TABLE workshop_piece_rates ADD COLUMN IF NOT EXISTS audience TEXT NOT NULL DEFAULT 'wholesale'
+  CHECK (audience IN ('wholesale','retail'));
+ALTER TABLE workshop_piece_rates DROP CONSTRAINT IF EXISTS workshop_piece_rates_operation_product_key;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_workshop_rate ON workshop_piece_rates(operation, product, audience);
 
--- Fresh/demo databases get useful example rates; existing admin-edited values win.
-INSERT INTO workshop_piece_rates (operation, product, amount)
+-- Fresh/demo databases get useful example rates for BOTH audiences; existing
+-- admin-edited values win. Retail seeds match wholesale until an admin sets the
+-- real retail wages.
+INSERT INTO workshop_piece_rates (operation, product, audience, amount)
 VALUES
-  ('cut', 'robe', 500), ('overlock', 'robe', 750), ('robe_sew', 'robe', 1500),
-  ('cut', 'cap', 250), ('cap_sew', 'cap', 750),
-  ('cut', 'shawl', 250), ('shawl_close', 'shawl', 500), ('american_shawl', 'shawl', 1000),
-  ('cut', 'sash', 250), ('shawl_close', 'sash', 500)
-ON CONFLICT (operation, product) DO NOTHING;
+  ('cut','robe','wholesale',500), ('overlock','robe','wholesale',750), ('robe_sew','robe','wholesale',1500),
+  ('cut','cap','wholesale',250), ('cap_sew','cap','wholesale',750),
+  ('cut','shawl','wholesale',250), ('shawl_close','shawl','wholesale',500), ('american_shawl','shawl','wholesale',1000),
+  ('cut','sash','wholesale',250), ('shawl_close','sash','wholesale',500),
+  ('cut','robe','retail',500), ('overlock','robe','retail',750), ('robe_sew','robe','retail',1500),
+  ('cut','cap','retail',250), ('cap_sew','cap','retail',750),
+  ('cut','shawl','retail',250), ('shawl_close','shawl','retail',500), ('american_shawl','shawl','retail',1000),
+  ('cut','sash','retail',250), ('shawl_close','sash','retail',500)
+ON CONFLICT (operation, product, audience) DO NOTHING;
+
+-- A database that already held admin-edited wholesale rates when `audience` was added
+-- gets its retail rows from the seed above — i.e. the SEED defaults, not that shop's real
+-- wholesale amounts. That silently misprices retail work (prod had overlock 300 / robe_sew
+-- 1000 against seed defaults of 750 / 1500). Migration 072 copies wholesale→retail
+-- dynamically, but `scripts/deploy.sh` runs `npm run migrate`, which applies THIS FILE and
+-- never the numbered migrations — so the correction has to live here.
+--
+-- Aligns a retail rate to its wholesale twin only while no admin has ever set it
+-- (`upsertRate` stamps `updated_by`; the seed leaves it NULL). Once the admin enters a real
+-- retail wage this stops touching that row forever. Idempotent — safe on every deploy.
+UPDATE workshop_piece_rates r
+   SET amount = w.amount
+  FROM workshop_piece_rates w
+ WHERE r.audience = 'retail'
+   AND r.updated_by IS NULL
+   AND w.audience = 'wholesale'
+   AND w.operation = r.operation
+   AND w.product   = r.product
+   AND r.amount   <> w.amount;
 
 CREATE TABLE IF NOT EXISTS workshop_production_entries (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -988,6 +1179,8 @@ CREATE TABLE IF NOT EXISTS workshop_production_entries (
   created_by UUID REFERENCES users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE workshop_production_entries ADD COLUMN IF NOT EXISTS audience TEXT NOT NULL DEFAULT 'wholesale'
+  CHECK (audience IN ('wholesale','retail'));
 CREATE INDEX IF NOT EXISTS idx_workshop_production_worker ON workshop_production_entries(worker_id, work_date DESC, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS workshop_adjustments (

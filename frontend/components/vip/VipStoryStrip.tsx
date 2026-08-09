@@ -22,7 +22,8 @@ export function VipStoryStrip({
           src={imageUrl || "/lookbook/detail-pedestal.jpg"}
           alt=""
           fill
-          unoptimized
+          /* `unoptimized` removed — see the note in VipHero. Full-bleed band at
+             100vw, stored /uploads or local /lookbook src, no blob preview. */
           sizes="100vw"
           className="object-cover animate-kenburns transition-transform duration-[1200ms] group-hover:scale-105"
         />

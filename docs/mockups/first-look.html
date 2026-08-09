@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>لولو شوب — الانطباع الأول · ٤ مقترحات</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://lolo-shop96.com">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&family=Amiri:wght@400;700&family=Playfair+Display:wght@500;600;700&family=Great+Vibes&display=swap" rel="stylesheet">
+<style>
+/* ══════════════════════════════════════════════════════════════════════════
+   FIRST LOOK — 4 competing bets for the opening screen of the LoloShop app.
+
+   Best-of-N on the hero only (playbook rule). Everything below the hero is
+   IDENTICAL across all four so the comparison is honest: same tokens, same
+   real photos, same real catalog rows, same tab bar. Only the first screen —
+   the thing a student sees before she scrolls — changes.
+
+   Tokens are written in oklch per design-dna:
+     · ONE accent hue (orange, H≈38–44) at chroma .15–.20 — CTA + active only.
+     · Neutrals at chroma ≤ .022, all hue-biased warm (H 78–86) — never gray.
+     · Gold is a SECOND accent hue, so it is banned here. It stays in the VIP
+       band on the main mockup where it is a deliberate sub-brand.
+   Arabic physics per design-dna:
+     · letter-spacing 0 on ALL Arabic (the main mockup violates this twice —
+       .hero h1 has -.02em and .kicker has .12em; both are fixed below).
+     · body line-height 1.75 · headings 1.3 · Latin digits everywhere, tabular.
+
+   Photos are REAL (frontend/public/lookbook + showcase). Catalog rows are the
+   REAL retail feed served through prod's next/image optimizer (~27 KB webp).
+   Nothing here is drawn in CSS and nothing is a placeholder.
+   ══════════════════════════════════════════════════════════════════════════ */
+:root{
+  /* ── accent — the only saturated hue on the page ── */
+  --accent:oklch(55.3% .174 38.4);        /* CTA, active tab, key metric */
+  --accent-lift:oklch(71.2% .165 44.1);   /* same hue, lighter — washes only */
+  --accent-wash:oklch(55.3% .174 38.4 / .10);
+  /* ── warm neutrals — chroma ≤ .022, hue-biased toward the accent ── */
+  --beige:oklch(99.5% .005 78);           /* raised surface  */
+  --cream:oklch(96.9% .015 81);           /* page canvas     */
+  --sink:oklch(95.6% .014 85);            /* recessed band   */
+  --line:oklch(89.9% .019 86);            /* hairline        */
+  --page:oklch(93.0% .021 82);
+  --ink:oklch(21.8% .008 80);             /* was pure achromatic — warmed */
+  --ink-soft:oklch(31.1% .010 81);        /* body reading colour */
+  --muted:oklch(50.3% .020 80);           /* labels / metadata only */
+  --desk:oklch(26% .012 80);              /* the board this page sits on */
+  --desk-2:oklch(21% .010 80);
+
+  --shadow-soft:0 1px 2px oklch(21.8% .008 80/.05),0 1px 3px oklch(21.8% .008 80/.07);
+  --shadow-card:0 2px 8px -3px oklch(21.8% .008 80/.10),0 12px 30px -16px oklch(21.8% .008 80/.14);
+  --shadow-float:0 10px 26px -12px oklch(21.8% .008 80/.20),0 3px 10px -5px oklch(21.8% .008 80/.10);
+
+  --r:1.25rem; --r-sm:12px; --r-pill:9999px;
+  /* spacing scale ONLY — 4/8/12/16/24/32/48/64 */
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-6:24px; --sp-8:32px; --sp-12:48px; --sp-16:64px;
+  --tab-h:70px;
+  --f-ui:"Cairo",ui-sans-serif,system-ui,sans-serif;
+  --f-ar:"Amiri",serif;
+  --f-lat:"Playfair Display",serif;
+  --f-script:"Great Vibes",cursive;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+img{display:block;max-width:100%}
+a{color:inherit;text-decoration:none}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+ul,ol{list-style:none}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.num{font-variant-numeric:tabular-nums}
+
+body{font-family:var(--f-ui);font-size:15px;line-height:1.75;letter-spacing:0;
+  background:var(--desk-2);color:var(--cream);-webkit-font-smoothing:antialiased}
+
+/* ══ the comparison board ══════════════════════════════════════════════ */
+.board{max-width:1800px;margin-inline:auto;padding:var(--sp-8) var(--sp-6) var(--sp-16)}
+.board-head{max-width:74ch;margin-block-end:var(--sp-8)}
+.board-head .eyebrow{font-size:12px;font-weight:800;color:var(--accent-lift)}
+.board-head h1{font-family:var(--f-ar);font-size:clamp(1.9rem,4vw,2.6rem);line-height:1.3;
+  margin-block-start:var(--sp-2);color:var(--beige)}
+.board-head p{margin-block-start:var(--sp-3);font-size:14.5px;color:oklch(80% .012 82)}
+.board-head b{color:var(--beige)}
+
+.facts{display:flex;flex-wrap:wrap;gap:var(--sp-2);margin-block-start:var(--sp-4)}
+.facts li{padding:5px 12px;border-radius:var(--r-pill);background:oklch(34% .012 80);
+  font-size:12px;font-weight:700;color:oklch(86% .012 82)}
+
+.rack{display:flex;gap:var(--sp-8);overflow-x:auto;padding-block:var(--sp-4) var(--sp-6);
+  scroll-snap-type:x proximity}
+.slot{flex:0 0 auto;width:390px;scroll-snap-align:center}
+.slot > header{margin-block-end:var(--sp-4);min-height:118px}
+.slot .tag{display:inline-flex;align-items:center;gap:var(--sp-2);font-size:12px;font-weight:800;
+  color:var(--accent-lift)}
+.slot .tag b{display:grid;place-items:center;width:22px;height:22px;border-radius:50%;
+  background:var(--accent);color:var(--beige);font-family:var(--f-lat);font-size:12px}
+.slot h2{font-family:var(--f-ar);font-size:1.5rem;line-height:1.3;color:var(--beige);
+  margin-block-start:6px}
+.slot .bet{margin-block-start:var(--sp-2);font-size:13px;line-height:1.7;color:oklch(78% .012 82)}
+.slot .bet b{color:var(--beige)}
+.slot .risk{margin-block-start:6px;font-size:12px;color:oklch(66% .012 82)}
+
+/* ── the device ── */
+.phone{position:relative;height:844px;border-radius:38px;padding:5px;
+  background:linear-gradient(160deg,oklch(40% .010 80),oklch(24% .008 80));
+  box-shadow:0 30px 70px -30px oklch(10% 0 0/.9),0 0 0 1px oklch(45% .01 80)}
+.vp{position:relative;height:100%;border-radius:33px;overflow-y:auto;overflow-x:clip;
+  background:var(--cream);color:var(--ink-soft);scrollbar-width:none}
+.vp::-webkit-scrollbar{display:none}
+.vp::after{content:"";position:sticky;bottom:0;display:block;height:0}
+
+/* ══ shared app chrome (identical in all four) ═════════════════════════ */
+h1,h2,h3{color:var(--ink);line-height:1.3;text-wrap:balance;font-weight:700;letter-spacing:0}
+.pad{padding-inline:var(--sp-4)}
+/* 1.45, not the 1.3 the doctrine gives for Arabic headings: Amiri is a deep
+   naskh and measured scrollHeight 36 against clientHeight 31 at 1.3 — the
+   ascenders were overflowing the line box. This is the "+0.25" caveat. */
+.h-ar{font-family:var(--f-ar);font-size:1.55rem;line-height:1.45}
+.small{font-size:12.5px;color:var(--muted);line-height:1.7}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:var(--sp-2);
+  min-height:48px;padding:0 var(--sp-6);border-radius:var(--r-pill);
+  font-size:14.5px;font-weight:800;letter-spacing:0;transition:background-color .2s,translate .2s}
+.btn svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2.2;
+  stroke-linecap:round;stroke-linejoin:round;transition:translate .2s}
+.btn:hover svg{translate:-3px 0}
+.btn-1{background:var(--accent);color:var(--beige);box-shadow:var(--shadow-float)}
+.btn-1:hover{background:var(--ink);translate:0 -2px}
+.btn-2{background:var(--beige);color:var(--accent);border:1px solid var(--accent-wash);
+  box-shadow:var(--shadow-soft)}
+.btn-ghost{background:oklch(99% .005 78/.14);color:var(--beige);
+  border:1px solid oklch(99% .005 78/.35);backdrop-filter:blur(6px)}
+.btn-w{width:100%}
+
+.sec-head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--sp-3);
+  margin-block:var(--sp-8) var(--sp-3)}
+.more{display:inline-flex;align-items:center;gap:4px;min-height:44px;flex:0 0 auto;
+  font-size:12.5px;font-weight:800;color:var(--accent)}
+.more svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2.6;
+  stroke-linecap:round;stroke-linejoin:round}
+
+/* trust strip — the fear answers, visible without scrolling */
+.trust{display:flex;gap:var(--sp-2);padding:var(--sp-3) var(--sp-4);
+  border-block:1px solid var(--line);background:var(--sink)}
+.trust li{flex:1;text-align:center;font-size:11.5px;font-weight:700;line-height:1.5;color:var(--ink-soft)}
+.trust li span{display:block;font-size:10.5px;font-weight:600;color:var(--muted)}
+.trust li + li{border-inline-start:1px solid var(--line)}
+
+/* category doors */
+.doors{display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-3)}
+.door{display:flex;flex-direction:column;overflow:hidden;border-radius:var(--r-sm);
+  background:var(--beige);box-shadow:var(--shadow-soft);text-align:start;
+  transition:box-shadow .25s,translate .25s}
+.door:hover{box-shadow:var(--shadow-float);translate:0 -2px}
+.door .im{aspect-ratio:16/11;overflow:hidden;background:var(--sink)}
+.door .im img{width:100%;height:100%;object-fit:cover}
+.door .bd{display:flex;align-items:baseline;justify-content:space-between;gap:6px;
+  padding:10px var(--sp-3) 12px}
+.door b{font-size:14px;color:var(--ink)}
+.door small{font-size:11px;color:var(--muted)}
+
+/* product rail + tile */
+.rail{display:flex;gap:var(--sp-3);overflow-x:auto;scroll-snap-type:x mandatory;
+  padding:2px var(--sp-4) var(--sp-2);scrollbar-width:none}
+.rail::-webkit-scrollbar{display:none}
+.rail > *{flex:0 0 58%;scroll-snap-align:start}
+.tile{display:block;text-align:start;width:100%}
+.tile .ph{position:relative;overflow:hidden;border-radius:10px;aspect-ratio:3/4;
+  background:var(--beige);box-shadow:inset 0 0 0 1px oklch(21.8% .008 80/.10)}
+.tile img{width:100%;height:100%;object-fit:cover;transition:scale .8s cubic-bezier(.16,1,.3,1)}
+.tile:hover img{scale:1.04}
+.tile .flag{position:absolute;top:8px;inset-inline-start:8px;padding:2px 9px;border-radius:var(--r-pill);
+  background:oklch(99.5% .005 78/.93);backdrop-filter:blur(4px);font-size:10px;font-weight:800;color:var(--accent)}
+/* line-height 1.8, not 1.5: `overflow:hidden` makes the box exactly one
+   line tall, and Arabic ascenders (أ ل ك) + dots overflow a 1.5 box — the
+   titles render visibly decapitated. 1.7–1.9 is the design-dna Arabic floor. */
+.tile h3{margin-block-start:8px;font-size:14.5px;font-weight:700;line-height:1.8;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.price{display:flex;align-items:baseline;gap:5px;margin-block-start:2px;direction:ltr}
+.price .from{font-size:11px;font-weight:500;color:var(--muted)}
+.price .now{font-size:15px;font-weight:800;color:var(--ink)}
+
+/* bottom tab bar */
+.tabs{position:sticky;bottom:0;z-index:38;display:flex;background:var(--beige);
+  border-block-start:1px solid var(--line);padding:6px;margin-block-start:var(--sp-8);
+  box-shadow:0 -6px 18px -12px oklch(21.8% .008 80/.2)}
+.tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;min-height:56px;
+  padding-block:4px;font-size:10.5px;font-weight:600;color:var(--muted)}
+.tab .cap{display:grid;place-items:center;width:46px;height:30px;border-radius:var(--r-pill)}
+.tab svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.9;
+  stroke-linecap:round;stroke-linejoin:round}
+.tab.on{color:var(--accent);font-weight:800}
+.tab.on .cap{background:var(--accent);color:var(--beige)}
+
+/* ══ A · THE NAME ══════════════════════════════════════════════════════ */
+.a-top{display:flex;align-items:center;justify-content:space-between;
+  padding:var(--sp-3) var(--sp-4) var(--sp-2)}
+.brandmark{display:flex;align-items:center;gap:var(--sp-2)}
+.brandmark img{width:34px;height:34px;border-radius:var(--r-pill)}
+.brandmark span{font-family:var(--f-lat);font-weight:700;font-size:14.5px;color:var(--ink)}
+.iconbtn{display:grid;place-items:center;width:44px;height:44px;border-radius:var(--r-pill);
+  color:var(--ink-soft)}
+.iconbtn svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;
+  stroke-linecap:round;stroke-linejoin:round}
+
+.a-stage{position:relative;margin:var(--sp-2) var(--sp-4) 0;border-radius:var(--r);
+  overflow:hidden;aspect-ratio:1/1;background:var(--sink);box-shadow:var(--shadow-card)}
+.a-stage img{width:100%;height:100%;object-fit:cover;object-position:50% 42%}
+.a-callout{position:absolute;inset-inline-end:var(--sp-3);top:var(--sp-3);
+  display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:var(--r-pill);
+  background:oklch(99.5% .005 78/.94);backdrop-filter:blur(8px);
+  font-size:11px;font-weight:800;color:var(--ink);box-shadow:var(--shadow-soft)}
+.a-callout i{width:6px;height:6px;border-radius:50%;background:var(--accent)}
+.a-copy{padding:var(--sp-6) var(--sp-4) 0}
+.a-copy .kicker{font-size:12px;font-weight:800;color:var(--accent)}
+.a-copy h1{font-family:var(--f-ar);font-size:2.35rem;line-height:1.25;margin-block-start:var(--sp-2)}
+.a-copy h1 em{font-style:normal;color:var(--accent)}
+.a-copy .lede{margin-block-start:var(--sp-3);max-width:32ch;font-size:14.5px;color:var(--ink-soft)}
+.a-cta{display:flex;gap:var(--sp-2);margin-block:var(--sp-6) var(--sp-6)}
+
+/* ══ B · THE COVER ═════════════════════════════════════════════════════ */
+/* 640px + object-position 12% lands the bottom of the frame on the BLACK robe,
+   not on the red sash — the headline needs an unbusy, dark surface to sit on. */
+.b-cover{position:relative;isolation:isolate;height:640px;overflow:hidden;background:var(--ink)}
+.b-cover > img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
+  object-position:50% 12%;z-index:-2}
+.b-cover::after{content:"";position:absolute;inset:0;z-index:-1;
+  background:linear-gradient(to top,oklch(16% .01 80/.96) 0%,oklch(16% .01 80/.90) 30%,
+    oklch(16% .01 80/.55) 46%,oklch(16% .01 80/.06) 66%,oklch(16% .01 80/.34) 100%)}
+.b-bar{display:flex;align-items:center;justify-content:space-between;padding:var(--sp-4)}
+.b-bar .bm{display:flex;align-items:center;gap:var(--sp-2)}
+.b-bar .bm img{width:34px;height:34px;border-radius:var(--r-pill)}
+.b-bar .bm span{font-family:var(--f-lat);font-weight:700;font-size:14.5px;color:var(--beige)}
+.b-bar .iconbtn{color:var(--beige)}
+.b-copy{position:absolute;inset-inline:0;bottom:0;padding:var(--sp-6) var(--sp-4) var(--sp-8)}
+.b-copy .kicker{font-family:var(--f-lat);font-size:11px;font-weight:700;letter-spacing:.2em;
+  color:oklch(88% .03 70)}   /* Latin-only label — tracking is allowed here */
+.b-copy h1{font-family:var(--f-ar);font-size:2.5rem;line-height:1.25;color:var(--beige);
+  margin-block-start:var(--sp-2)}
+.b-copy p{margin-block-start:var(--sp-3);max-width:30ch;font-size:14px;color:oklch(88% .012 82)}
+.b-copy .row{display:flex;gap:var(--sp-2);margin-block-start:var(--sp-6)}
+
+/* ══ C · THE CLASS ═════════════════════════════════════════════════════ */
+/* The source is an Instagram grab: a "Loloshop" watermark sits bottom-left and a
+   mute button bottom-right. height:150% + top anchor overflows the frame and
+   clips both away, leaving only the graduates. */
+.c-proof{position:relative;height:360px;overflow:hidden;background:var(--ink)}
+.c-proof img{width:100%;height:150%;object-fit:cover;object-position:50% 0}
+.c-proof::after{content:"";position:absolute;inset:0;
+  background:linear-gradient(to top,var(--cream) 1%,oklch(96.9% .015 81/.82) 14%,
+    oklch(96.9% .015 81/.10) 34%,oklch(18% .01 80/.18) 62%,oklch(18% .01 80/.46) 100%)}
+.c-bar{position:absolute;inset-inline:0;top:0;z-index:2;display:flex;align-items:center;
+  justify-content:space-between;padding:var(--sp-4)}
+.c-bar .bm{display:flex;align-items:center;gap:var(--sp-2)}
+.c-bar .bm img{width:34px;height:34px;border-radius:var(--r-pill)}
+.c-bar .bm span{font-family:var(--f-lat);font-weight:700;font-size:14.5px;color:var(--beige)}
+.c-bar .iconbtn{color:var(--beige)}
+.c-copy{position:relative;z-index:2;margin-block-start:-56px;padding-inline:var(--sp-4)}
+.c-stat{display:flex;align-items:baseline;gap:var(--sp-2)}
+.c-stat b{font-family:var(--f-lat);font-size:3.4rem;line-height:.9;color:var(--accent);
+  font-variant-numeric:tabular-nums}
+.c-stat span{font-size:13px;font-weight:700;line-height:1.5;color:var(--ink-soft);max-width:14ch}
+.c-copy h1{font-family:var(--f-ar);font-size:2.05rem;line-height:1.25;margin-block-start:var(--sp-4)}
+.c-copy .lede{margin-block-start:var(--sp-3);max-width:33ch;font-size:14.5px;color:var(--ink-soft)}
+.c-cta{display:flex;gap:var(--sp-2);margin-block:var(--sp-6) var(--sp-6)}
+.c-rep{display:flex;align-items:center;gap:var(--sp-3);margin:var(--sp-6) var(--sp-4) 0;
+  padding:var(--sp-4);border-radius:var(--r);background:var(--beige);
+  border:1px solid var(--line);box-shadow:var(--shadow-soft);text-align:start}
+.c-rep .ic{display:grid;place-items:center;width:44px;height:44px;flex:0 0 auto;
+  border-radius:var(--r-pill);background:var(--accent-wash);color:var(--accent)}
+.c-rep .ic svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.9;
+  stroke-linecap:round;stroke-linejoin:round}
+.c-rep b{display:block;font-size:14px;color:var(--ink)}
+.c-rep small{font-size:12px;color:var(--muted);line-height:1.6}
+.c-rep .go{flex:0 0 auto;color:var(--muted)}
+.c-rep .go svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.2;
+  stroke-linecap:round;stroke-linejoin:round}
+
+/* ══ D · THE SHOP ══════════════════════════════════════════════════════ */
+.d-top{position:sticky;top:0;z-index:20;background:oklch(96.9% .015 81/.97);
+  backdrop-filter:blur(10px);border-block-end:1px solid var(--line)}
+.d-row{display:flex;align-items:center;gap:var(--sp-3);padding:10px var(--sp-4)}
+.d-row .bm{display:flex;align-items:center;gap:var(--sp-2);flex:0 0 auto}
+.d-row .bm img{width:36px;height:36px;border-radius:var(--r-pill)}
+.search{flex:1;display:flex;align-items:center;gap:var(--sp-2);min-height:44px;padding:0 var(--sp-3);
+  border:1px solid var(--line);border-radius:var(--r-pill);background:var(--beige);
+  color:var(--muted);font-size:13.5px;font-weight:600;box-shadow:var(--shadow-soft);text-align:start}
+.search svg{flex:0 0 auto;width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.2}
+.d-promise{display:flex;align-items:center;gap:var(--sp-2);padding:var(--sp-3) var(--sp-4);
+  background:var(--accent-wash);font-size:13px;font-weight:700;color:var(--ink);line-height:1.6}
+.d-promise svg{flex:0 0 auto;width:17px;height:17px;fill:none;stroke:var(--accent);stroke-width:2.2;
+  stroke-linecap:round;stroke-linejoin:round}
+.d-cats{display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-2);padding:var(--sp-4) var(--sp-4) 0}
+.d-cat{position:relative;overflow:hidden;border-radius:var(--r-sm);aspect-ratio:1/1;
+  background:var(--sink);text-align:start}
+.d-cat img{width:100%;height:100%;object-fit:cover;transition:scale .6s cubic-bezier(.16,1,.3,1)}
+.d-cat:hover img{scale:1.05}
+.d-cat span{position:absolute;inset-inline:0;bottom:0;padding:var(--sp-6) var(--sp-3) var(--sp-3);
+  background:linear-gradient(to top,oklch(18% .01 80/.85),transparent);
+  color:var(--beige);font-size:14.5px;font-weight:800}
+.d-cat span small{display:block;font-size:11px;font-weight:600;opacity:.82}
+.d-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-6) var(--sp-3);padding:var(--sp-4)}
+
+/* ── judging aids ── */
+.tools{position:fixed;inset-block-start:var(--sp-4);inset-inline-start:var(--sp-4);z-index:99;
+  display:flex;gap:var(--sp-2);padding:var(--sp-2);border-radius:var(--r-pill);
+  background:oklch(30% .012 80/.94);backdrop-filter:blur(10px);box-shadow:var(--shadow-float)}
+.tools button{min-height:38px;padding:0 var(--sp-4);border-radius:var(--r-pill);
+  font-size:12.5px;font-weight:800;color:oklch(84% .012 82)}
+.tools button[aria-pressed="true"]{background:var(--accent);color:var(--beige)}
+body[data-lens="gray"] .phone{filter:grayscale(1)}
+body[data-lens="blur"] .phone{filter:blur(5px)}
+
+.foot{max-width:74ch;margin-block-start:var(--sp-12);font-size:14px;color:oklch(78% .012 82)}
+.foot h3{color:var(--beige);font-family:var(--f-ar);font-size:1.35rem;margin-block-end:var(--sp-2)}
+.foot li{margin-block-start:var(--sp-2)}
+.foot b{color:var(--beige)}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition-duration:0ms!important}}
+</style>
+</head>
+<body>
+
+<div class="tools" role="group" aria-label="أدوات الحكم">
+  <button type="button" data-lens="" aria-pressed="true">عادي</button>
+  <button type="button" data-lens="gray" aria-pressed="false">تدرّج رمادي</button>
+  <button type="button" data-lens="blur" aria-pressed="false">ضبابي ٥px</button>
+</div>
+
+<div class="board">
+  <header class="board-head">
+    <p class="eyebrow">لولو شوب · الانطباع الأول</p>
+    <h1>أربع رهانات على أول شاشة يشوفها الطالب</h1>
+    <p>كل شي تحت الشاشة الأولى <b>متطابق في الأربعة</b> — نفس الألوان، نفس الصور الحقيقية، نفس
+      المنتجات الحقيقية من قاعدة البيانات. المتغيّر الوحيد هو <b>الانطباع الأول</b>: الشي الذي
+      يشوفه الطالب قبل ما ينزّل إصبعه. اختر واحد وأدمجه بالمخطط الأساسي.</p>
+    <ul class="facts">
+      <li>صور حقيقية من ملفات المشروع</li>
+      <li>٥٣ منتج حقيقي بأسعاره</li>
+      <li>لون واحد فقط مشبَّع (البرتقالي)</li>
+      <li>بدون رسم CSS · بدون محرّر تصميم</li>
+      <li>عرض ٣٩٠px — هاتف حقيقي</li>
+    </ul>
+  </header>
+
+  <div class="rack">
+
+    <!-- ══════════════════════════════════════════════════════════════════
+         A · THE NAME — lead with the promise made visible.
+         ══════════════════════════════════════════════════════════════════ -->
+    <div class="slot">
+      <header>
+        <p class="tag"><b>A</b> الاسم</p>
+        <h2>«اسمك، مو اسم غيرك»</h2>
+        <p class="bet">الرهان: <b>المنتج نفسه هو الإعلان.</b> صورة الوشاح المسطّح تُظهر بالضبط ما
+          يشتريه الطالب — اسمه بالخط العربي، كليته، سنة تخرّجه. حقيقة لا يقدر أي متجر ثاني ينسخها.</p>
+        <p class="risk">الخطر: بلا وجه إنسان، ممكن يقلّ الدفء العاطفي.</p>
+      </header>
+      <div class="phone"><div class="vp">
+
+        <div class="a-top">
+          <span class="brandmark">
+            <img src="../../frontend/public/icons/icon-192.png" alt="" width="34" height="34">
+            <span>لولو شوب</span>
+          </span>
+          <button class="iconbtn" type="button" aria-label="الإشعارات">
+            <svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+          </button>
+        </div>
+
+        <figure class="a-stage">
+          <img src="../../frontend/public/lookbook/detail-flatlay.jpg"
+               alt="وشاح تخرّج أزرق مطرّز باسم الطالبة بالخط العربي على جهة، وكلية الصيدلة وشعارها وسنة ٢٠٢٦ على الجهة الثانية">
+          <figcaption class="a-callout"><i></i>تطريز يدوي</figcaption>
+        </figure>
+
+        <div class="a-copy">
+          <p class="kicker">أوشحة وروبات تخرّج</p>
+          <h1>اسمك مطرّز بالخيط، <em>مو مطبوع</em></h1>
+          <p class="lede">على جهة اسمك بالخط العربي، وعلى الثانية كليتك وسنة تخرّجك.
+            نخيطه ونطرّزه بورشتنا — لا قالب جاهز ولا طباعة سريعة.</p>
+          <div class="a-cta">
+            <button class="btn btn-1" type="button">تسوّق الأوشحة
+              <svg viewBox="0 0 24 24"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg></button>
+            <button class="btn btn-2" type="button">كل القطع</button>
+          </div>
+        </div>
+
+        <ul class="trust">
+          <li>نقداً<span>عند التسليم</span></li>
+          <li>5 أيام<span>وقت التجهيز</span></li>
+          <li>بغداد<span>محل تزوره</span></li>
+        </ul>
+
+        <div class="pad">
+          <div class="sec-head">
+            <h2 class="h-ar">تسوّق حسب القطعة</h2>
+            <button class="more" type="button">الكل
+              <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+          </div>
+          <div class="doors">
+            <button class="door" type="button"><span class="im"><img src="https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2Fbc150ab4881131926d66393611470ce0.png&amp;w=640&amp;q=75" alt="" loading="lazy"></span><span class="bd"><b>أوشحة</b><small>11 موديل</small></span></button>
+            <button class="door" type="button"><span class="im"><img src="https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2Fa96dc9aa022ffc775a6f66abd58f8e9d.png&amp;w=640&amp;q=75" alt="" loading="lazy"></span><span class="bd"><b>روبات</b><small>20 موديل</small></span></button>
+          </div>
+        </div>
+
+        <div class="sec-head pad"><h2 class="h-ar">الأكثر طلباً</h2>
+          <button class="more" type="button">عرض الكل
+            <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button></div>
+        <div class="rail" data-rail></div>
+
+        <nav class="tabs" data-tabs></nav>
+      </div></div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+         B · THE COVER — lead with the feeling of the day.
+         ══════════════════════════════════════════════════════════════════ -->
+    <div class="slot">
+      <header>
+        <p class="tag"><b>B</b> الغلاف</p>
+        <h2>«يوم واحد، صورة تبقى العمر»</h2>
+        <p class="bet">الرهان: <b>العاطفة قبل المنتج.</b> صورة كاملة بعرض الشاشة مثل غلاف مجلة أزياء
+          — خرّيجة بروب أسود ووشاح مخملي أحمر. يبيع اللحظة، والقطعة تجي بعدها.</p>
+        <p class="risk">الخطر: أجمل شاشة، لكنها الأبطأ للوصول إلى منتج.</p>
+      </header>
+      <div class="phone"><div class="vp">
+
+        <div class="b-cover">
+          <img src="../../frontend/public/lookbook/look-english-red.jpg"
+               alt="خرّيجة بروب أسود وقبعة تخرّج ووشاح مخملي أحمر مطرّز باسمها وقسم اللغة الإنجليزية ودفعة 2026">
+          <div class="b-bar">
+            <span class="bm">
+              <img src="../../frontend/public/icons/icon-192.png" alt="" width="34" height="34">
+              <span>لولو شوب</span>
+            </span>
+            <button class="iconbtn" type="button" aria-label="بحث">
+              <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+            </button>
+          </div>
+          <div class="b-copy">
+            <p class="kicker">CLASS OF 2026</p>
+            <h1>يوم واحد. وصورة تبقى العمر كله.</h1>
+            <p>روب ووشاح وقبعة باسمك وكليتك — مخيوطة ومطرّزة بورشتنا، وتوصلك قبل موعد الحفل.</p>
+            <div class="row">
+              <button class="btn btn-1" type="button">تسوّق الآن
+                <svg viewBox="0 0 24 24"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg></button>
+              <button class="btn btn-ghost" type="button">الطقم الكامل</button>
+            </div>
+          </div>
+        </div>
+
+        <ul class="trust">
+          <li>نقداً<span>عند التسليم</span></li>
+          <li>5 أيام<span>وقت التجهيز</span></li>
+          <li>بغداد<span>محل تزوره</span></li>
+        </ul>
+
+        <div class="pad">
+          <div class="sec-head">
+            <h2 class="h-ar">تسوّق حسب القطعة</h2>
+            <button class="more" type="button">الكل
+              <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+          </div>
+          <div class="doors">
+            <button class="door" type="button"><span class="im"><img src="https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2Fbc150ab4881131926d66393611470ce0.png&amp;w=640&amp;q=75" alt="" loading="lazy"></span><span class="bd"><b>أوشحة</b><small>11 موديل</small></span></button>
+            <button class="door" type="button"><span class="im"><img src="https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2Fa96dc9aa022ffc775a6f66abd58f8e9d.png&amp;w=640&amp;q=75" alt="" loading="lazy"></span><span class="bd"><b>روبات</b><small>20 موديل</small></span></button>
+          </div>
+        </div>
+
+        <div class="sec-head pad"><h2 class="h-ar">الأكثر طلباً</h2>
+          <button class="more" type="button">عرض الكل
+            <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button></div>
+        <div class="rail" data-rail></div>
+
+        <nav class="tabs" data-tabs></nav>
+      </div></div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+         C · THE CLASS — lead with proof, and open the rep door.
+         ══════════════════════════════════════════════════════════════════ -->
+    <div class="slot">
+      <header>
+        <p class="tag"><b>C</b> الدفعة</p>
+        <h2>«دفعات كاملة لبستها»</h2>
+        <p class="bet">الرهان: <b>الثقة قبل الذوق.</b> بالعراق أول سؤال هو «هذا محل حقيقي لو حساب
+          إنستغرام؟» — صورة دفعة كاملة ورقم حقيقي يجاوبون قبل أي كلام تسويقي. وهي الوحيدة التي
+          تفتح باب <b>ممثل الدفعة</b>، وهو خط شغل كامل ما إله باب بالمتجر اليوم.</p>
+        <p class="risk">الخطر: صورة الحشد أقل جودة (لقطة إنستغرام).</p>
+      </header>
+      <div class="phone"><div class="vp">
+
+        <div class="c-proof">
+          <div class="c-bar">
+            <span class="bm">
+              <img src="../../frontend/public/icons/icon-192.png" alt="" width="34" height="34">
+              <span>لولو شوب</span>
+            </span>
+            <button class="iconbtn" type="button" aria-label="بحث">
+              <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+            </button>
+          </div>
+          <img src="../../frontend/public/lookbook/grad-crowd.jpg"
+               alt="مدرّجات مليئة بخرّيجين يلبسون أوشحة تخرّج من لولو شوب في حفل تخرّج جامعي">
+        </div>
+
+        <div class="c-copy">
+          <p class="c-stat"><b class="num">553</b><span>طالب وطالبة لبسوا تصاميمنا</span></p>
+          <h1>دفعتك كلها تقدر تطلب سوية</h1>
+          <p class="lede">أوشحة وروبات وقبعات بأسماء الطلاب وكلياتهم — للطالب الواحد أو للدفعة
+            كاملة. نخيطها بورشتنا ونسلّمها قبل موعد الحفل.</p>
+          <div class="c-cta">
+            <button class="btn btn-1" type="button">تسوّق القطع
+              <svg viewBox="0 0 24 24"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg></button>
+            <button class="btn btn-2" type="button">الطقم الكامل</button>
+          </div>
+        </div>
+
+        <button class="c-rep" type="button">
+          <span class="ic"><svg viewBox="0 0 24 24"><path d="M17 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="4"/><path d="M22 20v-2a4 4 0 0 0-3-3.87"/></svg></span>
+          <span style="flex:1">
+            <b>أنت ممثل دفعتك؟</b>
+            <small>سجّل دفعتك وتابع طلبات زملائك من مكان واحد</small>
+          </span>
+          <span class="go"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></span>
+        </button>
+
+        <ul class="trust" style="margin-block-start:var(--sp-6)">
+          <li>نقداً<span>عند التسليم</span></li>
+          <li>5 أيام<span>وقت التجهيز</span></li>
+          <li>بغداد<span>محل تزوره</span></li>
+        </ul>
+
+        <div class="pad">
+          <div class="sec-head">
+            <h2 class="h-ar">تسوّق حسب القطعة</h2>
+            <button class="more" type="button">الكل
+              <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+          </div>
+          <div class="doors">
+            <button class="door" type="button"><span class="im"><img src="https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2Fbc150ab4881131926d66393611470ce0.png&amp;w=640&amp;q=75" alt="" loading="lazy"></span><span class="bd"><b>أوشحة</b><small>11 موديل</small></span></button>
+            <button class="door" type="button"><span class="im"><img src="https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2Fa96dc9aa022ffc775a6f66abd58f8e9d.png&amp;w=640&amp;q=75" alt="" loading="lazy"></span><span class="bd"><b>روبات</b><small>20 موديل</small></span></button>
+          </div>
+        </div>
+
+        <div class="sec-head pad"><h2 class="h-ar">الأكثر طلباً</h2>
+          <button class="more" type="button">عرض الكل
+            <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button></div>
+        <div class="rail" data-rail></div>
+
+        <nav class="tabs" data-tabs></nav>
+      </div></div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+         D · THE SHOP — the anti-hero. No marketing, straight to goods.
+         ══════════════════════════════════════════════════════════════════ -->
+    <div class="slot">
+      <header>
+        <p class="tag"><b>D</b> المتجر</p>
+        <h2>«بدون مقدّمات — القطع فوراً»</h2>
+        <p class="bet">الرهان: <b>السرعة هي الفخامة.</b> بلا صورة بطل ولا كلام تسويقي — بحث، أربع
+          فئات بصور حقيقية، وشبكة المنتجات تبدأ فوق الطيّة. للطالب الذي يعرف شنو يريد، وللزائر
+          الراجع، هذي أسرع طريق للشراء.</p>
+        <p class="risk">الخطر: ما يجاوب «ليش لولو شوب؟» — ممكن يقرأ كأي متجر ثاني.</p>
+      </header>
+      <div class="phone"><div class="vp">
+
+        <div class="d-top">
+          <div class="d-row">
+            <span class="bm"><img src="../../frontend/public/icons/icon-192.png" alt="لولو شوب" width="36" height="36"></span>
+            <button class="search" type="button">
+              <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+              دوّر على وشاح، روب، قبعة…
+            </button>
+            <button class="iconbtn" type="button" aria-label="الإشعارات">
+              <svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <p class="d-promise">
+          <svg viewBox="0 0 24 24"><path d="m20 6-11 11-5-5"/></svg>
+          اسمك وكليتك مطرّزين بالخيط · جاهز خلال 5 أيام · الدفع نقداً عند التسليم
+        </p>
+
+        <div class="d-cats">
+          <button class="d-cat" type="button">
+            <img src="https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2Fbc150ab4881131926d66393611470ce0.png&amp;w=640&amp;q=75" alt="" loading="lazy">
+            <span>أوشحة<small>11 موديل · من 15,000</small></span>
+          </button>
+          <button class="d-cat" type="button">
+            <img src="https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2Fa96dc9aa022ffc775a6f66abd58f8e9d.png&amp;w=640&amp;q=75" alt="" loading="lazy">
+            <span>روبات<small>20 موديل · من 20,000</small></span>
+          </button>
+          <button class="d-cat" type="button">
+            <img src="https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2F585b11f5310e196951919c7c5a2b9b9e.png&amp;w=640&amp;q=75" alt="" loading="lazy">
+            <span>قبعات<small>5 موديلات · من 15,000</small></span>
+          </button>
+          <button class="d-cat" type="button">
+            <img src="https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2Ff2fb87b5543e2a277202505bceab964e.png&amp;w=640&amp;q=75" alt="" loading="lazy">
+            <span>شالات<small>17 موديل · من 25,000</small></span>
+          </button>
+        </div>
+
+        <div class="sec-head pad" style="margin-block-start:var(--sp-6)">
+          <h2 class="h-ar">الأكثر طلباً</h2>
+          <button class="more" type="button">عرض الكل
+            <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+        </div>
+        <div class="d-grid" data-grid></div>
+
+        <nav class="tabs" data-tabs></nav>
+      </div></div>
+    </div>
+
+  </div>
+
+  <section class="foot">
+    <h3>كيف تحكم عليها</h3>
+    <ul>
+      <li><b>اختبار الضبابي:</b> اضغط «ضبابي ٥px» فوق — لازم تعرف <b>الشي المسيطر</b> بكل شاشة
+        خلال ثانية. إذا شيئين يتنافسون، الشاشة فاشلة.</li>
+      <li><b>اختبار الرمادي:</b> اضغط «تدرّج رمادي» — ترتيب الأهمية لازم ما يتغيّر. إذا انهار،
+        معناها اللون كان يشيل الهرمية بدل الحجم والمسافة.</li>
+      <li><b>اختبار «أي متجر ثاني»:</b> اسأل عن كل شاشة — شنو الحقيقة التي تحملها ولا يقدر أي
+        متجر ثاني ينسخها؟ (A: اسمك بالخط · B: يوم التخرّج · C: 553 خرّيج + الدفعة · D: لا شي —
+        وهذا ضعفها الوحيد.)</li>
+    </ul>
+    <h3 style="margin-block-start:var(--sp-6)">ملاحظات صدق</h3>
+    <ul>
+      <li>رقم <b>553</b> بشاشة C حقيقي من قاعدة البيانات (553 طالب · 578 طلب · 1,727 قطعة منذ
+        2026-06-23). إذا تريده رقم ثاني، بدّله — بس لا تخلّيه رقم تسويقي مدوّر.</li>
+      <li>أعداد الموديلات (11 وشاح · 20 روب · 5 قبعات · 17 شال) محسوبة من نفس التغذية الحقيقية.</li>
+      <li>لا يوجد <b>محرّر تصميم للوشاح</b> بأي شاشة — محرّر التجزئة محذوف من التطبيق منذ
+        2026-06-20، والتخصيص يصير بحقول نص بصفحة القطعة.</li>
+    </ul>
+  </section>
+</div>
+
+<script>
+/* ══ REAL catalog rows — the retail feed, prices as stored, photos through
+      prod's next/image optimizer (~27 KB webp instead of the 4–6 MB originals). ══ */
+var IMG = 'https://lolo-shop96.com/_next/image?url=https%3A%2F%2Flolo-shop96.com%2Fuploads%2Fimages%2F';
+var TOP = [
+  { n:'وشاح الفراشة',              p:30000, f:true,  h:'bc150ab4881131926d66393611470ce0.png' },
+  { n:'روب فصال خليجي مبطن سن',   p:35000, f:false, h:'a96dc9aa022ffc775a6f66abd58f8e9d.png' },
+  { n:'قبعة ملكة',                 p:15000, f:false, h:'585b11f5310e196951919c7c5a2b9b9e.png' },
+  { n:'شال امريكي 17',             p:25000, f:false, h:'f2fb87b5543e2a277202505bceab964e.png' },
+  { n:'وشاح مثلث ملكي',            p:25000, f:false, h:'31d90300ec723af87dd0ff27478d93f2.png' },
+  { n:'روب فصال تركي',             p:40000, f:false, h:'a3c6e6614ce1a4aad176d68e0798688e.png' }
+];
+var iqd = function (n) { return n.toLocaleString('en-US') + ' د.ع'; };
+
+function tile(p) {
+  return '<button class="tile" type="button">' +
+    '<span class="ph"><img src="' + IMG + p.h + '&w=640&q=75" alt="' + p.n + '" loading="lazy">' +
+    (p.f ? '<span class="flag">مميّز</span>' : '') + '</span>' +
+    '<h3>' + p.n + '</h3>' +
+    '<p class="price num"><span class="from">يبدأ من</span><span class="now">' + iqd(p.p) + '</span></p>' +
+    '</button>';
+}
+document.querySelectorAll('[data-rail]').forEach(function (el) {
+  el.innerHTML = TOP.slice(0, 4).map(tile).join('');
+});
+document.querySelectorAll('[data-grid]').forEach(function (el) {
+  el.innerHTML = TOP.map(tile).join('');
+});
+
+/* identical tab bar in all four — the shell is not what we are testing */
+var TABS = [
+  { k:'home',     l:'الرئيسية', d:'<path d="M3 9.5 12 3l9 6.5"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/>' },
+  { k:'products', l:'القطع',    d:'<rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/>' },
+  { k:'cart',     l:'السلة',    d:'<path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/>' },
+  { k:'account',  l:'حسابي',    d:'<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>' }
+];
+document.querySelectorAll('[data-tabs]').forEach(function (el) {
+  el.setAttribute('aria-label', 'التنقّل الرئيسي');
+  el.innerHTML = TABS.map(function (t, i) {
+    return '<button class="tab' + (i === 0 ? ' on' : '') + '" type="button">' +
+      '<span class="cap"><svg viewBox="0 0 24 24">' + t.d + '</svg></span>' + t.l + '</button>';
+  }).join('');
+});
+
+/* judging lenses — grayscale + 5px blur, per the design-dna rubric */
+var tools = document.querySelector('.tools');
+tools.addEventListener('click', function (e) {
+  var b = e.target.closest('button'); if (!b) return;
+  tools.querySelectorAll('button').forEach(function (x) { x.setAttribute('aria-pressed', String(x === b)); });
+  document.body.dataset.lens = b.dataset.lens;
+});
+</script>
+</body>
+</html>

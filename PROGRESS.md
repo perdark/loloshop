@@ -1,5 +1,470 @@
 # Progress
 
+## 2026-08-08 — Push notifications, and the eight open review findings
+
+**Branch `claude/handoff-cloud-board-tasks-v342hb`** (off `feat/deeplinks-and-location`).
+**Migration `077_push_notifications.sql` — pending, not yet applied.**
+Gates: `tsc` 0 · `eslint` 0 · `next build` exit 0 · backend syntax check clean ·
+`node --test test/push.test.js test/joinRouteOrder.test.js test/memoCache.test.js` **13/13**
+(the DB-backed suites were not runnable — this sandbox has no PostgreSQL).
+
+Closes both items on the HANDOFF cloud board. The third ship-queue blocker — push — was the only
+one with no code at all; it now has everything a cloud session can build, and stops at the two
+things that need a browser session in a console (a Firebase project and an APNs key).
+
+### 1 — Push notifications (the last unbuilt blocker)
+
+**What shipped as "notifications" before this:** rows in the `notifications` table, rendered
+in-app. A rep whose student joined at 11pm found out the next time they happened to open the
+app; a closed phone learned nothing at all.
+
+- **`notifications` IS the queue.** New `push_state` / `pushed_at` columns plus
+  `backend/lib/pushOutbox.js`, which claims committed rows and delivers them. Chosen over a send
+  call at each site because there are **thirteen** `INSERT INTO notifications` and several run
+  inside `tx()` — sending from in there pushes work that may still roll back, and sending after
+  means threading a return value through every caller. **No call site changed**, so no future
+  insert can forget to push.
+- **⚠️ Two independent flood guards, and both are load-bearing.** `push_state` defaults to
+  `'pending'`, so the migration retires every pre-existing row to `'skipped'`, **and** the drain
+  only ever looks at the last 15 minutes. Either one alone is a single line away from replaying
+  the shop's entire notification history onto real phones. The backfill is repeated in
+  `db/schema.sql` because that file is what `npm run migrate` applies, to a database that
+  already holds every notification ever written.
+- **Zero new npm dependencies, and that is a deploy requirement.** `ci.yml:22` runs
+  `npm audit --omit=dev --audit-level=moderate` and the deploy job needs it green, so a package
+  that picks up a moderate advisory stops the **site** shipping, not just this feature.
+  `firebase-admin` would put ~40 transitive packages permanently inside that gate to do two
+  things Node already does: sign a JWT and make an HTTP/2 request. `backend/lib/push.js`
+  implements FCM HTTP v1 and APNs HTTP/2 on `crypto` + `http2` + `fetch`.
+- **iOS talks to Apple directly, not through Firebase.** Routing iOS through FCM needs the
+  Firebase iOS SDK *inside the app*, and the iOS project is regenerated from Capacitor's
+  template on every Codemagic run — the same trap that already forces the privacy strings and
+  the entitlement to be re-injected each build. Straight APNs needs nothing in the app: the
+  plugin's stock token IS the APNs token and the `.p8` lives only on the server. So **the
+  Firebase project is Android-only**, and the `.p8` goes in the backend `.env`.
+- **⚠️ `POST_NOTIFICATIONS` added to `AndroidManifest.xml`.** The plugin does **not** declare it
+  — it names it only in a Capacitor `@Permission` annotation, which is a runtime concept; its
+  own manifest carries just the messaging service. Verified by reading both files in
+  `node_modules`. Android denies a runtime request for an undeclared permission **without
+  showing a dialog**, so without this line `requestPermissions()` resolves `'denied'` instantly
+  on every modern phone and nothing anywhere says why — the identical silent failure the two
+  location permissions were added to fix. It is compiled into the AAB, so missing it costs a
+  whole extra store release.
+- **`npx cap update android` run**, so `capacitor.settings.gradle` and `capacitor.build.gradle`
+  now include `capacitor-push-notifications`. They are generated files; the plugin was in
+  `package.json` but had never been synced, so a build would have shipped without it.
+  `app/build.gradle` already applies the google-services plugin only when `google-services.json`
+  exists, so the build still succeeds without the owner's file — silently producing an app that
+  can never register, which is why that is spelled out in the manifest comment.
+- **`POST /api/notifications/devices`** (upsert) and **`/devices/unregister`**. ⚠️ The upsert
+  conflicts on **`token`**, not `(user_id, token)`: phones here are shared and resold and the
+  provider hands the same token to whoever signs in next, so the device **moves** to its new
+  owner instead of leaving the previous account subscribed. `logout()` unregisters **before**
+  clearing the JWT, passing the token explicitly — axios' interceptor reads localStorage in a
+  microtask, by which time it is gone.
+- **Frontend:** `lib/push.ts`, `components/PushRegistrar.tsx` (root layout), both dynamically
+  imported so axios stays out of the root chunk. The permission is asked **after login only** —
+  iOS shows that sheet once per install, and spending it on a browsing student burns it, since
+  a «رفض» can only be undone in system Settings. Foreground arrivals become a sonner toast
+  (Android draws no system notification while the app is foregrounded); taps navigate, and the
+  `link` is validated as a same-origin path because it round-trips through FCM/APNs.
+- **Device rows are deleted on one signal only** — an explicit provider verdict (FCM 404/403,
+  APNs 410/BadDeviceToken). Never on a timeout or a 5xx, which would quietly unsubscribe every
+  phone in the shop during a provider outage.
+- **iOS `aps-environment`** is prepared as `docs/patches/codemagic-ios-push-capability.patch`,
+  because `codemagic.yaml` exists **only** on `ios-appstore` and creating it here would be an
+  add/add conflict on the day that branch merges. Verified `git apply --check` clean against
+  `f1785c0`. See `docs/patches/README.md`.
+
+### 2 — The eight review findings
+
+- **Native detection unified.** New `frontend/lib/native-shell.ts` is the one implementation of
+  the two-signal test. `DeepLinkHandler.tsx` tested `window.Capacitor` alone while its comment
+  claimed parity with the gate; both now import the same function. **The underlying hole is
+  documented, not fixed, and that is a decision:** on Android WebView <105 there is no Capacitor
+  runtime at all, so `AppWeb.getLaunchUrl()` returns `''` and an App Link opens the app with the
+  code already lost. Nothing in JS recovers it — reading the launch intent needs the very bridge
+  that is missing. WebView 105 shipped in Aug 2022 and updates through Play, so the affected
+  phones are largely ones that cannot install from Play either. The real fix is a native change
+  in `MainActivity` that no cloud session can compile or test.
+- **Route order is now pinned** — `backend/test/joinRouteOrder.test.js`, 3 tests, no database
+  (`lib/db` and the controller are stubbed in `require.cache`). The third test builds a
+  deliberately mis-ordered router and asserts `/representatives` really is swallowed, so the
+  other two cannot pass for unrelated reasons.
+- **`join:` caches are invalidated** on rep create / update / deadline / delete
+  (`adminController.invalidateJoinCaches`). An admin creating a rep in front of the owner used
+  to watch it not appear for five minutes. The prefix clears `join:<code>` too, deliberately —
+  a deadline edit changes the referral page a student reads.
+- **The shared limiter is split.** `directoryLimit` 300/15min and `lookupLimit` 200/15min are
+  now separate, and both were raised: Iraqi carriers CGNAT, so one IP is routinely a whole
+  cohort. The enumeration defence the old 60 was tuned for is already spent —
+  `/representatives` publishes every code in one response. **`joinLimit` (10/hour/IP) was left
+  alone**: it is the deliberate bound on approval-queue spam recorded on 2026-08-07, and
+  changing it is an owner call. It has the same CGNAT exposure — flagged in HANDOFF.
+- **`/join` tells a network failure apart from an empty directory.** `getJoinRepresentatives`
+  now throws instead of resolving `[]`, and the page has a real error state with a retry button.
+  The old behaviour told a student on a flaky connection «لا توجد قائمة ممثلين» — read as "your
+  rep is not registered" — on the exact screen that exists because they already lost their link.
+- **Dead code removed** — the `?referrer=join_<code>` branch in `app-gate.ts`, unreachable since
+  `/join` was allowlisted. What it was for, and when to restore it, is recorded in its place.
+- **Stale comments corrected** — `app-gate.ts` no longer says `/s /w /d` must open in a browser
+  (the manifest now claims them), and the spec's «two dropdowns» acceptance line now matches the
+  shipped grouped `<select>`.
+- **The codemagic sharp edge is fixed** in the patch above: the injection is idempotent and
+  ignores foreign targets instead of bailing out with a mystery failure.
+
+**Open — owner actions, unchanged in order:**
+1. Firebase project → `google-services.json` → commit to `frontend/android/app/`.
+2. APNs `.p8` → `APNS_KEY_FILE` + `APNS_KEY_ID` + `APNS_TEAM_ID` in the prod `.env`.
+3. Enable **Push Notifications** on the App ID (alongside Associated Domains).
+4. Apply the patch to `ios-appstore` before the next Codemagic run.
+5. Run `npm run migrate` (or `npm run migrate:file db/migrations/077_push_notifications.sql`).
+6. Declare notifications on the Play Data Safety form and the Apple privacy label.
+
+---
+
+## 2026-08-07 — «ادخل مع ممثلك», team portals as deep links, and the iOS pipeline
+
+**Branch `feat/deeplinks-and-location`** (+ `codemagic.yaml` on `ios-appstore`). No migration.
+Spec: `docs/superpowers/specs/2026-08-07-app-entry-deeplinks-gps.md`.
+Gates: backend **177/177** · `tsc` 0 · `eslint` 0 errors · `next build` exit 0 · endpoint and
+both well-known routes curl-verified against real servers.
+
+**The question this answers:** «can a rep's students and the team get into the app without the
+website?» — with the website reduced to admin + a download landing page.
+
+- **Split by what needs a store review.** The binaries are WebView shells on the live site, so
+  HTML/JS/API changes reach installed apps on deploy; only `AndroidManifest.xml` and the iOS
+  entitlements need a new binary. Everything below is sorted by that line.
+
+**Ships on deploy — no store, no review:**
+- **`GET /api/join/representatives`** — public directory of approved reps (جامعة · قسم · code),
+  5-min cached. ⚠️ Registered **above** `/:code`; Express 5 matches in order and the param route
+  would swallow it.
+- **`/join` — «ادخل مع ممثلك»**, linked from `/login`. Recovery for a student whose rep link is
+  buried in WhatsApp. `referral_code` is an admin-typed Latin slug, so typing it is not an
+  option, and iOS has no deferred deep linking, so "install and it remembers" is not either.
+- **⚠️ Built as جامعة→قسم first; the live data killed it.** `university_name` is admin free text
+  and the 12 real rows spell one university three ways («بلاد الرافدين» · «بلاد الرفدين» ·
+  «كلية بلاد الرافدين»; same for «جامعة ديالى» · «ديالى» · «جامعة ديالى كلية العلوم»). Two
+  dependent dropdowns dead-end anyone picking the wrong spelling — empty قسم list, no error,
+  student concludes their rep isn't registered. Now **one `<select>` grouped by `<optgroup>`**,
+  so a mis-spelled twin is visible instead of hidden. **The 12 rows still want cleaning.**
+- **`/join` allowlisted in `BROWSER_ALLOWED_PREFIXES`** — a correctness fix, not a nicety.
+  Without it, flipping `NEXT_PUBLIC_APP_ONLY=1` replaces every referral tap with the store and
+  **nothing carries the code through the install**: Play's `?referrer=` has no reader on our
+  side and iOS has no equivalent. Costs nothing — once App Links verify, Android intercepts
+  `/join/*` before the browser loads it.
+- **`/get-app`** now states the only instruction that works on both platforms: tap the link
+  again after installing.
+
+**Needs one new binary per store (batched with the location permission):**
+- **Deep links extended to `/s/`, `/w/`, `/d/`** — manifest, AASA and `DeepLinkHandler` all
+  claim the same four prefixes. These portals are the **only** way in for staff, workshop and
+  design-team members with no phone for the WhatsApp OTP, and they went browser-only when
+  `TeamKeyEntry` was deleted on 2026-08-06. This puts that entrance back inside the app.
+- **`codemagic.yaml` (`ios-appstore`)** — `NSLocationWhenInUseUsageDescription` added to the
+  existing `plutil` step and its fail-loud check, plus a new step that writes
+  `App.entitlements` (`com.apple.developer.associated-domains`) and wires
+  `CODE_SIGN_ENTITLEMENTS` into `project.pbxproj`. Both re-injected **after `cap sync`**,
+  because `npx cap add ios` regenerates `ios/` every run and wipes committed edits — the same
+  trap the camera-crash fix already documents. Dry-run against a fake project: wired into
+  exactly the 2 App-target configs, left a plugin target with a different bundle id untouched,
+  and exits 1 when the template shape changes.
+
+**Open — owner actions, in this order:**
+1. **⚠️ Enter the shop coordinates.** `staff_attendance_settings.shop_latitude/longitude` are
+   NULL; setting `verification_mode` to `location`/`both` first **403s every بصمة for every
+   worker on every platform**.
+2. **⚠️ Enable "Associated Domains" on the App ID** before the next Codemagic run, or
+   `fetch-signing-files` builds a profile without it and the build dies at signing.
+3. `ANDROID_SHA256_CERT_FINGERPRINTS` (Play **App signing** key, not the upload keystore) and
+   `IOS_TEAM_ID` on the VPS.
+4. Play Data Safety + Apple privacy label: declare location.
+5. Clean the 12 wholesaler `university_name` rows.
+6. Verify on a real phone before flipping either flag — App Links fail **soft**, so a wrong
+   fingerprint is invisible: `adb shell pm get-app-links com.loloshop96.app`.
+
+**Accepted tradeoff:** the rep directory is public and unauthenticated, so the university list
+is disclosed and a rep's approval queue can be spammed without the link leaking. Bounded by
+`joinLimit` (10/h/IP) and the unique-phone check, and joining still grants nothing until the rep
+approves. Note the codes are already 1–3 characters (`g`, `tr`, `ml`), so they were trivially
+enumerable long before this endpoint existed.
+
+---
+
+## 2026-08-06 — Deep links for `/join/*`, and the location permission the app never had
+
+**Branch `feat/deeplinks-and-location`. No migration.**
+Gates: `tsc` 0 · `eslint` 0 · `next build` exit 0 · both well-known routes curl-verified against
+a real `next start`.
+
+- **The problem, stated properly.** The shells are remote-URL WebViews (`capacitor.config.ts`
+  → `server.url`) with **no address bar**, and nothing in the app links to `/join/*`. So a
+  wholesaler's referral link was **browser-only**: `AndroidManifest.xml` had only
+  `MAIN`/`LAUNCHER` — no `VIEW`/`BROWSABLE` — and no `.well-known` file existed for iOS.
+  An installed student had no path to their code at all.
+- **Android:** added an `autoVerify` App Links intent-filter claiming `https://lolo-shop96.com`
+  and `www.` at **`pathPrefix="/join/"` only** (per the 2026-07-31 spec — a wildcard would make
+  the app hijack every shared product link).
+- **iOS:** added `app/.well-known/apple-app-site-association/route.ts`, extensionless and
+  `application/json`, emitting both the iOS 13+ `appIDs`/`components` form and the legacy
+  `appID`/`paths` form. Driven by a new `IOS_TEAM_ID` env var.
+- **`DeepLinkHandler.tsx`** handles **both** arrival paths — `appUrlOpen` (warm) *and*
+  `App.getLaunchUrl()` (cold start, where no event ever fires). Handling only the listener is
+  the classic half-working deep link: fine while you test with the app open, broken for every
+  student tapping from WhatsApp. Host + path allowlisted again in JS, independently of the
+  manifest. Dynamic-imports `@capacitor/app` so browsers never fetch it.
+- **Hardened the pre-existing `assetlinks.json` route**, which accepted any non-empty string.
+  It now normalises case/colons and **drops anything that is not 64 hex chars**, so a pasted
+  SHA-1 or a truncated copy fails loudly instead of serving a document that looks right and
+  never verifies. Verified: a junk `DE:AD:BE:EF` entry is dropped, a lowercase unseparated
+  fingerprint is normalised to `AA:BB:…`.
+- **`ACCESS_FINE_LOCATION` + `ACCESS_COARSE_LOCATION` added to the manifest.** Staff بصمة calls
+  the *web* `navigator.geolocation` (`lib/staff.ts:1377`); Capacitor's bridge already prompts
+  for these two (`BridgeWebChromeClient:246`), but **Android denies a runtime request for an
+  undeclared permission without showing a dialog** — so `getCurrentPosition` always hit its
+  error path and check-in posted `location: null`. Silent, because `verification_mode` is
+  `'none'` and the backend then marks it verified anyway. This is why a **new binary** was
+  unavoidable: `<uses-permission>` compiles into the AAB and the remote-URL trick cannot ship it.
+
+⚠️ **Order of operations for GPS — getting it wrong locks every staff member out.** Ship the
+binary → wait for phones to update → set `shop_latitude`/`shop_longitude` in `/admin` → *only
+then* move `verification_mode` off `'none'`. Flipping it first makes `locationOk` false for
+everyone, and `attendanceController.js:532` + `:619` answer that with a hard
+**403 `ERR_ATTENDANCE_LOCATION`**.
+
+Open / owner actions:
+- `ANDROID_SHA256_CERT_FINGERPRINTS` on the VPS — from Play Console → **App integrity → App
+  signing key certificate**, *not* the upload keystore. Unset today, so the route 404s.
+- `IOS_TEAM_ID` on the VPS. Unset = that route 404s and iOS deep links stay off.
+- **Enable "Associated Domains" on the App ID** in the Apple Developer portal *before* the next
+  Codemagic run, or signing fails with a missing-entitlement error.
+- Update the Play **Data Safety** form (location is now collected).
+- `codemagic.yaml` on `ios-appstore` still needs the entitlement +
+  `NSLocationWhenInUseUsageDescription` injection step.
+- Neither half is smoke-tested on a real device yet — App Links fail *soft* (the link just opens
+  in the browser), so a wrong fingerprint is invisible. Check with
+  `adb shell pm get-app-links com.loloshop96.app`.
+
+## 2026-08-05 (e) — التجهيز cards show the garment, not just the stitching
+
+**Committed to `feat/ssr-storefront-native-auth`. No migration.**
+Gates: **backend 177/177** (+10) · `tsc` 0 · `eslint` 0 errors · `next build` exit 0.
+
+- **Closed the prep-queue data gap.** The زone detector was NOT touched — 325 of 326 cards said
+  «لا تطريز على هذه القطعة» *correctly*, because the queue is robes and zones are a sash/cap thing.
+  The console now also answers the preparer's real question: **لون/قماش/فصال الروب · الشكل · لون
+  القبعة**, the student's free-text lines («كسرة الكتف» — the single most common line in the whole
+  queue at 225) and **قياسات الروب** with ملاحظات الفصال and صورة الوصل.
+- **Why the data was invisible:** a spec line carries no `customer_text` and no `customer_image_url`
+  — it is a *choice*, not content — and every existing code path filtered on content. Same table,
+  opposite filter. `buildPieceSpec` partitions the lines and is pure, so the rules are unit-tested
+  against labels measured off the live queue.
+- **Measured by driving the real `getQueue` with a real preparer over the real 435-row queue:**
+  rows with something to show **3 → 416 (95.6%)**, measurements **0 → 281**, empty cards **432 → 19**.
+  All 19 remaining empties are correct — American shawls whose only line is «السعر الأساسي», because
+  the product name (*شال امريكي 10*) already is the spec.
+- `measurements` is gated in SQL, not JS, so it never rides on the other stations' ~480-row payloads.
+  `chest_cm` is 0 on every live order, so 0 renders as absent. `RobeMeasurements` was extracted from
+  an inline type so the order detail and the queue row cannot drift.
+- `PieceSpec` uses flex rows, not `grid-cols-subgrid` — old Android WebViews in the workshop.
+
+Open:
+- Browser smoke test of the prep console — the payload is verified end to end, the UI is not clicked.
+- ⚠️ The `postgres` MCP server points at a DIFFERENT project's DB (a digital-goods store). All
+  measurements above came from LoloShop's own DB via `backend/lib/db.js`.
+
+## 2026-08-05 — التجهيز prep console · scroll restore · touch-first buttons · account screen
+
+**Committed to `feat/ssr-storefront-native-auth`. No migration.**
+Gates: **backend 167/167** · `tsc` 0 · `eslint` 0 errors · `next build` exit 0.
+
+- **قائمة التجهيز is now its own console** (`components/staff/prep/PrepConsole.tsx`), reusing the
+  embroiderer's `StudentSheet` verbatim per the owner's «مثله مثل واجهة عامل التطريز». The preparer
+  was packing **blind** — their old queue was a flat `OrderCard` grid with no artwork, and رف التجهيز
+  has no `<img>` either, so verifying a set meant opening every piece's detail page.
+- **Zones are read-only at التجهيز.** The stitching is finished by the time a piece arrives, and the
+  backend exposes no zone-tick endpoint for `preparing`, so the preparer reads the artwork to verify
+  and never ticks it. One detector (`detectZonesForOrders`) still serves both stations.
+- **Two defects found reviewing the batch before commit, both fixed here:**
+  - The **«جاهزة للتسليم» tab claimed «لا تطريز على هذه القطعة» on every packed piece.** The backend
+    attached zones only for `embroidery`/`preparing`, and the sheet cannot tell *"no artwork"* from
+    *"artwork never fetched"* — so an absent list rendered as a statement of fact on pieces that are
+    demonstrably embroidered. `ready` joined `ZONE_STAGES` (no extra round-trip — the detector is one
+    `order_id = ANY($1)` query), and `PrepConsole`/`StudentSheet` stopped collapsing `null` into `[]`
+    so the distinction survives the mapper.
+  - That same tab then read **«لا يمكن إكمال هذه القطعة من هنا حالياً»** on every row — true (تأكيد
+    التسليم needs a delivery method, so it lives on the detail page) but a dead end. Now points at
+    «التفاصيل», via a `noActionHint` prop supplied by the only caller that can tell the tabs apart.
+- **Scroll position survives back-navigation** (`hooks/useScrollRestore.ts`) on staff home, queue,
+  shelf, station and prep. Next's built-in restoration does not cover this: the staff screens navigate
+  in and out with `<Link>` pushes, and a push always lands at the top. The save is frozen on click —
+  without that, leaving the page scrolls to 0, that fires a `scroll` event, and the good offset is
+  overwritten with 0 (measured; the first version of the hook was broken exactly this way).
+- **Buttons work on touch.** Every bit of the CTA's character lived behind `:hover` — invisible on the
+  phones students and reps actually use. `.btn-press` scales under the thumb, `.btn-shine` fires its
+  sheen on `:active`, all transform/shadow only, all collapsing under `prefers-reduced-motion`.
+- **Zone thumbnails go through the optimizer** (`ZoneThumb`): a raw `<img>` was pulling the full 4–6 MB
+  upload for a 44 px box, ~25 MB per student with five zones, uncacheable (`no-store`) over workshop
+  wifi. A broken URL now renders an explicit «؟» marker — never as "this zone has no artwork".
+- **`unoptimized` removed from the 8 staff order-detail images**; the lightbox moved to `next/image`.
+- **حسابي rebuilt**: graduate-figure avatar tied to the onboarding gender answer, destination rows
+  instead of two ghost pills, and a real signed-out screen instead of a login wall. «تفضيلاتي» now
+  *shows* an answered gender as a settled summary with «تغيير» rather than re-asking the question.
+- **`turbopack.root` removed from `next.config.ts`** — it silences a cosmetic warning and breaks
+  `next dev` (`/` 500s on the React Client Manifest). The header comment now says so at length.
+- **Docs:** `HANDOFF.md` 665 → ~180 lines, `PLAN.md` 337 → ~80; history moved verbatim into
+  `docs/HANDOFF-archive.md` and the new `docs/PLAN-archive.md`.
+
+Open:
+- Browser smoke test of the prep console against the real queue (326 students / 429 pieces) —
+  not run this session.
+- The prep-queue **data** gap is untouched: robe colour/fabric/cut, shape, cap colour and
+  `measurements` are in the DB and still unrendered. See `HANDOFF.md`.
+
+## 2026-08-01 — Image weight: product photos were 4–6 MB served raw and uncacheable
+
+**Uncommitted on main. No migration.** Gates: **backend 167/167** (+6) · `tsc` 0 · `eslint` 0 errors.
+Full detail in `HANDOFF.md`.
+
+- **Measured, not guessed:** prod product photos are **4.3–6.1 MB PNGs** (hero: 6,003,607 bytes at
+  1856×2304, on a 390 px phone). Nothing resized them on upload, `/uploads` is `no-store` so they
+  re-downloaded every visit, and the product page used a raw `<img>` that skipped Next's optimizer.
+  The home grid already used the optimizer — that's why only the product page felt broken.
+- **Answer to "client-side or SSR?": 47 of 54 pages are `"use client"`.** The storefront is entirely
+  client-rendered — LCP 3.68 s with **2.79 s of render delay** on Slow-4G + 4× CPU, CLS 1.10.
+- **Fixed at delivery:** hero + thumbnails routed through `/_next/image` inside a fixed `aspect-[4/5]`
+  `object-contain` box (no crop, no distortion, and it reserves space so the CLS goes away).
+- **Fixed at the source:** uploads over 500 KB are auto-oriented, capped at 2000 px and re-encoded
+  (alpha → PNG, else JPEG q85 — no WebP on disk, so no downstream tool can be handed a format it
+  can't open). Embroidery artwork is exempt on both client and server.
+- **Fixed the upload leg:** browser-side downscale wired into `apiUploadFile`, the one choke point all
+  11 upload callers share.
+- **Verified end to end:** same 6 MB photo over real HTTP → **6,003,607 → 208,010 bytes (3.5%)**; a
+  15.53 MB pick left the browser as **385,548 bytes (2.4%)** — a file multer would previously have
+  rejected at its 10 MB cap.
+- **⚠️ `priority` is deprecated in Next 16 and silently does nothing** — caught in the browser (no
+  `fetchpriority` attribute emitted). Now `loading="eager" fetchPriority="high"`. **~8 other
+  components still pass the dead prop** and lazy-load their above-the-fold images; not touched.
+- **Second pass — the home page is a separate bug.** CrUX field data (real users, p75):
+  **LCP 3905 ms, load delay 2113 ms, load duration only 289 ms** — so image bytes are NOT the home
+  page's problem; discovering them late is. Fixed one concrete cause: `app/(student)/page.tsx`
+  chained the shop feed *inside* `getMaintenance().then()`, making two API round trips **strictly
+  serial**. Now concurrent (verified: start 3 ms apart and overlap). The rest is the client-render
+  waterfall — the SSR fix is **blocked on an owner decision** because the JWT lives in `localStorage`,
+  so a Server Component can't know the viewer's price role.
+- **⚠️ None of this is deployed** — still uncommitted, which is why the live site was unchanged.
+
+## 2026-07-31 (b) — App-only gate verified + shipped with the flag OFF · dead-app bug caught · attendance breaks were broken on prod
+
+**Deployed with `NEXT_PUBLIC_APP_ONLY` unset, so prod behaviour is unchanged.** Turning it on is a
+VPS env edit + rebuild — the exact commands are in `HANDOFF.md`. Gates: `eslint` 0 errors ·
+`next build` 0 (run twice, flag OFF and flag ON) · `tsc` 0 · **backend 161/161**.
+
+- **Phase 9 done in a real browser against a production build**, not dev: flag OFF is byte-identical
+  to today (gate string absent from the HTML); flag ON bounces `/` to `/get-app` while `/admin`,
+  `/workshop`, `/tv/<key>`, `/privacy`, `/terms`, `/delete-account` all still open; an Android UA on
+  `/join/ABC123` lands on the real Play listing with `&referrer=join_ABC123`.
+- **Caught a bug that would have bricked the app.** The gate keyed off `window.Capacitor` alone, but
+  `Bridge.java:266` only injects it when `DOCUMENT_START_SCRIPT` is supported — **Android WebView
+  105+**. Below that the app would have redirected *itself* to the Play Store forever. Now accepts
+  `window.Capacitor || window.androidBridge`; proved with a controlled comparison where only the
+  injected global changes (Capacitor → holds · androidBridge only → holds · neither → bounces).
+- `TeamKeyEntry` verified with the real staff and workshop keys, a pasted `/s/<key>` link, and a
+  wrong key.
+- **Owner decisions:** PWA users get bounced too; App Store id `6793976053`.
+- **Known and deliberately not fixed:** the gate only runs on full page loads, so `/admin` →
+  (client-side) `/login` escapes it; and the bypass token ships in the page source. Both are
+  properties of a client-side gate, both recorded in `HANDOFF.md` for an owner call.
+
+**Separately — attendance breaks were live-broken on prod since 2026-07-30.** Shipped with 161/161
+tests but never clicked; the first click threw `Cannot read properties of undefined (reading
+'start_time')` at an Arabic-only worker. `staffPayload` returned half a payload while the frontend
+maps every break action through one `mapAttendancePayload`. The write always succeeded (201) — only
+the render died, so workers retried into «لديك خروج مؤقت مفتوح». Fixed by making
+`attendanceController.todayPayload()` the single source of the payload shape. Then walked end to end:
+request → approve → «طلعت» → «رجعت» → balance 10 س → 9 س 59 د, and the money path «خرجت بدون موافقة»
+→ خصم ١٬٠٠٠ د.ع → «أوافق وألغي الخصم» → deduction cleared while the allowance stays spent.
+
+## 2026-07-30 (b) — Apple rejection fixed: camera crash (2.1a) + in-app account deletion (5.1.1v)
+
+**Uncommitted. Migration 076 applied to the laptop dev DB + mirrored into `db/schema.sql`. The
+codemagic.yaml fix is on the `ios-appstore` branch (worktree), NOT main.** Gates: backend
+**161/161** (+8 new) · live HTTP e2e **15/15** · `tsc` 0 · `eslint` 0 · **browser-verified on a
+390px phone viewport, console clean**.
+
+- **Camera crash** — the repo has no `Info.plist` at all; `npx cap add ios` regenerates it every
+  build, so the app shipped without `NSCameraUsageDescription`. iOS kills any app that opens the
+  camera without it, which is exactly what "tapped Take Photo → crash" is. New codemagic step
+  injects the camera + photo-library strings after `cap sync` and **fails the build** if they are
+  missing, so this cannot silently regress. Also sets `ITSAppUsesNonExemptEncryption=false`.
+- **Account deletion** — new `POST /auth/account/delete` + `GET /auth/account/deletion-preview`
+  (`accountController.js`), new `/account` screen linked from the student nav, and `/delete-account`
+  rewritten to point at the real flow instead of "message us on Instagram".
+- Deletion **anonymises** rather than row-deletes: `orders.student_id` is `ON DELETE RESTRICT`, so a
+  real delete is refused the moment a student has an order and would destroy the shop's sales
+  records. The account dies (phone/email NULLed, password replaced, `token_version` bumped so every
+  JWT dies at once, cart/notifications/trusted devices cleared); the order survives on its
+  `checkout_groups` delivery snapshot so an in-flight sash still ships.
+- Retail only (`SELF_DELETE_ROLES`) — reps and staff/workshop keep admin-managed deletion.
+- New `npm run demo-account` recreates the App Review demo login, because the reviewer walking this
+  very flow would otherwise destroy it and fail the next submission.
+
+Open: enter the real Apple reply (screen recording), push, rebuild on Codemagic, resubmit.
+
+## 2026-07-30 — الخروج المؤقت: temporary-leave button beside بصمة + 10h monthly allowance
+
+**Uncommitted on main. Migration 075 applied to the laptop dev DB + mirrored into `db/schema.sql`.**
+Gates: backend **153/153** (+26 new) · `tsc` 0 · `eslint` 0 errors. **Browser walkthrough NOT done**
+(stopped at the owner's request). Spec:
+`docs/superpowers/specs/2026-07-30-attendance-temporary-leave-design.md`.
+
+- New `staff_attendance_breaks` table + `break_monthly_minutes` on both settings layers (global
+  default 600 = 10 hours, nullable per-staff override).
+- New `backend/lib/attendanceBreak.js` owns the whole money rule: free only if approved AND inside
+  the allowance; anything else deducted at the existing per-minute rate, frozen per row. Every
+  change re-runs the worker's whole month so the parts always sum to the balance.
+- New `backend/controllers/attendanceBreakController.js`: staff request → leave → return → cancel,
+  admin list/balances/approve/reject/correct-duration. Wired into `routes/staff.js` + `routes/admin.js`.
+- `worked_minutes` now excludes break time (new `present_minutes`/`break_minutes` on records);
+  بصمة الخروج auto-closes a break the worker forgot to end.
+- New `components/staff/StaffBreakControl.tsx` on both attendance surfaces (full card + compact
+  `/staff` row) with the allowance bar, live timer, and the «خرجت بدون موافقة» escape hatch;
+  new «الخروج المؤقت» section on `/admin/attendance`.
+
+Open:
+- Browser walkthrough (staff request → admin approve → طلعت → رجعت → over-quota deduction).
+- Owner decision: should lateness deductions also reach the salary balance? (see spec, last section)
+
+## 2026-07-29 — الورشة: piece rates split by customer type (ممثلين / تجزئة) — SHIPPED
+
+**Pushed to main `8832922`, CI green, deployed. Migration 072 applied to prod by the deploy.**
+Gates: backend **123/123** (+5 new) · `tsc` 0 · `eslint` 0 · live e2e on the dev DB · browser-verified
+as a workshop worker and as staff.
+
+**Done**
+- Migration 072: `audience` (`wholesale`/`retail`) on `workshop_piece_rates` + `workshop_production_entries`;
+  unique key is now `(operation, product, audience)`. `DEFAULT 'wholesale'` backfills all existing rows.
+  Retail rates seeded equal to wholesale so no job is ever worth 0 on day one.
+- `insertProduction`, `upsertRate`, `ratesMatrix` all resolve by audience — they had to change together,
+  because the migration invalidates the 2-column conflict target and makes the un-filtered rate lookup
+  match two rows.
+- Audience is **required** on every production entry — no default, validated server-side.
+- `ledgerFor` + `dashboard` return `production_wholesale` / `production_retail` (+ `pieces_*`).
+- Worker screen: «لمين هالشغل؟» toggle (unselected by default, submit disabled until tapped), live price
+  follows the choice, حسابك shows the two totals, each ledger line names its audience.
+- Admin: two price inputs per job in أسعار القطع, the same required choice on تسجيل القطع, and a
+  الكل/ممثلين/تجزئة filter on نظرة عامة (المستحق under الكل only — حوافز/خصومات belong to no audience).
+- Payout card panel removed from the workshop crew's screen + its two backend routes deleted.
+
+**Next**
+- **Enter the real تجزئة wages in `/admin/workshop` → أسعار القطع.** Every retail rate currently equals its
+  wholesale twin, so the split is structurally correct but changes no numbers until this is done.
+- The payout-card feature remains uncommitted and undeployed — see HANDOFF for the blocking accrual issue.
+
+---
+
 ## 2026-07-20 — Order editing repaired: priced spec lines were uneditable · student academic info had no edit path
 
 **Branch `security-fixes`, committed, NOT pushed. No migration for this fix.** Reported by the owner as "editing on order for

@@ -305,6 +305,56 @@ export interface StaffAttendanceSettings {
   updatedAt?: string | null;
   isUserOverride?: boolean;
   attendanceRequired?: boolean;
+  /** monthly الخروج المؤقت allowance in minutes (600 = 10 hours) */
+  breakMonthlyMinutes: number;
+}
+
+/** الخروج المؤقت — one temporary-leave record. */
+export interface StaffBreak {
+  id: string;
+  userId: string;
+  staffName: string | null;
+  workDate: string;
+  monthKey: string;
+  reasonAr: string | null;
+  requestedMinutes: number | null;
+  requestedAt: string;
+  leftAt: string | null;
+  returnedAt: string | null;
+  minutes: number;
+  state: "requested" | "out" | "returned" | "cancelled";
+  approval: "pending" | "approved" | "rejected";
+  leftWithoutApproval: boolean;
+  decidedAt: string | null;
+  decisionNoteAr: string | null;
+  freeMinutes: number;
+  deductedMinutes: number;
+  deductionPerMinute: number;
+  deductionAmount: number;
+  autoClosed: boolean;
+  adminNoteAr: string | null;
+  /** live elapsed minutes while state === "out" */
+  openMinutes: number;
+  openTooLong: boolean;
+}
+
+/** A worker's monthly allowance ledger. */
+export interface StaffBreakBalance {
+  monthKey: string;
+  monthlyMinutes: number;
+  usedMinutes: number;
+  remainingMinutes: number;
+  deductedMinutes: number;
+  deductionAmount: number;
+  breakCount: number;
+}
+
+/** Admin view: one row per staff member for the month. */
+export interface StaffBreakBalanceRow extends StaffBreakBalance {
+  userId: string;
+  staffName: string | null;
+  outCount: number;
+  pendingCount: number;
 }
 
 export interface StaffAttendanceUserSetting {
@@ -315,6 +365,8 @@ export interface StaffAttendanceUserSetting {
   graceMinutes: number | null;
   deductionPerMinute: number | null;
   attendanceRequired: boolean;
+  /** null = inherits the shop-wide الخروج المؤقت allowance */
+  breakMonthlyMinutes: number | null;
   hasOverride: boolean;
   updatedAt: string | null;
 }
@@ -345,7 +397,11 @@ export interface StaffAttendanceRecord {
   status: "present" | "late" | "missing_checkout" | "overridden";
   adminNoteAr: string | null;
   noteAr: string | null;
+  /** check-in → check-out minus الخروج المؤقت time */
   workedMinutes: number;
+  /** the raw check-in → check-out span, before breaks are removed */
+  presentMinutes: number;
+  breakMinutes: number;
   scheduledMinutes: number;
   overtimeMinutes: number;
   openTooLong: boolean;
@@ -518,6 +574,13 @@ export interface ShopFeed {
   audience: ShopAudience;
   packages: ShopPackageCard[];
   byType: Partial<Record<ProductType, ShopProductCard[]>>;
+  /**
+   * طالب — distinct students with a live order, straight from lib/counts.
+   * The home hero prints it as the shop's proof number. `null` when the
+   * backend could not count it; the hero then omits the stat line rather
+   * than showing a stale or invented figure.
+   */
+  graduates: number | null;
 }
 
 export interface HeroSlide {

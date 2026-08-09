@@ -6,9 +6,19 @@
 // truth shared with the rep + student forms) and NEVER applies to retail bundles: the
 // form would re-price them with rep/piece pricing. Eligibility = the student is
 // wholesaler-linked OR is an admin-created name-only account (users.phone IS NULL).
+const crypto = require('crypto');
+const bcrypt = require('bcrypt');
 const { query, tx } = require('../lib/db');
 const { persistFullSetOrder, readFullSetOrder, loadWholesalerPricing } = require('../lib/fullSetOrder');
+const { priceSelections, validateRobeMeasurements } = require('./orderController');
 const { publicUrl } = require('../lib/upload');
+const { publish } = require('../lib/eventBus');
+const { releaseForOrder } = require('../lib/shelf');
+// Same canonical phone form auth uses, so an admin-created student's number matches if they
+// later log in or recover by OTP.
+const { normalizeIqPhone, isValidIqMobile } = require('../lib/otp');
+
+const SALT_ROUNDS = 10;
 
 function clean(v, max) {
   const t = v == null ? '' : String(v).trim();
@@ -19,7 +29,7 @@ const isUuid = (s) => /^[0-9a-f-]{36}$/i.test(String(s || ''));
 async function loadStudent(studentId) {
   if (!isUuid(studentId)) return null;
   const { rows } = await query(
-    `SELECT s.id, s.user_id, u.name, u.phone, s.status, s.instagram_username,
+    `SELECT s.id, s.user_id, u.name, u.phone, s.status, s.gender::text AS gender, s.instagram_username,
             s.university_name, s.department, s.study_type::text AS study_type,
             s.wholesaler_id, wu.name AS rep_name
        FROM students s
@@ -33,6 +43,110 @@ async function loadStudent(studentId) {
 }
 
 const eligibleForFullSet = (student) => !!student && (student.wholesaler_id != null || student.phone == null);
+
+// ── Product swap (same family only) ─────────────────────────────────────────
+// A retail piece may be re-pointed at a SIBLING product — «وشاح الفراشة» → «وشاح ملكي» —
+// carrying the student's saved selections across verbatim.
+//
+// WHY same-family-only is the whole safety argument: child products own ZERO option
+// groups (every group lives on the parent, see priceSelections' groupProductIds), so the
+// saved (group_id, option_id, customer_text, customer_image_url) tuples remain valid on
+// any sibling without remapping. Colours, embroidery texts and reference photos survive;
+// only the base price moves. Cross-family or cross-type would invalidate every selection,
+// and on a REP bundle «ملكي» is an add-on LINE (إضافة: وشاح ملكي) rather than a product,
+// so swapping there would double-charge — hence retail-only, enforced by the caller.
+const familyKey = (row) => String(row.parent_id || row.id);
+
+// ── One live design-less piece per (student, product) ───────────────────────
+// `uq_orders_student_product_nodesign` (db/schema.sql) is a DB-level invariant, not a
+// suggestion: a student may hold at most ONE non-cancelled design-less order per product.
+// BOTH write paths here can violate it — a swap moves a piece ONTO a product, «طلب مخصص»
+// creates one — and an unguarded write surfaces as a raw 23505 with no Arabic message and
+// a 500 the admin can do nothing with. So: look the clash up first for a useful error, and
+// still catch 23505 as the race backstop (the check and the write are not atomic).
+async function liveOrderForProduct(studentId, productId, exceptOrderId = null) {
+  const { rows } = await query(
+    `SELECT id FROM orders
+      WHERE student_id = $1 AND product_id = $2
+        AND design_id IS NULL AND status <> 'cancelled'
+        AND ($3::uuid IS NULL OR id <> $3::uuid)
+      LIMIT 1`,
+    [studentId, productId, exceptOrderId || null]
+  );
+  return rows[0]?.id || null;
+}
+
+const isUniqueViolation = (e) => e && e.code === '23505';
+
+// Sibling candidates for the swap picker. Deliberately re-derived from the DB on every
+// request (never cached, never trusted from the client) so prod catalog shape rules.
+// Products the student ALREADY holds a live design-less piece of are filtered out — the
+// picker must never offer a target that the unique index above would then refuse.
+async function swapCandidates({ productId, parentId, productType, gender, studentId, orderId }) {
+  const { rows } = await query(
+    `SELECT p.id, p.name_ar, p.image_url,
+            COALESCE(ppr.base_price, p.base_price)::int AS retail_price
+       FROM products p
+       LEFT JOIN product_price_roles ppr ON ppr.product_id = p.id AND ppr.role = 'retail'
+      WHERE p.active = TRUE
+        AND p.type::text = $1
+        AND COALESCE(p.parent_id, p.id) = $2::uuid
+        AND p.id <> $3::uuid
+        AND p.wholesaler_only = FALSE
+        AND (p.gender_restriction IS NULL OR p.gender_restriction::text IS NOT DISTINCT FROM $4)
+        AND NOT EXISTS (
+          SELECT 1 FROM orders o2
+           WHERE o2.student_id = $5::uuid
+             AND o2.product_id = p.id
+             AND o2.design_id IS NULL
+             AND o2.status <> 'cancelled'
+             AND o2.id <> $6::uuid
+        )
+      ORDER BY p.sort, p.name_ar`,
+    [productType, parentId || productId, productId, gender || null, studentId, orderId]
+  );
+  return rows;
+}
+
+// Full server-side re-validation of a requested swap target. Returns {error:{status,message,code}}
+// or {product}. Every rule is checked against the DB row, never against anything the client sent.
+async function resolveSwapTarget({ targetProductId, current }) {
+  if (!isUuid(targetProductId)) {
+    return { error: { status: 400, message: 'منتج غير صحيح', code: 'ERR_VALIDATION' } };
+  }
+  const { rows } = await query(
+    `SELECT id, name_ar, type::text AS type, parent_id, active, wholesaler_only,
+            gender_restriction::text AS gender_restriction
+       FROM products WHERE id = $1`,
+    [targetProductId]
+  );
+  if (!rows.length) {
+    return { error: { status: 404, message: 'المنتج غير موجود', code: 'ERR_NOT_FOUND' } };
+  }
+  const target = rows[0];
+  if (!target.active) {
+    return { error: { status: 400, message: 'هذا المنتج غير مفعّل', code: 'ERR_PRODUCT_INACTIVE' } };
+  }
+  if (target.wholesaler_only) {
+    return { error: { status: 403, message: 'هذا المنتج مخصص للممثلين فقط', code: 'ERR_FORBIDDEN' } };
+  }
+  if (target.type !== current.product_type) {
+    return { error: { status: 400, message: 'لا يمكن التبديل إلى نوع منتج مختلف', code: 'ERR_PRODUCT_TYPE_MISMATCH' } };
+  }
+  if (familyKey(target) !== familyKey({ id: current.product_id, parent_id: current.product_parent_id })) {
+    return {
+      error: {
+        status: 400,
+        message: 'لا يمكن التبديل إلا بين منتجات من نفس العائلة',
+        code: 'ERR_PRODUCT_FAMILY_MISMATCH',
+      },
+    };
+  }
+  if (target.gender_restriction && target.gender_restriction !== current.gender) {
+    return { error: { status: 403, message: 'هذا المنتج غير متاح', code: 'ERR_GENDER' } };
+  }
+  return { product: target };
+}
 
 // FE «التسعيرة» shape (selling side only — same as the rep-facing pricing payload).
 async function publicPricing(wholesalerId) {
@@ -207,7 +321,14 @@ async function editContext(req, res) {
   const { id } = req.params;
   if (!isUuid(id)) return res.status(400).json({ error: 'طلب غير صحيح', code: 'ERR_VALIDATION' });
   const o = await query(
-    `SELECT id, student_id, design_id, checkout_group_id FROM orders WHERE id = $1`, [id]
+    `SELECT o.id, o.student_id, o.design_id, o.checkout_group_id, o.product_id,
+            o.status::text AS status, o.price, o.cost, o.measurements, o.has_embroidery,
+            o.needs_pressing, o.tailor_status::text AS tailor_status,
+            p.type::text AS product_type, p.name_ar AS product_name, p.parent_id AS product_parent_id
+       FROM orders o
+       JOIN products p ON p.id = o.product_id
+      WHERE o.id = $1`,
+    [id]
   );
   if (!o.rows.length) return res.status(404).json({ error: 'الطلب غير موجود', code: 'ERR_NOT_FOUND' });
   const order = o.rows[0];
@@ -224,9 +345,8 @@ async function editContext(req, res) {
     );
     group = g.rows[0] || null;
   }
-  // The order's editable spec lines — every line that already carries TYPED content (same set
-  // patchOrderDetails accepts). This drives the LIMITED editor for retail orders (which can't
-  // use the full طقم form): edit the student's info + each piece's text, no re-pricing.
+  // Full saved retail selection snapshot. The old response exposed only typed lines, which
+  // made measurements, cap shape, normal/royal options and image-only rows impossible to edit.
   //
   // FIX (2026-07-20): this used to also require `COALESCE(price_snapshot,0) = 0`, meant as
   // "never touch price rows". That conflated a line CARRYING a price with editing CHANGING
@@ -242,18 +362,45 @@ async function editContext(req, res) {
   // knowing: readFullSetOrder derives sash_type/cap_type from those values, so retyping
   // «نوع الوشاح» to «ملكي» re-prices the bundle on the NEXT full-form save (not here).
   const editable = await query(
-    `SELECT id, label_snapshot AS label, customer_text AS text
+    `SELECT id, group_id, option_id, label_snapshot AS label, qty,
+            customer_text AS text, customer_image_url
        FROM order_items
-      WHERE order_id = $1 AND customer_text IS NOT NULL
+      WHERE order_id = $1
       ORDER BY id`,
     [order.id]
   );
+  const qtyResult = await query(
+    `SELECT COALESCE((
+       SELECT GREATEST(qty, 1)
+         FROM order_items
+        WHERE order_id = $1 AND group_id IS NULL AND option_id IS NULL
+        ORDER BY created_at, id
+        LIMIT 1
+     ), 1)::int AS quantity`,
+    [order.id]
+  );
+  const editMode = canEdit
+    ? 'full_set'
+    : (student.wholesaler_id == null && student.phone != null ? 'retail' : 'limited');
+  // Swap targets are offered ONLY on the retail snapshot, and only while no Fabric design is
+  // attached (a design belongs to the product it was drawn on).
+  const swaps = editMode === 'retail' && !order.design_id
+    ? await swapCandidates({
+      productId: order.product_id,
+      parentId: order.product_parent_id,
+      productType: order.product_type,
+      gender: student.gender,
+      studentId: order.student_id,
+      orderId: order.id,
+    })
+    : [];
   res.json({
     data: {
       student: {
         id: student.id,
         name: student.name,
         phone: student.phone,
+        gender: student.gender,
         instagram_username: student.instagram_username,
         university_name: student.university_name,
         department: student.department,
@@ -265,7 +412,434 @@ async function editContext(req, res) {
       existing,
       pricing: await publicPricing(student.wholesaler_id),
       can_edit_full_set: canEdit,
-      editable_items: editable.rows,
+      edit_mode: editMode,
+      editable_items: editable.rows.filter((it) => it.text != null),
+      retail_order: editMode === 'retail' ? {
+        id: order.id,
+        product_id: order.product_id,
+        product_type: order.product_type,
+        product_name: order.product_name,
+        product_parent_id: order.product_parent_id,
+        swap_candidates: swaps,
+        status: order.status,
+        // Whether «أرجع الطلب إلى بانتظار التصميم» is meaningful here is a state-machine
+        // question, so it is answered HERE and never re-derived in the UI — a frontend copy
+        // of this set is how ghost buttons that 409 get built.
+        can_force_rework: REWORKABLE_STAGES.has(order.status),
+        price: Number(order.price || 0),
+        cost: Number(order.cost || 0),
+        measurements: order.measurements,
+        has_embroidery: !!order.has_embroidery,
+        needs_pressing: !!order.needs_pressing,
+        tailor_status: order.tailor_status,
+        quantity: Number(qtyResult.rows[0]?.quantity || 1),
+        selections: editable.rows
+          .filter((it) => it.group_id != null && it.option_id != null)
+          .map((it) => ({
+            group_id: it.group_id,
+            option_id: it.option_id,
+            qty: Number(it.qty || 1),
+            customer_text: it.text,
+            customer_image_url: it.customer_image_url,
+          })),
+      } : null,
+    },
+  });
+}
+
+function normalizeRetailMeasurements(productType, raw) {
+  if (productType !== 'robe') return null;
+  const m = raw || {};
+  const chest = m.chest_cm == null || m.chest_cm === '' ? null : Number(m.chest_cm);
+  return {
+    shoulder_cm: Number(m.shoulder_cm),
+    chest_cm: Number.isFinite(chest) && chest > 0 ? chest : null,
+    robe_length_cm: Number(m.robe_length_cm),
+    sleeve_length_cm: Number(m.sleeve_length_cm),
+    tailor_notes: clean(m.tailor_notes, 500),
+    receipt_image_url: clean(m.receipt_image_url, 1000),
+  };
+}
+
+function comparableSelections(lines) {
+  return lines
+    .filter((line) => line.group_id && line.option_id)
+    .map((line) => ({
+      group_id: String(line.group_id),
+      option_id: String(line.option_id),
+      qty: Number(line.qty || 1),
+      customer_text: clean(line.customer_text, 200),
+      customer_image_url: clean(line.customer_image_url, 1000),
+    }))
+    .sort((a, b) =>
+      `${a.group_id}:${a.option_id}`.localeCompare(`${b.group_id}:${b.option_id}`)
+    );
+}
+
+function comparableStoredSelections(lines, orderQuantity) {
+  const multiplier = Math.max(1, Number(orderQuantity) || 1);
+  return comparableSelections(lines.map((line) => ({
+    ...line,
+    // Cart checkout stores line quantities multiplied by the number of identical
+    // pieces. priceSelections() returns the per-piece selection, so normalize the
+    // saved value or an unchanged ×2 order would look edited.
+    qty: Number(line.qty || 1) / multiplier,
+  })));
+}
+
+const DESIGN_PASSED_STAGES = new Set([
+  'converting', 'embroidery', 'pressing', 'preparing', 'ready', 'delivered',
+]);
+// Stages from which an EXPLICIT «أرجع الطلب إلى بانتظار التصميم» is meaningful. Includes
+// design_complete itself (there the rework is a reset: zones + artwork cleared, shelf slot
+// released) but never the pre-design stages, where forcing it would push the piece FORWARD.
+const REWORKABLE_STAGES = new Set([...DESIGN_PASSED_STAGES, 'design_complete']);
+
+// ── PUT /api/production/orders/:id/retail-configuration ─────────────────────
+// Full structured editor for independent retail pieces. Product/design identity and recorded
+// production cost stay immutable; selections are authoritatively re-priced at the retail role.
+async function saveRetailConfiguration(req, res) {
+  const { id } = req.params;
+  if (!isUuid(id)) return res.status(400).json({ error: 'طلب غير صحيح', code: 'ERR_VALIDATION' });
+
+  const current = await query(
+    `SELECT o.id, o.student_id, o.product_id, o.design_id, o.checkout_group_id,
+            o.status::text AS status,
+            o.price, o.cost, o.measurements, o.has_embroidery, o.needs_pressing,
+            o.tailor_status::text AS tailor_status,
+            s.user_id, s.gender::text AS gender, s.wholesaler_id, u.phone, u.name,
+            p.type::text AS product_type, p.parent_id AS product_parent_id,
+            p.name_ar AS product_name
+       FROM orders o
+       JOIN students s ON s.id = o.student_id
+       JOIN users u ON u.id = s.user_id
+       JOIN products p ON p.id = o.product_id
+      WHERE o.id = $1`,
+    [id]
+  );
+  if (!current.rows.length) {
+    return res.status(404).json({ error: 'الطلب غير موجود', code: 'ERR_NOT_FOUND' });
+  }
+  const order = current.rows[0];
+  if (order.wholesaler_id != null || order.phone == null) {
+    return res.status(403).json({ error: 'هذا المسار للطلبات المفردة فقط', code: 'ERR_FORBIDDEN' });
+  }
+  if (order.status === 'cancelled') {
+    return res.status(409).json({ error: 'لا يمكن تعديل طلب ملغى', code: 'ERR_INVALID_STATE' });
+  }
+
+  const selections = Array.isArray(req.body?.selections) ? req.body.selections : [];
+  if (selections.length > 50) {
+    return res.status(400).json({ error: 'عدد كبير من الخيارات', code: 'ERR_VALIDATION' });
+  }
+
+  // ── Optional product swap ────────────────────────────────────────────────
+  // Resolved BEFORE measurements are validated and before pricing, so every downstream
+  // rule (robe measurements, needs_pressing, priceSelections) is applied against the
+  // product the piece will actually become.
+  const rawTarget = req.body?.product_id;
+  const targetProductId = rawTarget == null || rawTarget === '' ? order.product_id : String(rawTarget);
+  const productChanged = targetProductId !== order.product_id;
+  let targetProduct = null;
+  if (productChanged) {
+    // A Fabric design belongs to the exact product it was drawn on — re-pointing it would
+    // silently attach that artwork to a different garment shape.
+    if (order.design_id) {
+      return res.status(409).json({
+        error: 'لا يمكن تبديل منتج طلب مرتبط بتصميم', code: 'ERR_INVALID_STATE',
+      });
+    }
+    const resolved = await resolveSwapTarget({ targetProductId, current: order });
+    if (resolved.error) {
+      return res.status(resolved.error.status).json({
+        error: resolved.error.message, code: resolved.error.code,
+      });
+    }
+    // The student may already hold a live piece of the target product — swapping onto it
+    // would collide with uq_orders_student_product_nodesign. Name the other order so the
+    // admin can go and edit it instead.
+    const clash = await liveOrderForProduct(order.student_id, targetProductId, id);
+    if (clash) {
+      return res.status(409).json({
+        error: 'الطالب لديه طلب فعّال بهذا المنتج — لا يمكن التبديل إليه',
+        code: 'ERR_DUPLICATE_PIECE',
+        existing_order_id: clash,
+      });
+    }
+    targetProduct = resolved.product;
+  }
+  const targetType = targetProduct ? targetProduct.type : order.product_type;
+  const targetName = targetProduct ? targetProduct.name_ar : order.product_name;
+
+  const measurementError = validateRobeMeasurements(targetType, req.body?.measurements);
+  if (measurementError) {
+    return res.status(400).json({ error: measurementError, code: 'ERR_VALIDATION' });
+  }
+  const infoPayload = { ...(req.body?.student || {}), ...(req.body?.group || {}) };
+  const infoValidation = validateStudentInfo(infoPayload);
+  if (infoValidation.error) {
+    return res.status(400).json({ error: infoValidation.error, code: 'ERR_VALIDATION' });
+  }
+
+  // Authoritative re-price at the retail role against the TARGET product. priceSelections
+  // re-checks active + gender + group ownership itself, so a swap can never smuggle in an
+  // option that does not belong to the destination family.
+  const priced = await priceSelections({
+    productId: targetProductId,
+    role: 'retail',
+    selections,
+    studentGender: order.gender,
+  });
+  if (!priced.ok) {
+    return res.status(priced.status).json({ error: priced.error, code: priced.code });
+  }
+
+  const oldItemsResult = await query(
+    `SELECT group_id, option_id, qty, customer_text, customer_image_url
+       FROM order_items
+      WHERE order_id = $1 AND group_id IS NOT NULL AND option_id IS NOT NULL
+      ORDER BY id`,
+    [id]
+  );
+  const qtyResult = await query(
+    `SELECT COALESCE((
+       SELECT GREATEST(qty, 1)
+         FROM order_items
+        WHERE order_id = $1 AND group_id IS NULL AND option_id IS NULL
+        ORDER BY created_at, id
+        LIMIT 1
+     ), 1)::int AS quantity`,
+    [id]
+  );
+  const orderQuantity = Number(qtyResult.rows[0]?.quantity || 1);
+  const beforeSelections = comparableStoredSelections(oldItemsResult.rows, orderQuantity);
+  const afterSelections = comparableSelections(priced.items);
+  const selectionsChanged = JSON.stringify(beforeSelections) !== JSON.stringify(afterSelections);
+  const beforeMeasurements = normalizeRetailMeasurements(targetType, order.measurements);
+  const afterMeasurements = normalizeRetailMeasurements(targetType, req.body?.measurements);
+  const measurementsChanged = JSON.stringify(beforeMeasurements) !== JSON.stringify(afterMeasurements);
+
+  // A SAME-FAMILY SWAP ALONE NEVER FORCES REWORK. The selections are byte-identical
+  // (same group/option ids), so ticked embroidery zones and the approved artwork stay
+  // meaningful — only the base garment changed. The admin may still ask for rework
+  // explicitly («أرجع الطلب إلى بانتظار التصميم»), which reuses this exact branch.
+  const forceRework = req.body?.force_design_rework === true;
+  const autoRework =
+    priced.hasEmbroidery && selectionsChanged && DESIGN_PASSED_STAGES.has(order.status);
+  const designRework = autoRework || (forceRework && REWORKABLE_STAGES.has(order.status));
+  const tailorReopened =
+    targetType === 'robe' && measurementsChanged && order.tailor_status === 'done';
+  const resultingStatus = designRework ? 'design_complete' : order.status;
+  const keepPrice = req.body?.keep_price === true;
+  const newPrice = Number(priced.total || 0) * orderQuantity;
+  const oldPrice = Number(order.price || 0);
+  // Money never moves silently: the caller is told the recomputed price either way, and
+  // `keep_price` is what decides whether it is actually written.
+  const appliedPrice = keepPrice ? oldPrice : newPrice;
+  const recordedCost = Number(order.cost || 0);
+
+  let studentInfoChanged = [];
+  await tx(async (client) => {
+    const locked = await client.query(
+      `SELECT status::text AS status, price, product_id FROM orders WHERE id = $1 FOR UPDATE`,
+      [id]
+    );
+    if (!locked.rows.length) {
+      const e = new Error('الطلب غير موجود');
+      e.statusCode = 404;
+      throw e;
+    }
+    if (locked.rows[0].status === 'cancelled') {
+      const e = new Error('لا يمكن تعديل طلب ملغى');
+      e.statusCode = 409;
+      throw e;
+    }
+    if (
+      locked.rows[0].status !== order.status ||
+      Number(locked.rows[0].price || 0) !== oldPrice ||
+      String(locked.rows[0].product_id) !== String(order.product_id)
+    ) {
+      const e = new Error('تم تحديث الطلب أثناء التعديل — أعد تحميل الصفحة ثم حاول مجدداً');
+      e.statusCode = 409;
+      throw e;
+    }
+
+    // ── KEYED RECONCILIATION of order_items (was: DELETE-ALL + re-INSERT) ──────
+    // calligraphy_plates.order_item_id is ON DELETE SET NULL and there is NO relink path
+    // (calligraphyController joins plates to orders THROUGH order_item_id), so wiping the
+    // rows silently orphaned every generated plate — unrecoverably — on EVERY save.
+    // Matching on (group_id, option_id) and updating in place keeps order_items.id stable,
+    // so plate links survive an edit and, because a same-family swap keeps identical
+    // group/option ids, they survive a product swap too.
+    const existingItems = await client.query(
+      `SELECT id, group_id, option_id FROM order_items
+        WHERE order_id = $1 ORDER BY created_at, id`,
+      [id]
+    );
+    const lineKey = (g, o) => `${g || ''}|${o || ''}`;
+    const byKey = new Map();
+    for (const row of existingItems.rows) {
+      // First row wins per key — the base line is the FIRST (group NULL, option NULL) row,
+      // the same rule the quantity probe above uses. Any further duplicate is surplus.
+      const k = lineKey(row.group_id, row.option_id);
+      if (!byKey.has(k)) byKey.set(k, row.id);
+    }
+    const keptIds = [];
+    for (const item of priced.items) {
+      const values = [
+        item.label,
+        Number(item.price || 0) * orderQuantity,
+        Number(item.qty || 1) * orderQuantity,
+        clean(item.customer_image_url, 1000),
+        clean(item.customer_text, 200),
+      ];
+      const matchId = byKey.get(lineKey(item.group_id, item.option_id));
+      if (matchId) {
+        await client.query(
+          `UPDATE order_items
+              SET label_snapshot = $1, price_snapshot = $2, admin_price_snapshot = 0,
+                  qty = $3, customer_image_url = $4, customer_text = $5
+            WHERE id = $6`,
+          [...values, matchId]
+        );
+        keptIds.push(matchId);
+      } else {
+        const ins = await client.query(
+          `INSERT INTO order_items
+             (order_id, group_id, option_id, label_snapshot, price_snapshot,
+              admin_price_snapshot, qty, customer_image_url, customer_text)
+           VALUES ($1, $2, $3, $4, $5, 0, $6, $7, $8) RETURNING id`,
+          [id, item.group_id || null, item.option_id || null, ...values]
+        );
+        keptIds.push(ins.rows[0].id);
+      }
+    }
+    // Only genuinely removed selections (and surplus duplicate keys) are deleted.
+    await client.query(
+      `DELETE FROM order_items WHERE order_id = $1 AND NOT (id = ANY($2::uuid[]))`,
+      [id, keptIds]
+    );
+
+    await client.query(
+      `UPDATE orders
+          SET price = $1,
+              status = $2,
+              measurements = $3::jsonb,
+              has_embroidery = $4,
+              needs_pressing = $5,
+              embroidery_zones = CASE WHEN $6 THEN '{}'::jsonb ELSE embroidery_zones END,
+              final_design_url = CASE WHEN $6 THEN NULL ELSE final_design_url END,
+              tailor_status = CASE WHEN $7 THEN 'pending'::tailor_track_status ELSE tailor_status END,
+              tailor_done_at = CASE WHEN $7 THEN NULL ELSE tailor_done_at END,
+              tailor_done_by = CASE WHEN $7 THEN NULL ELSE tailor_done_by END,
+              product_id = $8
+        WHERE id = $9`,
+      [
+        appliedPrice,
+        resultingStatus,
+        afterMeasurements == null ? null : JSON.stringify(afterMeasurements),
+        !!priced.hasEmbroidery,
+        targetType !== 'cap',
+        designRework,
+        tailorReopened,
+        targetProductId,
+        id,
+      ]
+    );
+    if (designRework) await releaseForOrder(id, client);
+    const infoResult = await applyStudentInfo(
+      {
+        id: order.student_id,
+        user_id: order.user_id,
+        name: order.name,
+      },
+      infoPayload,
+      order.checkout_group_id,
+      (sql, params) => client.query(sql, params)
+    );
+    if (infoResult.error) {
+      const e = new Error(infoResult.error);
+      e.statusCode = 400;
+      throw e;
+    }
+    studentInfoChanged = infoResult.changed || [];
+
+    await client.query(
+      `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
+       VALUES ($1, 'staff_order_edit', 'order', $2, $3::jsonb)`,
+      [
+        req.user.id,
+        id,
+        JSON.stringify({
+          via: 'retail_configuration',
+          product_id: targetProductId,
+          product_id_before: order.product_id,
+          product_id_after: targetProductId,
+          product_name_before: order.product_name,
+          product_name_after: targetName,
+          product_swapped: productChanged,
+          selections_before: beforeSelections,
+          selections_after: afterSelections,
+          measurements_before: beforeMeasurements,
+          measurements_after: afterMeasurements,
+          price_before: oldPrice,
+          price_after: appliedPrice,
+          price_computed: newPrice,
+          price_kept: keepPrice,
+          cost_preserved: recordedCost,
+          profit_before: oldPrice - recordedCost,
+          profit_after: appliedPrice - recordedCost,
+          status_before: order.status,
+          status_after: resultingStatus,
+          design_rework: designRework,
+          design_rework_forced: forceRework,
+          tailor_reopened: tailorReopened,
+          student_info_fields: studentInfoChanged,
+        }),
+      ]
+    );
+  }).catch((err) => {
+    if (err.statusCode) {
+      res.status(err.statusCode).json({
+        error: err.message,
+        code: err.statusCode === 404 ? 'ERR_NOT_FOUND' : 'ERR_INVALID_STATE',
+      });
+      return null;
+    }
+    // Race backstop for the pre-check above: another save could have taken the target
+    // product between the lookup and this write.
+    if (isUniqueViolation(err)) {
+      res.status(409).json({
+        error: 'الطالب لديه طلب فعّال بهذا المنتج — لا يمكن التبديل إليه',
+        code: 'ERR_DUPLICATE_PIECE',
+      });
+      return null;
+    }
+    throw err;
+  });
+  if (res.headersSent) return;
+
+  publish({ type: 'order', orderId: id, status: resultingStatus });
+  res.json({
+    data: {
+      id,
+      old_price: oldPrice,
+      new_price: newPrice,
+      price_difference: newPrice - oldPrice,
+      // What was actually written to orders.price — equals old_price when keep_price was set.
+      price_applied: appliedPrice,
+      price_kept: keepPrice,
+      cost: recordedCost,
+      profit: appliedPrice - recordedCost,
+      product_changed: productChanged,
+      product_id: targetProductId,
+      product_name: targetName,
+      status: resultingStatus,
+      design_rework: designRework,
+      tailor_reopened: tailorReopened,
+      quantity: orderQuantity,
+      selections: afterSelections,
+      measurements: afterMeasurements,
     },
   });
 }
@@ -427,14 +1001,23 @@ async function patchOrderDetails(req, res) {
 }
 
 // ── GET /api/production/students-search?q= ───────────────────────────────────
-// Only full-set-eligible students (rep-linked or admin-created name-only) — retail
-// self-registered students must never be targeted by the طقم form (see header note).
+// Returns EVERY retail-role student and flags which form applies:
+//   full_set_eligible = true  → rep-linked or admin-created name-only → the طقم form
+//   full_set_eligible = false → self-registered تجزئة student → the retail-order form
+//
+// Until 2026-07-25 تجزئة students were HIDDEN here, which made «طلب مخصص» structurally
+// impossible for them (invisible in search, 403 on every follow-up call). Hiding them was
+// never the safety property — the 403 in getStudentFullSet/saveFullSetOrder is, and that
+// guard is unchanged: the طقم form prices at REP prices and its deselect-cancel can cancel
+// the student's cart pieces. Callers branch on this flag instead.
 async function studentsSearch(req, res) {
   const raw = String(req.query.q || '').trim();
   if (raw.length < 2) return res.json({ data: [] });
   const q = `%${raw.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
   const { rows } = await query(
     `SELECT s.id, u.name, u.phone, s.university_name, s.wholesaler_id, wu.name AS rep_name,
+            s.gender::text AS gender,
+            (s.wholesaler_id IS NOT NULL OR u.phone IS NULL) AS full_set_eligible,
             EXISTS (SELECT 1 FROM orders o
                      WHERE o.student_id = s.id AND o.design_id IS NULL AND o.status <> 'cancelled') AS has_full_set
        FROM students s
@@ -442,7 +1025,6 @@ async function studentsSearch(req, res) {
        LEFT JOIN wholesalers w ON w.id = s.wholesaler_id
        LEFT JOIN users wu ON wu.id = w.user_id
       WHERE u.role = 'retail'
-        AND (s.wholesaler_id IS NOT NULL OR u.phone IS NULL)
         AND (u.name ILIKE $1 OR s.full_name_third ILIKE $1 OR u.phone ILIKE $1)
       ORDER BY u.name ASC
       LIMIT 20`,
@@ -468,6 +1050,425 @@ async function getStudentFullSet(req, res) {
   });
 }
 
+// ── RETAIL ORDER CREATION — one bundle, N pieces ────────────────────────────
+// «طلب مخصص» for a تجزئة student, whether they self-registered or the admin is creating
+// them right now. The mirror image of saveFullSetOrder: this path is reachable ONLY when
+// the طقم path is not, and vice-versa — the two guards are exact complements, so a student
+// can never be served by both.
+//
+// Four rules make this safe where the طقم form is not:
+//  1. priced authoritatively at the RETAIL role via priceSelections — never the rep addon table
+//     (which would book a 20,000 sash against a 25,000–30,000 catalog piece);
+//  2. ALWAYS a brand-new checkout_group — the student's existing orders / cart pieces are never
+//     read, re-priced, cancelled or re-bound (the طقم upsert's deselect-cancel is what makes it
+//     unsafe here);
+//  3. wholesaler_approval = NULL — a direct admin order never enters the rep approval flow
+//     (same as adminCustomOrderController's independent-student branch);
+//  4. every write — the student, the bundle, every piece — commits in ONE transaction, so a
+//     half-created student with no order, or 2 of 3 pieces, can never be left behind.
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+const MAX_PIECES = 10;
+const GENDERS = new Set(['male', 'female']);
+const STUDY_TYPES = new Set(['morning', 'evening']);
+
+// Validate + price every requested piece against the DB. Nothing here trusts the payload:
+// product identity, activity, audience and price all come from a fresh read, because the
+// catalog shape on prod is not what the client (or this laptop's snapshot) says it is.
+// `studentId` is null when the student is being created in this same request — there is
+// nothing to collide with yet, so the duplicate probe is skipped.
+async function resolveRetailPieces({ rawPieces, studentId, gender }) {
+  const err = (status, message, code, extra) => ({ error: { status, message, code, ...extra } });
+
+  if (!Array.isArray(rawPieces) || rawPieces.length === 0) {
+    return err(400, 'اختر قطعة واحدة على الأقل', 'ERR_VALIDATION');
+  }
+  if (rawPieces.length > MAX_PIECES) {
+    return err(400, `لا يمكن إضافة أكثر من ${MAX_PIECES} قطع في طلب واحد`, 'ERR_VALIDATION');
+  }
+
+  const seen = new Set();
+  const pieces = [];
+  for (const raw of rawPieces) {
+    const productId = raw?.product_id;
+    if (!productId) return err(400, 'المنتج مطلوب', 'ERR_VALIDATION');
+    if (!isUuid(productId)) return err(400, 'منتج غير صحيح', 'ERR_VALIDATION');
+    // Two pieces of the same product in ONE payload would each pass the DB probe below and
+    // then collide with uq_orders_student_product_nodesign mid-transaction. Name it up front.
+    if (seen.has(productId)) {
+      return err(400, 'لا يمكن إضافة نفس المنتج مرتين في الطلب نفسه', 'ERR_DUPLICATE_PIECE');
+    }
+    seen.add(productId);
+
+    const selections = Array.isArray(raw?.selections) ? raw.selections : [];
+    if (selections.length > 50) return err(400, 'عدد كبير من الخيارات', 'ERR_VALIDATION');
+
+    const prod = await query(
+      `SELECT id, name_ar, type::text AS type, active, wholesaler_only
+         FROM products WHERE id = $1`,
+      [productId]
+    );
+    if (!prod.rows.length || !prod.rows[0].active) {
+      return err(404, 'المنتج غير موجود', 'ERR_NOT_FOUND');
+    }
+    const product = prod.rows[0];
+    if (product.wholesaler_only) {
+      return err(403, 'هذا المنتج مخصص للممثلين فقط', 'ERR_FORBIDDEN');
+    }
+
+    const measurementError = validateRobeMeasurements(product.type, raw?.measurements);
+    if (measurementError) return err(400, measurementError, 'ERR_VALIDATION');
+
+    // A second live piece of the same product for the same student is a DB-level
+    // impossibility (see liveOrderForProduct). Refuse it by name and hand back the order to
+    // edit instead — the honest answer, since this path deliberately never touches existing
+    // orders.
+    if (studentId) {
+      const clash = await liveOrderForProduct(studentId, productId);
+      if (clash) {
+        return err(
+          409,
+          `الطالب لديه طلب فعّال بـ«${product.name_ar}» — عدّل الطلب الحالي بدل إنشاء طلب جديد`,
+          'ERR_DUPLICATE_PIECE',
+          { existing_order_id: clash }
+        );
+      }
+    }
+
+    const priced = await priceSelections({
+      productId, role: 'retail', selections, studentGender: gender,
+    });
+    if (!priced.ok) return err(priced.status, priced.error, priced.code);
+
+    pieces.push({
+      product,
+      priced,
+      // Routing copied verbatim from the retail creation path in orderController.configureOrder:
+      // المكوجي gets every piece except caps; a plain cap goes straight to التجهيز.
+      needsPressing: product.type !== 'cap',
+      status: priced.hasEmbroidery
+        ? 'design_complete'
+        : (product.type === 'cap' ? 'preparing' : 'pressing'),
+      total: Number(priced.total || 0),
+      measurementsJson: product.type === 'robe' && raw?.measurements
+        ? JSON.stringify(normalizeRetailMeasurements(product.type, raw.measurements))
+        : null,
+    });
+  }
+  return { pieces };
+}
+
+// The single write. Runs INSIDE a caller-supplied transaction so student creation (when the
+// caller is making one) commits with the pieces or not at all.
+async function writeRetailBundle(client, { student, pieces, group, actorId }) {
+  const g = group || {};
+  const cg = await client.query(
+    `INSERT INTO checkout_groups
+       (customer_name, instagram_username, phone_primary, phone_secondary,
+        governorate, area_details, event_date, notes)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+    [
+      clean(g.customer_name, 120) || student.name,
+      clean(String(g.instagram_username ?? student.instagram_username ?? '').replace(/^@+/, ''), 100),
+      clean(g.phone_primary, 20) || student.phone || '',
+      clean(g.phone_secondary, 20),
+      clean(g.governorate, 120),
+      clean(g.area_details, 300),
+      clean(g.event_date, 10),
+      clean(g.notes, 500),
+    ]
+  );
+  const cgId = cg.rows[0].id;
+
+  const orders = [];
+  for (const piece of pieces) {
+    const o = await client.query(
+      `INSERT INTO orders
+         (student_id, product_id, checkout_group_id, price, status,
+          has_embroidery, needs_pressing, measurements, wholesaler_approval)
+       VALUES ($1,$2,$3,$4,$5::order_status,$6,$7,$8::jsonb,NULL) RETURNING id`,
+      [student.id, piece.product.id, cgId, piece.total, piece.status,
+        !!piece.priced.hasEmbroidery, piece.needsPressing, piece.measurementsJson]
+    );
+    const orderId = o.rows[0].id;
+    for (const it of piece.priced.items) {
+      await client.query(
+        `INSERT INTO order_items
+           (order_id, group_id, option_id, label_snapshot, price_snapshot,
+            admin_price_snapshot, qty, customer_image_url, customer_text)
+         VALUES ($1,$2,$3,$4,$5,0,$6,$7,$8)`,
+        [orderId, it.group_id || null, it.option_id || null, it.label,
+          Number(it.price || 0), Number(it.qty || 1),
+          clean(it.customer_image_url, 1000), clean(it.customer_text, 200)]
+      );
+    }
+    await client.query(
+      `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
+       VALUES ($1, 'staff_retail_order_create', 'order', $2, $3::jsonb)`,
+      [actorId, orderId, JSON.stringify({
+        via: 'retail_custom_order',
+        student_id: student.id,
+        checkout_group_id: cgId,
+        product_id: piece.product.id,
+        product_name: piece.product.name_ar,
+        price: piece.total,
+        status: piece.status,
+        has_embroidery: !!piece.priced.hasEmbroidery,
+        piece_count: pieces.length,
+        selections: comparableSelections(piece.priced.items),
+      })]
+    );
+    orders.push({
+      id: orderId,
+      product_id: piece.product.id,
+      product_name: piece.product.name_ar,
+      price: piece.total,
+      status: piece.status,
+    });
+  }
+  return { cgId, orders };
+}
+
+const duplicatePieceRace = (res) =>
+  res.status(409).json({
+    error: 'الطالب لديه طلب فعّال بأحد هذه المنتجات — أعد تحميل الصفحة ثم حاول مجدداً',
+    code: 'ERR_DUPLICATE_PIECE',
+  });
+
+// ── POST /api/production/students/:studentId/retail-order ───────────────────
+// Single-piece adapter kept for the existing caller. It is a thin mapping onto the same core
+// as the multi-piece endpoint — one write path, not two.
+async function createRetailOrder(req, res) {
+  const student = await loadStudent(req.params.studentId);
+  if (!student) return res.status(404).json({ error: 'الطالب غير موجود', code: 'ERR_NOT_FOUND' });
+  // EXACT mirror of eligibleForFullSet — self-registered retail only.
+  if (eligibleForFullSet(student)) {
+    return res.status(403).json({ error: 'هذا المسار لطلاب التجزئة فقط', code: 'ERR_FORBIDDEN' });
+  }
+
+  const g = req.body?.group || {};
+  const eventDate = clean(g.event_date, 10);
+  if (eventDate && !DATE_ONLY.test(eventDate)) {
+    return res.status(400).json({ error: 'تاريخ الحفلة غير صحيح', code: 'ERR_VALIDATION' });
+  }
+
+  const resolved = await resolveRetailPieces({
+    rawPieces: [{
+      product_id: req.body?.product_id,
+      selections: req.body?.selections,
+      measurements: req.body?.measurements,
+    }],
+    studentId: student.id,
+    gender: student.gender,
+  });
+  if (resolved.error) {
+    const { status, message, code, ...extra } = resolved.error;
+    return res.status(status).json({ error: message, code, ...extra });
+  }
+
+  const created = await tx((client) =>
+    writeRetailBundle(client, {
+      student, pieces: resolved.pieces, group: req.body?.group, actorId: req.user.id,
+    })
+  ).catch((err) => {
+    // Race backstop for the pre-check above.
+    if (isUniqueViolation(err)) return duplicatePieceRace(res), null;
+    throw err;
+  });
+  if (res.headersSent) return;
+
+  const order = created.orders[0];
+  publish({ type: 'order_new', orderId: order.id });
+  res.status(201).json({
+    data: {
+      order_id: order.id,
+      checkout_group_id: created.cgId,
+      price: order.price,
+      status: order.status,
+    },
+  });
+}
+
+// Validate the «student» block of a multi-piece create. Name, phone and gender are REQUIRED
+// and each is load-bearing:
+//  · phone flips eligibleForFullSet to false, so this student's orders are owned by the retail
+//    edit path for life. Without it the طقم editor would re-price them rep-style on the next
+//    edit — the write-paths-out-of-sync money bug (2026-07-16).
+//  · gender decides which option groups exist: priceSelections REJECTS a gender-restricted
+//    option when studentGender is null, so a null-gender student cannot be priced correctly.
+function validateNewStudent(raw) {
+  const name = String(raw?.name || '').trim();
+  if (!name) return { error: { status: 400, message: 'اسم الطالب مطلوب', code: 'ERR_VALIDATION', field: 'name' } };
+  if (name.length > 120) {
+    return { error: { status: 400, message: 'اسم الطالب طويل جداً', code: 'ERR_VALIDATION', field: 'name' } };
+  }
+
+  const phone = normalizeIqPhone(raw?.phone);
+  if (!phone) {
+    return { error: { status: 400, message: 'رقم الهاتف مطلوب', code: 'ERR_VALIDATION', field: 'phone' } };
+  }
+  if (!isValidIqMobile(phone)) {
+    return {
+      error: {
+        status: 400, code: 'ERR_VALIDATION', field: 'phone',
+        message: 'رقم الهاتف غير صحيح — يجب أن يبدأ بـ 07 ويتكوّن من 11 رقماً',
+      },
+    };
+  }
+
+  const gender = String(raw?.gender || '').trim();
+  if (!GENDERS.has(gender)) {
+    return { error: { status: 400, message: 'جنس الطالب مطلوب', code: 'ERR_VALIDATION', field: 'gender' } };
+  }
+
+  const studyType = clean(raw?.study_type, 20);
+  if (studyType && !STUDY_TYPES.has(studyType)) {
+    return { error: { status: 400, message: 'نوع الدراسة غير صحيح', code: 'ERR_VALIDATION', field: 'study_type' } };
+  }
+
+  return {
+    student: {
+      name,
+      phone,
+      gender,
+      study_type: studyType,
+      instagram_username: clean(String(raw?.instagram_username ?? '').replace(/^@+/, ''), 100),
+      university_name: clean(raw?.university_name, 120),
+      department: clean(raw?.department, 120),
+    },
+  };
+}
+
+// ── POST /api/production/retail-orders ──────────────────────────────────────
+// «طلب مخصص» for a تجزئة student — either an existing one (`student_id`) or one created here
+// (`student`). One bundle, up to MAX_PIECES pieces, every piece priced at the retail book.
+async function createRetailOrders(req, res) {
+  const body = req.body || {};
+  const wantsNewStudent = !body.student_id;
+
+  const eventDate = clean(body.group?.event_date, 10);
+  if (eventDate && !DATE_ONLY.test(eventDate)) {
+    return res.status(400).json({ error: 'تاريخ الحفلة غير صحيح', code: 'ERR_VALIDATION' });
+  }
+
+  // ── Existing student ──────────────────────────────────────────────────────
+  if (!wantsNewStudent) {
+    const student = await loadStudent(String(body.student_id));
+    if (!student) return res.status(404).json({ error: 'الطالب غير موجود', code: 'ERR_NOT_FOUND' });
+    if (eligibleForFullSet(student)) {
+      return res.status(403).json({ error: 'هذا المسار لطلاب التجزئة فقط', code: 'ERR_FORBIDDEN' });
+    }
+    const resolved = await resolveRetailPieces({
+      rawPieces: body.pieces, studentId: student.id, gender: student.gender,
+    });
+    if (resolved.error) {
+      const { status, message, code, ...extra } = resolved.error;
+      return res.status(status).json({ error: message, code, ...extra });
+    }
+    const created = await tx((client) =>
+      writeRetailBundle(client, {
+        student, pieces: resolved.pieces, group: body.group, actorId: req.user.id,
+      })
+    ).catch((err) => {
+      if (isUniqueViolation(err)) return duplicatePieceRace(res), null;
+      throw err;
+    });
+    if (res.headersSent) return;
+    return respondRetailBundle(res, student.id, created);
+  }
+
+  // ── New independent student ───────────────────────────────────────────────
+  const validated = validateNewStudent(body.student);
+  if (validated.error) {
+    const { status, message, code, ...extra } = validated.error;
+    return res.status(status).json({ error: message, code, ...extra });
+  }
+  const info = validated.student;
+
+  // users.phone is UNIQUE. Refuse by name and hand back the existing student so the admin
+  // switches to «طالب موجود» — silently attaching an order to whoever already owns the number
+  // would bind it to the wrong human.
+  const taken = await query(
+    `SELECT u.id AS user_id, u.name, u.role::text AS role, s.id AS student_id
+       FROM users u LEFT JOIN students s ON s.user_id = u.id
+      WHERE u.phone = $1`,
+    [info.phone]
+  );
+  if (taken.rows.length) {
+    const owner = taken.rows[0];
+    return res.status(409).json({
+      error: owner.student_id
+        ? `هذا الرقم مسجّل باسم «${owner.name}» — اختره من «طالب موجود» بدل إنشاء حساب جديد`
+        : `هذا الرقم مسجّل لحساب آخر (${owner.name}) — استخدم رقماً غير مستخدم`,
+      code: 'ERR_PHONE_TAKEN',
+      student_id: owner.student_id || null,
+    });
+  }
+
+  // Priced BEFORE the transaction opens: a rejected option must not leave a created user
+  // behind, and pricing is read-only.
+  const resolved = await resolveRetailPieces({
+    rawPieces: body.pieces, studentId: null, gender: info.gender,
+  });
+  if (resolved.error) {
+    const { status, message, code, ...extra } = resolved.error;
+    return res.status(status).json({ error: message, code, ...extra });
+  }
+
+  const passwordHash = await bcrypt.hash(crypto.randomUUID(), SALT_ROUNDS);
+  const created = await tx(async (client) => {
+    const u = await client.query(
+      `INSERT INTO users (name, phone, email, password_hash, role)
+       VALUES ($1, $2, NULL, $3, 'retail') RETURNING id`,
+      [info.name, info.phone, passwordHash]
+    );
+    const s = await client.query(
+      `INSERT INTO students
+         (user_id, wholesaler_id, full_name_third, university_name, department,
+          gender, study_type, instagram_username, status)
+       VALUES ($1, NULL, $2, $3, $4, $5::gender, $6::study_type, $7, 'approved')
+       RETURNING id`,
+      [u.rows[0].id, info.name, info.university_name, info.department,
+        info.gender, info.study_type, info.instagram_username]
+    );
+    const student = {
+      id: s.rows[0].id,
+      name: info.name,
+      phone: info.phone,
+      instagram_username: info.instagram_username,
+    };
+    const bundle = await writeRetailBundle(client, {
+      student, pieces: resolved.pieces, group: body.group, actorId: req.user.id,
+    });
+    return { ...bundle, studentId: student.id };
+  }).catch((err) => {
+    // The phone probe above and this INSERT are not atomic.
+    if (isUniqueViolation(err) && String(err.constraint || '').includes('phone')) {
+      res.status(409).json({
+        error: 'هذا الرقم سُجّل للتو من مكان آخر — أعد تحميل الصفحة ثم حاول مجدداً',
+        code: 'ERR_PHONE_TAKEN',
+      });
+      return null;
+    }
+    if (isUniqueViolation(err)) return duplicatePieceRace(res), null;
+    throw err;
+  });
+  if (res.headersSent) return;
+
+  return respondRetailBundle(res, created.studentId, created);
+}
+
+function respondRetailBundle(res, studentId, created) {
+  for (const o of created.orders) publish({ type: 'order_new', orderId: o.id });
+  return res.status(201).json({
+    data: {
+      student_id: studentId,
+      checkout_group_id: created.cgId,
+      orders: created.orders,
+      total: created.orders.reduce((sum, o) => sum + Number(o.price || 0), 0),
+    },
+  });
+}
+
 // Reference-photo upload for the edit form (multer runs in the route).
 async function uploadImage(req, res) {
   if (!req.file) return res.status(400).json({ error: 'الملف مطلوب', code: 'ERR_VALIDATION' });
@@ -475,10 +1476,13 @@ async function uploadImage(req, res) {
 }
 
 module.exports = {
-  editContext, saveFullSetOrder, patchOrderDetails, studentsSearch, getStudentFullSet, uploadImage,
+  editContext, saveFullSetOrder, saveRetailConfiguration, patchOrderDetails,
+  studentsSearch, getStudentFullSet, createRetailOrder, createRetailOrders, uploadImage,
   // shared with adminCustomOrderController (existing-student mode)
   loadStudent, eligibleForFullSet, captureApproval, restoreApproval,
   captureGroupPhone, restoreGroupPhone,
   // exported for unit tests
-  validateStudentInfo, applyStudentInfo,
+  validateStudentInfo, applyStudentInfo, normalizeRetailMeasurements, comparableSelections,
+  comparableStoredSelections, familyKey, resolveSwapTarget, swapCandidates,
+  validateNewStudent, resolveRetailPieces,
 };

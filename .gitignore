@@ -59,3 +59,11 @@ SECURITY_AUDIT_REPORT_*.md
 STAFF_ADMIN_READINESS.md
 design-mockups/
 voice_*
+
+# Local dev auth helpers — dev-token-tmp.json holds a LIVE admin JWT and
+# public/ is served in production. Never commit these.
+frontend/public/dev-login.html
+frontend/public/dev-token-tmp.json
+
+# Brainstorming visual-companion scratch
+.superpowers/

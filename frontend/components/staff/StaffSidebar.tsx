@@ -97,7 +97,16 @@ function getNavLinks(staffTypes: StaffType[], isAdmin: boolean): NavLink[] {
     return [
       { href: "/staff", label: "المتابعة", icon: iconBarChart() },
       { href: "/staff/queue", label: "جميع الطلبات", icon: iconClipboard(), prefix: true },
-      { href: "/staff/custom-order", label: "طلب مخصص", icon: iconClipboard(), prefix: true },
+      // «طلب مخصص» has TWO mounts and they are not interchangeable: the whole
+      // /api/staff/* router is `requireRole('staff')`, which blocks the admin role by
+      // design (backend/routes/staff.js), so an admin sent to /staff/custom-order lands
+      // on a form whose config request 403s. Admins get their own /admin mount.
+      {
+        href: isAdmin ? "/admin/custom-order" : "/staff/custom-order",
+        label: "طلب مخصص",
+        icon: iconClipboard(),
+        prefix: true,
+      },
       { href: "/staff/tailor", label: "الفصال", icon: iconScissors(), prefix: true },
       { href: "/staff/shelf", label: "رف التجهيز", icon: iconClipboard(), prefix: true },
     ];
@@ -222,7 +231,7 @@ export function StaffSidebar({ user, open, onClose }: StaffSidebarProps) {
       {/* Brand header — warm veil so it reads as a premium header, not a plain bar */}
       <div className="bg-warm-veil border-b border-line px-5 py-5">
         <div className="flex items-center gap-3">
-          <BrandMark size={44} priority />
+          <BrandMark size={44} eager />
           <div>
             <p className="font-display text-sm font-semibold text-ink">لولو شوب</p>
             <p className="mt-0.5 text-xs font-medium text-orange-ink">{typeLabel}</p>

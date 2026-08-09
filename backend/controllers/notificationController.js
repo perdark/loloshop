@@ -32,4 +32,60 @@ async function markAllRead(req, res) {
   res.json({ data: { updated: rowCount } });
 }
 
-module.exports = { list, markRead, markAllRead };
+
+// ── Device registration for push (migration 077) ─────────────────────────────
+
+/** FCM tokens run ~160 chars, APNs 64+ hex. The cap only stops a junk body reaching the DB. */
+const MAX_TOKEN_LEN = 4096;
+const PLATFORMS = ['android', 'ios'];
+
+/**
+ * Called by the app on every launch while signed in (frontend/lib/push.ts), not only the
+ * first time: FCM and APNs both rotate tokens on their own schedule — after a restore, an
+ * app update, or for no visible reason — and a stale token fails silently forever.
+ *
+ * ⚠️ THE UPSERT IS ON `token`, NOT ON (user_id, token). Phones here are shared and re-sold,
+ * and the provider hands the SAME token to whoever signs in next. Conflicting on the token
+ * MOVES the device to its new owner; a per-user unique key would leave the previous account
+ * still subscribed and deliver a student's «تمت الموافقة» to the person who bought their
+ * phone. This is the single line that prevents that.
+ */
+async function registerDevice(req, res) {
+  const token = String(req.body?.token || '').trim();
+  const platform = String(req.body?.platform || '').trim();
+  if (!token || token.length > MAX_TOKEN_LEN || !PLATFORMS.includes(platform)) {
+    return res.status(400).json({ error: 'بيانات الجهاز غير صحيحة', code: 'ERR_VALIDATION' });
+  }
+  await query(
+    `INSERT INTO device_tokens (user_id, token, platform)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (token) DO UPDATE
+       SET user_id = EXCLUDED.user_id,
+           platform = EXCLUDED.platform,
+           last_seen_at = now()`,
+    [req.user.id, token, platform]
+  );
+  res.json({ data: { registered: true } });
+}
+
+/**
+ * Logout, from the device that is leaving. Scoped to the caller's own rows so a leaked token
+ * string cannot be used to unsubscribe someone else's phone.
+ *
+ * The app fires this BEFORE clearing its JWT (frontend/lib/auth.ts) — afterwards the request
+ * would be a 401 and the phone would keep receiving the previous user's notifications until
+ * somebody signed in again on it.
+ */
+async function unregisterDevice(req, res) {
+  const token = String(req.body?.token || '').trim();
+  if (!token || token.length > MAX_TOKEN_LEN) {
+    return res.status(400).json({ error: 'بيانات الجهاز غير صحيحة', code: 'ERR_VALIDATION' });
+  }
+  const { rowCount } = await query(
+    `DELETE FROM device_tokens WHERE token = $1 AND user_id = $2`,
+    [token, req.user.id]
+  );
+  res.json({ data: { removed: rowCount } });
+}
+
+module.exports = { list, markRead, markAllRead, registerDevice, unregisterDevice };

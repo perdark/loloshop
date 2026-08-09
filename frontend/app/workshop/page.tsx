@@ -9,6 +9,7 @@ import { formatIQD, formatDateShort } from "@/lib/format";
 import {
   getMyWorkshopSummary, recordMyProduction,
   type RateRow, type WorkerSummary, type WorkshopOperation, type WorkshopProduct,
+  type WorkshopAudience,
 } from "@/lib/workshop";
 
 export default function WorkshopWorkerPage() {
@@ -43,39 +44,63 @@ export default function WorkshopWorkerPage() {
           <Tab active={tab === "record"} onClick={() => setTab("record")}>سجّل شغلك</Tab>
           <Tab active={tab === "account"} onClick={() => setTab("account")}>حسابك</Tab>
         </div>
-        {!summary ? <Loader /> : tab === "record" ? <ProductionForm rates={summary.rates || []} onDone={load} /> : <Account summary={summary} />}
+        {!summary ? (
+          <Loader />
+        ) : tab === "record" ? (
+          <ProductionForm rates={summary.rates || []} onDone={load} />
+        ) : (
+          <Account summary={summary} />
+        )}
       </main>
     </div>
   );
 }
 
 function ProductionForm({ rates, onDone }: { rates: RateRow[]; onDone: () => Promise<void> }) {
-  const [product, setProduct] = useState<WorkshopProduct>(rates[0]?.product || "robe");
-  const available = useMemo(() => rates.filter((r) => r.product === product), [rates, product]);
+  // rates now holds one row per (product, operation, audience). The job list is the same
+  // for both audiences, so derive the pickers from one of them to avoid duplicate options.
+  const jobs = useMemo(() => rates.filter((r) => r.audience === "wholesale"), [rates]);
+  const [product, setProduct] = useState<WorkshopProduct>(jobs[0]?.product || "robe");
+  const available = useMemo(() => jobs.filter((r) => r.product === product), [jobs, product]);
   const [operation, setOperation] = useState<WorkshopOperation>(available[0]?.operation || "cut");
+  // No default: the audience decides the wage, so it must be tapped, never guessed.
+  const [audience, setAudience] = useState<WorkshopAudience | null>(null);
   const [qty, setQty] = useState("");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
-  const rate = rates.find((r) => r.product === product && r.operation === operation)?.amount || 0;
+  const rate = audience
+    ? rates.find((r) => r.product === product && r.operation === operation && r.audience === audience)?.amount || 0
+    : 0;
 
   function changeProduct(next: WorkshopProduct) {
-    setProduct(next); setOperation(rates.find((r) => r.product === next)?.operation || "cut");
+    setProduct(next); setOperation(jobs.find((r) => r.product === next)?.operation || "cut");
   }
   async function submit(e: React.FormEvent) {
     e.preventDefault(); const count = Math.floor(Number(qty));
+    if (!audience) { toast.error("حدد لمين هالشغل: ممثلين أو تجزئة"); return; }
     if (count < 1) { toast.error("حطّ عدد القطع"); return; }
     setBusy(true);
     try {
-      const result = await recordMyProduction({ product, operation, qty: count, work_date: date, note });
+      const result = await recordMyProduction({ product, operation, audience, qty: count, work_date: date, note });
       toast.success(`تسجّل ${count} قطعة — ${formatIQD(result.amount)}`); setQty(""); setNote(""); await onDone();
     } catch (e) { toast.error(getApiErrorMessage(e, "ما زبط التسجيل")); }
     finally { setBusy(false); }
   }
-  const products = Array.from(new Map(rates.map((r) => [r.product, r.product_label_ar])).entries());
+  const products = Array.from(new Map(jobs.map((r) => [r.product, r.product_label_ar])).entries());
   return (
     <form onSubmit={submit} className="space-y-4 rounded-2xl border border-line bg-surface p-5">
-      <div><h1 className="text-lg font-bold text-ink">شو اشتغلت اليوم؟</h1><p className="mt-1 text-sm text-ink-soft">اختار القطعة والشغل، وبعدين اكتب العدد.</p></div>
+      <div><h1 className="text-lg font-bold text-ink">شو اشتغلت اليوم؟</h1><p className="mt-1 text-sm text-ink-soft">اختار لمين الشغل والقطعة، وبعدين اكتب العدد.</p></div>
+      <Field label="لمين هالشغل؟">
+        <div className="grid grid-cols-2 gap-3">
+          {([["wholesale", "ممثلين"], ["retail", "تجزئة"]] as [WorkshopAudience, string][]).map(([value, label]) => (
+            <button key={value} type="button" onClick={() => setAudience(value)} aria-pressed={audience === value}
+              className={`min-h-12 rounded-xl border px-4 font-semibold transition-colors ${audience === value ? "border-orange-ink bg-orange-ink text-white" : "border-line bg-white text-ink"}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </Field>
       <Field label="القطعة"><select value={product} onChange={(e) => changeProduct(e.target.value as WorkshopProduct)} className="min-h-12 w-full rounded-xl border border-line bg-white px-3 text-ink outline-none focus:border-orange-ink">{products.map(([v,l]) => <option key={v} value={v}>{l}</option>)}</select></Field>
       <Field label="نوع الشغل"><select value={operation} onChange={(e) => setOperation(e.target.value as WorkshopOperation)} className="min-h-12 w-full rounded-xl border border-line bg-white px-3 text-ink outline-none focus:border-orange-ink">{available.map((r) => <option key={r.operation} value={r.operation}>{r.operation_label_ar}</option>)}</select></Field>
       <div className="grid grid-cols-2 gap-3">
@@ -84,15 +109,15 @@ function ProductionForm({ rates, onDone }: { rates: RateRow[]; onDone: () => Pro
       </div>
       <Field label="ملاحظة (اختياري)"><input className="min-h-12 w-full rounded-xl border border-line bg-white px-3 text-ink outline-none focus:border-orange-ink" value={note} onChange={(e) => setNote(e.target.value)} /></Field>
       <div className="rounded-xl bg-surface-sink p-3 text-sm text-ink-soft">سعر القطعة: <b className="text-ink">{formatIQD(rate)}</b> · المجموع: <b className="text-orange-ink">{formatIQD((Number(qty) || 0) * rate)}</b></div>
-      <button disabled={busy} className="min-h-12 w-full rounded-full bg-orange-ink px-4 font-semibold text-white disabled:opacity-50">{busy ? "عم نسجّل…" : "سجّل الشغل"}</button>
+      <button disabled={busy || !audience} className="min-h-12 w-full rounded-full bg-orange-ink px-4 font-semibold text-white disabled:opacity-50">{busy ? "عم نسجّل…" : !audience ? "حدد لمين هالشغل أول" : "سجّل الشغل"}</button>
     </form>
   );
 }
 
 function Account({ summary }: { summary: WorkerSummary }) {
   return <div className="space-y-4">
-    <div className="grid grid-cols-2 gap-3"><Metric label="أجور القطع" value={formatIQD(summary.production)} /><Metric label="حوافز" value={formatIQD(summary.bonuses)} /><Metric label="خصومات" value={formatIQD(summary.deductions)} /><Metric label="المستحق" value={formatIQD(summary.payable)} accent /></div>
-    <section><h2 className="mb-2 font-bold text-ink">آخر الحركات</h2><div className="divide-y divide-line rounded-2xl border border-line bg-surface px-4">{summary.entries.length ? summary.entries.map((e) => <div key={e.id} className="flex items-center justify-between gap-3 py-3 text-sm"><div><p className="font-medium text-ink">{e.kind === "production" ? `${e.operation_label_ar} · ${e.product_label_ar} × ${e.qty}` : e.kind === "bonus" ? "حافز" : "خصم"}</p><p className="text-xs text-ink-soft">{e.reason || formatDateShort(e.entry_date)}</p></div><b className={e.kind === "deduction" ? "text-danger" : "text-ink"}>{e.kind === "deduction" ? "−" : "+"}{formatIQD(e.amount)}</b></div>) : <p className="py-10 text-center text-sm text-ink-soft">ما في حركات بعد.</p>}</div></section>
+    <div className="grid grid-cols-2 gap-3"><Metric label="أجور ممثلين" value={formatIQD(summary.production_wholesale)} /><Metric label="أجور تجزئة" value={formatIQD(summary.production_retail)} /><Metric label="حوافز" value={formatIQD(summary.bonuses)} /><Metric label="خصومات" value={formatIQD(summary.deductions)} /><Metric label="المستحق" value={formatIQD(summary.payable)} accent /></div>
+    <section><h2 className="mb-2 font-bold text-ink">آخر الحركات</h2><div className="divide-y divide-line rounded-2xl border border-line bg-surface px-4">{summary.entries.length ? summary.entries.map((e) => <div key={e.id} className="flex items-center justify-between gap-3 py-3 text-sm"><div><p className="font-medium text-ink">{e.kind === "production" ? `${e.operation_label_ar} · ${e.product_label_ar} × ${e.qty} · ${e.audience_label_ar}` : e.kind === "bonus" ? "حافز" : "خصم"}</p><p className="text-xs text-ink-soft">{e.reason || formatDateShort(e.entry_date)}</p></div><b className={e.kind === "deduction" ? "text-danger" : "text-ink"}>{e.kind === "deduction" ? "−" : "+"}{formatIQD(e.amount)}</b></div>) : <p className="py-10 text-center text-sm text-ink-soft">ما في حركات بعد.</p>}</div></section>
   </div>;
 }
 

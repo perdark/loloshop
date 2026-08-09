@@ -273,7 +273,48 @@ async function buildShopFeed(audience, role) {
     if (!promoLive) p.compare_at_price = null;
     (by_type[p.type] ||= []).push(p);
   });
-  return { price_role: role, audience, packages, full_set_packages, by_type };
+  const graduates = await graduatesServed();
+  return { price_role: role, audience, packages, full_set_packages, by_type, graduates };
+}
+
+/**
+ * The storefront's proof number — «N طالب وطالبة» on the home band.
+ *
+ * It is the **live count of registered student accounts**, which is 1,141 today and
+ * rises by one with every sign-up. Owner decision (2026-08-02): an earlier cut used
+ * a hand-given 1,837 baseline, and the owner replaced it with this — «it is a number
+ * from me, ok make it 1141». Since 1,141 IS the real account count, the baseline
+ * disappears entirely: no magic constant to restate, no cutoff date to maintain, and
+ * the figure cannot drift from reality because it is measured, not stored.
+ *
+ * ⚠️ THIS IS DELIBERATELY *NOT* `lib/counts.countStudents()` and must never be
+ * reconciled against `/admin` or `/tv`. Those answer «كم طالب عنده طلب؟» (554 with a
+ * live order). This answers «كم طالب مسجّل عدنا؟». Two different questions.
+ *
+ * GRADUATES_BASELINE (default 0) is added on top, for the day the owner wants the
+ * years of customers served before this system existed to count too.
+ *
+ * A failure here must never take the storefront down: the band drops its stat line
+ * rather than showing a wrong number.
+ */
+async function graduatesServed() {
+  const baseline = Number.parseInt(process.env.GRADUATES_BASELINE ?? '0', 10);
+  if (!Number.isFinite(baseline) || baseline < 0) {
+    console.error('[catalog] GRADUATES_BASELINE is not a number:', process.env.GRADUATES_BASELINE);
+    return null;
+  }
+  try {
+    const { rows } = await query(
+      `SELECT COUNT(*)::int AS n
+         FROM users
+        WHERE role = 'retail'
+          AND deleted_at IS NULL`
+    );
+    return baseline + rows[0].n;
+  } catch (err) {
+    console.error('[catalog] graduate count failed', err.message);
+    return null;
+  }
 }
 
 // ---------- ADMIN: list all products (incl. inactive) for catalog editor ----------

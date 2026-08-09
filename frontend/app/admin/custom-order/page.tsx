@@ -80,6 +80,7 @@ export default function AdminCustomOrderPage() {
           onUploadImage={uploadAdminCustomOrderImage}
           onSearchStudents={searchProductionStudents}
           onLoadStudentContext={getStudentFullSetContext}
+          onRetailCreated={({ orders }) => router.push(`/staff/orders/${orders[0].id}`)}
         />
       ) : (
         <EmptyState title="تعذر تحميل نموذج الطلب" message="تحقق من الاتصال ثم أعد تحميل الصفحة." />

@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { PayoutAccountPanel } from "@/components/payments/PayoutAccountPanel";
 import {
   getMyActivity,
   getMyGoal,
@@ -12,6 +14,12 @@ import { getApiErrorMessage } from "@/lib/api";
 import { ORDER_STATUS_LABELS, SALARY_TXN_LABELS } from "@/lib/constants";
 import { formatDateShort, formatIQD } from "@/lib/format";
 import type { OrderStatus, StaffGoal, StaffSalary } from "@/lib/types";
+import { getUser } from "@/lib/auth";
+import {
+  getMyStaffPayoutAccount,
+  saveMyStaffPayoutAccount,
+  type PayoutAccount,
+} from "@/lib/payments";
 
 function GoalCard({ goal }: { goal: StaffGoal }) {
   const pct = Math.min(100, Math.round((goal.progress / goal.targetCount) * 100));
@@ -89,20 +97,23 @@ export default function StaffMePage() {
   const [salary, setSalary] = useState<StaffSalary | null>(null);
   const [activity, setActivity] = useState<MyActivityRow[]>([]);
   const [goal, setGoal] = useState<StaffGoal | null>(null);
+  const [payoutAccount, setPayoutAccount] = useState<PayoutAccount | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [s, a, g] = await Promise.all([
+      const [s, a, g, payout] = await Promise.all([
         getMySalary(),
         getMyActivity(),
         getMyGoal(),
+        getMyStaffPayoutAccount(),
       ]);
       setSalary(s);
       setActivity(a);
       setGoal(g);
+      setPayoutAccount(payout);
     } catch (e) {
       setError(getApiErrorMessage(e, "تعذر تحميل بياناتك"));
     } finally {
@@ -151,6 +162,22 @@ export default function StaffMePage() {
               </p>
             </div>
           </section>
+
+          {/* Workshop crew (e.g. ابو عبدو الفصال) don't manage their own card — admin does. */}
+          {payoutAccount?.eligible !== false && <PayoutAccountPanel
+            account={payoutAccount}
+            ownerName={getUser()?.name || "الموظف"}
+            onSave={async (input) => {
+              try {
+                const saved = await saveMyStaffPayoutAccount(input);
+                setPayoutAccount(saved);
+                return saved;
+              } catch (caught) {
+                toast.error(getApiErrorMessage(caught, "تعذّر حفظ بيانات SuperQi"));
+                throw caught;
+              }
+            }}
+          />}
 
           {/* Ledger */}
           <section className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">

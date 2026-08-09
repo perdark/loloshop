@@ -1,5 +1,6 @@
 import axios, { type AxiosError } from "axios";
 import { logout } from "./auth";
+import { compressImageForUpload } from "./imageCompress";
 import type { ApiError } from "./types";
 
 const baseURL =
@@ -32,14 +33,24 @@ api.interceptors.request.use((config) => {
 });
 
 /** Multipart upload — reuses the axios instance (interceptor strips the JSON
- *  Content-Type for FormData) so auth + 401 handling stay unified. */
+ *  Content-Type for FormData) so auth + 401 handling stay unified.
+ *
+ *  Images are downscaled in the browser first (see lib/imageCompress.ts). It lives here,
+ *  at the single choke point every upload already passes through, rather than in each of
+ *  the eleven callers — a new upload screen then cannot forget it. Non-images and files
+ *  already small enough are passed through untouched, and a compression failure always
+ *  falls back to the original file.
+ *
+ *  Pass `compress: false` for artwork that must stay pixel-exact. */
 export async function apiUploadFile(
   path: string,
   file: File,
-  fieldName = "file"
+  fieldName = "file",
+  { compress = true }: { compress?: boolean } = {}
 ): Promise<unknown> {
+  const payload = compress ? await compressImageForUpload(file) : file;
   const form = new FormData();
-  form.append(fieldName, file, file.name);
+  form.append(fieldName, payload, payload.name);
   const { data } = await api.post(path, form);
   return data;
 }

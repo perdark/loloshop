@@ -36,10 +36,19 @@ export default function StaffCustomOrderPage() {
       : user?.staff_type
         ? [user.staff_type]
         : [];
-  const isManager = user?.role === "admin" || myTypes.includes("manager");
+  // NOT `role === 'admin' || …`. The whole /api/staff/* router is `requireRole('staff')`
+  // (backend/routes/staff.js) — the admin role is blocked there BY DESIGN and uses the
+  // /api/admin mounts instead. Claiming admins are authorised here renders a form whose
+  // every request 403s, so admins are sent to their own page instead.
+  const isAdmin = user?.role === "admin";
+  const isManager = myTypes.includes("manager");
 
   useEffect(() => {
-    if (!user || !isManager) return;
+    if (isAdmin) router.replace("/admin/custom-order");
+  }, [isAdmin, router]);
+
+  useEffect(() => {
+    if (!user || isAdmin || !isManager) return;
     let alive = true;
     getStaffCustomOrderConfig()
       .then((data) => {
@@ -56,6 +65,8 @@ export default function StaffCustomOrderPage() {
   }, [user?.id, isManager]);
 
   if (authLoading || !user) return <PageLoader />;
+  // Redirect in flight — never flash «غير مصرّح» at an admin who is simply on the wrong mount.
+  if (isAdmin) return <PageLoader />;
 
   if (!isManager) {
     return (
@@ -103,6 +114,7 @@ export default function StaffCustomOrderPage() {
           onUploadImage={uploadStaffCustomOrderImage}
           onSearchStudents={searchProductionStudents}
           onLoadStudentContext={getStudentFullSetContext}
+          onRetailCreated={({ orders }) => router.push(`/staff/orders/${orders[0].id}`)}
         />
       ) : (
         <EmptyState title="تعذر تحميل نموذج الطلب" message="تحقق من الاتصال ثم أعد تحميل الصفحة." />

@@ -1,6 +1,5 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8" ?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
@@ -8,7 +7,6 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
-
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
             android:name=".MainActivity"
@@ -16,12 +14,59 @@
             android:theme="@style/AppTheme.NoActionBarLaunch"
             android:launchMode="singleTask"
             android:exported="true">
-
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!--
+              ANDROID APP LINKS — makes https://lolo-shop96.com/join/<code> open THIS APP
+              instead of the phone browser. Before this existed the referral link was
+              browser-only: the shell is a remote-URL WebView with no address bar, and
+              nothing in the app navigates to /join/*, so an installed student had no way
+              to reach their code at all.
+
+              android:autoVerify="true" makes Android fetch
+              https://lolo-shop96.com/.well-known/assetlinks.json at install time and
+              compare its SHA-256 against this APK's signing certificate. If that check
+              FAILS the link simply opens in the browser as before — a wrong fingerprint
+              degrades, it does not break. Verify on a device with:
+                adb shell pm get-app-links com.loloshop96.app
+
+              ⚠️ SCOPE IS DELIBERATELY THESE FOUR PREFIXES ONLY. Widening the pathPrefix
+              (or dropping it) makes this app claim EVERY page on the domain, so every
+              shared product link would yank installed users out of their browser.
+              Keep it narrow. Three places must claim the SAME four prefixes:
+                • this file
+                • app/.well-known/apple-app-site-association/route.ts  (iOS)
+                • components/DeepLinkHandler.tsx                        (what the web accepts)
+
+              /join/ — the rep's referral link, the reason this was built.
+              /s/ /w/ /d/ — the secret-key portals for staff, workshop and design-team, who
+              have NO phone and therefore cannot receive a WhatsApp OTP. `TeamKeyEntry` was
+              deleted from /login on 2026-08-06 (it showed students a staff entrance), so
+              those links became BROWSER-ONLY for people whose whole job is on the phone.
+              Claiming them here puts that entrance back where it belongs: the same link
+              they already have now opens the app, and the session persists like any other.
+              These four are exactly BROWSER_ALLOWED_PREFIXES' user-facing entry points.
+
+              The activity is already launchMode="singleTask", so a link tapped while the
+              app is running re-uses the running instance and arrives via onNewIntent —
+              Capacitor turns that into the JS `appUrlOpen` event the handler listens for.
+            -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="lolo-shop96.com" android:pathPrefix="/join/" />
+                <data android:scheme="https" android:host="lolo-shop96.com" android:pathPrefix="/s/" />
+                <data android:scheme="https" android:host="lolo-shop96.com" android:pathPrefix="/w/" />
+                <data android:scheme="https" android:host="lolo-shop96.com" android:pathPrefix="/d/" />
+                <data android:scheme="https" android:host="www.lolo-shop96.com" android:pathPrefix="/join/" />
+                <data android:scheme="https" android:host="www.lolo-shop96.com" android:pathPrefix="/s/" />
+                <data android:scheme="https" android:host="www.lolo-shop96.com" android:pathPrefix="/w/" />
+                <data android:scheme="https" android:host="www.lolo-shop96.com" android:pathPrefix="/d/" />
+            </intent-filter>
         </activity>
 
         <provider
@@ -29,13 +74,69 @@
             android:authorities="${applicationId}.fileprovider"
             android:exported="false"
             android:grantUriPermissions="true">
-            <meta-data
-                android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/file_paths"></meta-data>
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
     </application>
 
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!--
+      STAFF ATTENDANCE GPS (بصمة). components/staff/StaffAttendancePanel.tsx calls the plain
+      WEB navigator.geolocation API (lib/staff.ts:1377) — the Capacitor Geolocation plugin is
+      deliberately NOT installed, the WebView one is enough.
+
+      Capacitor's bridge already handles the WebView's permission prompt
+      (BridgeWebChromeClient.onGeolocationPermissionsShowPrompt) and asks for exactly these
+      two at runtime — but Android denies a runtime request for any permission not declared
+      here, WITHOUT showing a dialog. So without these lines getCurrentPosition always hit
+      its error callback, lib/staff.ts resolved null, and check-in posted location: null.
+
+      ⚠️ THIS IS WHY THE APP NEEDED A NEW BINARY. <uses-permission> is compiled into the AAB;
+      the remote-URL WebView (capacitor.config.ts server.url) can ship web changes instantly
+      but can never add a permission.
+
+      ⚠️ ORDER OF OPERATIONS WHEN TURNING GPS ON — getting this wrong locks staff out:
+        1. Ship this binary and wait until staff phones have actually updated.
+        2. Set the shop coordinates in /admin (staff_attendance_settings.shop_latitude /
+           shop_longitude are NULL today).
+        3. ONLY THEN move verification_mode off 'none'.
+      Flipping verification_mode first means locationOk=false for everyone, and
+      backend/controllers/attendanceController.js:532 + :619 answer that with a hard
+      403 ERR_ATTENDANCE_LOCATION — every بصمة, every user, every platform.
+
+      Adding these also means updating the Play Console Data Safety form (location).
+    -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+
+    <!--
+      PUSH NOTIFICATIONS (Android 13 / API 33+).
+
+      ⚠️ THE PLUGIN DOES NOT DECLARE THIS AND CANNOT. @capacitor/push-notifications names
+      POST_NOTIFICATIONS only in a Capacitor `@Permission` annotation on
+      PushNotificationsPlugin.java — a RUNTIME alias — and its own AndroidManifest.xml
+      contains just the FirebaseMessagingService entry. Verified by reading both files in
+      node_modules, not assumed.
+
+      Android denies a runtime request for a permission the merged manifest does not declare
+      WITHOUT showing a dialog. So without this line PushNotifications.requestPermissions()
+      resolves 'denied' instantly on every modern phone, register() is never called, no token
+      ever reaches the backend — and nothing anywhere says why. That is the exact silent
+      failure the two location permissions above were added to fix.
+
+      ⚠️ COMPILED INTO THE AAB. The remote-URL WebView ships web changes instantly but can
+      never add a permission, so forgetting this costs a whole extra store release.
+
+      Also required in the installed binary, and equally invisible when missing:
+        • android/app/google-services.json — the Firebase config. app/build.gradle already
+          applies the google-services plugin only when that file exists, so a build without
+          it succeeds and silently produces an app that can never register.
+        • `npx cap sync android` — capacitor.settings.gradle / capacitor.build.gradle are
+          GENERATED, and the push plugin only appears in them after a sync.
+
+      Adding this also means declaring notifications on the Play Data Safety form.
+    -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 </manifest>

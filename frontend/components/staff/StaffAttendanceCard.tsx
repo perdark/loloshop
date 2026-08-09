@@ -29,6 +29,7 @@ export function StaffAttendanceCard({
   busy,
   onCheckIn,
   onCheckOut,
+  breakSlot = null,
   className = "",
 }: {
   settings: StaffAttendanceSettings | null | undefined;
@@ -36,6 +37,8 @@ export function StaffAttendanceCard({
   busy: boolean;
   onCheckIn: () => void;
   onCheckOut: () => void;
+  /** الخروج المؤقت controls — rendered only while a shift is open */
+  breakSlot?: React.ReactNode;
   className?: string;
 }) {
   const attendanceRequired = settings?.attendanceRequired !== false;
@@ -88,6 +91,8 @@ export function StaffAttendanceCard({
         )}
       </div>
 
+      {attendanceRequired && breakSlot ? <div className="mt-4">{breakSlot}</div> : null}
+
       {attendanceRequired && (
         <div className="mt-4 grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
           <div className="rounded-xl bg-surface/75 p-3">
@@ -107,6 +112,12 @@ export function StaffAttendanceCard({
           <div className="rounded-xl bg-surface/75 p-3">
             <p className="text-xs text-muted">مدة العمل</p>
             <p className="mt-1 font-bold text-ink">{durationLabel(record?.workedMinutes)}</p>
+            {/* breaks are excluded from مدة العمل — say so where the number is */}
+            {record?.breakMinutes ? (
+              <p className="mt-0.5 text-[11px] text-muted">
+                بعد خصم {durationLabel(record.breakMinutes)} خروج مؤقت
+              </p>
+            ) : null}
           </div>
           <div className="rounded-xl bg-surface/75 p-3">
             <p className="text-xs text-muted">وقت إضافي</p>
