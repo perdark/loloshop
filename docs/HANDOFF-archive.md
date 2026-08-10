@@ -89,11 +89,43 @@ that triggers the auto-deploy. Prod confirmed on `11a7a43`.
 **Also corrected:** the board called iOS "unshipped". App Store Connect shows **iOS 1.0 Ready for
 Distribution** — it was approved, which is precisely what closed the 1.0 train.
 
+**Then iOS 1.0.4 was submitted the same night, driven through App Store Connect in the browser.**
+The board said "upload screenshots, then submit"; that was wrong in two places. First, **no 1.0.4
+version existed at all** — a build and a version are different objects, and the uploaded binary
+was sitting in the pool with nothing to attach to. Second, Apple's own App Review page showed
+**no open items**, so the long-standing "reply with a deletion-flow screen recording" task had
+already been closed when 1.0 was approved on Jul 30.
+
+Order that worked: create version 1.0.4 → Add Build (only `1786309948` was offered, because ASC
+filters builds by matching marketing version — Apple's UI independently confirming the version
+fix) → Save → App Privacy → screenshots → *What's New* → Add for Review.
+
+**App Privacy needed Precise Location**, and the answer was checked against the code rather than
+assumed: `attendanceController.js:565-584` **inserts** `latitude`/`longitude`/
+`location_accuracy_meters` into the attendance row (`db/schema.sql:895-897`), which meets Apple's
+definition of "collect" — retained beyond the immediate request — and is linked to the staff
+member's identity. Published as Precise Location · App Functionality · Linked · not used for
+tracking. Identifiers was already declared, so the push token needed nothing new.
+
+**Three traps found in that flow**, each of which costs a cycle to rediscover:
+· **«What's New in This Version» is required for every update** and was *not* required for the
+initial 1.0 release. Missing it blocks *Add for Review* behind a generic "An unexpected error was
+encountered" that hides the real one-line cause.
+· **«Add for Review» submits immediately** in this ASC flow — it is not a staging step and there
+is no second confirm. *(Assumed otherwise and told the owner so; it went straight to review.)*
+· The screenshots uploaded to the **6.9"** slot and Apple then reported *«Using 6.9" Display»* for
+the 6.5" slot too — one 6.9" set covers both, no separate 6.5" set needed.
+
+The 8 screenshots live in **`appstore/`, deliberately uncommitted** at the owner's request, with
+`.gitignore` already carrying `appstore/**/*.png` so only the README and the two scripts would
+ever be tracked. Independently verified before upload: 1290 × 2796 and 2064 × 2752, 8-bit RGB
+with **no alpha** (App Store Connect rejects transparency).
+
 **Open follow-ups:** no iOS device token exists until someone installs 1.0.4 from TestFlight and
-grants the prompt, so iOS push is proven only at the credential layer · Android 1.0.4 is in
-production review with managed publishing ON (approval will not publish it) · iOS 1.0.4 still
-needs submitting in ASC · **every future iOS submission must raise `MARKETING`** or it fails at
-publish after a full successful build.
+grants the prompt, so iOS push is proven only at the credential layer — **and the owner has no
+iPhone**, so this needs a TestFlight invite to someone who does · **both** stores are set to
+manual release, so approval publishes neither · **every future iOS submission must raise
+`MARKETING`** or it fails at publish after a full successful build.
 
 ---
 

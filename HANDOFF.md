@@ -24,7 +24,7 @@ Apple Developer console in a browser this session.
 | `origin/ios-appstore` | `11a7a43` — **fast-forwarded to `main`**, no longer a divergent branch |
 | Migration 077 | ✅ applied to prod AND the dev DB — 3,311 prod rows retired to `skipped` |
 | Android | **v1.0.4 (versionCode 5) IN PRODUCTION REVIEW** — deep links + GPS + push in one review |
-| iOS | **1.0.4 (build 1786309948) UPLOADED** — «Complete» on TestFlight, status *Ready to Submit* |
+| iOS | **1.0.4 (build 1786309948) SUBMITTED — «Waiting for Review»** (2026-08-10, ≤48h) |
 | Android push | ✅ working end to end |
 | iOS push | ✅ **APNs key installed and verified against Apple** — `push.configured()` → `{"android":true,"ios":true}` |
 | Backend tests | **185/185 pass** against the dev DB with 077 applied |
@@ -76,11 +76,14 @@ code side of this queue is closed.
 **Both `.well-known` manifests are LIVE and verified** on the apex *and* `www`, HTTP 200,
 `application/json`, zero redirects — which also **closes the `www` landmine** below.
 
-**What is left is not code:**
-1. Android — press publish once Play approves (managed publishing is ON, see owner actions).
-2. iOS — submit 1.0.4 for review in App Store Connect (`submit_to_app_store` is `false` in
-   `codemagic.yaml`, so Codemagic uploads and deliberately stops there).
-3. Install from a **store track** on a real phone and confirm links + push actually fire.
+**Both platforms are submitted and waiting. What is left is not code:**
+
+1. ⚠️ **PRESS RELEASE ON BOTH — approval does NOT publish either one.** This trap now exists
+   twice, for different reasons, and both land on the same person:
+   · **Android** — «النشر المُدار» (managed publishing) is ON.
+   · **iOS** — the version is set to **«Manually release this version»**.
+   Both will sit looking like "still in review" when they are actually approved and waiting.
+2. Install from a **store track** on a real phone and confirm links + push actually fire.
 
 **Both `.well-known` manifests are LIVE and verified** on the apex *and* `www`, HTTP 200,
 `application/json`, zero redirects — which also **closes the `www` landmine** below.
@@ -185,13 +188,20 @@ longer stranded on a branch · the laptop's loose credentials are filed in
    ⚠️ **«النشر المُدار» (managed publishing) is ON, so approval does NOT publish it.** Someone
    must return to the publishing overview and press publish. It will look like "still in review"
    when it is actually approved and waiting. Check in a day or two.
-2. **⏳ Submit iOS 1.0.4 for review in App Store Connect.** Build `1786309948` is uploaded and
-   sits at *Ready to Submit*; `codemagic.yaml` sets `submit_to_app_store: false` on purpose, so
-   Codemagic uploads and stops. Nothing else is needed from a build.
+2. **⏳ iOS 1.0.4 is IN REVIEW** — submitted 2026-08-10, ≤48h, and set to **manual release**, so
+   approval will not publish it either. Done in the same sitting: version 1.0.4 created, build
+   attached, 6.9" screenshots uploaded (the page now reads *«Using 6.9" Display»*), Arabic
+   *What's New* written by the owner, App Privacy published.
+   ⚠️ **«What's New in This Version» is REQUIRED for every update** and blocks *Add for Review*
+   with a misleading generic "unexpected error" alongside the real message. It was not required
+   for the initial 1.0 release, so it is easy to hit once and never again.
+   ⚠️ **In this ASC flow «Add for Review» submits immediately** — it is not a staging step and
+   there is no second confirm.
 3. **📱 Install iOS 1.0.4 from TestFlight and grant the notification prompt.** Internal group
    «Testers1», no review wait. This is the ONLY way a first iOS device token exists — until then
    iOS push is proven at the credential layer and nowhere else. While you are in there, tap a
-   `/join/` WhatsApp link and confirm it opens the app rather than Safari.
+   `/join/` WhatsApp link and confirm it opens the app rather than Safari. **The owner has no
+   iPhone** — a TestFlight invite to anyone with one closes this.
 5. **⚠️ Enter the shop coordinates** at `/admin/attendance` (خط العرض · خط الطول · نطاق الموقع)
    **before** moving `verification_mode` off `'none'`. Wrong order 403s every بصمة for every
    worker on every platform.
