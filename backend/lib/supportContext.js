@@ -11,6 +11,7 @@
 // user_id, so one student's prompt can never contain another student's order.
 
 const { query } = require('./db');
+const memoCache = require('./memoCache');
 
 // Mirrors frontend/lib/constants.ts ORDER_STATUS_LABELS. Duplicated rather than imported
 // because backend and frontend share no package (see CLAUDE.md → Architecture). If a status
@@ -33,6 +34,92 @@ const STATUS_AR = {
 
 const fmtDate = (d) => (d ? new Date(d).toISOString().slice(0, 10) : null);
 const fmtIQD = (n) => `${Number(n || 0).toLocaleString('en-US')} دينار`;
+
+const TYPE_AR = {
+  sash: 'وشاح تخرج',
+  robe: 'روب تخرج',
+  cap: 'قبعة تخرج',
+  shawl: 'شال',
+};
+
+/**
+ * Format a per-type price summary. Pure, so the «starts from» wording is testable.
+ *
+ * Ranges, not a product list: the catalogue is dozens of rows and would dominate the prompt
+ * (and the bill) while adding nothing — «شكد سعر الروب؟» wants a number, not an inventory.
+ * A range also cannot go stale per product the way a hand-written FAQ answer does.
+ */
+function formatPriceBook(rows, packages = []) {
+  if (!rows.length) return null;
+  const lines = rows
+    .filter((r) => TYPE_AR[r.type])
+    .map((r) => {
+      const min = Number(r.min_price || 0);
+      const max = Number(r.max_price || 0);
+      // base_price is the STARTING price — options add to it — so every line says «يبدأ من».
+      // Stating a flat price here would be a quote the checkout does not honour.
+      return min === max
+        ? `- ${TYPE_AR[r.type]}: يبدأ من ${fmtIQD(min)}`
+        : `- ${TYPE_AR[r.type]}: يبدأ من ${fmtIQD(min)} (وأغلى موديل ${fmtIQD(max)})`;
+    });
+
+  for (const p of packages) {
+    lines.push(`- ${p.name_ar} (طقم كامل): ${fmtIQD(p.price)}`);
+  }
+  if (!lines.length) return null;
+
+  return [
+    'قائمة الأسعار (أسعار البداية):',
+    ...lines,
+    'ملاحظة: هذي أسعار البداية، والسعر النهائي يعتمد على التفاصيل والإضافات اللي يختارها الزبون.',
+  ].join('\n');
+}
+
+/**
+ * The prices this audience is actually shown on the storefront.
+ *
+ * Mirrors buildShopFeed (controllers/catalogController.js) on BOTH axes, and must keep doing
+ * so: the audience filter (`wholesaler_only` / `retail_only`) and the per-role price override
+ * in product_price_roles. A rep-linked student pays wholesaler prices, so quoting them the
+ * retail book would be a wrong number from the shop's own assistant — worse than no answer.
+ *
+ * Cached 5 minutes per role: it is identical for every anonymous visitor, and the shop's price
+ * list does not change between two messages of one conversation.
+ */
+async function priceBook(role = 'retail') {
+  const audienceFilter =
+    role === 'wholesaler' ? 'AND p.retail_only = FALSE' : 'AND p.wholesaler_only = FALSE';
+
+  return memoCache.wrap(`ai:pricebook:${role}`, 5 * 60 * 1000, async () => {
+    const { rows } = await query(
+      `SELECT p.type::text AS type,
+              MIN(COALESCE(ppr.base_price, p.base_price))::bigint AS min_price,
+              MAX(COALESCE(ppr.base_price, p.base_price))::bigint AS max_price
+         FROM products p
+         LEFT JOIN product_price_roles ppr ON ppr.product_id = p.id AND ppr.role = $1
+        WHERE p.active = TRUE
+          ${audienceFilter}
+          -- Parents whose children are active are not orderable themselves; the child rows
+          -- carry the real prices. Same exclusion the feed makes.
+          AND NOT EXISTS (SELECT 1 FROM products c WHERE c.parent_id = p.id AND c.active = TRUE)
+          AND COALESCE(ppr.base_price, p.base_price) > 0
+        GROUP BY p.type`,
+      [role]
+    );
+
+    // «طقم كامل» is a retail storefront entity with its own flat price, not a product row.
+    const { rows: packages } =
+      role === 'wholesaler'
+        ? { rows: [] }
+        : await query(
+            `SELECT name_ar, price FROM packages
+              WHERE active = TRUE AND role = 'retail' AND is_full_set = TRUE
+              ORDER BY sort, created_at LIMIT 4`
+          );
+
+    return formatPriceBook(rows, packages);
+  });
+}
 
 /**
  * Turn one profile row + their orders into the fact block the model is allowed to phrase.
@@ -81,8 +168,12 @@ function formatContext(p, orders = []) {
 }
 
 /**
- * Everything the bot may say to this user, as plain text.
- * Returns null for a signed-out visitor — they get the generic FAQ-only prompt.
+ * Everything the bot may say to this user.
+ *
+ * Returns `{ block, priceRole }` — the facts, plus which price book this person is actually
+ * shown, because a rep-linked student pays wholesaler prices and quoting them the retail
+ * number would be the shop's own assistant giving a wrong price.
+ * Returns null for a signed-out visitor; they get the generic prompt and the retail book.
  */
 async function forUser(userId) {
   if (!userId) return null;
@@ -90,6 +181,7 @@ async function forUser(userId) {
   const { rows: profile } = await query(
     `SELECT u.name                AS user_name,
             s.id                  AS student_id,
+            s.wholesaler_id,
             s.full_name_third,
             s.university_name,
             s.department,
@@ -120,7 +212,9 @@ async function forUser(userId) {
       )
     : { rows: [] };
 
-  return formatContext(p, orders);
+  // Same rule as catalogController.priceRoleForUser: a student linked to a rep genuinely is a
+  // wholesaler-priced customer. Derived from the profile row we already have, not re-queried.
+  return { block: formatContext(p, orders), priceRole: p.wholesaler_id ? 'wholesaler' : 'retail' };
 }
 
-module.exports = { forUser, STATUS_AR, formatContext };
+module.exports = { forUser, priceBook, STATUS_AR, formatContext, formatPriceBook, TYPE_AR };

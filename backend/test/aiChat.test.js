@@ -13,7 +13,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 
 const { evaluateCaps, estimateCostUsd } = require('../lib/aiChat')._internals;
-const { formatContext } = require('../lib/supportContext');
+const { formatContext, formatPriceBook } = require('../lib/supportContext');
 const { clampDays } = require('../lib/adminMetrics')._internals;
 const { parseRoute } = require('../controllers/adminAnalyticsChatController')._internals;
 
@@ -182,6 +182,51 @@ test('a retail customer is described as having no rep rather than an empty one',
   const text = formatContext({ user_name: 'سارة', rep_name: null }, []);
   assert.ok(text.includes('ما عنده ممثل جامعة'));
   assert.ok(text.includes('ماكو طلبات'));
+});
+
+// ── The price book ──────────────────────────────────────────────────────────────────────
+//
+// products.base_price is a STARTING price that options add to. If the bot ever states one as
+// a flat price it has quoted a total the checkout will not honour — so every line must carry
+// «يبدأ من», including the single-product case where a range would collapse.
+
+test('every price line is stated as a STARTING price, never a flat one', () => {
+  const text = formatPriceBook([
+    { type: 'robe', min_price: 20000, max_price: 50000 },
+    { type: 'cap', min_price: 15000, max_price: 15000 },
+  ]);
+  assert.ok(text.includes('روب تخرج: يبدأ من 20,000 دينار'));
+  assert.ok(text.includes('وأغلى موديل 50,000 دينار'));
+  // The collapsed case is the trap: min === max must still say «يبدأ من».
+  assert.ok(text.includes('قبعة تخرج: يبدأ من 15,000 دينار'));
+  assert.ok(!/قبعة تخرج: 15,000/.test(text), 'a flat price would be a quote, not a starting price');
+  assert.ok(text.includes('أسعار البداية'), 'the caveat line must survive');
+});
+
+test('full-set packages are listed at their real flat price', () => {
+  const text = formatPriceBook(
+    [{ type: 'sash', min_price: 15000, max_price: 15000 }],
+    [{ name_ar: 'طقم ميلانو', price: 150000 }]
+  );
+  assert.ok(text.includes('طقم ميلانو (طقم كامل): 150,000 دينار'));
+});
+
+test('an unknown product type is dropped rather than shown with a raw English key', () => {
+  // Unlike order STATUS, where degrading to the raw value is right, a price line is customer-
+  // facing money: «hoodie: يبدأ من 5,000» in an Arabic answer is worse than silence.
+  const text = formatPriceBook([
+    { type: 'robe', min_price: 20000, max_price: 20000 },
+    { type: 'hoodie', min_price: 5000, max_price: 5000 },
+  ]);
+  assert.ok(text.includes('روب تخرج'));
+  assert.ok(!text.includes('hoodie'));
+});
+
+test('an empty catalogue yields no price block at all, not an empty heading', () => {
+  // The controller filters falsy blocks out of the prompt. A bare «قائمة الأسعار:» with
+  // nothing under it would invite the model to fill the gap.
+  assert.strictEqual(formatPriceBook([]), null);
+  assert.strictEqual(formatPriceBook([{ type: 'hoodie', min_price: 1, max_price: 1 }]), null);
 });
 
 // ── The analytics router ────────────────────────────────────────────────────────────────

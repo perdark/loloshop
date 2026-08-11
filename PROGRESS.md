@@ -29,9 +29,25 @@ failures pointing at either the bill or a student's trust. **Backend suite now 2
 - `sessionKey()` no longer crashes the widget when `localStorage` throws (privacy modes) — it is
   now the only link between an anon visitor and their history, so it had to stop being fragile.
 
-**Still open from the review, not done here:** no response cache (the owner's stance was «cache +
-hard caps» and only the caps exist), analytics still spends 2 model calls per question, and the
-chat sheet has no `role="dialog"`/Escape/`aria-live`.
+**Then, from testing it in a browser:**
+
+- **«عندك سؤال؟» is now a real home-page section**, last before «موقعنا», with the shop's four
+  actual FAQs as tappable chips. The floating bubble stays; both share **one** conversation via
+  `SupportChatProvider`, because the server rebuilds history from its own ledger and two
+  independent threads would have shown an empty panel while the model still had the context.
+- **The bot can finally answer «شكد سعر الروب؟»** — the most common question in the shop, which
+  it previously answered *"ما عندي علم"* while the price sat on the page above it. It had no
+  catalogue at all. `supportContext.priceBook()` now feeds it per-type **starting-price ranges**
+  (not a product list — that would dominate the prompt and go stale), mirroring `buildShopFeed`
+  on both the audience filter and `product_price_roles`, so **a rep-linked student is quoted the
+  wholesaler book and never the retail one**. Cached 5 min per role. Verified: robe answered
+  correctly, «سعر الحذاء» still refused.
+- Accessibility gaps closed while the panel was being rewritten: `role="dialog"`, Escape-to-close
+  with focus returned, `aria-live` on both threads, and a «أعد المحاولة» button.
+
+**Still open:** no response cache (the owner's stance was «cache + hard caps» and only the caps
+exist — the FAQ chips now at least make the common asks arrive as identical strings, which is the
+key such a cache would use), and analytics still spends 2 model calls per question.
 
 ## 2026-08-10 (b) — AI assistant: Arabic support chatbot + admin analytics
 

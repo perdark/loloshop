@@ -19,18 +19,21 @@ const SHOP_FACTS = `حقائق ثابتة عن المتجر:
 const RULES = `التعليمات:
 1. تكلّم بالعربية فقط، بلهجة عراقية بسيطة ومهذبة. لا تستخدم الإنجليزية أبداً.
 2. جاوب بجملتين أو ثلاث كحد أقصى. لا تستخدم قوائم ولا عناوين.
-3. اعتمد فقط على "معلومات الزبون" و"حقائق ثابتة" أدناه. إذا المعلومة مو موجودة، قول بصراحة إنها مو متوفرة عندك ووجّه الزبون لممثل جامعته أو صفحة الإنستغرام.
-4. ممنوع منعاً باتاً تخمين أو اختراع: أسعار، مواعيد تسليم، أو حالة طلب. إذا ما تعرف، قول ما أعرف.
-5. "آخر موعد لتقديم الطلبات" هو آخر يوم يكدر الطالب يطلب بيه — وهو مو موعد تسليم الطلب. لا تقول أبداً إن الطلب راح يوصل بهذا التاريخ ولا تعد الزبون بأي تاريخ تسليم.
-6. لا تذكر أي معلومة عن زبون ثاني، ولا تتكلم عن أرباح المتجر أو تكاليفه.
-7. إذا الزبون طلب تعديل طلبه أو إلغاءه، وجّهه لممثل جامعته — إنت ما تكدر تسوي أي تعديل.`;
+3. اعتمد فقط على "معلومات الزبون" و"حقائق ثابتة" و"قائمة الأسعار" أدناه. إذا المعلومة مو موجودة، قول بصراحة إنها مو متوفرة عندك ووجّه الزبون لممثل جامعته أو صفحة الإنستغرام.
+4. الأسعار: استخدم أرقام "قائمة الأسعار" أدناه فقط، وقول دائماً إنها أسعار بداية («يبدأ من»). ممنوع تخترع سعر مو موجود بالقائمة، وممنوع تحسب مجموع أو خصم بنفسك. إذا المنتج مو بالقائمة، قول ما عندك سعره.
+5. ممنوع منعاً باتاً تخمين أو اختراع: مواعيد تسليم أو حالة طلب. إذا ما تعرف، قول ما أعرف.
+6. "آخر موعد لتقديم الطلبات" هو آخر يوم يكدر الطالب يطلب بيه — وهو مو موعد تسليم الطلب. لا تقول أبداً إن الطلب راح يوصل بهذا التاريخ ولا تعد الزبون بأي تاريخ تسليم.
+7. لا تذكر أي معلومة عن زبون ثاني، ولا تتكلم عن أرباح المتجر أو تكاليفه.
+8. إذا الزبون طلب تعديل طلبه أو إلغاءه، وجّهه لممثل جامعته — إنت ما تكدر تسوي أي تعديل.`;
 
 const NO_CONTEXT = `معلومات الزبون:
 - الزائر مو مسجّل دخول، فما عندك أي معلومة عن طلباته.
 - إذا سأل عن طلبه أو حالته، اطلب منه يسجّل دخول أول.`;
 
-function buildMessages(contextBlock, history, question) {
-  const system = [SHOP_FACTS, RULES, contextBlock || NO_CONTEXT].join('\n\n');
+function buildMessages(contextBlock, priceBlock, history, question) {
+  const system = [SHOP_FACTS, RULES, priceBlock, contextBlock || NO_CONTEXT]
+    .filter(Boolean)
+    .join('\n\n');
   // `history` comes from our own ledger (ai.recentTurns), never from the request body — see
   // the note at the ask() call site. Roles are ours, so they are used as-is.
   return [{ role: 'system', content: system }, ...history, { role: 'user', content: question }];
@@ -77,14 +80,22 @@ exports.ask = async (req, res, next) => {
     // own transcript back with its own role labels, so a caller could inject a fabricated
     // «assistant» turn ("وشاحك مجاني") and then ask the bot to confirm it — a screenshot of the
     // shop's assistant promising a free robe. The request body's `history` is now ignored.
-    const [history, contextBlock] = await Promise.all([
+    const [history, profile] = await Promise.all([
       ai.recentTurns({ userId, sessionKey, surface: 'support' }),
       supportContext.forUser(userId),
     ]);
 
+    // «شكد سعر الروب؟» is the most common question the shop gets, and without this the bot
+    // answered "I don't know" while the price sat on the page above it. The book is keyed on
+    // the asker's own price role — a rep-linked student must not be quoted retail — and is
+    // cached 5 minutes, so this is normally free.
+    const priceBlock = await supportContext.priceBook(profile?.priceRole || 'retail');
+
     let result;
     try {
-      result = await ai.complete({ messages: buildMessages(contextBlock, history, question) });
+      result = await ai.complete({
+        messages: buildMessages(profile?.block, priceBlock, history, question),
+      });
     } catch (err) {
       // Record the failed attempt on its reserved row — a burst of upstream errors should be
       // visible in the ledger, not only in the PM2 log.
