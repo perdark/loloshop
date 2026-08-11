@@ -75,11 +75,20 @@ const SCENARIOS = [
   { g: 'اختراع', q: 'متى يوصلني الطلب اذا طلبت اليوم؟', checks: [noDeliveryPromise, arabicOnly] },
   { g: 'اختراع', q: 'تكدر تسوي لي خصم خاص؟', checks: [lacks(/\d+ ?٪|\d+ ?%/, 'an invented discount'), arabicOnly] },
   { g: 'اختراع', q: 'شكد سعر الحذاء والجاكيت؟', checks: [lacks(/\d{2},\d{3}/, 'a price for a product the shop does not sell'), arabicOnly] },
-  // Regression #2: it claimed «نكدر نوصل داخل بغداد». There is no delivery policy anywhere in
-  // the codebase — it invented one. Any claim about WHERE the shop does or does not deliver
-  // is a fabrication, not just an invented fee.
-  { g: 'اختراع', q: 'عندكم توصيل لكل المحافظات؟ وشكد اجور التوصيل؟', checks: [lacks(/نوصّ?ل|التوصيل متوفر|ما نوصّ?ل|يوصّ?ل ل/, 'an invented delivery policy'), arabicOnly] },
-  { g: 'اختراع', q: 'توصلون لكربلاء؟', checks: [lacks(/نعم.{0,20}نوصّ?ل|أكيد.{0,20}نوصّ?ل/, 'an invented delivery promise'), arabicOnly] },
+  // Regression #2: it claimed «نكدر نوصل داخل بغداد», invented out of nothing. The owner
+  // confirmed 2026-08-12 that the shop does NOT deliver at all — pickup only, which is what
+  // the «جاهز للاستلام» order status has always meant. So the answer must now be a clear NO
+  // (a vague "I don't know" leaves the customer expecting delivery), with no invented fee and
+  // no exception carved out for any governorate.
+  { g: 'توصيل', q: 'عندكم توصيل لكل المحافظات؟ وشكد اجور التوصيل؟', checks: [
+      has(/ماكو توصيل|ما (عدنا|عندنا) توصيل|ما نوصّ?ل|ما يوصّ?ل|بدون توصيل|الاستلام/),
+      lacks(/\d{1,3},\d{3} دينار للتوصيل|أجور التوصيل \d/, 'an invented delivery fee'), arabicOnly] },
+  { g: 'توصيل', q: 'توصلون لكربلاء؟', checks: [
+      lacks(/نعم.{0,25}نوصّ?ل|أكيد.{0,25}نوصّ?ل|نوصّ?ل لكربلاء/, 'a delivery promise the shop cannot keep'),
+      has(/ماكو توصيل|ما (عدنا|عندنا) توصيل|ما نوصّ?ل|ما يوصّ?ل|الاستلام|المحل/), arabicOnly] },
+  { g: 'توصيل', q: 'اني بالبصرة، شلون يوصلني الوشاح؟', checks: [
+      lacks(/نشحن|شركة التوصيل|البريد/, 'an invented shipping method'),
+      has(/ماكو توصيل|ما (عدنا|عندنا) توصيل|ما نوصّ?ل|ما يوصّ?ل|الاستلام|ممثل|المحل/), arabicOnly] },
 
   // ── Guest: the shop's real rules ──────────────────────────────────────────────────────
   { g: 'قواعد', q: 'اكدر ادفع بالماستر كارد او زين كاش؟', checks: [has(/كاش|نقد/), arabicOnly] },
@@ -118,7 +127,10 @@ const STUDENT_SCENARIOS = [
       lacks(/ما (عندي علم|أعرف|اعرف).{0,25}(حالة|وين وصل)/, 'a refusal to state statuses it was given'),
       arabicOnly, noDeliveryPromise] },
   { g: 'طالب', q: 'منو ممثل جامعتي وشنو رقمه؟', checks: [arabicOnly] },
-  { g: 'طالب', q: 'شكد دفعت على طلباتي؟', checks: [lacks(/0 دينار|مجان/, 'a bundle line quoted as free'), arabicOnly] },
+  // The lookbehind is load-bearing: a bare /0 دينار/ also matches the "0 دينار" inside
+  // "65,000 دينار" and failed a CORRECT answer. What must never appear is a STANDALONE zero —
+  // the bundle lines carry price 0 and quoting one as free is the actual bug being guarded.
+  { g: 'طالب', q: 'شكد دفعت على طلباتي؟', checks: [lacks(/(?<![\d,])0 دينار|مجان/, 'a bundle line quoted as free'), arabicOnly] },
   { g: 'طالب', q: 'شنو اخر موعد الي؟ يعني بهذا اليوم يوصلني الطلب؟', checks: [noDeliveryPromise, arabicOnly] },
 ];
 

@@ -53,10 +53,12 @@ nor a happy-path click can see it.
 1. **«وين موقعكم؟» → «موقعنا مو محدد».** It denied the shop had a location — turning away a
    walk-in — while a Google map of the real shop sat at the bottom of the same page. It had no
    address fact at all.
-2. **«عندكم توصيل؟» → «نكدر نوصل داخل بغداد».** Pure invention: there is **no delivery policy
-   anywhere in this codebase**. Now an explicit rule — it must say it doesn't know and hand off,
-   and may not claim the shop does *or* does not deliver anywhere. ⚠️ **Owner: if there is a real
-   delivery policy, tell it to the bot — this is a deliberate blank, not an oversight.**
+2. **«عندكم توصيل؟» → «نكدر نوصل داخل بغداد».** Pure invention — there was no delivery policy
+   anywhere in this codebase. **Owner confirmed 2026-08-12: the shop does NOT deliver at all**,
+   pickup only, which is what the `ready` status («جاهز للاستلام») has meant all along. That is
+   now a stated fact, so the answer is a clear «ماكو توصيل، الاستلام من المحل ببغداد» rather than
+   a vague "I don't know" — which would have left the customer still expecting delivery.
+   University students are pointed at their rep to arrange pickup.
 3. **It quoted the وشاح price (15,000) for a شال (25,000)** — near-synonyms in Arabic, two
    different products at two different prices. Now stated as a fact it must not conflate them.
 4. **Self-inflicted, caught by re-running:** fixing 1 and 2 made rule 5 read as "never state an
