@@ -45,6 +45,28 @@ failures pointing at either the bill or a student's trust. **Backend suite now 2
 - Accessibility gaps closed while the panel was being rewritten: `role="dialog"`, Escape-to-close
   with focus returned, `aria-live` on both threads, and a «أعد المحاولة» button.
 
+**Then a 38-scenario adversarial pass — `npm run ai:scenarios` — which found 4 more real bugs
+that both the unit tests and the browser pass had missed.** All of them were fluent, confident,
+wrong Arabic; none was a crash. This is the failure mode of this feature and neither a unit test
+nor a happy-path click can see it.
+
+1. **«وين موقعكم؟» → «موقعنا مو محدد».** It denied the shop had a location — turning away a
+   walk-in — while a Google map of the real shop sat at the bottom of the same page. It had no
+   address fact at all.
+2. **«عندكم توصيل؟» → «نكدر نوصل داخل بغداد».** Pure invention: there is **no delivery policy
+   anywhere in this codebase**. Now an explicit rule — it must say it doesn't know and hand off,
+   and may not claim the shop does *or* does not deliver anywhere. ⚠️ **Owner: if there is a real
+   delivery policy, tell it to the bot — this is a deliberate blank, not an oversight.**
+3. **It quoted the وشاح price (15,000) for a شال (25,000)** — near-synonyms in Arabic, two
+   different products at two different prices. Now stated as a fact it must not conflate them.
+4. **Self-inflicted, caught by re-running:** fixing 1 and 2 made rule 5 read as "never state an
+   order status", so a signed-in student asking «وين وصل طلبي؟» started getting «ما عندي علم»
+   while their three statuses sat in the prompt. Telling a student where their order is **is**
+   the feature; a refusal there is a failure, not caution. Rule 5 now distinguishes "not in the
+   context" from "don't invent".
+
+All four are now permanent scenarios, so they cannot regress silently. A run costs ~$0.004.
+
 **Still open:** no response cache (the owner's stance was «cache + hard caps» and only the caps
 exist — the FAQ chips now at least make the common asks arrive as identical strings, which is the
 key such a cache would use), and analytics still spends 2 model calls per question.
