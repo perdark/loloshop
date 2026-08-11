@@ -136,11 +136,17 @@ async function reserve({ userId, sessionKey, surface, question }) {
     // it is safe under PgBouncer transaction pooling (unlike a session-scoped lock).
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1)::bigint)', [lockKey]);
 
+    // `model <> 'cache'` excludes answers served from the response cache. The caps exist to
+    // bound SPEND, and a cache hit costs nothing — counting one against a student's 10/day
+    // would make the cache actively worse for the person it is supposed to help. Pending rows
+    // (model IS NULL, reserved but not yet settled) must still count, hence the COALESCE.
     const { rows } = await client.query(
       `SELECT
-         COUNT(*) FILTER (WHERE user_id = $1 AND $1 IS NOT NULL)          AS user_today,
+         COUNT(*) FILTER (WHERE user_id = $1 AND $1 IS NOT NULL
+                            AND COALESCE(model, '') <> 'cache')          AS user_today,
          COUNT(*) FILTER (WHERE session_key = $2 AND $2 IS NOT NULL
-                            AND user_id IS NULL)                         AS session_today,
+                            AND user_id IS NULL
+                            AND COALESCE(model, '') <> 'cache')          AS session_today,
          COALESCE(SUM(cost_usd), 0)                                      AS spend_today
        FROM ai_chat_messages
        WHERE created_at > NOW() - INTERVAL '24 hours'`,
@@ -197,6 +203,35 @@ async function settle(id, { answer, intent, result, error } = {}) {
     );
   } catch (e) {
     console.error('aiChat settle FAILED (row stays pending, caps unaffected):', e.message);
+  }
+}
+
+/**
+ * Record an answer that came from the response cache, not from the model.
+ *
+ * Written so the ledger stays a complete record of what customers actually ask — that log is
+ * the backlog of facts the assistant is missing, and it would go blind for exactly the most
+ * common questions if cache hits were invisible. `model = 'cache'` and cost 0 are what mark
+ * it, and what `reserve()` excludes from the caps.
+ *
+ * Fire-and-forget: a logging failure must never fail an answer we already have in hand.
+ */
+async function logCached({ userId, sessionKey, surface, question, answer }) {
+  try {
+    await query(
+      `INSERT INTO ai_chat_messages
+         (user_id, session_key, surface, question, answer, model, cost_usd)
+       VALUES ($1, $2, $3, $4, $5, 'cache', 0)`,
+      [
+        userId || null,
+        sessionKey || null,
+        surface,
+        String(question).slice(0, 2000),
+        String(answer).slice(0, 4000),
+      ]
+    );
+  } catch (e) {
+    console.error('aiChat cache-hit log FAILED (answer still served):', e.message);
   }
 }
 
@@ -312,6 +347,7 @@ module.exports = {
   complete,
   reserve,
   settle,
+  logCached,
   recentTurns,
   configured,
   CAPS,

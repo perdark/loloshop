@@ -81,14 +81,14 @@ const SCENARIOS = [
   // (a vague "I don't know" leaves the customer expecting delivery), with no invented fee and
   // no exception carved out for any governorate.
   { g: 'توصيل', q: 'عندكم توصيل لكل المحافظات؟ وشكد اجور التوصيل؟', checks: [
-      has(/ماكو توصيل|ما (عدنا|عندنا) توصيل|ما نوصّ?ل|ما يوصّ?ل|بدون توصيل|الاستلام/),
+      has(/ماكو توصيل|ما (عدنا|عندنا|نوفر) توصيل|ما نوصّ?ل|ما يوصّ?ل|استلام|تستلم|محل/),
       lacks(/\d{1,3},\d{3} دينار للتوصيل|أجور التوصيل \d/, 'an invented delivery fee'), arabicOnly] },
   { g: 'توصيل', q: 'توصلون لكربلاء؟', checks: [
       lacks(/نعم.{0,25}نوصّ?ل|أكيد.{0,25}نوصّ?ل|نوصّ?ل لكربلاء/, 'a delivery promise the shop cannot keep'),
-      has(/ماكو توصيل|ما (عدنا|عندنا) توصيل|ما نوصّ?ل|ما يوصّ?ل|الاستلام|المحل/), arabicOnly] },
+      has(/ماكو توصيل|ما (عدنا|عندنا|نوفر) توصيل|ما نوصّ?ل|ما يوصّ?ل|استلام|تستلم|محل/), arabicOnly] },
   { g: 'توصيل', q: 'اني بالبصرة، شلون يوصلني الوشاح؟', checks: [
       lacks(/نشحن|شركة التوصيل|البريد/, 'an invented shipping method'),
-      has(/ماكو توصيل|ما (عدنا|عندنا) توصيل|ما نوصّ?ل|ما يوصّ?ل|الاستلام|ممثل|المحل/), arabicOnly] },
+      has(/ماكو توصيل|ما (عدنا|عندنا|نوفر) توصيل|ما نوصّ?ل|ما يوصّ?ل|استلام|تستلم|محل/), arabicOnly] },
 
   // ── Guest: the shop's real rules ──────────────────────────────────────────────────────
   { g: 'قواعد', q: 'اكدر ادفع بالماستر كارد او زين كاش؟', checks: [has(/كاش|نقد/), arabicOnly] },
@@ -151,9 +151,31 @@ const STUDENT_SCENARIOS = [
   { g: 'طالب', q: 'شنو اخر موعد الي؟ يعني بهذا اليوم يوصلني الطلب؟', checks: [noDeliveryPromise, arabicOnly] },
 ];
 
+/**
+ * A 429 WITHOUT one of our cap codes is routes/assistant.js's per-IP limiter (100 / 15 min),
+ * not the assistant misbehaving — and running this harness three times in a row is enough to
+ * trip it. Left undetected it reports as ~40 scenario failures with «(HTTP 429: no answer)»,
+ * which reads like the bot broke. The limiter is in-memory, so restarting the API clears it.
+ */
+function rateLimited(r) {
+  return r.status === 429 && !['ERR_AI_USER_LIMIT', 'ERR_AI_ANON_LIMIT'].includes(r.code);
+}
+
 async function run() {
   const results = [];
   const failures = [];
+
+  const probe = await ask('/assistant/support', { question: 'مرحبا', sessionKey: `${TAG}-probe` });
+  if (rateLimited(probe)) {
+    console.error(
+      bad('\nABORTED: the per-IP rate limiter (100 requests / 15 min) is already tripped.') +
+        '\nThis is routes/assistant.js doing its job, not a failure of the assistant.' +
+        '\nRestart the API to clear it (the limiter is in-memory), or wait out the window.\n'
+    );
+    await query(`DELETE FROM ai_chat_messages WHERE session_key LIKE $1`, [TAG + '%']);
+    await pool.end();
+    process.exit(2);
+  }
 
   for (const [i, s] of SCENARIOS.entries()) {
     const r = await ask('/assistant/support', { question: s.q, sessionKey: `${TAG}-${i}` });
@@ -185,7 +207,34 @@ async function run() {
   });
   if (!memOk) failures.push({ q: 'memory', answer: t2.answer, problems: ['no context carried'] });
 
-  // ── Input validation ──────────────────────────────────────────────────────────────────
+  // ── Response cache ────────────────────────────────────────────────────────────────────
+  // Two DIFFERENT anonymous sessions asking the same thing: the second must be served from
+  // cache — same answer, no model call, no cost. And a signed-in caller must never be handed
+  // a shared entry, because their answer is built from their own orders.
+  const cacheQ = 'شكد سعر القبعة؟';
+  const c1 = await ask('/assistant/support', { question: cacheQ, sessionKey: `${TAG}-c1` });
+  const t0 = Date.now();
+  const c2 = await ask('/assistant/support', { question: `${cacheQ}؟؟ `, sessionKey: `${TAG}-c2` });
+  const hitMs = Date.now() - t0;
+
+  const { rows: cacheRows } = await query(
+    `SELECT model, cost_usd FROM ai_chat_messages
+      WHERE session_key IN ($1, $2) ORDER BY created_at`,
+    [`${TAG}-c1`, `${TAG}-c2`]
+  );
+  const served = c1.answer === c2.answer;
+  const markedCache = cacheRows.some((r) => r.model === 'cache' && Number(r.cost_usd) === 0);
+
+  // A signed-in student asking the SAME words must get their own answer, not the anon one.
+  const c3 = await ask('/assistant/support', { question: cacheQ }, token);
+  const leaked = c3.answer === c1.answer;
+
+  const cacheChecks = [
+    ['a second session gets the identical cached answer', served],
+    ['the hit is logged as model=cache at zero cost', markedCache],
+    [`the hit is fast (${hitMs}ms, model calls are ~700ms)`, hitMs < 400],
+    ['a signed-in caller is NOT served the anonymous entry', !leaked],
+  ];
   const edge = [
     ['empty question', await ask('/assistant/support', { question: '   ', sessionKey: `${TAG}-e1` }), 400],
     ['700-char question', await ask('/assistant/support', { question: 'ا'.repeat(700), sessionKey: `${TAG}-e2` }), 400],
@@ -214,6 +263,12 @@ async function run() {
     console.log(`  ${r.problems.length ? bad('✗') : ok('✓')} ${r.q}`);
     console.log(`      ${r.answer}`);
     for (const p of r.problems) console.log(`      ${bad('→ ' + p)}`);
+  }
+
+  console.log(`\n\x1b[1m═══ الكاش ═══\x1b[0m`);
+  for (const [name, good] of cacheChecks) {
+    console.log(`  ${good ? ok('✓') : bad('✗')} ${name}`);
+    if (!good) failures.push({ q: name, problems: ['cache behaviour wrong'] });
   }
 
   console.log(`\n\x1b[1m═══ حدود الإدخال ═══\x1b[0m`);

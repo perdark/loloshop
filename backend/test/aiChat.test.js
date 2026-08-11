@@ -229,6 +229,67 @@ test('an empty catalogue yields no price block at all, not an empty heading', ()
   assert.strictEqual(formatPriceBook([{ type: 'hoodie', min_price: 1, max_price: 1 }]), null);
 });
 
+// ── The response cache ──────────────────────────────────────────────────────────────────
+//
+// Two ways a cache like this fails, and both are silent:
+//   · too LOOSE — two different questions collapse to one key and a customer is answered
+//     something they did not ask;
+//   · STALE — prices change and the old answer keeps being served.
+// The key is a hash of (whole system prompt + normalised question), which is what makes the
+// second impossible rather than merely unlikely. These tests pin both directions.
+
+const support = require('../controllers/supportChatController')._internals;
+const { normalizeQuestion, cacheKeyFor } = support;
+
+test('spelling variants of ONE question fold to one key', () => {
+  const base = normalizeQuestion('شكد سعر الروب؟');
+  assert.strictEqual(normalizeQuestion('شكد سعر الروب'), base, 'trailing ؟');
+  assert.strictEqual(normalizeQuestion('  شكد   سعر  الروب ؟ '), base, 'stray whitespace');
+  assert.strictEqual(normalizeQuestion('شكد سعر الروب؟؟؟'), base, 'repeated punctuation');
+  assert.strictEqual(normalizeQuestion('شكد سعر الروب? 😊'), base, 'emoji + latin question mark');
+});
+
+test('alef, ya and ta-marbuta variants fold — Iraqi typing varies on all three', () => {
+  assert.strictEqual(normalizeQuestion('أسعار القبعة'), normalizeQuestion('اسعار القبعه'));
+  assert.strictEqual(normalizeQuestion('إلى متى'), normalizeQuestion('الي متي'));
+});
+
+test('a REAL word difference must NOT fold — the failure that answers the wrong question', () => {
+  const pairs = [
+    ['شكد سعر الروب', 'شكد سعر الوشاح'],
+    ['شكد سعر الوشاح', 'شكد سعر الشال'],
+    ['عندكم توصيل', 'ماكو توصيل'],
+    ['وين وصل طلبي', 'وين موقعكم'],
+  ];
+  for (const [a, b] of pairs) {
+    assert.notStrictEqual(normalizeQuestion(a), normalizeQuestion(b), `${a} vs ${b}`);
+  }
+});
+
+test('an empty or punctuation-only question normalises to empty, so it is never cached', () => {
+  // The caller treats '' as "not cacheable" — a blank key must not become a shared entry.
+  assert.strictEqual(normalizeQuestion('؟؟؟'), '');
+  assert.strictEqual(normalizeQuestion('   '), '');
+  assert.strictEqual(normalizeQuestion('😊'), '');
+});
+
+test('THE STALENESS GUARD: any change to the system prompt changes every key', () => {
+  const q = normalizeQuestion('شكد سعر الروب؟');
+  const before = cacheKeyFor('facts\nروب: يبدأ من 20,000 دينار', q);
+  const afterPriceChange = cacheKeyFor('facts\nروب: يبدأ من 25,000 دينار', q);
+  assert.notStrictEqual(before, afterPriceChange, 'a price change MUST invalidate the entry');
+  // Same prompt + same question is stable, or nothing would ever hit.
+  assert.strictEqual(before, cacheKeyFor('facts\nروب: يبدأ من 20,000 دينار', q));
+});
+
+test('different questions against the same prompt get different keys', () => {
+  const sys = 'the same system prompt';
+  assert.notStrictEqual(
+    cacheKeyFor(sys, normalizeQuestion('شكد سعر الروب')),
+    cacheKeyFor(sys, normalizeQuestion('شكد سعر الوشاح'))
+  );
+});
+
 // ── The analytics router ────────────────────────────────────────────────────────────────
 
 test('the router tolerates a ```json fence, which cheap models emit even in JSON mode', () => {

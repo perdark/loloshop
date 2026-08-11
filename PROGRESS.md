@@ -85,9 +85,35 @@ street or district, it has to be supplied.
 
 All of these are now permanent scenarios, so they cannot regress silently. A run costs ~$0.005.
 
-**Still open:** no response cache (the owner's stance was «cache + hard caps» and only the caps
-exist — the FAQ chips now at least make the common asks arrive as identical strings, which is the
-key such a cache would use), and analytics still spends 2 model calls per question.
+**The response cache — the other half of the owner's «tight — cache + hard caps» stance — is now
+in.** Measured on a repeat scenario run: **$0.0059 → $0.0013, a 77% cut**, and a hit answers in
+**4ms** against ~700ms for a model call.
+
+- **Cacheable only when ANONYMOUS and there is no history.** Both conditions are load-bearing: a
+  signed-in answer is built from that student's own orders and rep, so sharing one would hand a
+  stranger another student's order status; and once there is history the answer depends on it
+  («وهو الوشاح؟» means nothing alone). Under those two conditions every anonymous caller gets a
+  byte-identical prompt, so the answer is genuinely reusable. Proven in the harness: a signed-in
+  caller asking the identical words is **not** served the anonymous entry.
+- **The key is a hash of the WHOLE system prompt + the normalised question**, so a price change,
+  a rule change or a new best-seller ranking invalidates every entry automatically. There is no
+  invalidation call to forget — which is the usual way this kind of cache goes stale.
+- **Question normalisation folds spelling, never meaning:** tashkeel, أإآ→ا, ى→ي, ة→ه,
+  punctuation and emoji. Tests pin both directions — variants of one question must collapse, and
+  «سعر الروب» vs «سعر الوشاح» must never collapse.
+- **Cache hits are logged (`model = 'cache'`, cost 0) but excluded from the caps.** The caps bound
+  spend, and a free answer must not eat a student's 10/day. Logging them keeps the ledger a
+  complete record of what customers ask — which is the backlog of missing facts.
+
+**Also:** the harness now aborts with an explanation when the per-IP limiter (100/15 min) is
+tripped by running it repeatedly, instead of reporting ~40 scenarios as failures. And three
+delivery assertions were widened to match Arabic **stems** — they demanded «المحل»/«الاستلام» and
+failed correct answers that said «محلنا»/«تستلم». That is the third time an over-literal assertion
+failed right behaviour; a check that cries wolf is worse than no check.
+
+**Still open:** analytics spends 2 model calls per question; the assistant cannot link to a
+product page; nobody reads the `intent IS NULL` deflection log; there is no alert when the
+provider fails.
 
 ## 2026-08-10 (b) — AI assistant: Arabic support chatbot + admin analytics
 
