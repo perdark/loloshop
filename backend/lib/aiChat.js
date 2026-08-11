@@ -49,6 +49,16 @@ const CAPS = {
   // Whole-shop ceiling per rolling 24h, in USD. The backstop that makes every other cap
   // optional: even total failure of the per-user logic cannot bill more than this per day.
   globalUsdPerDay: Number(process.env.AI_CHAT_DAILY_USD_MAX || 1.0),
+  // The slice of that ceiling ANONYMOUS traffic may consume. This is not a cost control —
+  // globalUsdPerDay already bounds the bill. It is an AVAILABILITY control.
+  //
+  // Measured 2026-08-12: `sessionKey` is client-supplied, so the 10/day anon cap is bypassed
+  // by generating a new one per request. The real bounds are the per-IP limiter (100/15min =
+  // 9,600 req/day/IP ≈ $0.58) and this ceiling — so ~2 IPs could exhaust the day's budget for
+  // pennies. Before this split, an exhausted budget refused EVERYONE, including signed-in
+  // students, so a stranger could silently switch the assistant off for real customers daily.
+  // With the split, anon flooding can only ever take its own slice.
+  anonUsdPerDay: Number(process.env.AI_CHAT_ANON_DAILY_USD_MAX || 0.4),
   // Longest question we will forward. Input is the cheap half, but an unbounded prompt is
   // an unbounded bill — and no genuine support question is 2,000 characters.
   maxQuestionChars: Number(process.env.AI_CHAT_MAX_QUESTION_CHARS || 600),
@@ -105,10 +115,15 @@ function estimateCostUsd({ reportedCost, model, promptTokens, completionTokens }
  * Split out from the SQL so the boundaries are testable without a database.
  * Returns a tagged error to throw/return, or null when the call is allowed.
  */
-function evaluateCaps({ userToday, sessionToday, spendToday }, { userId, caps = CAPS } = {}) {
+function evaluateCaps({ userToday, sessionToday, spendToday, anonSpendToday }, { userId, caps = CAPS } = {}) {
   if (Number(spendToday) >= caps.globalUsdPerDay) {
     // Deliberately vague to the user — the shop's daily AI budget is not their business.
     return tagged('المساعد مشغول حالياً، جرّب بعد شوية', 503, 'ERR_AI_BUDGET');
+  }
+  // Anonymous traffic is bounded by its own slice, so a flood of signed-out requests cannot
+  // consume the budget a signed-in student depends on. Signed-in callers skip this entirely.
+  if (!userId && Number(anonSpendToday || 0) >= caps.anonUsdPerDay) {
+    return tagged('المساعد مشغول حالياً، سجّل دخولك حتى تكدر تسأل', 503, 'ERR_AI_ANON_BUDGET');
   }
   if (userId && Number(userToday) >= caps.perUserPerDay) {
     return tagged('وصلت للحد اليومي من الأسئلة، جرّب باچر', 429, 'ERR_AI_USER_LIMIT');
@@ -147,7 +162,8 @@ async function reserve({ userId, sessionKey, surface, question }) {
          COUNT(*) FILTER (WHERE session_key = $2 AND $2 IS NOT NULL
                             AND user_id IS NULL
                             AND COALESCE(model, '') <> 'cache')          AS session_today,
-         COALESCE(SUM(cost_usd), 0)                                      AS spend_today
+         COALESCE(SUM(cost_usd), 0)                                      AS spend_today,
+         COALESCE(SUM(cost_usd) FILTER (WHERE user_id IS NULL), 0)        AS anon_spend_today
        FROM ai_chat_messages
        WHERE created_at > NOW() - INTERVAL '24 hours'`,
       [userId || null, sessionKey || null]
@@ -155,7 +171,12 @@ async function reserve({ userId, sessionKey, surface, question }) {
     const r = rows[0] || {};
 
     const capError = evaluateCaps(
-      { userToday: r.user_today, sessionToday: r.session_today, spendToday: r.spend_today },
+      {
+        userToday: r.user_today,
+        sessionToday: r.session_today,
+        spendToday: r.spend_today,
+        anonSpendToday: r.anon_spend_today,
+      },
       { userId }
     );
     if (capError) return { error: capError };

@@ -324,6 +324,10 @@ export function StudentHome({ initialFeed, initialMaintenance }: StudentHomeProp
         {copy.promise}
       </p>
 
+      {/* «اسأل لولو» — directly under the hero (owner, 2026-08-12). It used to sit last, above
+          the map; a student who has not scrolled the whole catalogue never saw it. */}
+      <AskLoloSection />
+
       {families.map((family, i) => (
         <div key={family.type}>
           <FamilySlider
@@ -335,10 +339,6 @@ export function StudentHome({ initialFeed, initialMaintenance }: StudentHomeProp
           {gapSections[i] ?? null}
         </div>
       ))}
-
-      {/* «عندك سؤال؟» — last, before the map: a student who has scrolled the whole catalogue
-          without ordering is the one most likely to have an unanswered question. */}
-      <AskLoloSection />
 
       <StoreLocation />
     </div>
