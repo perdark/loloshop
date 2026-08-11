@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * «مساعد لولو» — the floating storefront launcher and its panel.
+ * «لولو» — the floating storefront launcher and its panel.
  *
  * Phone-first: students are phone-only (see CLAUDE.md → Device Priority), so the open panel
  * is a full-height bottom sheet on mobile and a floating card from `sm:` up. The launcher
@@ -63,7 +63,7 @@ export function SupportChat() {
         ref={launcherRef}
         type="button"
         onClick={() => setOpen(true)}
-        aria-label="افتح مساعد لولو"
+        aria-label="افتح محادثة لولو"
         className="fixed z-40 flex h-14 w-14 items-center justify-center rounded-full bg-orange text-white shadow-lg transition hover:scale-105 active:scale-95"
         style={{
           insetInlineEnd: "1rem",
@@ -89,7 +89,7 @@ export function SupportChat() {
       dir="rtl"
       role="dialog"
       aria-modal="true"
-      aria-label="مساعد لولو"
+      aria-label="محادثة لولو"
       // Mobile: full-screen sheet, which deliberately covers the bottom tab bar.
       // sm+: floating card — bottom-24 (6rem) clears the same fixed 56px tab bar the
       // launcher clears, otherwise the composer row lands on top of the nav.
@@ -98,13 +98,13 @@ export function SupportChat() {
       {/* Header */}
       <div className="flex items-center justify-between border-b border-line bg-cream px-4 py-3 sm:rounded-t-2xl">
         <div>
-          <p className="font-semibold text-ink">مساعد لولو</p>
-          <p className="text-xs text-muted">يجاوب عن طلبك وعن المتجر</p>
+          <p className="font-semibold text-ink">لولو</p>
+          <p className="text-xs text-muted">يجاوبك عن طلبك وعن المتجر</p>
         </div>
         <button
           type="button"
           onClick={() => setOpen(false)}
-          aria-label="سكّر المساعد"
+          aria-label="سكّر المحادثة"
           className="flex h-11 w-11 items-center justify-center rounded-full text-muted transition hover:bg-surface-sink hover:text-ink"
         >
           <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">

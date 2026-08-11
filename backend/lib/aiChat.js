@@ -264,7 +264,7 @@ async function complete({ messages, maxTokens, temperature = 0.3, jsonMode = fal
         Authorization: `Bearer ${key}`,
         'Content-Type': 'application/json',
         'HTTP-Referer': process.env.PUBLIC_URL || 'https://lolo-shop96.com',
-        'X-Title': 'LoloShop Assistant',
+        'X-Title': 'Lolo (LoloShop assistant)',
       },
       body: JSON.stringify(body),
       signal: controller.signal,

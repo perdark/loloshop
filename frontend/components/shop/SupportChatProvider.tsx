@@ -3,7 +3,7 @@
 /**
  * One conversation, two surfaces.
  *
- * «مساعد لولو» is reachable from the floating launcher on every storefront page AND from the
+ * «لولو» — the assistant — is reachable from the floating launcher on every storefront page AND from the
  * section on the home page. They must not be two separate chats: a student who asks in the
  * home section and then taps the bubble would otherwise face an empty thread while the server
  * — which rebuilds history from its own ledger (backend/lib/aiChat.js → recentTurns) — is
@@ -24,7 +24,7 @@ import type { ApiError } from "@/lib/types";
 export type Turn = { role: "user" | "assistant"; content: string };
 
 export const GREETING =
-  "هلا بيك! آني مساعد لولو. اسألني عن طلبك، أو عن الأوشحة والروبات، أو عن ممثل جامعتك.";
+  "هلا بيك! آني لولو. اسألني عن طلبك، أو عن الأسعار، أو عن ممثل جامعتك.";
 
 /** The four questions the shop actually gets asked. Offered as taps so a student who does not
  *  know what to type still gets an answer — and so the most common asks arrive as identical

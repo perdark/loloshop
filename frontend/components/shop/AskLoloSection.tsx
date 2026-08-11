@@ -51,7 +51,7 @@ export function AskLoloSection() {
           عندك سؤال؟
         </h2>
         <p className="mt-3 text-sm leading-relaxed text-ink-soft">
-          اسأل مساعد لولو — يجاوبك عن طلبك، عن الأسعار، وعن ممثل جامعتك.
+          اسأل لولو — يجاوبك عن طلبك، عن الأسعار، وعن ممثل جامعتك.
         </p>
       </div>
 
@@ -95,7 +95,7 @@ export function AskLoloSection() {
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             placeholder="اكتب سؤالك هنا…"
-            aria-label="سؤالك لمساعد لولو"
+            aria-label="سؤالك للولو"
             maxLength={600}
             disabled={busy}
             className="h-12 min-w-0 flex-1 rounded-full border border-line bg-cream px-4 text-sm text-ink outline-none transition placeholder:text-muted focus:border-orange disabled:opacity-60"
