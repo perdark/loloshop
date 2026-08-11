@@ -15,7 +15,7 @@ const SHOP_FACTS = `حقائق ثابتة عن المتجر:
 - الدفع نقدي فقط (كاش). ماكو دفع إلكتروني ولا بطاقات ولا تحويل.
 - الطالب يصمم وشاحه بنفسه من الموقع، ويرفع شعار جامعته بنفسه.
 - طلاب الجامعات يطلبون عن طريق ممثل جامعتهم؛ الممثل هو اللي يوافق على الطلب.
-- عدنا محل حقيقي ببغداد، وموقعه مثبّت على خريطة كوكل بآخر الصفحة الرئيسية بالموقع تحت عنوان «موقعنا».
+- عدنا محل حقيقي ببغداد، واسمه على خرائط كوكل «مطبعة لولو شوب» — الزبون يكدر يدوّر عليه بهذا الاسم، أو يشوف الخريطة مثبّتة بآخر الصفحة الرئيسية بالموقع تحت عنوان «موقعنا».
 - «الوشاح» و«الشال» منتجان مختلفان بأسعار مختلفة — لا تخلط بينهما أبداً.
 - ماكو توصيل ولا شحن نهائياً — لا لبغداد ولا لأي محافظة ثانية. الطلب يُستلم من المحل ببغداد (وهذا معنى حالة «جاهز للاستلام»). طالب الجامعة يسأل ممثل جامعته عن ترتيب الاستلام.`;
 
@@ -28,14 +28,15 @@ const RULES = `التعليمات:
 6. "آخر موعد لتقديم الطلبات" هو آخر يوم يكدر الطالب يطلب بيه — وهو مو موعد تسليم الطلب. لا تقول أبداً إن الطلب راح يوصل بهذا التاريخ ولا تعد الزبون بأي تاريخ تسليم.
 7. لا تذكر أي معلومة عن زبون ثاني، ولا تتكلم عن أرباح المتجر أو تكاليفه.
 8. إذا الزبون طلب تعديل طلبه أو إلغاءه، وجّهه لممثل جامعته — إنت ما تكدر تسوي أي تعديل.
-9. التوصيل: المتجر ما يوصّل أبداً (قرار المالك). إذا سأل عن التوصيل أو الشحن، قول بوضوح إنه ماكو توصيل وإن الاستلام من المحل ببغداد، ووجّه طالب الجامعة لممثله حتى يرتّب معه الاستلام. ممنوع تخترع أجور توصيل أو استثناء لأي محافظة.`;
+9. التوصيل: المتجر ما يوصّل أبداً (قرار المالك). إذا سأل عن التوصيل أو الشحن، قول بوضوح إنه ماكو توصيل وإن الاستلام من المحل ببغداد، ووجّه طالب الجامعة لممثله حتى يرتّب معه الاستلام. ممنوع تخترع أجور توصيل أو استثناء لأي محافظة.
+10. الأكثر مبيعاً والتوصيات: إذا سأل شنو أكثر شي ينباع أو شنو تنصحه، اعتمد فقط على سطر «الأكثر مبيعاً» بالحقائق أعلاه إذا موجود. إذا مو موجود، قول ما عندك هالمعلومة. وبكل الأحوال ممنوع تخترع سبب أو تحليل ليش هذا المنتج يُباع أكثر، وممنوع تعطي رأي شخصي أو تدّعي إن الزباين يحبون شي معيّن.`;
 
 const NO_CONTEXT = `معلومات الزبون:
 - الزائر مو مسجّل دخول، فما عندك أي معلومة عن طلباته.
 - إذا سأل عن طلبه أو حالته، اطلب منه يسجّل دخول أول.`;
 
-function buildMessages(contextBlock, priceBlock, history, question) {
-  const system = [SHOP_FACTS, RULES, priceBlock, contextBlock || NO_CONTEXT]
+function buildMessages(contextBlock, priceBlock, bestSellerBlock, history, question) {
+  const system = [SHOP_FACTS, RULES, priceBlock, bestSellerBlock, contextBlock || NO_CONTEXT]
     .filter(Boolean)
     .join('\n\n');
   // `history` comes from our own ledger (ai.recentTurns), never from the request body — see
@@ -93,12 +94,16 @@ exports.ask = async (req, res, next) => {
     // answered "I don't know" while the price sat on the page above it. The book is keyed on
     // the asker's own price role — a rep-linked student must not be quoted retail — and is
     // cached 5 minutes, so this is normally free.
-    const priceBlock = await supportContext.priceBook(profile?.priceRole || 'retail');
+    const priceRole = profile?.priceRole || 'retail';
+    const [priceBlock, bestSellerBlock] = await Promise.all([
+      supportContext.priceBook(priceRole),
+      supportContext.bestSellers(priceRole),
+    ]);
 
     let result;
     try {
       result = await ai.complete({
-        messages: buildMessages(profile?.block, priceBlock, history, question),
+        messages: buildMessages(profile?.block, priceBlock, bestSellerBlock, history, question),
       });
     } catch (err) {
       // Record the failed attempt on its reserved row — a burst of upstream errors should be

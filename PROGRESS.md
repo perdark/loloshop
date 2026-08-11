@@ -67,7 +67,23 @@ nor a happy-path click can see it.
    the feature; a refusal there is a failure, not caution. Rule 5 now distinguishes "not in the
    context" from "don't invent".
 
-All four are now permanent scenarios, so they cannot regress silently. A run costs ~$0.004.
+5. **«شنو أكثر قطعة تنباع عدكم؟» → «وشاح التخرج، لأن الطلاب يحبون يصممونها بنفسهم».** It had no
+   sales data at all — it guessed, then invented a motive to justify the guess. It landed
+   near-right *by type* that day (sash leads on 468 pieces), which is the worst kind of wrong:
+   confident, unfounded, and fine right up until the ranking moves. `supportContext.bestSellers()`
+   now feeds the real top 3 **by name only** — the ranking is shop-front marketing, the volumes
+   are the shop's business — using `billableOrderSql` so it agrees with `/admin`, cached 30 min.
+   It answers قبعة → روب → وشاح, matching the DB, and a new rule forbids inventing a *reason*,
+   an opinion, or a claim about what customers like.
+
+**Location, checked:** the claim it makes is true — `StoreLocation` really is the last section of
+the home page under «موقعنا». It now also names the shop as it appears on Google Maps,
+**«مطبعة لولو شوب»**, taken from the map embed already in `StoreLocation.tsx`, so a customer can
+search it directly. ⚠️ There is **no street address in text anywhere in the repo** (the embed is
+an iframe and Maps is JS-rendered, so it can't be read out). If the owner wants the bot to say a
+street or district, it has to be supplied.
+
+All of these are now permanent scenarios, so they cannot regress silently. A run costs ~$0.005.
 
 **Still open:** no response cache (the owner's stance was «cache + hard caps» and only the caps
 exist — the FAQ chips now at least make the common asks arrive as identical strings, which is the

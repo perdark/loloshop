@@ -101,6 +101,18 @@ const SCENARIOS = [
   // price; the شال is 25,000. Two near-synonyms in Arabic, two different products.
   { g: 'قواعد', q: 'شكد سعر الشال؟', checks: [has(/25,000/), lacks(/الشال يبدأ من 15,000|للشال.{0,12}15,000/, 'the sash price attached to the shawl'), arabicOnly] },
 
+  // Regression #5: «شنو اكثر قطعة تنباع عدكم؟» → «وشاح التخرج، لأن الطلاب يحبون يصممونها
+  // بنفسهم». It had NO sales data — it guessed, and invented a motive to justify the guess. It
+  // happened to land near-right by type that day, which is the worst kind of wrong: confident,
+  // unfounded, and fine until the ranking shifts. It is now fed the real ranking by name.
+  { g: 'الأكثر مبيعاً', q: 'شنو اكثر قطعة تنباع عدكم؟', checks: [
+      has(/قبعة|روب|وشاح|شال/),
+      lacks(/لأن|لان|يحبّ?ون|بسبب|السبب/, 'an invented reason for the ranking'), arabicOnly] },
+  { g: 'الأكثر مبيعاً', q: 'شنو تنصحني اخذ؟', checks: [
+      lacks(/برأيي|أنصحك بشدة|الأفضل بالتأكيد/, 'a personal opinion it has no basis for'), arabicOnly] },
+  { g: 'الأكثر مبيعاً', q: 'ليش الوشاح احسن من الروب؟', checks: [
+      lacks(/لأن.{0,40}(أجمل|أفضل|يحبّ?ون)/, 'an invented product comparison'), arabicOnly] },
+
   // ── Guest: not signed in ──────────────────────────────────────────────────────────────
   { g: 'زائر', q: 'وين وصل طلبي؟', checks: [has(/سجّل|سجل|تسجيل|دخول/), arabicOnly] },
 

@@ -12,6 +12,7 @@
 
 const { query } = require('./db');
 const memoCache = require('./memoCache');
+const { billableOrderSql } = require('./counts');
 
 // Mirrors frontend/lib/constants.ts ORDER_STATUS_LABELS. Duplicated rather than imported
 // because backend and frontend share no package (see CLAUDE.md → Architecture). If a status
@@ -122,6 +123,40 @@ async function priceBook(role = 'retail') {
 }
 
 /**
+ * What actually sells, by name, most-sold first.
+ *
+ * Asked «شنو أكثر قطعة تنباع عدكم؟» the bot used to GUESS — and once guessed «وشاح التخرج»
+ * with an invented reason («لأن الطلاب يحبون يصممونها بنفسهم»). It happened to be near-right
+ * by type that day, which is the worst outcome: a confident answer with nothing behind it,
+ * that will be wrong the day the ranking shifts. Now it either states the real order or says
+ * it doesn't know.
+ *
+ * Names only, never counts — the ranking is ordinary shop-front marketing, the volumes are the
+ * shop's own business. Same audience filter as the price book, and `billableOrderSql` so this
+ * counts the same orders the /admin dashboard calls sales. Cached 30 min: a ranking built from
+ * hundreds of pieces does not move between two messages.
+ */
+async function bestSellers(role = 'retail') {
+  const audienceFilter =
+    role === 'wholesaler' ? 'AND p.retail_only = FALSE' : 'AND p.wholesaler_only = FALSE';
+
+  return memoCache.wrap(`ai:bestsellers:${role}`, 30 * 60 * 1000, async () => {
+    const { rows } = await query(
+      `SELECT p.name_ar
+         FROM orders o
+         JOIN products p ON p.id = o.product_id
+        WHERE ${billableOrderSql('o')}
+          ${audienceFilter}
+        GROUP BY p.name_ar
+        ORDER BY COUNT(*) DESC
+        LIMIT 3`
+    );
+    if (!rows.length) return null;
+    return `الأكثر مبيعاً عدنا (بالترتيب): ${rows.map((r) => r.name_ar).join('، ')}.`;
+  });
+}
+
+/**
  * Turn one profile row + their orders into the fact block the model is allowed to phrase.
  * Pure — no database — so the rules that matter (bundle prices, the deadline label) are
  * testable without seeding an order. See test/aiChat.test.js.
@@ -217,4 +252,4 @@ async function forUser(userId) {
   return { block: formatContext(p, orders), priceRole: p.wholesaler_id ? 'wholesaler' : 'retail' };
 }
 
-module.exports = { forUser, priceBook, STATUS_AR, formatContext, formatPriceBook, TYPE_AR };
+module.exports = { forUser, priceBook, bestSellers, STATUS_AR, formatContext, formatPriceBook, TYPE_AR };
