@@ -23,6 +23,7 @@ import { WhyLoloShop } from "@/components/shop/WhyLoloShop";
 import { VipPackageCard } from "@/components/shop/VipPackageCard";
 import { CohortProof } from "@/components/shop/CohortProof";
 import { StoreLocation } from "@/components/shop/StoreLocation";
+import { AskLoloSection } from "@/components/shop/AskLoloSection";
 import { MaintenanceScreen } from "@/components/MaintenanceScreen";
 
 /**
@@ -334,6 +335,10 @@ export function StudentHome({ initialFeed, initialMaintenance }: StudentHomeProp
           {gapSections[i] ?? null}
         </div>
       ))}
+
+      {/* «عندك سؤال؟» — last, before the map: a student who has scrolled the whole catalogue
+          without ordering is the one most likely to have an unanswered question. */}
+      <AskLoloSection />
 
       <StoreLocation />
     </div>
