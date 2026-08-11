@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { getAdminAnalytics, getAdminAccounting, getPendingApprovalCount, getVisitorStats, type VisitorStats } from "@/lib/admin";
 import { PromoControl } from "@/components/admin/PromoControl";
 import { MaintenanceControl } from "@/components/admin/MaintenanceControl";
+import { AnalyticsAsk } from "@/components/admin/AnalyticsAsk";
 import { getTailorSummary, type TailorSummary } from "@/lib/staff";
 import Link from "next/link";
 import { formatIQD } from "@/lib/format";
@@ -538,6 +539,13 @@ export default function AdminDashboardPage() {
             النطاق المحاسبي نفسه مطبق هنا: لا ملغى، ولا طلب ممثل معلّق أو مُرجع.
           </p>
         </CalculationDetails>
+      </section>
+
+      {/* Natural-language questions over the numbers already on this page. The prose is
+          model-written; every figure in it comes from our own SQL (lib/adminMetrics.js). */}
+      <section className="mt-16">
+        <SectionHead title="المساعد" />
+        <AnalyticsAsk />
       </section>
 
       {/* Promo / Discount Popup control */}

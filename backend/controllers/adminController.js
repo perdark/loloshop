@@ -44,20 +44,10 @@ function pricingOrderIsValid(adminPrice, sellingPrice, addons) {
   return sellingPrice >= adminPrice && Object.values(addons).every((pair) => pair.selling >= pair.admin);
 }
 
-// Money shown as revenue/cost/profit is settlement money: retail rows have NULL
-// approval; representative rows count only after approval. Pending/rejected rows stay
-// operationally visible elsewhere but never inflate settled totals.
-function billableOrderSql(alias = 'o') {
-  return `${alias}.status <> 'cancelled'
-    AND (
-      ${alias}.wholesaler_approval = 'approved'
-      OR (${alias}.wholesaler_approval IS NULL AND EXISTS (
-        SELECT 1 FROM students settled_student
-        WHERE settled_student.id = ${alias}.student_id
-          AND settled_student.wholesaler_id IS NULL
-      ))
-    )`;
-}
+// Settlement filter. Moved to lib/counts.js 2026-08-10 and re-exported here under the same
+// name so every call site below is unchanged — the AI analytics assistant needs the identical
+// definition, and two "revenue" definitions that disagree would be worse than no assistant.
+const { billableOrderSql } = counts;
 
 const STAFF_TYPES = ['designer', 'embroiderer', 'presser', 'preparer', 'manager', 'digitizer', 'tailor'];
 const STAFF_SCOPES = ['retail', 'wholesaler', 'both'];

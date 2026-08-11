@@ -23,6 +23,7 @@ Apple Developer console in a browser this session.
 | `origin/main` | `11a7a43` — merge of `ios-appstore`; now also carries the **Codemagic iOS pipeline** |
 | `origin/ios-appstore` | `11a7a43` — **fast-forwarded to `main`**, no longer a divergent branch |
 | Migration 077 | ✅ applied to prod AND the dev DB — 3,311 prod rows retired to `skipped` |
+| Migration 078 | ⚠️ **applied to the DEV DB only** — the AI assistant's `ai_chat_messages`. It is in `db/schema.sql` too, so the next prod `npm run migrate` creates it. **Run it in the same deploy as the code:** until the table exists the cap check throws and both assistant endpoints 500 (the rest of the site is unaffected — nothing else reads that table). |
 | Android | **v1.0.4 (versionCode 5) IN PRODUCTION REVIEW** — deep links + GPS + push in one review |
 | iOS | **1.0.4 (build 1786309948) SUBMITTED — «Waiting for Review»** (2026-08-10, ≤48h) |
 | Android push | ✅ working end to end |
@@ -115,7 +116,9 @@ code side of this queue is closed.
    ⚠️ **Run the migration after that deploy** — `npm run migrate` applies `db/schema.sql`, which
    carries 077's columns *and* its flood-guard backfill. Or
    `npm run migrate:file db/migrations/077_push_notifications.sql`. Nothing pushes until FCM/APNs
-   credentials exist, so the order of these two is safe either way.
+   credentials exist, so the order of these two is safe either way. The same `npm run migrate`
+   also creates **078**'s `ai_chat_messages` — the AI assistant's ledger *and* rate limiter, so
+   its endpoints 500 until the table exists.
    ⚠️ **Apply `docs/patches/codemagic-ios-push-capability.patch` to `ios-appstore`** before
    step 4 — without `aps-environment` in the entitlements, iOS registration fails on device from
    a build that succeeded. See `docs/patches/README.md`.

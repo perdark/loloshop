@@ -1,5 +1,69 @@
 # Progress
 
+## 2026-08-12 — AI assistant hardened: caps made atomic, spend guard fail-safe, history un-forgeable
+
+Three defects found by re-reading the 2026-08-10 (b) code before shipping it. All were silent
+failures pointing at either the bill or a student's trust. **Backend suite now 202/202** (was
+185 — the assistant had zero tests in a repo with 185).
+
+- **The caps could be walked straight past.** The old order was: count → model call (~700ms) →
+  insert. N concurrent requests all read the same count and all passed. Now `reserve()` counts
+  and writes the ledger row inside **one transaction holding a per-caller advisory lock**, and
+  `settle()` fills in the answer and cost afterwards. **Measured against the dev DB: 40
+  simultaneous requests, exactly 10 granted for an anon session (cap 10) and exactly 30 for a
+  signed-in user (cap 30).** Side effect: a crashed call still leaves its row, so a retry storm
+  is no longer free, and a failed ledger write can no longer make every cap under-count.
+- **The $1/day ceiling could switch itself off silently.** `Number(usage.cost || 0)` recorded
+  $0.00 whenever OpenRouter reported no cost — every row zero, `SUM(cost_usd)` flat forever, the
+  backstop dead with nothing in any log. A missing cost now falls back to a token estimate, and
+  an **unrecognised model is priced as expensive on purpose**: over-counting trips the ceiling
+  early (recoverable), under-counting is a bill.
+- **A student could forge what the bot said.** The client sent its own transcript back with its
+  own role labels, so a caller could POST a fabricated `assistant` turn («وشاحك مجاني»), ask the
+  bot to confirm it, and screenshot the shop's assistant promising a free robe. History is now
+  rebuilt server-side from `ai_chat_messages` (2-hour window); `req.body.history` is ignored.
+- **17 tests** covering the cap boundaries (incl. pg returning counts as **strings** — `'9' > '10'`
+  lexicographically would have blocked callers 21 questions early), the cost fallback, the
+  bundle `price = 0` rule that nearly told a student their robe was free, and `clampDays`, which
+  is the entire defence on the one model-supplied value interpolated into SQL.
+- `sessionKey()` no longer crashes the widget when `localStorage` throws (privacy modes) — it is
+  now the only link between an anon visitor and their history, so it had to stop being fragile.
+
+**Still open from the review, not done here:** no response cache (the owner's stance was «cache +
+hard caps» and only the caps exist), analytics still spends 2 model calls per question, and the
+chat sheet has no `role="dialog"`/Escape/`aria-live`.
+
+## 2026-08-10 (b) — AI assistant: Arabic support chatbot + admin analytics
+
+Owner asked for both surfaces on a **cheap** model, explicitly not the Claude API. Reuses the
+existing `OPENROUTER_API_KEY` (already live for calligraphy) and adds **zero npm packages**, so
+the `npm audit` deploy gate is untouched.
+
+**Shipped:**
+- **`google/gemini-2.5-flash-lite`, chosen by live Arabic test** — 4 candidates run against real
+  Iraqi-Arabic questions with real order context. Winner: sub-second, **$0.04/1,000 messages**,
+  no hallucinations. `openai/gpt-oss-120b` was rejected for **inventing a delivery promise**;
+  `qwen/qwen3.7-flash` returned empty content. Re-run that test before changing the model.
+- **Support chatbot** (`/api/assistant/support`, widget on every storefront page) — public, anon
+  allowed. The server pre-fetches the asker's own orders/rep/deadline and the model only phrases
+  them. **No tool-calling and no model-written SQL anywhere** — a cheap model is unreliable at
+  both, and free SQL on this DB (no RLS) is a security hole.
+- **Admin analytics** (`/api/assistant/analytics`, box on `/admin`) — the model picks one key
+  from a **closed set of 8 typed metrics**; our SQL runs; the model phrases it. The raw figures
+  render under the prose so the owner can audit the arithmetic.
+- **`billableOrderSql` moved to `lib/counts.js`** (re-exported at its old name) so the assistant
+  and the dashboard define revenue identically. 185/185 backend tests still pass.
+- **Cost caps live in the DB** (`ai_chat_messages`, migration 078), not memory: 30/user/day,
+  10/anon-session/day, **$1/day shop ceiling**. Anon callers keyed on a session id, not IP
+  (CGNAT). With the key unset both endpoints 503 and the widget removes itself.
+
+**Bugs the real data caught:** `products.name` doesn't exist (it's `name_ar`); bundle lines have
+`price = 0`, so the bot nearly told a student their robe was free; and the analytics phrasing
+invented a containment relationship between two independent counts. All three fixed.
+
+**Verified in a browser at phone width** — anon + signed-in student + admin, including that the
+bot refuses to promise a delivery date. ⚠️ **Migration 078 still needs applying to prod.**
+
 ## 2026-08-10 — iOS 1.0.4 uploaded, APNs verified against Apple, both platforms at parity
 
 Prod runs `11a7a43`, confirmed over SSH. CI green, all 3 PM2 processes online, site 200.

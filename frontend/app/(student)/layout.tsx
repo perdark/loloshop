@@ -5,6 +5,7 @@ import { DiscountPopup } from "@/components/DiscountPopup";
 import { VisitBeacon } from "@/components/VisitBeacon";
 import { Onboarding } from "@/components/student/Onboarding";
 import { FooterSignature } from "@/components/shop/FooterSignature";
+import { SupportChat } from "@/components/shop/SupportChat";
 
 export default function StudentLayout({
   children,
@@ -19,6 +20,9 @@ export default function StudentLayout({
       <Onboarding />
       <DiscountPopup />
       <VisitBeacon />
+      {/* Fixed overlay — belongs beside the other fixed children, outside <main>, whose
+          animate-page-in transform would otherwise become its containing block. */}
+      <SupportChat />
       <StudentNav />
       {/* Phone-first but no longer caged at 512px — editorial grids engage on
           tablet/desktop while mobile stays a single calm column. */}

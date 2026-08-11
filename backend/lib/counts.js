@@ -40,8 +40,32 @@ const bundlesExpr = (a = 'o') => `COUNT(DISTINCT ${bundleKey(a)})::int`;
 const studentsExpr = (a = 'o') => `COUNT(DISTINCT ${a}.student_id)::int`;
 
 /** Live = everything except cancelled. This is the OPERATIONAL filter; money
- *  aggregates use billableOrderSql (approval-gated) and are NOT this file's job. */
+ *  aggregates use billableOrderSql (approval-gated) below. */
 const liveSql = (a = 'o') => `${a}.status <> 'cancelled'`;
+
+/**
+ * The SETTLEMENT filter — the money counterpart to liveSql.
+ *
+ * Money shown as revenue/cost/profit is settlement money: retail rows have NULL approval;
+ * representative rows count only after approval. Pending/rejected rows stay operationally
+ * visible elsewhere but never inflate settled totals.
+ *
+ * Lives here (moved out of adminController 2026-08-10) so the admin dashboard and the AI
+ * analytics assistant compute revenue the SAME way. Two definitions of "revenue" that
+ * disagree by a few pending bundles is exactly the bug that destroys trust in an assistant
+ * the owner cannot audit — there must be one.
+ */
+function billableOrderSql(alias = 'o') {
+  return `${alias}.status <> 'cancelled'
+    AND (
+      ${alias}.wholesaler_approval = 'approved'
+      OR (${alias}.wholesaler_approval IS NULL AND EXISTS (
+        SELECT 1 FROM students settled_student
+        WHERE settled_student.id = ${alias}.student_id
+          AND settled_student.wholesaler_id IS NULL
+      ))
+    )`;
+}
 
 const finishedSql = (a = 'o') =>
   `${a}.status IN (${FINISHED_STATUSES.map((s) => `'${s}'`).join(', ')})`;
@@ -169,6 +193,7 @@ module.exports = {
   bundlesExpr,
   studentsExpr,
   liveSql,
+  billableOrderSql,
   finishedSql,
   buildScope,
   countPieces,

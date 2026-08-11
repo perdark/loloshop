@@ -16,6 +16,130 @@ written against an uncommitted tree; **(d)** committed it, so that caveat is dis
 
 ---
 
+## 2026-08-12 — 🔒 AI assistant hardened before ship: three silent failures closed
+
+A pre-ship read of the 2026-08-10 (b) code. Everything worked in a browser; all three defects
+below were invisible to that kind of testing, which is the point worth keeping.
+
+**1. The caps were checked and written a full model-latency apart.** `checkCaps` counted, the
+model took ~700ms, and only then did `logCall` insert. Every concurrent request in that window
+read the same count, so twenty parallel requests consumed **one** slot — and the same hole
+applied to the $1/day ceiling. This is not a theoretical race; it is a `for` loop.
+
+The fix is a **reserve → call → settle** protocol. `reserve()` takes a transaction-scoped
+advisory lock keyed on the caller (`ai:u:<id>` / `ai:s:<session>`), counts, and inserts the
+pending row in the **same** transaction; `settle()` fills in the answer and the real cost after
+the call. The lock is never held across the network call, and it is `pg_advisory_xact_lock`
+rather than a session lock specifically because prod goes through Neon's PgBouncer endpoint.
+
+**Measured, not reasoned:** 40 simultaneous `reserve()` calls against the dev DB granted exactly
+10 for an anonymous session (cap 10) and exactly 30 for a signed-in user (cap 30), with 10 rows
+in the ledger and none leaking across sessions. Two further consequences, both wanted: a request
+that dies mid-flight still leaves its row, so a retry storm is not free; and the old failure mode
+where a ledger write error silently made every subsequent cap under-count is gone, because the
+row that bounds the caller is written *before* anything can fail.
+
+**2. The daily USD ceiling could disable itself with no symptom.** `costUsd: Number(usage.cost
+|| 0)` is correct only while OpenRouter reports a cost. If that field ever goes missing — a
+provider that omits it, a response-shape change — every row records $0.00, `SUM(cost_usd)` never
+grows, and the backstop that makes every other cap optional is off. Nothing logs, nothing errors;
+the first symptom is the invoice. A missing cost now estimates from tokens, an **unknown model is
+priced as expensive on purpose** (over-counting is recoverable, under-counting is a bill), and
+the fallback logs loudly when it fires.
+
+**3. The client controlled the `assistant` turns.** The widget sent its transcript back and the
+controller mapped `turn.role === 'assistant' ? 'assistant' : 'user'` — so the *content* was
+capped but the *authorship* was trusted. A caller could POST a fabricated assistant turn
+(«وشاحك مجاني»), ask the bot to confirm it, and screenshot the shop's own assistant promising a
+free robe. There was no fix at the prompt level: the model cannot tell a real prior turn from a
+forged one. History is now rebuilt from `ai_chat_messages` (last 3 exchanges, 2-hour window,
+scoped to the caller) and `req.body.history` is ignored. It costs one indexed read, and it also
+made the thread survive a refresh, which the local-state version did not.
+
+**Tests: 185 → 202.** The assistant had none. The pure logic was split out to make that possible
+(`aiChat._internals`, `supportContext.formatContext`, `adminMetrics._internals`,
+`parseRoute`). The cases worth naming: pg returns `COUNT()`/`SUM()` as **strings**, and `'9' >
+'10'` lexicographically, so a string comparison in the cap check would have cut users off 21
+questions early while letting a $9 day pass as under $1 — the test pins numeric comparison. The
+bundle `price = 0` rule (the bug that nearly told a student their robe was free) is pinned.
+`clampDays` is fuzzed with SQL-injection strings, `NaN`, `Infinity` and objects because it is the
+**only** thing between a model's output and an interpolated SQL `INTERVAL`.
+
+Deliberately **not** asserted: the concurrency itself. A unit test cannot observe an advisory
+lock — that needed real parallel connections, which is why the numbers above were measured with
+a throwaway script rather than added to `node --test`.
+
+**Left open, and named rather than quietly dropped:** there is still **no cache**, although the
+owner's stated stance was «tight — cache + hard caps»; storefront FAQ questions are identical for
+every signed-out visitor and each one is a paid call. Admin analytics still spends two model
+calls per question when a keyword pre-route would skip the router on common phrasings. And the
+chat sheet is a full-screen mobile dialog with no `role="dialog"`, no Escape-to-close, no focus
+trap and no `aria-live` on the thread.
+
+---
+
+## 2026-08-10 (b) — 🤖 AI added: Arabic support chatbot + admin analytics assistant
+
+**Owner picked both surfaces** («Arabic support agent» + «Admin natural-language analytics»)
+with cost stance **«tight — cache + hard caps»**, and explicitly ruled out the Claude API:
+*"not claude api, a cheap model, it is just chatbot"*. So this reuses the **existing**
+`OPENROUTER_API_KEY` (already live in prod for calligraphy) and adds **zero npm packages** —
+Node 20's global `fetch` only, the same rule `lib/push.js` follows, so the
+`npm audit --omit=dev` deploy gate is untouched.
+
+**Model chosen by live test, not by assumption** (mirroring how the calligraphy model was
+picked). Four candidates, real Iraqi-Arabic support questions, real order context:
+
+| model | verdict |
+|---|---|
+| **google/gemini-2.5-flash-lite** | ✅ **CHOSEN** — 605–848ms, **$0.04 / 1,000 messages**, correct, refused what it didn't know |
+| google/gemini-3.1-flash-lite | ✅ also clean, but 4× the cost and an 11s outlier |
+| openai/gpt-oss-120b | ❌ **hallucinated a delivery promise** («راح نوصلّه قبل آخر موعد») out of the order deadline |
+| qwen/qwen3.7-flash | ❌ returned empty content + upstream 429 |
+
+**The architectural decision — no tool-calling, no model-written SQL.** A model this cheap is
+unreliable at multi-step tool loops, and ad-hoc SQL from a model against this DB is a security
+hole (no RLS — every guard is application-side). Instead:
+- **Support**: the server pre-fetches the asker's own facts (`lib/supportContext.js`, scoped to
+  their `user_id`) and the model *only phrases them*. One API call, no loop, and the bot can
+  reach nothing the student couldn't already see on `/track`.
+- **Analytics**: the model maps the question to one key from a **closed catalogue of 8 typed
+  metrics** (`lib/adminMetrics.js`); we run the hand-written SQL; the model phrases the result.
+  Worst case from a bad model output is "wrong metric chosen", never "arbitrary read".
+
+**Three real bugs the live data caught, that a mocked test would not have:**
+1. `products.name` doesn't exist — the column is `name_ar`. Two queries were wrong.
+2. Bundle order lines carry `price = 0` (the whole bundle's price sits on one row). The bot was
+   about to tell a student **their robe is free**. Now suppressed and labelled «ضمن طلب مشترك».
+3. The analytics phrasing step wrote «80 طلبًا… **ومن بينها** 123 طالبًا», inventing a containment
+   relationship between two independent counts. Numbers we computed correctly can still be made
+   false by the sentence that joins them, so the phrasing prompt now forbids relating figures.
+
+**One shared definition of money.** `billableOrderSql` moved out of `adminController.js` into
+`lib/counts.js` and is re-exported at its old name, so the assistant and the `/admin` dashboard
+compute revenue identically. An assistant whose revenue disagrees with the dashboard by a few
+pending bundles is worse than no assistant. **185/185 backend tests still pass** after the move.
+
+**Cost control (the owner's «tight» stance), in the DB not in memory** — `ai_chat_messages`
+(migration 078) is both the ledger and the rate limiter, so a PM2 restart cannot reset a user's
+allowance and both API workers share one guard. Caps: 30/user/day, 10/anon-session/day, and a
+**$1/day whole-shop ceiling** as the backstop. Anonymous callers are keyed on a client session
+id, **not IP** — Iraqi carriers CGNAT, so an IP-keyed cap would let one cohort's shared egress
+address exhaust the whole cohort's allowance (the `joinLimit` trap).
+
+**Verified in a real browser at phone width**, not just by unit test: anonymous visitor asked a
+two-part question and got both halves right; signed in as a real student with 3 real orders, the
+bot listed the true statuses, refused to invent the bundle price, gave the real rep's name and
+phone, and **refused to promise a delivery date** while correctly distinguishing the order
+deadline. Admin box answered and rendered its «الأرقام كما هي» audit trail. One layout defect
+found and fixed in the browser: the `sm:` floating card overlapped the fixed bottom tab bar.
+
+**Open follow-ups:** migration 078 must reach prod (see the board); the metric catalogue is
+deliberately small — `ai_chat_messages.intent IS NULL` is the log of questions it *couldn't*
+answer, i.e. the backlog for the next metric.
+
+---
+
 ## 2026-08-10 — 🍎 iOS 1.0.4 uploaded, APNs verified against Apple, both platforms at parity
 
 **Two bugs, both of which produced a *successful-looking* run that failed later.** That is the
