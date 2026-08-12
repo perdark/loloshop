@@ -82,7 +82,11 @@ function formatPriceBook(rows, packages = []) {
     });
 
   for (const p of packages) {
-    lines.push(`- ${p.name_ar} (طقم كامل): ${fmtIQD(p.price)}`);
+    // safeField even though package names are admin-written: these are `- fact:` bullets in the
+    // SYSTEM prompt exactly like the customer-typed ones, and a newline in any of them appends
+    // rules the model reads as the shop's own. Trusting a value because of who typed it is how
+    // that hole comes back.
+    lines.push(`- ${safeField(p.name_ar, 60)} (طقم كامل): ${fmtIQD(p.price)}`);
   }
   if (!lines.length) return null;
 
@@ -169,7 +173,9 @@ async function bestSellers(role = 'retail') {
         LIMIT 3`
     );
     if (!rows.length) return null;
-    return `الأكثر مبيعاً عدنا (بالترتيب): ${rows.map((r) => r.name_ar).join('، ')}.`;
+    // safeField for the same reason as the package names above — admin-written is not the same
+    // as safe to interpolate into a system prompt.
+    return `الأكثر مبيعاً عدنا (بالترتيب): ${rows.map((r) => safeField(r.name_ar, 60)).join('، ')}.`;
   });
 }
 
@@ -268,7 +274,16 @@ async function forUser(userId) {
 
   // Same rule as catalogController.priceRoleForUser: a student linked to a rep genuinely is a
   // wholesaler-priced customer. Derived from the profile row we already have, not re-queried.
-  return { block: formatContext(p, orders), priceRole: p.wholesaler_id ? 'wholesaler' : 'retail' };
+  //
+  // repName/repPhone are returned ALONGSIDE the prose block, not parsed back out of it: they
+  // become a tappable «كلّم ممثلك» chip (lib/supportActions.js), and re-extracting a phone
+  // number from generated Arabic would be a parser waiting to hand a customer a wrong number.
+  return {
+    block: formatContext(p, orders),
+    priceRole: p.wholesaler_id ? 'wholesaler' : 'retail',
+    repName: p.rep_name ? safeField(p.rep_name, 40) : null,
+    repPhone: p.rep_phone ? safeField(p.rep_phone, 20) : null,
+  };
 }
 
 module.exports = {

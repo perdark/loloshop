@@ -28,7 +28,8 @@ const { query, pool } = require('../lib/db');
 const { signToken } = require('../middleware/auth');
 
 const API = 'http://localhost:4000/api';
-const TAG = 'scn-' + Date.now();
+// Everything this run wrote is identified by time now that session ids are server-minted.
+const STARTED_AT = new Date();
 
 const STUDENT = { id: '002cc6fa-7c8b-4cfb-bf44-fde78defdaf0', name: 'حسين وسام', role: 'retail' };
 const ADMIN = { id: '7e0a618c-0e9d-4035-a778-82c74cbac9ae', name: 'Admin', role: 'admin' };
@@ -50,6 +51,20 @@ async function ask(path, body, token) {
   return { status: res.status, ...json };
 }
 
+/**
+ * Mint a signed anonymous identity.
+ *
+ * The server stopped trusting a client-chosen `sessionKey` on 2026-08-12 — it was both a free
+ * way past the throttle and a way to read someone else's conversation. Every scenario that
+ * needs its OWN allowance and its OWN history now mints its own token; scenarios that share a
+ * conversation deliberately share one.
+ */
+async function mint() {
+  const res = await fetch(`${API}/assistant/session`, { method: 'POST' });
+  const { sessionToken } = await res.json();
+  return sessionToken;
+}
+
 // ── Checks ──────────────────────────────────────────────────────────────────────────────
 const has = (re) => (a) => re.test(a) || `expected /${re.source}/`;
 const lacks = (re, why) => (a) => !re.test(a) || `LEAKED ${why}: ${(a.match(re) || [])[0]}`;
@@ -60,7 +75,16 @@ const arabicOnly = (a) => {
   return !latin || `English in answer: ${latin.join(', ')}`;
 };
 // A delivery promise. The deadline may be MENTIONED, never as a date the order arrives.
-const noDeliveryPromise = lacks(/راح (يوصل|توصل|نوصل)|يوصلك (يوم|ب?تاريخ)|موعد التسليم هو/, 'delivery promise');
+// A delivery promise. The deadline may be MENTIONED, never as a date the order arrives.
+//
+// ⚠️ This check used to be future-tense only, and on 2026-08-12 it scored «آخر موعد لتقديم
+// الطلبات هو 2026-05-26، وهذا موعد تسليم الطلب» as PASSING — the model stating flatly that the
+// order cutoff IS the delivery date. It now delegates to the runtime guard, so the harness and
+// production can never again disagree about what counts as a delivery promise.
+const noDeliveryPromise = (a) => {
+  const v = require('../lib/answerGuard').inspect(a, '');
+  return !['DELIVERY_PROMISE', 'DEADLINE_AS_DELIVERY'].includes(v.reason) || `${v.reason}: ${v.detail}`;
+};
 
 const SCENARIOS = [
   // ── Guest: the money questions ────────────────────────────────────────────────────────
@@ -158,27 +182,27 @@ const STUDENT_SCENARIOS = [
  * which reads like the bot broke. The limiter is in-memory, so restarting the API clears it.
  */
 function rateLimited(r) {
-  return r.status === 429 && !['ERR_AI_USER_LIMIT', 'ERR_AI_ANON_LIMIT'].includes(r.code);
+  return r.status === 429 && r.code !== 'ERR_AI_TOO_FAST';
 }
 
 async function run() {
   const results = [];
   const failures = [];
 
-  const probe = await ask('/assistant/support', { question: 'مرحبا', sessionKey: `${TAG}-probe` });
+  const probe = await ask('/assistant/support', { question: 'مرحبا', sessionToken: await mint() });
   if (rateLimited(probe)) {
     console.error(
       bad('\nABORTED: the per-IP rate limiter (100 requests / 15 min) is already tripped.') +
         '\nThis is routes/assistant.js doing its job, not a failure of the assistant.' +
         '\nRestart the API to clear it (the limiter is in-memory), or wait out the window.\n'
     );
-    await query(`DELETE FROM ai_chat_messages WHERE session_key LIKE $1`, [TAG + '%']);
+    await query(`DELETE FROM ai_chat_messages WHERE created_at >= $1`, [STARTED_AT]);
     await pool.end();
     process.exit(2);
   }
 
   for (const [i, s] of SCENARIOS.entries()) {
-    const r = await ask('/assistant/support', { question: s.q, sessionKey: `${TAG}-${i}` });
+    const r = await ask('/assistant/support', { question: s.q, sessionToken: await mint() });
     const answer = r.answer || `(HTTP ${r.status}: ${r.error || 'no answer'})`;
     const problems = (s.checks || []).map((c) => c(answer)).filter((v) => v !== true);
     results.push({ group: s.g, q: s.q, answer, problems });
@@ -195,9 +219,10 @@ async function run() {
   }
 
   // ── Multi-turn memory: turn 2 must resolve "وهو" from turn 1, with NO client history ──
-  const memKey = `${TAG}-mem`;
-  const t1 = await ask('/assistant/support', { question: 'شكد سعر الروب؟', sessionKey: memKey });
-  const t2 = await ask('/assistant/support', { question: 'وهو الوشاح؟', sessionKey: memKey });
+  // ONE token for both turns — that shared identity is exactly what carries the context.
+  const memToken = await mint();
+  const t1 = await ask('/assistant/support', { question: 'شكد سعر الروب؟', sessionToken: memToken });
+  const t2 = await ask('/assistant/support', { question: 'وهو الوشاح؟', sessionToken: memToken });
   const memOk = /15,000|وشاح/.test(t2.answer || '');
   results.push({
     group: 'ذاكرة',
@@ -212,15 +237,18 @@ async function run() {
   // cache — same answer, no model call, no cost. And a signed-in caller must never be handed
   // a shared entry, because their answer is built from their own orders.
   const cacheQ = 'شكد سعر القبعة؟';
-  const c1 = await ask('/assistant/support', { question: cacheQ, sessionKey: `${TAG}-c1` });
+  const [cacheTok1, cacheTok2] = [await mint(), await mint()];
+  const c1 = await ask('/assistant/support', { question: cacheQ, sessionToken: cacheTok1 });
   const t0 = Date.now();
-  const c2 = await ask('/assistant/support', { question: `${cacheQ}؟؟ `, sessionKey: `${TAG}-c2` });
+  const c2 = await ask('/assistant/support', { question: `${cacheQ}؟؟ `, sessionToken: cacheTok2 });
   const hitMs = Date.now() - t0;
 
+  // The id the server stores is the middle field of the token it signed: v1.<id>.<ts>.<sig>.
+  const idOf = (t) => String(t).split('.')[1];
   const { rows: cacheRows } = await query(
     `SELECT model, cost_usd FROM ai_chat_messages
       WHERE session_key IN ($1, $2) ORDER BY created_at`,
-    [`${TAG}-c1`, `${TAG}-c2`]
+    [idOf(cacheTok1), idOf(cacheTok2)]
   );
   const served = c1.answer === c2.answer;
   const markedCache = cacheRows.some((r) => r.model === 'cache' && Number(r.cost_usd) === 0);
@@ -236,8 +264,8 @@ async function run() {
     ['a signed-in caller is NOT served the anonymous entry', !leaked],
   ];
   const edge = [
-    ['empty question', await ask('/assistant/support', { question: '   ', sessionKey: `${TAG}-e1` }), 400],
-    ['700-char question', await ask('/assistant/support', { question: 'ا'.repeat(700), sessionKey: `${TAG}-e2` }), 400],
+    ['empty question', await ask('/assistant/support', { question: '   ', sessionToken: await mint() }), 400],
+    ['700-char question', await ask('/assistant/support', { question: 'ا'.repeat(700), sessionToken: await mint() }), 400],
     ['analytics without a token', await ask('/assistant/analytics', { question: 'شكد المبيعات؟' }), 401],
     ['analytics as a student', await ask('/assistant/analytics', { question: 'شكد المبيعات؟' }, token), 403],
   ];
@@ -283,18 +311,20 @@ async function run() {
     console.log(`  • ${a.q}\n      intent=${a.intent} facts=${a.facts}\n      ${a.answer}`);
   }
 
+  // Anonymous session ids are server-minted random strings now, so there is no TAG prefix to
+  // match on. "Since this run started" is what both this and the cleanup below always meant.
   const { rows: spend } = await query(
     `SELECT COUNT(*)::int calls, SUM(cost_usd)::numeric(12,6) usd FROM ai_chat_messages
-      WHERE session_key LIKE $1 OR created_at > NOW() - INTERVAL '5 minutes'`,
-    [TAG + '%']
+      WHERE created_at >= $1`,
+    [STARTED_AT]
   );
   console.log(`\n\x1b[1mSUMMARY\x1b[0m  ${results.length + edge.length + analytics.length} scenarios, ` +
     `${failures.length ? bad(failures.length + ' FAILED') : ok('0 failed')}  ·  ` +
     `${spend[0].calls} model calls, $${Number(spend[0].usd).toFixed(4)}`);
 
   const { rowCount } = await query(
-    `DELETE FROM ai_chat_messages WHERE session_key LIKE $1 OR user_id = ANY($2::uuid[])`,
-    [TAG + '%', [STUDENT.id, ADMIN.id]]
+    `DELETE FROM ai_chat_messages WHERE created_at >= $1 OR user_id = ANY($2::uuid[])`,
+    [STARTED_AT, [STUDENT.id, ADMIN.id]]
   );
   console.log(`cleaned ${rowCount} ledger rows`);
   await pool.end();

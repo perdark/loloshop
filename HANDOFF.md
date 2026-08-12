@@ -167,6 +167,61 @@ keep building the AAB by hand on the laptop; the keystore stays local and off Gi
 
 ---
 
+## 🤖 THE ASSISTANT — 2026-08-12 (b), on branch `ai-assistant`
+
+**Owner reframe: «لولو» is the shop's MAIN MARKETING CONTENT, not a support widget.** Everything
+below follows from that, plus the owner's instruction to stop limiting individual users and
+protect against attackers instead.
+
+**The per-person daily quota is GONE.** It was keyed on an identity the CLIENT chose, so
+rotating it cost nothing — measured, 25 requests with 25 fresh keys were all granted. It bounded
+honest students and nobody else, and «وصلت للحد اليومي» is the worst sentence a marketing
+surface can say. Five layers replace it, outermost first:
+
+1. **Per-IP volume** (`routes/assistant.js`, 100 asks / 15 min) — unchanged.
+2. **A server-SIGNED identity** (`lib/anonSession.js`, HMAC on `JWT_SECRET`, zero new deps).
+   This also closed a real hole: `recentTurns` keys anonymous history on that id, so a
+   client-chosen one meant supplying somebody else's id loaded THEIR last two hours into your
+   prompt. Minting is limited to **300/hour/IP** — deliberately generous, see the landmine below.
+3. **A burst throttle** (10/min, 40/5min) instead of a quota — "are you a person", not "how much
+   have you had today". Fires at the 11th message; verified live.
+4. **The daily USD ceiling**, $1 → **$3**, with a **new warning at $1** that writes an admin
+   `notifications` row — which the push outbox turns into a phone push for free. Anonymous
+   traffic keeps its own slice ($1.2) so strangers cannot switch the assistant off for students.
+5. **`lib/answerGuard.js` — nothing wrong leaves, whatever the model was talked into.**
+
+**The guard is the real answer to prompt injection.** It does not screen the question (whack-a-
+mole); it asserts properties every legitimate answer has: no IQD figure absent from the price
+book we handed the model, no delivery promise, no English. Four live injection attempts held.
+**It immediately found a real defect the 44-scenario harness was scoring as PASSING** — the model
+answering «آخر موعد لتقديم الطلبات هو 2026-05-26، **وهذا موعد تسليم الطلب**», stating flatly that
+the order cutoff IS the delivery date. Every pattern in the guard *and* in the harness expected a
+future-tense promise («راح يوصل»); this is a present-tense equation. Now caught as
+`DEADLINE_AS_DELIVERY`, negation-aware so the correct denial still passes, and **the harness now
+calls the runtime guard** so the two can never disagree again.
+
+**Never dark** (`lib/supportFallback.js`): the shop's most common questions — prices, delivery,
+payment, location, how to order — are answered from the price book with **no model at all** when
+the model is unreachable or the budget is spent. Verified by pointing `AI_CHAT_MODEL` at a bogus
+model: four of five questions still answered, the fifth got a WhatsApp escalation.
+
+**UX:** the mascot's 7 expressions cut from the owner's brand sheet, registered so the head does
+not jump between them, driven by a server-chosen emotion · answers end in server-chosen action
+chips from a closed list (the model never emits a URL) · word-by-word reveal (NOT streaming —
+streaming would publish text before the guard sees it) · thread persists 2h, matching the
+server's own window · **the dead retry button is fixed** — a throttle now counts down instead of
+offering a retry that cannot work · the input no longer disables while busy, which was dismissing
+the Android keyboard mid-conversation.
+
+**Verified:** 243/243 unit tests (was 215) · 44/44 scenarios · tsc + lint + `next build` clean ·
+driven in a real browser end to end.
+
+⚠️ **Not verified: a real phone viewport.** Chrome refused to resize the maximized ultrawide
+window, so every browser check ran at 3440px. The phone-only audience means this still needs one
+pass at ~390px — the panel sheet, the chip rows and the 132px mascot are what to look at.
+
+---
+
 ## 👤 OWNER ACTIONS — outside the code
 
 **✅ DONE 2026-08-09 — do not redo these:** Associated Domains **and** Push Notifications are both
@@ -185,6 +240,14 @@ longer stranded on a branch · the laptop's loose credentials are filed in
 
 **Still outstanding:**
 
+0. **🛡️ PUT CLOUDFLARE IN FRONT OF THE VPS — ~20 min in a browser, free tier.** Decided
+   2026-08-12. Nothing in the app is DDoS protection: `express-rate-limit` runs *after* traffic
+   has already reached `142.93.110.202` and consumed its bandwidth and event loop. The assistant
+   raised the stakes because it is now the home page's headline feature. Proxy `lolo-shop96.com`
+   and `www` through Cloudflare (orange cloud), keep the origin cert, and leave the app limits
+   exactly as they are — they bound COST, Cloudflare bounds VOLUME. ⚠️ Check
+   `/.well-known/assetlinks.json` still serves **200, `application/json`, zero redirects** on
+   both hosts afterwards, or Android deep links break silently (see the cleared landmine below).
 1. **⏳ Android 1.0.4 (versionCode 5) is IN PRODUCTION REVIEW** — submitted 2026-08-09 with
    deep links + GPS + push together, full rollout, exactly one queued change (the withdrawn
    versionCode 4 draft did NOT linger; verified before submitting).
@@ -246,6 +309,22 @@ longer stranded on a branch · the laptop's loose credentials are filed in
 ---
 
 ## 💣 LANDMINES
+
+- **⚠️ `AI_CHAT_SESSION_MINTS_PER_HOUR` IS THE ONE ASSISTANT LIMIT CGNAT CAN BREAK — do not
+  "tighten" it.** It bounds identity *harvesting* only; the per-IP ask limiter already caps one
+  address at 100 requests/15min however many identities it holds, so rotation buys an attacker
+  nothing. But a rep dropping a WhatsApp link means ~100 students opening the site within an hour
+  behind one carrier NAT, each browser minting exactly once. It was set to 30/hour and **the
+  project's own harness tripped it immediately**; it is 300/hour now. Same trap as `joinLimit`.
+- **⚠️ Migration 079 must be applied with the assistant code.** It adds `ai_chat_messages.ip_hash`
+  and `reserve()`/`logCached()` write it, so on a database without the column **every assistant
+  message 500s**. It is in `db/schema.sql` too, so the deploy's `npm run migrate` covers it —
+  the ordering rule is the same one 078 already has.
+- **The assistant's `.env` needs three new values in prod:** `AI_CHAT_DAILY_USD_MAX=3.0`,
+  `AI_CHAT_DAILY_USD_WARN=1.0`, `AI_CHAT_ANON_DAILY_USD_MAX=1.2`, plus `SHOP_WHATSAPP` (digits
+  only, `9647723078729`). Without `SHOP_WHATSAPP` the escalation silently falls back to
+  Instagram — correct, but not what the owner asked for. Defaults in code already match, so a
+  missing var degrades safely rather than breaking.
 
 - **⚠️ `notifications.push_state` DEFAULTS TO `'pending'` — the backfill is not optional.**
   Migration 077 retires every pre-existing row to `'skipped'`, and the same `UPDATE` is repeated

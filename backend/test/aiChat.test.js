@@ -17,8 +17,8 @@ const { formatContext, formatPriceBook } = require('../lib/supportContext');
 const { clampDays } = require('../lib/adminMetrics')._internals;
 const { parseRoute } = require('../controllers/adminAnalyticsChatController')._internals;
 
-const CAPS = { perUserPerDay: 30, perSessionPerDay: 10, globalUsdPerDay: 1.0 };
-const zero = { userToday: 0, sessionToday: 0, spendToday: 0 };
+const CAPS = { burstPerMinute: 10, burstPer5Min: 40, globalUsdPerDay: 3.0, anonUsdPerDay: 1.2 };
+const zero = { burstMinute: 0, burstWindow: 0, spendToday: 0, anonSpendToday: 0 };
 
 // ── Cost accounting ─────────────────────────────────────────────────────────────────────
 //
@@ -74,70 +74,84 @@ test('a call with no cost AND no tokens is genuinely free', () => {
   );
 });
 
-// ── Cap boundaries ──────────────────────────────────────────────────────────────────────
+// ── Throttle and ceiling boundaries ─────────────────────────────────────────────────────
+//
+// There is NO per-person daily quota any more (owner decision 2026-08-12). The old one was
+// keyed on a client-chosen identity, so rotating it cost nothing — it bounded honest students
+// and nobody else. What is asserted here is what replaced it: a burst throttle that asks "are
+// you a person" rather than "how much have you had today", and the USD ceilings that do not
+// care who you are.
 
-test('an under-quota caller is allowed', () => {
+test('a caller within both burst windows is allowed', () => {
   assert.strictEqual(evaluateCaps(zero, { userId: 'u1', caps: CAPS }), null);
   assert.strictEqual(evaluateCaps(zero, { userId: null, caps: CAPS }), null);
 });
 
-test('the cap is >=, not > — the 30th question is the last one', () => {
-  const at = { ...zero, userToday: 30 };
-  const below = { ...zero, userToday: 29 };
-  assert.strictEqual(evaluateCaps(below, { userId: 'u1', caps: CAPS }), null);
-  assert.strictEqual(evaluateCaps(at, { userId: 'u1', caps: CAPS })?.code, 'ERR_AI_USER_LIMIT');
+test('NO DAILY QUOTA: a heavy but human user is never refused', () => {
+  // The regression this locks down. A student who asked 500 questions today but is not
+  // bursting must still be served — the assistant is the shop's main marketing surface, and
+  // «وصلت للحد اليومي» is the worst sentence it could say to a paying customer.
+  const heavy = { burstMinute: 3, burstWindow: 9, spendToday: 0.2, anonSpendToday: 0.05 };
+  assert.strictEqual(evaluateCaps(heavy, { userId: 'u1', caps: CAPS }), null);
+  assert.strictEqual(evaluateCaps(heavy, { userId: null, caps: CAPS }), null);
 });
 
-test('signed-in and anonymous allowances are separate, and neither leaks into the other', () => {
-  // A user at their limit is blocked even with an empty session count...
-  assert.strictEqual(
-    evaluateCaps({ ...zero, userToday: 30 }, { userId: 'u1', caps: CAPS })?.code,
-    'ERR_AI_USER_LIMIT'
-  );
-  // ...and an exhausted session must not block a signed-in user who shares the browser.
-  assert.strictEqual(evaluateCaps({ ...zero, sessionToday: 99 }, { userId: 'u1', caps: CAPS }), null);
-  // The reverse: an anon caller is bounded by the session cap, not the (higher) user cap.
-  assert.strictEqual(
-    evaluateCaps({ ...zero, sessionToday: 10 }, { userId: null, caps: CAPS })?.code,
-    'ERR_AI_ANON_LIMIT'
-  );
-  assert.strictEqual(evaluateCaps({ ...zero, userToday: 99 }, { userId: null, caps: CAPS }), null);
+test('the throttle is >=, not > — the 10th message in a minute is the last one', () => {
+  assert.strictEqual(evaluateCaps({ ...zero, burstMinute: 9 }, { userId: 'u1', caps: CAPS }), null);
+  const err = evaluateCaps({ ...zero, burstMinute: 10 }, { userId: 'u1', caps: CAPS });
+  assert.strictEqual(err?.code, 'ERR_AI_TOO_FAST');
+  assert.strictEqual(err.status, 429);
+  assert.strictEqual(err.retryAfter, 60, 'the UI needs the wait to count it down');
 });
 
-test('the shop-wide USD ceiling outranks every per-caller cap', () => {
+test('the five-minute window catches a slow drip the per-minute window misses', () => {
+  // 8/minute never trips the first window but is 40 in five minutes, which is not a person.
+  const drip = { ...zero, burstMinute: 8, burstWindow: 40 };
+  const err = evaluateCaps(drip, { userId: 'u1', caps: CAPS });
+  assert.strictEqual(err?.code, 'ERR_AI_TOO_FAST');
+  assert.strictEqual(err.retryAfter, 300);
+});
+
+test('the throttle applies to signed-in and anonymous callers alike', () => {
+  const fast = { ...zero, burstMinute: 10 };
+  assert.strictEqual(evaluateCaps(fast, { userId: 'u1', caps: CAPS })?.code, 'ERR_AI_TOO_FAST');
+  assert.strictEqual(evaluateCaps(fast, { userId: null, caps: CAPS })?.code, 'ERR_AI_TOO_FAST');
+});
+
+test('the shop-wide USD ceiling outranks the throttle', () => {
   // It is the backstop: it must fire for a caller who has asked nothing at all.
-  const err = evaluateCaps({ ...zero, spendToday: 1.0 }, { userId: 'u1', caps: CAPS });
+  const err = evaluateCaps({ ...zero, spendToday: 3.0 }, { userId: 'u1', caps: CAPS });
   assert.strictEqual(err?.code, 'ERR_AI_BUDGET');
   assert.strictEqual(err.status, 503, '503 not 429 — it is the shop that is out, not the user');
   // And it must not disclose the shop's budget to a student.
-  assert.ok(!/\$|USD|1\.0/.test(err.message), 'the budget must not leak into the Arabic message');
+  assert.ok(!/\$|USD|3\.0/.test(err.message), 'the budget must not leak into the Arabic message');
+  assert.ok(!err.retryAfter, 'a spent budget is not a short wait, so it must not offer one');
 });
 
-test('cap counts arriving as strings from pg still compare numerically', () => {
+test('counts arriving as strings from pg still compare numerically', () => {
   // COUNT()/SUM() come back as strings from node-postgres for bigint/numeric. '9' > '10'
-  // lexicographically, so a string comparison here would block a caller 21 questions early
-  // and let a $9 day through as under $10.
+  // lexicographically, so a string comparison here would throttle a caller early and let a
+  // $9 day through as under $10.
   assert.strictEqual(
-    evaluateCaps({ userToday: '30', sessionToday: '0', spendToday: '0' }, { userId: 'u1', caps: CAPS })?.code,
-    'ERR_AI_USER_LIMIT'
+    evaluateCaps({ burstMinute: '10', burstWindow: '10', spendToday: '0' }, { userId: 'u1', caps: CAPS })?.code,
+    'ERR_AI_TOO_FAST'
   );
   assert.strictEqual(
-    evaluateCaps({ userToday: '9', sessionToday: '0', spendToday: '0' }, { userId: 'u1', caps: CAPS }),
+    evaluateCaps({ burstMinute: '9', burstWindow: '9', spendToday: '0' }, { userId: 'u1', caps: CAPS }),
     null
   );
   assert.strictEqual(
-    evaluateCaps({ userToday: '0', sessionToday: '0', spendToday: '0.9999' }, { userId: 'u1', caps: CAPS }),
+    evaluateCaps({ burstMinute: '0', burstWindow: '0', spendToday: '2.9999' }, { userId: 'u1', caps: CAPS }),
     null
   );
 });
 
 test('ANON TRAFFIC CANNOT STARVE SIGNED-IN STUDENTS OF THE DAILY BUDGET', () => {
-  // `sessionKey` is client-supplied, so the 10/day anon cap is bypassed by rotating it
-  // (measured: 25 fresh keys → 25 grants). The per-IP limiter allows ~9,600 req/day/IP, so
-  // roughly two IPs could burn the whole $1. Before the split that refused EVERYONE — a
-  // stranger could switch the assistant off for real customers daily, for pennies.
-  const caps = { ...CAPS, anonUsdPerDay: 0.4 };
-  const anonBurned = { ...zero, spendToday: 0.4, anonSpendToday: 0.4 };
+  // Without the split, a flood of signed-out requests exhausts the day's budget and the
+  // assistant then refuses SIGNED-IN students too — a stranger could switch the assistant off
+  // for real customers daily, for pennies.
+  const caps = { ...CAPS, anonUsdPerDay: 1.2 };
+  const anonBurned = { ...zero, spendToday: 1.2, anonSpendToday: 1.2 };
 
   assert.strictEqual(
     evaluateCaps(anonBurned, { userId: null, caps })?.code,
@@ -151,7 +165,7 @@ test('ANON TRAFFIC CANNOT STARVE SIGNED-IN STUDENTS OF THE DAILY BUDGET', () => 
   );
   // The whole-shop ceiling still outranks everything, for everyone.
   assert.strictEqual(
-    evaluateCaps({ ...zero, spendToday: 1.0, anonSpendToday: 0 }, { userId: 'x', caps })?.code,
+    evaluateCaps({ ...zero, spendToday: 3.0, anonSpendToday: 0 }, { userId: 'x', caps })?.code,
     'ERR_AI_BUDGET'
   );
 });
@@ -395,4 +409,275 @@ test('clampDays is the guard on the one model-supplied value that reaches SQL te
   assert.strictEqual(clampDays(7), 7);
   assert.strictEqual(clampDays('30'), 30);
   assert.strictEqual(clampDays(365), 365);
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════
+// THE ANSWER GUARD — the control that makes prompt injection not matter
+// ════════════════════════════════════════════════════════════════════════════════════════
+//
+// Every rule below is a REAL defect this shop already shipped and caught with
+// scripts/ai-scenarios.js AFTER the feature had been "verified in a browser". That harness is
+// a manual gate someone has to remember to run; these are the same checks at runtime.
+//
+// The reason this is the anti-injection control and an inbound filter is not: it asserts
+// properties every legitimate answer has, instead of trying to enumerate attacks. Nobody can
+// phrase their way past "every price you stated was one we handed you".
+
+const guard = require('../lib/answerGuard');
+
+const FACTS = [
+  'قائمة الأسعار (أسعار البداية):',
+  '- روب تخرج: يبدأ من 20,000 دينار (وأغلى موديل 50,000 دينار)',
+  '- وشاح تخرج: يبدأ من 15,000 دينار',
+  '- الطقم الكامل (طقم كامل): 145,000 دينار',
+].join('\n');
+
+test('GUARD: a price taken from the price book passes', () => {
+  assert.strictEqual(guard.inspect('سعر الروب يبدأ من 20,000 دينار.', FACTS).ok, true);
+  assert.strictEqual(guard.inspect('الطقم الكامل بـ 145,000 دينار.', FACTS).ok, true);
+});
+
+test('GUARD: AN INVENTED PRICE IS BLOCKED — the failure that costs the shop money', () => {
+  // Regression #3: the bot quoted the وشاح price for a شال. Two products, two prices, two
+  // near-synonymous names — and a quote the checkout will not honour.
+  const v = guard.inspect('سعر الشال 25,000 دينار.', FACTS);
+  assert.strictEqual(v.ok, false);
+  assert.strictEqual(v.reason, 'PRICE_NOT_IN_FACTS');
+  assert.strictEqual(v.detail, '25,000');
+});
+
+test('GUARD: a made-up total is blocked even when built from real prices', () => {
+  // «اذا اخذ ٣ اوشحة شكد يطلع المجموع؟» — 3 × 15,000 is arithmetic the checkout never quoted.
+  assert.strictEqual(guard.inspect('المجموع 45,000 دينار.', FACTS).reason, 'PRICE_NOT_IN_FACTS');
+});
+
+test('GUARD: Arabic-Indic digits are folded, so ٢٥,٠٠٠ cannot slip past 25,000', () => {
+  assert.strictEqual(guard.inspect('السعر ١٥,٠٠٠ دينار', FACTS).ok, true, 'a real price in Arabic digits');
+  assert.strictEqual(guard.inspect('السعر ٢٥,٠٠٠ دينار', FACTS).reason, 'PRICE_NOT_IN_FACTS');
+});
+
+test('GUARD: a delivery promise is blocked — the shop does not deliver at all', () => {
+  // Regression #2: «نكدر نوصل داخل بغداد», invented out of nothing. And every model tested
+  // tried to reuse the ORDER DEADLINE in the prompt as an arrival date.
+  assert.strictEqual(guard.inspect('راح يوصلك الطلب يوم 15/8.', FACTS).reason, 'DELIVERY_PROMISE');
+  assert.strictEqual(guard.inspect('التوصيل مجاني داخل بغداد.', FACTS).reason, 'DELIVERY_PROMISE');
+  // But MENTIONING the deadline is legitimate and must not be blocked.
+  assert.strictEqual(
+    guard.inspect('آخر موعد لتقديم الطلبات هو 15/8، وهو مو موعد تسليم.', FACTS).ok,
+    true
+  );
+});
+
+test('GUARD: THE DEADLINE IS NOT THE DELIVERY DATE — caught live, scored as a PASS', () => {
+  // Real answer, produced 2026-08-12 during a harness run that reported 44/44 passing:
+  // «آخر موعد لتقديم الطلبات هو 2026-05-26، وهذا موعد تسليم الطلب».
+  // Every delivery pattern in the guard AND in scripts/ai-scenarios.js expected a future-tense
+  // PROMISE («راح يوصل»); this is a flat present-tense equation, so both waved it through.
+  const v = guard.inspect('آخر موعد لتقديم الطلبات هو 2026-05-26، وهذا موعد تسليم الطلب.', FACTS);
+  assert.strictEqual(v.ok, false);
+  assert.strictEqual(v.reason, 'DEADLINE_AS_DELIVERY');
+});
+
+test('GUARD: but DENYING the deadline is a delivery date must still pass', () => {
+  // The system prompt hands the model «آخر موعد لتقديم الطلبات (مو موعد تسليم)» and rule 6 tells
+  // it to say so, so a blanket ban on the phrase would block the correct answer — the guard has
+  // to tell making the claim apart from refusing it.
+  for (const good of [
+    'آخر موعد لتقديم الطلبات هو 2026-05-26، وهو مو موعد تسليم.',
+    'هذا مو موعد التسليم، هو آخر يوم تكدر تطلب بيه.',
+    'ماكو موعد تسليم محدد عندي.',
+  ]) {
+    assert.strictEqual(guard.inspect(good, FACTS).ok, true, `wrongly blocked: ${good}`);
+  }
+});
+
+test('GUARD: English is blocked, but the brand handle is not', () => {
+  assert.strictEqual(guard.inspect('Your order is ready حبيبي', FACTS).reason, 'NOT_ARABIC');
+  assert.strictEqual(guard.inspect('تابعنا على @lolo_shop96 🧡', FACTS).ok, true);
+});
+
+test('GUARD: an empty answer is a failure, not an empty bubble', () => {
+  assert.strictEqual(guard.inspect('   ', FACTS).reason, 'EMPTY');
+});
+
+test('GUARD: a year or an order number is not mistaken for a price', () => {
+  // Bare digit runs must not trip the money matcher, or the guard would block half of the
+  // shop's legitimate answers and quietly become noise nobody trusts.
+  assert.strictEqual(guard.inspect('تخرج سنة 2026 وطلبك رقم 4821.', FACTS).ok, true);
+});
+
+test('GUARD: the safe reply never blames the assistant or hints anything was blocked', () => {
+  assert.ok(!/خطأ|عذر|مشكلة|error/i.test(guard.SAFE_ANSWER));
+  assert.ok(/تواصل|فريق/.test(guard.SAFE_ANSWER), 'it must hand the customer to a human');
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════
+// SIGNED ANONYMOUS SESSIONS
+// ════════════════════════════════════════════════════════════════════════════════════════
+//
+// The identity used to be chosen by the CLIENT, which made it both a free way past the rate
+// limit (measured: 25 fresh keys → 25 grants) and — because history is keyed on it — a way to
+// load somebody else's conversation. Now the server signs it.
+
+const anonSession = require('../lib/anonSession');
+
+test('SESSION: a minted token verifies to a stable id', () => {
+  process.env.JWT_SECRET = 'test-secret';
+  const token = anonSession.mint();
+  const id = anonSession.verify(token);
+  assert.ok(id, 'a token we minted must verify');
+  assert.strictEqual(anonSession.verify(token), id, 'and to the same id every time');
+});
+
+test('SESSION: A FORGED OR TAMPERED TOKEN IS REJECTED', () => {
+  process.env.JWT_SECRET = 'test-secret';
+  const token = anonSession.mint();
+  const [, id, issuedAt] = token.split('.');
+
+  assert.strictEqual(anonSession.verify(`v1.${id}.${issuedAt}.notasignature`), null, 'bad sig');
+  assert.strictEqual(anonSession.verify(`v1.someoneelse.${issuedAt}.${token.split('.')[3]}`), null,
+    'swapping in another id must not keep the signature valid');
+  assert.strictEqual(anonSession.verify('hello'), null, 'garbage');
+  assert.strictEqual(anonSession.verify(''), null, 'empty');
+  assert.strictEqual(anonSession.verify(null), null, 'absent');
+  assert.strictEqual(anonSession.verify('v1.a.b.c.d'), null, 'wrong shape');
+  assert.strictEqual(anonSession.verify('x'.repeat(5000)), null, 'oversized input is bounded');
+});
+
+test('SESSION: a token signed with a DIFFERENT secret is rejected', () => {
+  process.env.JWT_SECRET = 'secret-one';
+  const token = anonSession.mint();
+  process.env.JWT_SECRET = 'secret-two';
+  assert.strictEqual(anonSession.verify(token), null, 'rotating the secret must invalidate it');
+  process.env.JWT_SECRET = 'test-secret';
+});
+
+test('SESSION: an expired token is rejected, and a future-dated one too', () => {
+  process.env.JWT_SECRET = 'test-secret';
+  const crypto = require('node:crypto');
+  const forge = (issuedAt) => {
+    // Re-sign honestly, so what is under test is the AGE check and nothing else.
+    const id = 'abc';
+    const key = crypto.createHash('sha256')
+      .update(`${anonSession._internals.CONTEXT}:${process.env.JWT_SECRET}`).digest();
+    const sig = crypto.createHmac('sha256', key).update(`${id}.${issuedAt}`).digest('base64url');
+    return `v1.${id}.${issuedAt}.${sig}`;
+  };
+  const old = Date.now() - anonSession.MAX_AGE_MS - 1000;
+  assert.strictEqual(anonSession.verify(forge(old)), null, 'expired');
+  const future = Date.now() + 5 * 24 * 60 * 60 * 1000;
+  assert.strictEqual(anonSession.verify(forge(future)), null, 'issued in the future = tampered');
+  assert.ok(anonSession.verify(forge(Date.now())), 'a current one still works');
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════
+// ACTIONS — the tappable next step, chosen by the server from a closed list
+// ════════════════════════════════════════════════════════════════════════════════════════
+//
+// The model never emits a URL: letting it would put a hallucinated or injected link one bad
+// completion away from a customer.
+
+const actions = require('../lib/supportActions');
+
+test('ACTIONS: an order question sends a signed-out visitor to sign in, not to a page they cannot use', () => {
+  const out = actions.buildActions({ question: 'وين وصل طلبي؟', answer: '', signedIn: false });
+  assert.strictEqual(out[0].id, 'login');
+  const inn = actions.buildActions({ question: 'وين وصل طلبي؟', answer: '', signedIn: true });
+  assert.strictEqual(inn[0].id, 'my-order');
+});
+
+test('ACTIONS: the rep becomes a WhatsApp tap, and an Iraqi 07 number is converted correctly', () => {
+  const out = actions.buildActions({
+    question: 'منو ممثل جامعتي وشنو رقمه؟',
+    answer: '',
+    profile: { repName: 'مهدي علي', repPhone: '07813830309' },
+    signedIn: true,
+  });
+  const rep = out.find((a) => a.id === 'rep');
+  assert.ok(rep, 'a known rep must be tappable, not digits to copy off a phone screen');
+  assert.ok(rep.href.startsWith('https://wa.me/9647813830309'), `bad wa link: ${rep.href}`);
+  assert.ok(rep.label.includes('مهدي علي'));
+});
+
+test('ACTIONS: a malformed rep phone yields NO chip rather than a link to nowhere', () => {
+  for (const bad of ['123', '', null, 'لا يوجد', '07']) {
+    const out = actions.buildActions({
+      question: 'منو ممثل جامعتي؟', answer: '', profile: { repPhone: bad }, signedIn: true,
+    });
+    assert.ok(!out.some((a) => a.id === 'rep'), `built a chip from ${JSON.stringify(bad)}`);
+  }
+});
+
+test('ACTIONS: a blocked answer leads with the way to reach a human', () => {
+  const out = actions.buildActions({ question: 'أي سؤال', answer: '', guardTripped: true });
+  assert.strictEqual(out[0].id, 'contact');
+});
+
+test('ACTIONS: an answer never dead-ends — there is always somewhere to tap', () => {
+  // This is the shop's marketing surface; a dead end is a lost customer.
+  for (const q of ['هلو', 'شنو رايك بالطقس', 'اي شي', 'وين انتوا؟', 'شكد سعر الروب؟']) {
+    assert.ok(actions.buildActions({ question: q, answer: '' }).length > 0, `no action for: ${q}`);
+  }
+});
+
+test('ACTIONS: at most three chips — a wall of buttons is a menu, not a conversation', () => {
+  const out = actions.buildActions({
+    question: 'وين وصل طلبي وشكد سعره ووين موقعكم؟',
+    answer: 'ما عندي علم',
+    profile: { repName: 'مهدي', repPhone: '07813830309' },
+    signedIn: true,
+  });
+  assert.ok(out.length <= 3, `${out.length} chips`);
+});
+
+test('ACTIONS: escalation falls back to Instagram when no shop WhatsApp is configured', () => {
+  const prev = process.env.SHOP_WHATSAPP;
+  delete process.env.SHOP_WHATSAPP;
+  assert.ok(actions.shopContact().href.includes('instagram'), 'must never be a dead button');
+  process.env.SHOP_WHATSAPP = '07723078729';
+  assert.ok(actions.shopContact().href.startsWith('https://wa.me/9647723078729'));
+  if (prev === undefined) delete process.env.SHOP_WHATSAPP; else process.env.SHOP_WHATSAPP = prev;
+});
+
+test('EMOTION: the face matches the content, not just the request lifecycle', () => {
+  assert.strictEqual(actions.pickEmotion({ question: 'سلام عليكم', answer: '' }), 'love');
+  assert.strictEqual(actions.pickEmotion({ question: 'شكراً الك', answer: '' }), 'love');
+  assert.strictEqual(actions.pickEmotion({ question: 'شكد سعر الروب؟', answer: '' }), 'excited');
+  assert.strictEqual(actions.pickEmotion({ question: 'x', answer: '', guardTripped: true }), 'thinking');
+  assert.strictEqual(actions.pickEmotion({ question: 'x', answer: 'ما عندي علم' }), 'thinking');
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════
+// NEVER DARK — answers that need no model at all
+// ════════════════════════════════════════════════════════════════════════════════════════
+
+const fallback = require('../lib/supportFallback');
+
+test('FALLBACK: the shop\'s most common questions are answerable with the model unreachable', () => {
+  for (const [q, id] of [
+    ['شكد سعر الروب؟', 'price'],
+    ['عندكم توصيل؟', 'delivery'],
+    ['اكدر ادفع بالفيزا؟', 'payment'],
+    ['وين موقعكم؟', 'location'],
+    ['شلون أطلب وشاح؟', 'howto'],
+  ]) {
+    const a = fallback.answerFor({ question: q, priceBlock: FACTS });
+    assert.strictEqual(a?.id, id, `no fallback for: ${q}`);
+  }
+});
+
+test('FALLBACK: it refuses to guess, and NEVER answers about a specific order', () => {
+  // Order status is per-customer and is the one thing worth being unavailable over —
+  // «سجّل دخولك» is not an answer to «وين وصل طلبي؟».
+  assert.strictEqual(fallback.answerFor({ question: 'وين وصل طلبي؟', priceBlock: FACTS }), null);
+  assert.strictEqual(fallback.answerFor({ question: 'شنو رايك بالجو اليوم', priceBlock: FACTS }), null);
+});
+
+test('FALLBACK: every canned answer passes the guard it will be served alongside', () => {
+  // A fallback that trips the guard would be a self-inflicted outage.
+  for (const q of ['شكد سعر الروب؟', 'عندكم توصيل؟', 'اكدر ادفع بالفيزا؟', 'وين موقعكم؟', 'شلون أطلب وشاح؟']) {
+    const a = fallback.answerFor({ question: q, priceBlock: FACTS });
+    const v = guard.inspect(a.text, FACTS);
+    assert.strictEqual(v.ok, true, `fallback "${a.id}" fails the guard: ${v.reason} ${v.detail}`);
+  }
 });

@@ -1,5 +1,55 @@
 # Progress
 
+## 2026-08-12 (b) — the assistant becomes the marketing surface: quotas out, guard in
+
+Owner reframe: «لولو» is the shop's **main marketing content**, and individual users should not
+be limited — attackers should. Both changes point the same way, because the quota that existed
+was never protecting anything.
+
+- **The per-person daily quota is gone, and that is a security improvement.** It was keyed on a
+  `sessionKey` the CLIENT generated — measured, 25 requests with 25 fresh keys were all granted.
+  It bounded honest students and nobody else. Replaced by: a **server-signed identity**
+  (`lib/anonSession.js`, HMAC on `JWT_SECRET`, zero new deps — the CI `npm audit` gate stays
+  clean), a **burst throttle** (10/min · 40/5min) that asks "are you a person" instead of "how
+  much have you had today", free repetition through the response cache, and the daily USD
+  ceiling. **Verified live: the 11th message in a minute is refused, with a countdown.**
+- **That signed identity closed a real read, not just a bypass.** `recentTurns` keys anonymous
+  history on the session id, so supplying somebody else's loaded THEIR last two hours into your
+  prompt — «شنو سألتك قبل شوية؟» read it back out. Unguessable in practice, but it was an
+  unauthenticated read keyed on an unauthenticated identifier.
+- **Ceiling $1 → $3, with a warning at $1** that writes an admin `notifications` row — the push
+  outbox turns it into a phone push with no new plumbing. Measured cost is **$0.0001/message**,
+  so $3 is ~30,000 messages/day: an abuse backstop, never a budget.
+- **`lib/answerGuard.js` — the real answer to prompt injection.** It screens the ANSWER, not the
+  question: no IQD figure absent from the price book we handed the model, no delivery promise, no
+  English, negation-aware. It cannot be phrased around the way an inbound filter can. Four live
+  injection attempts held.
+  **It found a real defect on its first harness run — one the harness was scoring as PASSING:**
+  «آخر موعد لتقديم الطلبات هو 2026-05-26، **وهذا موعد تسليم الطلب**», the model stating flatly
+  that the order cutoff IS the delivery date. Every pattern in the guard and the harness expected
+  a future-tense promise; this was a present-tense equation. Now `DEADLINE_AS_DELIVERY`, and
+  **the harness calls the runtime guard** so they can never disagree again.
+- **Never dark** (`lib/supportFallback.js`): prices, delivery, payment, location and how-to-order
+  are answered from the price book with **no model at all** when it is unreachable or the budget
+  is spent. Verified by pointing `AI_CHAT_MODEL` at a bogus model — 4 of 5 questions still
+  answered, the 5th got a WhatsApp escalation instead of a dead end.
+- **Attribution** (migration 079): a **salted** hash of the caller's address per ledger row.
+  Removing the quota is only safe if a flood is visible afterwards; a raw IP is personal data and
+  an unsalted hash of one is trivially reversible.
+- **UX:** 7 expressions cut from the owner's brand sheet and **registered on the face** so the
+  head does not resize between them · a server-chosen emotion per answer · server-chosen action
+  chips from a closed list (the model never emits a URL) · word-by-word reveal, deliberately not
+  streaming, because streaming publishes text before the guard can veto it · thread persists 2h,
+  matching the server's window · **the dead retry button is fixed** (a throttle counts down
+  instead of offering a retry that cannot work) · the input no longer disables while busy, which
+  was dismissing the Android keyboard on every message.
+- Also: the `wa.me/964` button on `/sizes` was a country code with no number — a dead button,
+  now the real one. Admin-written product and package names now go through `safeField` before
+  entering the system prompt, like customer-written ones already did.
+- **243/243 unit tests** (was 215) · 44/44 scenarios · tsc + lint + `next build` clean.
+  ⚠️ **A real phone-viewport pass is still outstanding** — Chrome refused to resize the maximized
+  ultrawide window, so every browser check ran at 3440px.
+
 ## 2026-08-12 — AI assistant hardened: caps made atomic, spend guard fail-safe, history un-forgeable
 
 Three defects found by re-reading the 2026-08-10 (b) code before shipping it. All were silent

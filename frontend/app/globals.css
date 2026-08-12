@@ -1319,3 +1319,41 @@ html {
   from { clip-path: inset(0 0 100% 0); }
   to   { clip-path: inset(0 0 0 0); }
 }
+
+/* ── «لولو» the assistant mascot ────────────────────────────────────────────
+   The face idles with a slow float and pops whenever the expression changes,
+   which is the whole "it reacted to me" feeling. Both are transform-only so
+   they stay on the compositor — these run on low-end Androids on the home
+   page, where a layout-animating mascot would cost frames on every scroll. */
+.lolo-float {
+  animation: lolo-float 3.6s ease-in-out infinite;
+}
+@keyframes lolo-float {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50%      { transform: translateY(-7px) rotate(-1.5deg); }
+}
+
+/* Plays once per mount. LoloFace remounts the <img> on every expression
+   change (keyed on `emotion`), so the pop fires exactly when the face does. */
+.lolo-pop {
+  animation: lolo-pop 420ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+@keyframes lolo-pop {
+  0%   { transform: scale(0.72) rotate(-8deg); opacity: 0; }
+  60%  { transform: scale(1.06) rotate(2deg);  opacity: 1; }
+  100% { transform: scale(1) rotate(0deg);     opacity: 1; }
+}
+
+/* A float and a pop cannot both own `transform`, so the floating instance
+   nests them: the pop plays, then the float takes over on the same element. */
+.lolo-float.lolo-pop {
+  animation:
+    lolo-pop 420ms cubic-bezier(0.34, 1.56, 0.64, 1) both,
+    lolo-float 3.6s ease-in-out 420ms infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lolo-float,
+  .lolo-pop,
+  .lolo-float.lolo-pop { animation: none; }
+}

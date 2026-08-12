@@ -1360,4 +1360,14 @@ CREATE INDEX IF NOT EXISTS idx_ai_chat_session_created ON ai_chat_messages(sessi
   WHERE session_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_ai_chat_created         ON ai_chat_messages(created_at DESC);
 
+-- 079: attribution. The per-person daily quota was removed 2026-08-12 (it was keyed on a
+-- client-chosen identity, so it bounded only honest students); abuse is now bounded by a
+-- server-signed identity, a burst throttle and the daily USD ceiling. That only works if a
+-- flood is visible afterwards, so each row carries a SALTED HASH of the caller's address —
+-- enough to say "these rows are one client", never enough to say which. Full reasoning in
+-- db/migrations/079_ai_chat_ip_hash.sql.
+ALTER TABLE ai_chat_messages ADD COLUMN IF NOT EXISTS ip_hash TEXT;
+CREATE INDEX IF NOT EXISTS idx_ai_chat_ip_created
+  ON ai_chat_messages(ip_hash, created_at DESC) WHERE ip_hash IS NOT NULL;
+
 COMMIT;

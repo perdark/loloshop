@@ -31,34 +31,56 @@
 //   · the lock is held only for the count+insert, never across the network call.
 
 const { query, tx } = require('./db');
+const memoCache = require('./memoCache');
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const DEFAULT_MODEL = 'google/gemini-2.5-flash-lite';
 
-// Cost caps (owner decision 2026-08-10: "tight — cache + hard caps"). All overridable by env
-// so the owner can loosen them without a deploy; the defaults are the safe end.
+// Cost caps. Owner decision 2026-08-12, revising the 2026-08-10 "tight" stance against the
+// measured price: 16 real conversations cost $0.00164, i.e. ~$0.0001 per message. The old
+// $1/day ceiling was therefore ~9,700 messages/day for a shop with 1,141 registered students
+// — never a budget, only an abuse backstop. What actually bit was the per-person counts, and
+// those are the ones a real student feels. So the ceiling went up and the counts went up with
+// it. All overridable by env so the owner can move them without a deploy.
 const CAPS = {
-  // Per signed-in user per rolling 24h. A real student asks 3–5 questions; 30 is generous
-  // and still bounds a scripted abuser to ~$0.0012/day.
-  perUserPerDay: Number(process.env.AI_CHAT_USER_DAILY_MAX || 30),
-  // Per anonymous visitor (session key) per rolling 24h. Lower — an anon caller is cheaper
-  // to fake. Iraqi carriers CGNAT, so this is keyed on a client session id, NOT on IP:
-  // keying on IP would let one cohort's shared egress address exhaust everyone's allowance
-  // (the same trap documented for joinLimit in HANDOFF.md).
-  perSessionPerDay: Number(process.env.AI_CHAT_ANON_DAILY_MAX || 10),
+  // ── NO PER-PERSON DAILY QUOTA. Owner decision 2026-08-12, and it makes the system safer,
+  // not laxer. The old 30/day and 10/day counts were keyed on an identity the CLIENT chose,
+  // so anyone willing to rotate it was never bounded — measured: 25 requests with 25 fresh
+  // keys, all granted. A quota that only the honest obey is worse than none, because it
+  // spends its whole budget of user goodwill on people who were never the threat. The
+  // assistant is also the shop's main marketing surface now, and telling a curious customer
+  // «وصلت للحد اليومي» is the single worst sentence it could say.
+  //
+  // What bounds abuse instead, in order: an identity the SERVER signs (lib/anonSession.js),
+  // the burst throttle below, free repetition via the response cache, and the daily USD
+  // ceiling that does not care who you are.
+
+  // ── BURST THROTTLE — the quota's replacement. A quota asks "how much have you had today";
+  // this asks "are you a person". Nobody types ten questions in a minute, so a real student
+  // never meets it no matter how much they use the assistant, while a loop trips in seconds.
+  // Cache hits are excluded (they never reach here), so asking the same thing repeatedly is
+  // free and never throttled — flooding one string is pointless rather than expensive.
+  burstPerMinute: Number(process.env.AI_CHAT_BURST_PER_MIN || 10),
+  burstPer5Min: Number(process.env.AI_CHAT_BURST_PER_5MIN || 40),
   // Whole-shop ceiling per rolling 24h, in USD. The backstop that makes every other cap
   // optional: even total failure of the per-user logic cannot bill more than this per day.
-  globalUsdPerDay: Number(process.env.AI_CHAT_DAILY_USD_MAX || 1.0),
+  globalUsdPerDay: Number(process.env.AI_CHAT_DAILY_USD_MAX || 3.0),
+  // Tell the owner LONG before the wall. At ~$0.0001/message, $1 in a day is ~10,000 messages
+  // — roughly 30× a normal day, so crossing it means something is wrong (a script, a loop, a
+  // model that repriced) and the owner has two thirds of the budget left to react in. Without
+  // this the first signal is the assistant going dark. Set to 0 to switch the warning off.
+  warnUsdPerDay: Number(process.env.AI_CHAT_DAILY_USD_WARN || 1.0),
   // The slice of that ceiling ANONYMOUS traffic may consume. This is not a cost control —
   // globalUsdPerDay already bounds the bill. It is an AVAILABILITY control.
   //
-  // Measured 2026-08-12: `sessionKey` is client-supplied, so the 10/day anon cap is bypassed
-  // by generating a new one per request. The real bounds are the per-IP limiter (100/15min =
-  // 9,600 req/day/IP ≈ $0.58) and this ceiling — so ~2 IPs could exhaust the day's budget for
-  // pennies. Before this split, an exhausted budget refused EVERYONE, including signed-in
-  // students, so a stranger could silently switch the assistant off for real customers daily.
-  // With the split, anon flooding can only ever take its own slice.
-  anonUsdPerDay: Number(process.env.AI_CHAT_ANON_DAILY_USD_MAX || 0.4),
+  // Before the split an exhausted budget refused EVERYONE, signed-in students included, so a
+  // stranger could silently switch the assistant off for real customers daily. With it, anon
+  // flooding can only ever take its own slice. Sized at 40% of the ceiling: at the per-IP
+  // limiter's ceiling of 100 msgs/15min ≈ $0.041/hour, one IP now needs ~29 hours of sustained
+  // flooding to drain it — it cannot take the guest assistant down within a day. Cached
+  // answers are served before any of this (see supportChatController), so the shop's most
+  // common questions keep answering even if it ever does run out.
+  anonUsdPerDay: Number(process.env.AI_CHAT_ANON_DAILY_USD_MAX || 1.2),
   // Longest question we will forward. Input is the cheap half, but an unbounded prompt is
   // an unbounded bill — and no genuine support question is 2,000 characters.
   maxQuestionChars: Number(process.env.AI_CHAT_MAX_QUESTION_CHARS || 600),
@@ -77,11 +99,14 @@ const FALLBACK_PRICE_PER_MTOK = {
 // ceiling early (annoying, recoverable), under-estimating disables it (a bill, not a bug).
 const UNKNOWN_MODEL_PRICE = { in: 1.0, out: 3.0 };
 
-function tagged(message, status, code) {
+function tagged(message, status, code, retryAfterSec) {
   const e = new Error(message);
   e.status = status;
   e.expose = true;
   e.code = code;
+  // Only the throttle sets this. The UI uses it to say how long the wait is and to refuse to
+  // offer a retry button that cannot possibly work yet.
+  if (retryAfterSec) e.retryAfter = retryAfterSec;
   return e;
 }
 
@@ -115,7 +140,7 @@ function estimateCostUsd({ reportedCost, model, promptTokens, completionTokens }
  * Split out from the SQL so the boundaries are testable without a database.
  * Returns a tagged error to throw/return, or null when the call is allowed.
  */
-function evaluateCaps({ userToday, sessionToday, spendToday, anonSpendToday }, { userId, caps = CAPS } = {}) {
+function evaluateCaps({ burstMinute, burstWindow, spendToday, anonSpendToday }, { userId, caps = CAPS } = {}) {
   if (Number(spendToday) >= caps.globalUsdPerDay) {
     // Deliberately vague to the user — the shop's daily AI budget is not their business.
     return tagged('المساعد مشغول حالياً، جرّب بعد شوية', 503, 'ERR_AI_BUDGET');
@@ -125,13 +150,61 @@ function evaluateCaps({ userToday, sessionToday, spendToday, anonSpendToday }, {
   if (!userId && Number(anonSpendToday || 0) >= caps.anonUsdPerDay) {
     return tagged('المساعد مشغول حالياً، سجّل دخولك حتى تكدر تسأل', 503, 'ERR_AI_ANON_BUDGET');
   }
-  if (userId && Number(userToday) >= caps.perUserPerDay) {
-    return tagged('وصلت للحد اليومي من الأسئلة، جرّب باچر', 429, 'ERR_AI_USER_LIMIT');
+  // Burst, both windows. The message is friendly and says the wait is SHORT on purpose: a
+  // real person who somehow trips this is mid-conversation, and «جرّب باچر» would end it.
+  if (Number(burstMinute) >= caps.burstPerMinute) {
+    return tagged('شوية شوية 😅 انطيني دقيقة وارجع اسألني', 429, 'ERR_AI_TOO_FAST', 60);
   }
-  if (!userId && Number(sessionToday) >= caps.perSessionPerDay) {
-    return tagged('وصلت للحد اليومي من الأسئلة، سجّل دخولك حتى تسأل أكثر', 429, 'ERR_AI_ANON_LIMIT');
+  if (Number(burstWindow) >= caps.burstPer5Min) {
+    return tagged('أسئلتك سريعة كلش! استريح خمس دقائق وارجعلي', 429, 'ERR_AI_TOO_FAST', 300);
   }
   return null;
+}
+
+/**
+ * Tell the owner the day's AI spend crossed the warning line, once per 24h.
+ *
+ * The wall is $3; this fires at $1, which at the measured ~$0.0001/message is ~10,000
+ * messages — roughly thirty times a normal day. So it is not a "getting busy" notice, it is
+ * "something is wrong and you still have two thirds of the budget to react in". Without it
+ * the first thing the owner learns is that the assistant went dark.
+ *
+ * Writing a `notifications` row is the whole delivery mechanism: the push outbox drains
+ * pending rows within its 15-minute freshness window (lib/pushOutbox.js), so this reaches the
+ * owner's phone without this file knowing anything about FCM or APNs.
+ *
+ * Fire-and-forget, and never inside reserve()'s transaction: a warning that failed must not
+ * roll back a student's answer, and it must not run under the advisory lock.
+ */
+const WARN_MEMO_KEY = 'ai:spend-warned';
+async function maybeWarnSpend(spendToday, caps = CAPS) {
+  const spent = Number(spendToday || 0);
+  if (!caps.warnUsdPerDay || spent < caps.warnUsdPerDay) return;
+  // In-process guard first, so a busy day does not run the dedupe query on every message.
+  if (memoCache.get(WARN_MEMO_KEY)) return;
+
+  try {
+    // NOT EXISTS makes the once-per-24h rule survive a restart, which the memo cache cannot.
+    const { rowCount } = await query(
+      `INSERT INTO notifications (user_id, type, title_ar, body_ar, link)
+       SELECT u.id, 'ai_budget_warning', $1, $2, '/admin'
+         FROM users u
+        WHERE u.role = 'admin' AND u.deleted_at IS NULL
+          AND NOT EXISTS (
+                SELECT 1 FROM notifications
+                 WHERE type = 'ai_budget_warning'
+                   AND created_at > NOW() - INTERVAL '24 hours')`,
+      [
+        'تنبيه: كلفة المساعد الذكي',
+        `صرف المساعد ${spent.toFixed(2)}$ خلال آخر 24 ساعة، والحد الأقصى ${caps.globalUsdPerDay}$. `
+          + 'راجع الاستهلاك — هذا أعلى بكثير من يوم طبيعي.',
+      ]
+    );
+    if (rowCount > 0) console.warn(`aiChat: DAILY SPEND WARNING — $${spent.toFixed(4)} in 24h`);
+    memoCache.set(WARN_MEMO_KEY, true, 60 * 60 * 1000);
+  } catch (e) {
+    console.error('aiChat spend warning failed:', e.message);
+  }
 }
 
 /**
@@ -141,39 +214,51 @@ function evaluateCaps({ userToday, sessionToday, spendToday, anonSpendToday }, {
  * is hit. The advisory lock serialises callers that share an allowance, so twenty parallel
  * requests from one student consume twenty slots, not one.
  */
-async function reserve({ userId, sessionKey, surface, question }) {
+async function reserve({ userId, sessionKey, surface, question, ipHash = null }) {
   // One allowance per identity: a signed-in user is keyed on their id, an anonymous visitor on
   // their session key. Different callers hash to different locks and never block each other.
   const lockKey = userId ? `ai:u:${userId}` : `ai:s:${sessionKey || 'none'}`;
+  let spendToday = 0;
 
-  return tx(async (client) => {
+  const claim = await tx(async (client) => {
     // Transaction-scoped: released at COMMIT/ROLLBACK, so it cannot outlive this block, and
     // it is safe under PgBouncer transaction pooling (unlike a session-scoped lock).
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1)::bigint)', [lockKey]);
 
-    // `model <> 'cache'` excludes answers served from the response cache. The caps exist to
-    // bound SPEND, and a cache hit costs nothing — counting one against a student's 10/day
-    // would make the cache actively worse for the person it is supposed to help. Pending rows
-    // (model IS NULL, reserved but not yet settled) must still count, hence the COALESCE.
+    // `model <> 'cache'` excludes answers served from the response cache. A cache hit costs
+    // nothing, so counting one would make the cache actively worse for the person it exists to
+    // help — and it is what makes REPEATING a question free rather than throttled, so flooding
+    // one string is pointless instead of expensive. Pending rows (model IS NULL, reserved but
+    // not yet settled) must still count, hence the COALESCE.
+    //
+    // One pass over the 24h window serves both jobs: the burst windows are FILTERs over the
+    // same rows the spend totals come from, so the throttle costs no extra query and no extra
+    // index. `mine` is repeated rather than joined because a signed-in caller is keyed on
+    // their user id and an anonymous one on their signed session id — never both.
+    const mine = `(($1::uuid IS NOT NULL AND user_id = $1)
+                OR ($1::uuid IS NULL AND user_id IS NULL AND $2::text IS NOT NULL
+                    AND session_key = $2))`;
     const { rows } = await client.query(
       `SELECT
-         COUNT(*) FILTER (WHERE user_id = $1 AND $1 IS NOT NULL
-                            AND COALESCE(model, '') <> 'cache')          AS user_today,
-         COUNT(*) FILTER (WHERE session_key = $2 AND $2 IS NOT NULL
-                            AND user_id IS NULL
-                            AND COALESCE(model, '') <> 'cache')          AS session_today,
-         COALESCE(SUM(cost_usd), 0)                                      AS spend_today,
-         COALESCE(SUM(cost_usd) FILTER (WHERE user_id IS NULL), 0)        AS anon_spend_today
+         COUNT(*) FILTER (WHERE ${mine}
+                            AND COALESCE(model, '') <> 'cache'
+                            AND created_at > NOW() - INTERVAL '1 minute')   AS burst_minute,
+         COUNT(*) FILTER (WHERE ${mine}
+                            AND COALESCE(model, '') <> 'cache'
+                            AND created_at > NOW() - INTERVAL '5 minutes')  AS burst_window,
+         COALESCE(SUM(cost_usd), 0)                                         AS spend_today,
+         COALESCE(SUM(cost_usd) FILTER (WHERE user_id IS NULL), 0)          AS anon_spend_today
        FROM ai_chat_messages
        WHERE created_at > NOW() - INTERVAL '24 hours'`,
       [userId || null, sessionKey || null]
     );
     const r = rows[0] || {};
+    spendToday = Number(r.spend_today || 0);
 
     const capError = evaluateCaps(
       {
-        userToday: r.user_today,
-        sessionToday: r.session_today,
+        burstMinute: r.burst_minute,
+        burstWindow: r.burst_window,
         spendToday: r.spend_today,
         anonSpendToday: r.anon_spend_today,
       },
@@ -184,13 +269,18 @@ async function reserve({ userId, sessionKey, surface, question }) {
     // The row exists from here on. If the request dies before settle(), it stays with a NULL
     // answer and still counts — which is the intended behaviour, not a leak.
     const { rows: ins } = await client.query(
-      `INSERT INTO ai_chat_messages (user_id, session_key, surface, question)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO ai_chat_messages (user_id, session_key, surface, question, ip_hash)
+       VALUES ($1, $2, $3, $4, $5)
        RETURNING id`,
-      [userId || null, sessionKey || null, surface, String(question).slice(0, 2000)]
+      [userId || null, sessionKey || null, surface, String(question).slice(0, 2000), ipHash]
     );
     return { id: ins[0].id };
   });
+
+  // After COMMIT, so a warning failure cannot roll back the reservation and no extra work
+  // happens under the advisory lock. Not awaited — the student is waiting on an answer.
+  maybeWarnSpend(spendToday).catch(() => {});
+  return claim;
 }
 
 /**
@@ -237,18 +327,19 @@ async function settle(id, { answer, intent, result, error } = {}) {
  *
  * Fire-and-forget: a logging failure must never fail an answer we already have in hand.
  */
-async function logCached({ userId, sessionKey, surface, question, answer }) {
+async function logCached({ userId, sessionKey, surface, question, answer, ipHash = null }) {
   try {
     await query(
       `INSERT INTO ai_chat_messages
-         (user_id, session_key, surface, question, answer, model, cost_usd)
-       VALUES ($1, $2, $3, $4, $5, 'cache', 0)`,
+         (user_id, session_key, surface, question, answer, model, cost_usd, ip_hash)
+       VALUES ($1, $2, $3, $4, $5, 'cache', 0, $6)`,
       [
         userId || null,
         sessionKey || null,
         surface,
         String(question).slice(0, 2000),
         String(answer).slice(0, 4000),
+        ipHash,
       ]
     );
   } catch (e) {
@@ -374,5 +465,7 @@ module.exports = {
   CAPS,
   DEFAULT_MODEL,
   // Pure helpers, exported for test/aiChat.test.js — no database, no network.
-  _internals: { evaluateCaps, estimateCostUsd, FALLBACK_PRICE_PER_MTOK, UNKNOWN_MODEL_PRICE },
+  _internals: {
+    evaluateCaps, estimateCostUsd, FALLBACK_PRICE_PER_MTOK, UNKNOWN_MODEL_PRICE, WARN_MEMO_KEY,
+  },
 };
