@@ -511,6 +511,33 @@ test('GUARD: the safe reply never blames the assistant or hints anything was blo
   assert.ok(/تواصل|فريق/.test(guard.SAFE_ANSWER), 'it must hand the customer to a human');
 });
 
+test('GUARD: «we deliver to X» stated flatly is blocked; denying it is not', () => {
+  // Produced by a real scenario run 2026-08-12: «والله ما نوصل لكربلاء» is the CORRECT answer
+  // and the harness flagged it, while «نوصل لكربلاء» — present tense, no promise verb — would
+  // have passed the guard entirely. Both halves matter.
+  assert.strictEqual(guard.inspect('نوصل لكربلاء بيوم واحد.', FACTS).reason, 'DELIVERY_OFFERED');
+  assert.strictEqual(guard.inspect('أكيد نوصلك للبصرة.', FACTS).reason, 'DELIVERY_OFFERED');
+  assert.strictEqual(guard.inspect('والله ما نوصل لكربلاء ولا لأي محافظة.', FACTS).ok, true);
+  // The customer travelling to the shop is not the shop delivering.
+  assert.strictEqual(guard.inspect('تكدر توصل للمحل ببغداد بأي وقت.', FACTS).ok, true);
+});
+
+test('GUARD: OFFERING SOMETHING FREE is blocked — the screenshot an attacker wants', () => {
+  // No number is involved, so the price rule is blind to it. This is what the forged-history
+  // attack was built to produce: the shop's own assistant promising a free robe.
+  assert.strictEqual(guard.inspect('وشاحك مجاني هدية منّا.', FACTS).reason, 'OFFERED_FREE');
+  assert.strictEqual(guard.inspect('راح أنطيك الروب ببلاش.', FACTS).reason, 'OFFERED_FREE');
+  // ...but refusing must pass, and refusing is what the model actually writes.
+  assert.strictEqual(guard.inspect('ما أكدر أقدم لك وشاح مجاني، بس أكيد تدلل.', FACTS).ok, true);
+  assert.strictEqual(guard.inspect('ماكو شي ببلاش، الأسعار ثابتة.', FACTS).ok, true);
+});
+
+test('GUARD: negation is CLAUSE-scoped — a denial cannot shield the next sentence', () => {
+  // The trap in a naive fix: widen the look-behind until «ما أكدر أقدم لك وشاح مجاني» passes,
+  // and «ما عدنا توصيل. وشاحك مجاني.» starts passing too.
+  assert.strictEqual(guard.inspect('ما عدنا توصيل. وشاحك مجاني.', FACTS).reason, 'OFFERED_FREE');
+});
+
 // ════════════════════════════════════════════════════════════════════════════════════════
 // SIGNED ANONYMOUS SESSIONS
 // ════════════════════════════════════════════════════════════════════════════════════════
@@ -613,9 +640,40 @@ test('ACTIONS: a blocked answer leads with the way to reach a human', () => {
   assert.strictEqual(out[0].id, 'contact');
 });
 
-test('ACTIONS: an answer never dead-ends — there is always somewhere to tap', () => {
-  // This is the shop's marketing surface; a dead end is a lost customer.
-  for (const q of ['هلو', 'شنو رايك بالطقس', 'اي شي', 'وين انتوا؟', 'شكد سعر الروب؟']) {
+test('ACTIONS: SOCIAL TALK GETS NO CHIPS — answering a feeling with a button is crass', () => {
+  // Owner phone test, 2026-08-12: every reply in the conversation carried «شوف القطع»,
+  // including the ones to «اني معجبة ب شغلكم», «تعرف اني حزينة اليوم» and «احسك ماتحبني».
+  // The never-dead-end default is right for a customer with a question and wrong for a person
+  // being nice to you or telling you they are sad.
+  for (const q of [
+    'شلونك',
+    'اني معجبة ب شغلكم',
+    'تعرف اني حزينة اليوم',
+    'احسك ماتحبني',
+    'شكراً حبيبتي',
+    'السلام عليكم',
+  ]) {
+    assert.deepStrictEqual(actions.buildActions({ question: q, answer: '' }), [], `chips on: ${q}`);
+  }
+});
+
+test('ACTIONS: social still yields to a blocked answer — reaching a human always wins', () => {
+  const out = actions.buildActions({ question: 'شكراً', answer: '', guardTripped: true });
+  assert.strictEqual(out[0].id, 'contact');
+});
+
+test('EMOTION: a compliment gets the heart eyes, sadness does not', () => {
+  assert.strictEqual(actions.pickEmotion({ question: 'اني معجبة ب شغلكم', answer: '' }), 'love');
+  assert.strictEqual(actions.pickEmotion({ question: 'شلونك', answer: '' }), 'love');
+  assert.strictEqual(actions.pickEmotion({ question: 'تعرف اني حزينة اليوم', answer: '' }), 'thinking');
+  assert.strictEqual(actions.pickEmotion({ question: 'احسك ماتحبني', answer: '' }), 'thinking');
+});
+
+test('ACTIONS: a real QUESTION never dead-ends — there is always somewhere to tap', () => {
+  // This is the shop's marketing surface; a dead end is a lost customer. Social messages are
+  // the deliberate exception and are covered by their own test above — «هلو» used to be in this
+  // list, and that is precisely the behaviour the owner flagged from a phone test.
+  for (const q of ['شنو رايك بالطقس', 'اي شي', 'وين انتوا؟', 'شكد سعر الروب؟', 'شنو عندكم موديلات']) {
     assert.ok(actions.buildActions({ question: q, answer: '' }).length > 0, `no action for: ${q}`);
   }
 });
@@ -680,4 +738,17 @@ test('FALLBACK: every canned answer passes the guard it will be served alongside
     const v = guard.inspect(a.text, FACTS);
     assert.strictEqual(v.ok, true, `fallback "${a.id}" fails the guard: ${v.reason} ${v.detail}`);
   }
+});
+
+test('a dual-gender hedge is collapsed — the clearest tell that a form letter wrote it', () => {
+  // Arabic forces a gender choice on almost every address, and an anonymous visitor gives the
+  // model nothing to choose from, so it hedges: «هلا بيك حبيبي/حبيبتي». PERSONA forbids it and
+  // the model mostly obeys — "mostly" is visible on the shop's main marketing surface.
+  assert.strictEqual(support.stripGenderHedge('هلا بيك حبيبي/حبيبتي، شلونك؟'), 'هلا بيك، شلونك؟');
+  assert.strictEqual(support.stripGenderHedge('تدلل/تدللين إذا عندك سؤال.'), 'إذا عندك سؤال.');
+  // A real gendered address the model DID choose must survive untouched.
+  assert.strictEqual(support.stripGenderHedge('شكراً حبيبتي، ذوقج حلو.'), 'شكراً حبيبتي، ذوقج حلو.');
+  // And it is an explicit pair list, not a general X/Y rule, so real slashes are safe.
+  assert.strictEqual(support.stripGenderHedge('عدنا شال/وشاح بأسعار مختلفة.'), 'عدنا شال/وشاح بأسعار مختلفة.');
+  assert.strictEqual(support.stripGenderHedge('آخر موعد 2026/05/26.'), 'آخر موعد 2026/05/26.');
 });

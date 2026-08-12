@@ -49,14 +49,63 @@ const DELIVERY_RE =
 // «وهو مو موعد تسليم». So what is blocked is the phrase UNNEGATED — the difference between
 // denying the claim and making it.
 const DELIVERY_DATE_CLAIM_RE = /موعد\s*(?:ال)?تسليم/g;
-const NEGATOR_RE = /(?:مو|مب|مش|ليس|ماكو|مو\s*هو)\s*$/;
+
+// Arabic negators, as whole words only — as bare substrings `ما` and `لا` appear inside half
+// the vocabulary.
+const NEGATOR_RE = /(?:^|\s)(?:ما|مو|مب|مش|ليس|ماكو|لا|بدون|بلا)(?:\s|$)/;
+const CLAUSE_BREAK_RE = /[.،,؛;!؟?\n]/g;
+
+/**
+ * True when the phrase at `index` is being DENIED rather than asserted.
+ *
+ * Scoped to the CURRENT CLAUSE, and that is the whole design. A first attempt looked only at
+ * the few characters immediately before the phrase, which is where Arabic negation usually
+ * sits — and it misfired on both of the real answers it was written for, because the negator
+ * opens the clause instead: «ما أكدر أقدم لك وشاح مجاني» and «ماكو شي ببلاش». Widening the
+ * window alone does not help, since a negation in the PREVIOUS sentence is not a denial of this
+ * one — «ما عدنا توصيل. وشاحك مجاني» must still be blocked. So the window is the clause.
+ */
+function isNegated(text, index) {
+  const before = text.slice(0, index);
+  let lastBreak = -1;
+  for (const m of before.matchAll(CLAUSE_BREAK_RE)) lastBreak = m.index;
+  return NEGATOR_RE.test(before.slice(lastBreak + 1));
+}
 
 function claimsDeadlineIsDelivery(text) {
   for (const m of text.matchAll(DELIVERY_DATE_CLAIM_RE)) {
-    // Look at the short run of words immediately before the phrase. A negation lives right
-    // next to it in Arabic («مو موعد تسليم»); anything further away belongs to another clause.
-    const before = text.slice(Math.max(0, m.index - 14), m.index);
-    if (!NEGATOR_RE.test(before)) return m[0];
+    if (!isNegated(text, m.index)) return m[0];
+  }
+  return null;
+}
+
+// ── "WE DELIVER", STATED FLATLY ────────────────────────────────────────────────────────────
+// The patterns above are all future-tense promises, and a scenario run on 2026-08-12 produced
+// the present-tense version instead: «نوصل لكربلاء». First person plural is the load-bearing
+// part — that is the SHOP saying it delivers. `توصل`/`يوصل` are deliberately excluded here
+// because they are just as likely to be the customer arriving («تكدر توصل للمحل»), and the
+// future-tense patterns already cover the promise forms of those.
+const WE_DELIVER_RE = /(?:نوصّ?ل|أوصّ?ل)(?:ك|كم|ها|ه)?\s*(?:ل|إل|الى|إلى|لل)/g;
+
+function affirmsDelivery(text) {
+  for (const m of text.matchAll(WE_DELIVER_RE)) {
+    // «ما نوصل لكربلاء» is the CORRECT answer and must pass; «نوصل لكربلاء» must not.
+    if (!isNegated(text, m.index)) return m[0];
+  }
+  return null;
+}
+
+// ── SOMETHING FOR FREE ─────────────────────────────────────────────────────────────────────
+// The single most valuable thing to talk the assistant into saying, and the one the forged-
+// history attack was built to produce: a screenshot of the shop's own assistant promising a
+// free robe. No number is involved, so the price rule cannot see it.
+// Negation-aware, because «ماكو شي ببلاش» and «ما أكدر أنطيك وشاح مجاني» are correct answers —
+// and the second is what the model actually says when someone tries.
+const FREE_RE = /(?:مجان(?:ي|ية|اً|ا)|ببلاش|بلاش)/g;
+
+function offersSomethingFree(text) {
+  for (const m of text.matchAll(FREE_RE)) {
+    if (!isNegated(text, m.index)) return m[0];
   }
   return null;
 }
@@ -127,7 +176,16 @@ function inspect(answer, factsText) {
   const claim = claimsDeadlineIsDelivery(text);
   if (claim) return { ok: false, reason: 'DEADLINE_AS_DELIVERY', detail: claim };
 
-  // 3. ENGLISH. Cheap, and it catches a whole class of "the model stopped following the system
+  //    ...and the flat first-person «we deliver to X», which is neither a promise nor a date.
+  const delivers = affirmsDelivery(text);
+  if (delivers) return { ok: false, reason: 'DELIVERY_OFFERED', detail: delivers };
+
+  // 3. SOMETHING FOR FREE. No number, so the price rule is blind to it, and it is the exact
+  //    screenshot an attacker wants out of the shop's own assistant.
+  const free = offersSomethingFree(text);
+  if (free) return { ok: false, reason: 'OFFERED_FREE', detail: free };
+
+  // 4. ENGLISH. Cheap, and it catches a whole class of "the model stopped following the system
   //    prompt" without knowing why it stopped.
   const latin = text.replace(BRAND_RE, '').match(LATIN_RUN_RE);
   if (latin) return { ok: false, reason: 'NOT_ARABIC', detail: latin.join(' ') };

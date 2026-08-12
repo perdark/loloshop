@@ -51,6 +51,18 @@ function shopContact() {
 // Topic detection. Each list is the words Iraqi customers actually use — taken from the real
 // question log in ai_chat_messages, not invented: «شكد سعر الروب؟», «وين وصل طلبي؟»,
 // «منو ممثل جامعتي وشنو رقمه؟», «وين انتوا ؟».
+// ⚠️ `social` MUST stay first. A message that is a greeting, a thank-you, a compliment or a
+// feeling gets NO chips at all, and that check has to win before any keyword in the lists below
+// can drag it into a product topic.
+//
+// Reported by the owner from a phone test 2026-08-12: EVERY answer in the conversation carried
+// «شوف القطع», including the replies to «اني معجبة ب شغلكم», «تعرف اني حزينة اليوم» and «احسك
+// ماتحبني». The "never dead-end" default below is right for a customer with a question and
+// crass for a person being nice to you or telling you they are sad — it turns the assistant
+// into a shop window that answers grief with a link to the catalogue.
+const SOCIAL_RE =
+  /^\s*(?:هلا|هلو|اهلا|أهلا|سلام|السلام|مرحبا|مرحباً|صباح|مساء|شلونك|شلونچ|شلونكم|هاي|صديق)|شكرا|شكراً|تسلم|تسلمين|ممنون|احسنت|أحسنت|يعطيك العافية|عاشت ايدك|معجب|معجبة|حلو شغلك|حلوين|حزين|حزينة|زعلان|زعلانة|تعبان|تعبانة|مو زين|ما تحبني|ماتحبني|احبك|أحبك|اشتقت/;
+
 const TOPICS = [
   ['order', /طلب(ي|اتي)?|وين وصل|وصل طلب|حالة|حالت|وضع طلب|متابعة|اتابع|تتبع/],
   ['price', /سعر|اسعار|أسعار|شكد|شگد|بكم|كلف|كلفة|تكلفة|غالي|رخيص|خصم|عرض/],
@@ -63,6 +75,8 @@ const TOPICS = [
 
 function topicOf(question) {
   const q = String(question || '');
+  // Social wins outright — «شكراً على وشاحي» is a thank-you, not a sash enquiry.
+  if (SOCIAL_RE.test(q)) return 'social';
   for (const [name, re] of TOPICS) if (re.test(q)) return name;
   return null;
 }
@@ -85,6 +99,10 @@ function buildActions({ question, answer = '', profile = null, guardTripped = fa
   const push = (a) => {
     if (a && !out.some((x) => x.id === a.id)) out.push(a);
   };
+
+  // Someone saying hello, saying thank you, or saying they are sad is not browsing. Answering
+  // that with a button is the assistant failing to notice it is talking to a person.
+  if (topic === 'social' && !guardTripped) return [];
 
   // A tripped guard means the answer was replaced with one that says "ask a human" — so the
   // way to reach a human has to be the first thing under it, before anything else.
@@ -153,10 +171,14 @@ function buildActions({ question, answer = '', profile = null, guardTripped = fa
  */
 function pickEmotion({ question, answer = '', guardTripped = false }) {
   if (guardTripped) return 'thinking';
-  if (/^\s*(هلا|هلو|سلام|السلام|مرحبا|مرحباً|صباح|مساء|شلونك|هاي)/.test(String(question))) return 'love';
-  if (/شكرا|شكراً|تسلم|ممنون|احسنت|أحسنت|يعطيك العافية/.test(String(question))) return 'love';
-  if (DUNNO_RE.test(answer)) return 'thinking';
   const topic = topicOf(question);
+  // A compliment or a hello earns the heart eyes; being told someone is sad does not.
+  if (topic === 'social') {
+    return /حزين|حزينة|زعلان|زعلانة|تعبان|تعبانة|مو زين|ما تحبني|ماتحبني/.test(String(question))
+      ? 'thinking'
+      : 'love';
+  }
+  if (DUNNO_RE.test(answer)) return 'thinking';
   if (topic === 'price' || topic === 'product' || topic === 'design') return 'excited';
   if (topic === 'order') return 'happy';
   return 'happy';

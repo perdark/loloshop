@@ -168,6 +168,16 @@ async function bestSellers(role = 'retail') {
          JOIN products p ON p.id = o.product_id
         WHERE ${billableOrderSql('o')}
           ${audienceFilter}
+          -- Parents whose children are active are CATEGORY rows, not models — the same
+          -- exclusion priceBook makes, for a related reason and one extra one.
+          --
+          -- Without it this query ranked «قبعة» (276), «روب» (245) and «وشاح» (163) — the three
+          -- parents — above every real model, so asked «شنو أحسن قطعة عدكم؟» the bot replied
+          -- «قبعة التخرج، ثم روب التخرج، وأخيراً وشاح التخرج»: a list of the three things the
+          -- shop sells, which answers nothing. Reported by the owner from a phone test
+          -- 2026-08-12, who then guessed «وشاح فراشة» — which is exactly what this now returns.
+          -- The real ranking is قبعة ملكة (136) · وشاح الفراشة (110) · شال امريكي 10 (78).
+          AND NOT EXISTS (SELECT 1 FROM products c WHERE c.parent_id = p.id AND c.active = TRUE)
         GROUP BY p.name_ar
         ORDER BY COUNT(*) DESC
         LIMIT 3`
