@@ -1,5 +1,59 @@
 # Progress
 
+## 2026-08-13 — Track A: the admin numbers now say what they mean (bugs 9, 10, 11)
+
+Branch `fix/admin-numbers`, cut from `main`. Spec:
+`docs/superpowers/specs/2026-08-13-eleven-bugs-parallel-tracks.md`. Tracks B and C untouched —
+no file under `calligraphy*`, `staffController.js` or the rep students page was modified.
+
+**Bug 11 — «إجمالي الربح» was the REPRESENTATIVES' profit, not the shop's.** On a rep's order
+`price` is what the student paid the *rep*, `cost` is «حصة الإدارة» (the shop's actual income),
+and the generated column `profit = price − COALESCE(cost,0)` is therefore **the rep's margin** —
+the same number the rep's own page correctly labels «ربح الممثل». The dashboard summed it and
+called it «إجمالي الربح» / «صافي الربح», so on dev **2,995,000 IQD of representatives' earnings
+was being reported as shop profit** (prod: 4,240,000). «إجمالي التكلفة» was, symmetrically, the
+shop's *income*. Fixed in presentation and aggregate only — `orders.profit` is untouched, because
+wholesaler payouts and the rep account summary read it with the correct per-row meaning.
+The ledger now reads **دخل المحل = حصة الإدارة + مبيعات التجزئة**, with the reps' money in its own
+labelled block («مال الممثلين — ليس من دخل المحل»).
+
+⚠️ **Retail production cost has never been entered** (0 of 708 dev pieces, 0 of 1,467 on prod), so
+retail "profit" is revenue. The dashboard now says that outright instead of printing a net profit
+that cannot be true; «صافي الربح» is gone until a cost exists.
+
+**Bug 10 — the daily chart counted one population and earned from another.** `orders` counted
+every live bundle while `revenue` was filtered to settled ones, so anyone dividing got an average
+per order off by up to 3× (dev 16 Jul: 24 bundles against revenue from 15). Both counts now ride
+on the row and the chart plots both lines; the band between them is the pending-approval backlog.
+
+**Bug 9 — stage totals mixed workable with blocked.** Every stage row now splits into
+«قابل للعمل» / «بانتظار موافقة الممثل» / «مُرجع للطالب», summing exactly to the stage total. Dev
+بانتظار التصميم: 1,024 total = 838 workable + 167 unapproved + 19 returned — which is *why*
+/admin and the designer's queue disagreed. **The staff screens were correct and were not touched**;
+`stageFunnelSplit` mirrors `productionController.getQueue`'s own two gates.
+
+**Where the definitions live:** `billableOrderSql` moved from `adminController` into
+`lib/counts.js` — byte-identical to the same move on `ai-assistant`, so that merge auto-resolves —
+and the new money vocabulary (`shopIncomeExpr`, `repMarginExpr`, `settledMoney`) plus the
+workable/blocked predicates sit beside it with the reasoning in block comments.
+
+**Verified:** `node --test test/` **200/200** (185 before + 15 new in `test/adminNumbers.test.js`),
+`tsc --noEmit` clean, `eslint` clean, `next build` succeeds. Both endpoints driven over HTTP with a
+real admin JWT: `دخل المحل 37,877,300 = 16,681,000 + 21,196,300`, the receipt's
+`40,872,300 − 2,995,000 = 37,877,300`, and `by_wholesaler + independent_retail + orphaned` sums to
+the bottom line exactly. Every stage's three-way split reconciles, and «قابل للعمل» matches a
+hand-written mirror of the staff queue's filter.
+
+**Not verified:** the rendered page in a browser — the Claude-in-Chrome extension was not
+connected this session. Every layer below the pixels is proven; the labels/layout are not.
+
+**Also found (NOT fixed — outside Track A's files):** `db/schema.sql:305` declares
+`profit GENERATED ALWAYS AS (price - cost)` and `cost BIGINT NOT NULL DEFAULT 0`, but the live
+table has `cost` **nullable with no default** and the generated expression
+`price - COALESCE(cost, 0)`. The schema file is Track B's; the drift matters because under the
+file's version every retail row's profit would be NULL. Also `/admin/orders` still sums `o.profit`
+into a «الربح» column — the same mislabel on a screen Track A does not own.
+
 ## 2026-08-10 — iOS 1.0.4 uploaded, APNs verified against Apple, both platforms at parity
 
 Prod runs `11a7a43`, confirmed over SSH. CI green, all 3 PM2 processes online, site 200.

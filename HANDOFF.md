@@ -244,6 +244,28 @@ longer stranded on a branch · the laptop's loose credentials are filed in
 
 ## 💣 LANDMINES
 
+- **⚠️ MERGING `ai-assistant` MUST UPDATE «لولو»'s MONEY DEFINITION — or it will quote a
+  different profit than the dashboard.** Track A (`fix/admin-numbers`, 2026-08-13) changed what
+  «الربح» *means*: the admin dashboard no longer reports `SUM(orders.profit)`, because on a rep's
+  order that is **the rep's margin**, not the shop's. It now reports **دخل المحل** = حصة الإدارة
+  (rep rows) + price (retail rows), with the reps' margin shown separately as theirs. The whole
+  vocabulary lives in `backend/lib/counts.js` (`shopIncomeExpr` · `repMarginExpr` · `settledMoney`).
+  `ai-assistant`'s `lib/adminMetrics.js` still answers `revenue_summary` / `top_reps` with the OLD
+  `SUM(o.price)/SUM(o.cost)/SUM(o.profit)` triple under the words مبيعات/تكاليف/أرباح — which is
+  exactly the failure `lib/counts.js` warns about in its own header. **Rewrite those metrics onto
+  `settledMoney` in the same commit that merges the branch.**
+  · Mechanical part of that merge is already handled: Track A moved `billableOrderSql` from
+  `adminController` into `lib/counts.js` **byte-identically** to the way `ai-assistant` moved it,
+  so that hunk auto-resolves. The conflict left is `adminController.analytics`/`accounting`, and
+  it is a real one — resolve toward Track A's shape (`money`, not `totals`).
+- **⚠️ `db/schema.sql` DISAGREES WITH THE LIVE `orders` TABLE about money columns.** The file says
+  `cost BIGINT NOT NULL DEFAULT 0` and `profit GENERATED ALWAYS AS (price - cost)`; the real table
+  (measured 2026-08-13) has `cost` **nullable, no default** and `profit GENERATED ALWAYS AS
+  (price - COALESCE(cost, 0))`. Under the file's version every retail row — all of which have a
+  NULL cost, because no production cost has ever been entered — would compute `profit = NULL` and
+  drop out of every SUM. `npm run migrate` applies `schema.sql` with `CREATE TABLE IF NOT EXISTS`,
+  so it does not currently rewrite the column; **do not "fix" the drift by making the live table
+  match the file.** Owned by Track B (`db/schema.sql`), so Track A left it alone.
 - **⚠️ `notifications.push_state` DEFAULTS TO `'pending'` — the backfill is not optional.**
   Migration 077 retires every pre-existing row to `'skipped'`, and the same `UPDATE` is repeated
   in `db/schema.sql` **on purpose**, because that is the file `npm run migrate` applies to a
@@ -325,6 +347,10 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   rows (95.6%) carry a spec**, 281 carry measurements, **19 cards remain empty and all 19 are
   correct** — they are American shawls whose only order line is «السعر الأساسي», because the product
   name (*شال امريكي 10*) already IS the spec. The detector was not touched, as the board insisted.
+- **`/admin/orders` still shows the bug Track A fixed on `/admin`.** `app/admin/orders/page.tsx`
+  sums each row's `o.profit` into a «الربح» column — on a rep's order that is the *rep's* margin.
+  Track A does not own that file, so it was left alone deliberately; the fix is the same one, and
+  `AdminOrder.profit` should be presented as «ربح الممثل» there or replaced with the shop's share.
 - **Payout cards are shipped but their numbers are still wrong:** `suggested_amount` is a lifetime
   accrual that manual payouts never reduce · ابو عبدو is listed twice · مضر محمد renders −775,000 ·
   no `audit_log` row is written on card changes. *(The feature itself is committed and on

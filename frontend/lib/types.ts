@@ -75,17 +75,59 @@ export interface LoginResponse {
   device_token?: string;
 }
 
+/**
+ * The settled money split. The vocabulary — and WHY the old revenue/cost/profit triple
+ * was reporting the representatives' earnings as the shop's — is documented at length in
+ * `backend/lib/counts.js`. Read that before renaming anything here.
+ *
+ * `shopIncome === repAdminShare + retailRevenue` and
+ * `shopIncome === grossCollected − repMargin` are identities the backend computes from one
+ * set of rows, so the dashboard can print them as a reconciliation rather than a claim.
+ */
+export interface AdminMoney {
+  /** THE number — what the shop actually takes in: حصة الإدارة on a rep's order plus the
+   *  full price on a retail one. */
+  shopIncome: number;
+  /** The representatives' own margin (price − حصة الإدارة). THEIRS. Never the shop's. */
+  repMargin: number;
+  /** حصة الإدارة — the shop's cut of representative orders. */
+  repAdminShare: number;
+  /** What students handed the representatives = repAdminShare + repMargin. */
+  repGross: number;
+  /** Retail students pay the shop directly, so their price IS shop income. */
+  retailRevenue: number;
+  /** Production cost actually entered against retail orders. */
+  retailCost: number;
+  /** Every dinar students paid ANYONE — the old, misleading «إجمالي الإيرادات». */
+  grossCollected: number;
+  /** قطعة — settled retail pieces. */
+  retailPieces: number;
+  /** How many of those have a production cost entered. 0 → retail "profit" is revenue,
+   *  and the UI must say so instead of printing a profit that cannot be true. */
+  retailPiecesCosted: number;
+  /** طلب — settled bundles (checkout groups), NOT order rows. */
+  orders: number;
+}
+
 export interface AdminAnalytics {
-  totalRevenue: number;
-  totalCost: number;
-  totalProfit: number;
-  /** طلب — bundles (checkout groups), NOT order rows. */
-  orderCount: number;
+  money: AdminMoney;
   /** Pieces per stage. Kept for backward compatibility; prefer `funnel`. */
   ordersByStatus: Record<string, number>;
-  /** Stage funnel in both units. `pieces` sums to headline.pieces; `students` is a
-   *  membership count per stage and deliberately does NOT sum to headline.students. */
-  funnel: { stage: string; pieces: number; students: number }[];
+  /** Stage funnel in both units, split by whether a station can actually start the work.
+   *  `pieces` sums to headline.pieces; `students` is a membership count per stage and
+   *  deliberately does NOT sum to headline.students. `workable + awaitingRep + returned
+   *  === pieces` exactly — the admin total and the staff queue differ by the last two. */
+  funnel: {
+    stage: string;
+    pieces: number;
+    students: number;
+    /** What a station can pick up right now — matches the staff queue's own filter. */
+    workable: number;
+    /** Representative orders nobody has approved yet. Invisible to every station. */
+    awaitingRep: number;
+    /** «إرجاع للطالب» — out of production until the student resubmits. */
+    returned: number;
+  }[];
   headline: {
     pieces: number;    // قطعة
     bundles: number;   // طلب
@@ -104,7 +146,16 @@ export interface AdminAnalytics {
     total: number;
     ladder: { key: string; label: string; min: number }[];
   };
-  dailyOrders: { date: string; count: number; revenue: number }[];
+  /** `count` is every live bundle that day; `billableCount` is the subset that produced
+   *  `revenue`. They are DIFFERENT populations — dividing revenue by `count` was off by
+   *  up to 3×, which is why both now travel together and the chart plots both. */
+  dailyOrders: {
+    date: string;
+    count: number;
+    billableCount: number;
+    revenue: number;
+    shopIncome: number;
+  }[];
   topWholesalers: {
     id: string;
     name: string;
@@ -113,12 +164,7 @@ export interface AdminAnalytics {
 }
 
 export interface AdminAccounting {
-  totals: {
-    revenue: number;
-    cost: number;
-    profit: number;
-    orders: number;
-  };
+  totals: AdminMoney;
   byBatch: AccountingRow[];
   byWholesaler: AccountingRow[];
   independentRetail: AccountingRow;
@@ -127,9 +173,14 @@ export interface AdminAccounting {
 export interface AccountingRow {
   id?: string;
   label: string;
+  /** What the SHOP took from this source. These sum to totals.shopIncome across
+   *  byWholesaler + independentRetail (byBatch is an alternative view of the same
+   *  representative orders and must never be added to them). */
+  shopIncome: number;
+  /** What the representative kept on this source. Theirs. */
+  repMargin: number;
   revenue: number;
   cost: number;
-  profit: number;
   orders: number;
 }
 
