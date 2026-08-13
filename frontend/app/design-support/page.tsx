@@ -286,10 +286,15 @@ function JobDetail({
               {job.specLines.map((line, index) => (
                 <li key={index} className="flex items-start gap-3 rounded-xl border border-line bg-surface p-3">
                   {line.imageUrl && <SpecPhoto url={line.imageUrl} alt={line.label ?? "صورة"} />}
+                  {/* The generated plate is shown BESIDE the student's photo, never instead of
+                      it. Until migration 080 one column held both, so the plate replaced the
+                      photo here and the team designed from the machine's output. */}
+                  {line.plateImageUrl && <SpecPhoto url={line.plateImageUrl} alt="الخط المولّد" />}
                   <div className="min-w-0">
                     {line.label && <p className="text-xs font-semibold text-orange-ink">{line.label}</p>}
                     {line.text && <p className="mt-0.5 text-sm leading-6 text-ink">{line.text}</p>}
                     {line.imageUrl && !line.text && <p className="mt-0.5 text-xs text-ink-soft">صورة مرفقة — اضغط للتكبير</p>}
+                    {line.plateImageUrl && <p className="mt-0.5 text-xs text-ink-soft">يوجد خط مولّد لهذا السطر</p>}
                   </div>
                 </li>
               ))}

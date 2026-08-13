@@ -38,7 +38,10 @@ export interface DesignTeamSession {
 export interface DesignTeamSpecLine {
   label: string | null;
   text: string | null;
+  /** What the STUDENT sent — the reference to follow. */
   imageUrl: string | null;
+  /** The plate the calligraphy generator already made for this line (migration 080). */
+  plateImageUrl: string | null;
 }
 
 export interface DesignTeamStudent {
@@ -110,7 +113,14 @@ interface ApiJob {
     notes?: string | null;
   };
   product: { name_ar: string; type: string };
-  spec_lines: { label: string | null; text: string | null; image_url: string | null }[];
+  spec_lines: {
+    label: string | null;
+    text: string | null;
+    /** What the STUDENT sent — the reference أيادي التصميم is asked to follow. */
+    image_url: string | null;
+    /** What the calligraphy generator already produced for this line (migration 080). */
+    plate_image_url: string | null;
+  }[];
   task: {
     status: DesignTeamTaskStatus;
     note: string | null;
@@ -160,6 +170,7 @@ function mapJob(row: ApiJob): DesignTeamJob {
       label: line.label ?? null,
       text: line.text ?? null,
       imageUrl: line.image_url ?? null,
+      plateImageUrl: line.plate_image_url ?? null,
     })),
     task: {
       status: row.task?.status ?? "open",

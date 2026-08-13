@@ -21,4 +21,67 @@ async function whiteToTransparent(buffer, whiteThresh = 232) {
   return sharp(data, { raw: { width: info.width, height: info.height, channels: 4 } }).png().toBuffer();
 }
 
-module.exports = { whiteToTransparent };
+// ---------------------------------------------------------------------------------------
+// Make a regenerated plate DROP INTO THE SLOT the old one occupied.
+//
+// WHY. A batch plate is not a picture of a name — it is one horizontal band sliced out of a
+// 10-name sheet by lib/sheetCrop.js: full sheet width, height ≈ one tenth of the sheet, so the
+// letters sit small inside a wide strip. «إعادة التوليد» asked the model for a SINGLE name on
+// its own canvas and cropped that to one band, which produces a completely different shape —
+// the name fills the frame, the strip is nearly square, and the embroiderer gets one piece at
+// a visibly different scale from the nine it was generated beside. Nothing was wrong with the
+// calligraphy; the framing was wrong, and the only fix was to reroll until it looked close.
+//
+// So we don't guess a "correct" scale — we measure the plate being REPLACED and reproduce it:
+// same canvas dimensions, same ink height. The reference is the file that is already living
+// in the order line, which makes the match exact by construction rather than by tuning.
+//
+// Falls back to the new image untouched when either buffer can't be measured (a plate from
+// before sheet_path was recorded, a missing file) — a mismatched plate is worse than the old
+// behaviour only if it also silently fails, so it never throws.
+const WHITE = { r: 255, g: 255, b: 255, alpha: 1 };
+
+/**
+ * Ink bounding box of a white-background plate: the buffer trimmed, plus its size.
+ * Returns null when there is no ink to measure. sharp's trim CANNOT report that itself — on a
+ * uniform image it hands back the full frame unchanged, so a blank plate would otherwise look
+ * like one whose ink happens to fill the canvas, and the caller would scale a real name to
+ * cover an entire band. Contrast is the honest test.
+ */
+async function inkBox(buffer) {
+  const stats = await sharp(buffer).stats();
+  const hasInk = stats.channels.some((c) => c.max - c.min >= 8);
+  if (!hasInk) return null;
+  const { data, info } = await sharp(buffer)
+    .trim({ background: '#ffffff', threshold: 10 })
+    .toBuffer({ resolveWithObject: true });
+  return { buffer: data, width: info.width, height: info.height };
+}
+
+async function matchPlateGeometry(newBuffer, referenceBuffer) {
+  try {
+    const ref = await sharp(referenceBuffer).metadata();
+    if (!ref.width || !ref.height) return newBuffer;
+    const refInk = await inkBox(referenceBuffer);
+    const newInk = await inkBox(newBuffer);
+    if (!refInk || !newInk || !refInk.height || !newInk.height) return newBuffer;
+
+    // Ink HEIGHT is the anchor, not width: embroidery scale is letter height, and two
+    // different names legitimately differ in width.
+    const targetHeight = Math.max(1, Math.min(refInk.height, ref.height));
+    const scaled = await sharp(newInk.buffer)
+      .resize({ width: ref.width, height: targetHeight, fit: 'inside', background: WHITE })
+      .toBuffer();
+
+    return await sharp({
+      create: { width: ref.width, height: ref.height, channels: 3, background: WHITE },
+    })
+      .composite([{ input: scaled, gravity: 'center' }])
+      .png()
+      .toBuffer();
+  } catch {
+    return newBuffer; // never let framing cosmetics lose a paid generation
+  }
+}
+
+module.exports = { whiteToTransparent, matchPlateGeometry };

@@ -134,6 +134,27 @@ code side of this queue is closed.
 
 ---
 
+## 🧵 TRACK B (calligraphy) — DONE ON ITS BRANCH, NOT MERGED
+
+`fix/calligraphy-photo-loss` closes bugs 4·5·6 from
+`docs/superpowers/specs/2026-08-13-eleven-bugs-parallel-tracks.md`. Gates all green on the branch:
+`node --test test/` **197/197**, `tsc` clean, `eslint` clean, `next build` completes.
+
+⚠️ **Migration 080 MUST ride the same deploy as the code.** Merging the code without it 500s every
+screen that selects `order_items.plate_image_url` — which is most of production. `npm run migrate`
+applies `db/schema.sql`, which carries 080's columns *and* its backfill; the standalone file is
+`db/migrations/080_calligraphy_plate_column.sql`. Both are idempotent (verified by running twice).
+
+⚠️ Tracks A and C touch different files by design — **merge one track at a time and open the live
+site between merges**, per the spec's deploy rule.
+
+**Owner action this unlocks:** `npm run photo-recovery` on the prod box (read-only, deletes
+nothing) proposes which upload file was each deleted reference photo, by mtime. Run it **there** —
+mtimes on a copied tree are the copy date and match nothing. It cannot prove a match; the owner
+confirms each one, and lines whose own text names a photo (★) are the ones worth the time.
+
+---
+
 ## ☁️ CLOUD BOARD — what a session with no laptop can do
 
 Everything here is repo work. Start from `main` (`11a7a43`).
@@ -244,6 +265,16 @@ longer stranded on a branch · the laptop's loose credentials are filed in
 
 ## 💣 LANDMINES
 
+- **⚠️ The calligraphy plate writes `order_items.plate_image_url`, NEVER `customer_image_url`**
+  (migration 080, on `fix/calligraphy-photo-loss`). The two columns are the generator's output and
+  the student's own upload, and they shared one name until 2026-08-13 — so every generate / reroll
+  / compose deleted the photo, 459 prod lines across 628 link events, 27 of them carrying text
+  that pointed AT the image being deleted. Anything that attaches student media belongs in
+  `customer_image_url`; anything the generator produces belongs in `plate_image_url`. A reader
+  that wants «the artwork to stitch» takes `COALESCE(plate_image_url, customer_image_url)`.
+  ⚠️ **080's backfill is repeated in `db/schema.sql` on purpose**, exactly like 077's — that is
+  the file `npm run migrate` applies to a database that already holds the damaged rows. Do not
+  tidy it out.
 - **⚠️ `notifications.push_state` DEFAULTS TO `'pending'` — the backfill is not optional.**
   Migration 077 retires every pre-existing row to `'skipped'`, and the same `UPDATE` is repeated
   in `db/schema.sql` **on purpose**, because that is the file `npm run migrate` applies to a

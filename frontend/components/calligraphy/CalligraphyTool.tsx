@@ -13,6 +13,7 @@ import { getApiErrorMessage } from "@/lib/api";
 import { isAuthenticated, getUser } from "@/lib/auth";
 import {
   absUrl,
+  CAL_REROLL_LIMIT,
   calDownloadUrl,
   createCalJob,
   generateFromQueue,
@@ -32,6 +33,7 @@ import {
   type CalJob,
   type CalOrderZones,
   type CalQueue,
+  type CalQueueHeldItem,
   type CalQueueZone,
   type CalGrabRow,
   type CalPlate,
@@ -83,12 +85,19 @@ function PlateCard({
   rerolling,
 }: {
   plate: CalPlate;
-  onReroll: (id: string) => Promise<void>;
+  onReroll: (id: string, overrides?: { render_text?: string }) => Promise<void>;
   onPreview: (plate: CalPlate) => void;
   onEdit: (plate: CalPlate) => void;
   rerolling: boolean;
 }) {
   const imgUrl = absUrl(plate.plate_path);
+  // A plate whose text is an instruction cannot be fixed by rerolling — the model would just
+  // render the same sentence again. The only useful action is retyping the real name, so the
+  // card asks for it instead of offering a button that spends money to change nothing.
+  const needsText = plate.text_is_instruction === true;
+  const [fixText, setFixText] = useState("");
+  const rerollsUsed = plate.reroll_count ?? 0;
+  const atRerollLimit = rerollsUsed >= CAL_REROLL_LIMIT;
 
   return (
     <article className="flex min-w-0 flex-col gap-2 overflow-hidden rounded-2xl border border-line bg-white p-3 shadow-sm">
@@ -148,17 +157,40 @@ function PlateCard({
         </div>
       </div>
 
+      {/* The student wrote us a message, not a name. Say so before any money is spent. */}
+      {needsText && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-2.5">
+          <p className="text-[11px] font-semibold leading-5 text-amber-800">
+            هذا النص تعليمات للمحل وليس اسماً — اكتب الاسم الصحيح قبل إعادة التوليد
+          </p>
+          <input
+            value={fixText}
+            onChange={(e) => setFixText(e.target.value)}
+            placeholder="الاسم الصحيح"
+            dir="rtl"
+            className="mt-2 w-full min-h-11 rounded-full border border-amber-300 bg-white px-3 text-sm text-ink outline-none focus:border-orange-ink"
+          />
+        </div>
+      )}
+
       {/* actions */}
       <div className="flex flex-wrap gap-1.5">
         <Button
           size="sm"
           variant="ghost"
-          disabled={rerolling}
+          disabled={rerolling || atRerollLimit || (needsText && fixText.trim() === "")}
           loading={rerolling}
-          onClick={() => onReroll(plate.id)}
+          onClick={() =>
+            onReroll(plate.id, fixText.trim() ? { render_text: fixText.trim() } : undefined)
+          }
         >
-          إعادة التوليد
+          {atRerollLimit ? `بلغ الحد (${CAL_REROLL_LIMIT})` : "إعادة التوليد"}
         </Button>
+        {rerollsUsed > 0 && !atRerollLimit && (
+          <span className="self-center rounded-full bg-beige px-2 py-0.5 text-[11px] text-ink-soft border border-line">
+            أُعيد {rerollsUsed}/{CAL_REROLL_LIMIT}
+          </span>
+        )}
 
         {plate.status === "done" && imgUrl && (
           <>
@@ -228,20 +260,79 @@ function NameCountHint({ lines }: { lines: string[] }) {
 
 // ─── Queue zone card ─────────────────────────────────────────────────────────
 
+/**
+ * One held line, with the only two things a designer can honestly do about it: retype the real
+ * name, or say «this text IS the embroidery, generate it». The text box starts filled with the
+ * student's words so accepting-as-is costs one tap, and correcting costs an edit — either way
+ * the `order_item_id` rides along, so the plate still lands on the right order line instead of
+ * becoming another orphan from «لصق أسماء».
+ */
+function HeldRow({
+  item,
+  onGenerate,
+}: {
+  item: CalQueueHeldItem;
+  onGenerate: (item: CalQueueHeldItem, text: string) => Promise<void>;
+}) {
+  const [text, setText] = useState(item.render_text);
+  const [busy, setBusy] = useState(false);
+  const edited = text.trim() !== item.render_text.trim();
+
+  return (
+    <li className="rounded-lg border border-amber-200 bg-amber-50/60 p-2">
+      <p className="break-words text-ink-soft">
+        <span className="font-semibold text-ink">{item.student_name}</span>
+        <span className="text-amber-700"> · {item.hint}</span>
+      </p>
+      <input
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        dir="rtl"
+        aria-label={`النص المطلوب توليده لـ ${item.student_name}`}
+        className="mt-1.5 w-full min-h-11 rounded-lg border border-amber-300 bg-white px-2.5 text-xs text-ink outline-none focus:border-orange-ink"
+      />
+      <Button
+        size="sm"
+        variant="ghost"
+        className="mt-1.5"
+        disabled={busy || text.trim() === ""}
+        loading={busy}
+        onClick={async () => {
+          setBusy(true);
+          try {
+            await onGenerate(item, text.trim());
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        {edited ? "ولّد بالاسم المصحح" : "ولّد كما هو"}
+      </Button>
+    </li>
+  );
+}
+
 function QueueZoneCard({
   variant,
   zone,
   running,
   onGenerate,
+  onGenerateHeld,
 }: {
   variant: CalVariant;
   zone: CalQueueZone;
   running: boolean;
   onGenerate: (variant: CalVariant, mode: "full" | "all") => void;
+  onGenerateHeld: (item: CalQueueHeldItem, text: string) => Promise<void>;
 }) {
   const [confirmAll, setConfirmAll] = useState(false);
+  const [showOther, setShowOther] = useState(false);
   const full = Math.floor(zone.pending / 10);
   const leftover = zone.pending % 10;
+  // Two populations this card used to hide completely, which is why «بانتظار» could read 0
+  // while a designer's «يخصّني الآن» was full of the same reps' orders.
+  const heldCount = zone.held?.count ?? 0;
+  const platedCount = zone.plated?.count ?? 0;
 
   return (
     <div className="rounded-2xl border border-line bg-white p-4 shadow-sm space-y-3">
@@ -271,6 +362,59 @@ function QueueZoneCard({
         )}
         <p className="text-ink/50 pt-0.5">التكلفة الأقل: ١٠ أسماء بالورقة</p>
       </div>
+
+      {/* Everything in this zone that is NOT waiting to be generated. Without it «بانتظار 0»
+          reads as «لا يوجد عمل», which is exactly how 55 orders ended up visible only in a
+          designer's «يخصّني الآن» and nowhere in this tool. */}
+      {(heldCount > 0 || platedCount > 0) && (
+        <div className="rounded-xl border border-line bg-surface-sink px-3 py-2.5 text-xs">
+          <button
+            type="button"
+            onClick={() => setShowOther((v) => !v)}
+            className="flex w-full min-h-11 items-center justify-between gap-2 text-start font-semibold text-ink"
+          >
+            <span>
+              {heldCount > 0 && <>{heldCount} نص موقوف</>}
+              {heldCount > 0 && platedCount > 0 && " · "}
+              {platedCount > 0 && <>{platedCount} مُولَّد سابقاً</>}
+            </span>
+            <span className="text-ink-soft">{showOther ? "▾" : "◂"}</span>
+          </button>
+
+          {showOther && (
+            <div className="mt-2 space-y-2">
+              {heldCount > 0 && (
+                <div>
+                  <p className="font-semibold text-amber-700">
+                    موقوف — لن يُصرف عليه حتى تراجعه:
+                  </p>
+                  <ul className="mt-1 space-y-2">
+                    {zone.held.items.slice(0, 15).map((it) => (
+                      <HeldRow key={it.order_item_id} item={it} onGenerate={onGenerateHeld} />
+                    ))}
+                  </ul>
+                  {heldCount > 15 && <p className="mt-1 text-ink/50">…و{heldCount - 15} غيرها</p>}
+                </div>
+              )}
+              {platedCount > 0 && (
+                <div>
+                  <p className="font-semibold text-ink-soft">
+                    لديها صورة جاهزة — تظهر في «يخصّني الآن» ولا تظهر في الانتظار:
+                  </p>
+                  <ul className="mt-1 space-y-1">
+                    {zone.plated.items.slice(0, 15).map((it) => (
+                      <li key={it.order_item_id} className="break-words text-ink-soft">
+                        <span className="text-ink">{it.student_name}</span> — «{it.render_text}»
+                      </li>
+                    ))}
+                  </ul>
+                  {platedCount > 15 && <p className="mt-1 text-ink/50">…و{platedCount - 15} غيرها</p>}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* action buttons */}
       <div className="flex flex-col gap-2">
@@ -817,7 +961,7 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
     try {
       const job = await createCalJob(body);
       if (job.dropped && job.dropped.length) {
-        toast.message(`تم استبعاد ${job.dropped.length} اسم غير صالح`);
+        toast.message(`تم استبعاد ${job.dropped.length} نص — غير صالح أو تعليمات للمحل`);
       }
       localStorage.setItem("cal_last_job", job.job_id);
       await runCreatedJob(job);
@@ -843,11 +987,39 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
     }
   }
 
+  // ── generate ONE held line, after the designer has read it ───────────────────
+  // `reviewed: true` is what makes this legal — the instruction guard exists to stop
+  // UNREVIEWED spending, and a person reading this exact string and pressing the button is
+  // the review. The order_item_id rides along so the plate lands on the order line rather
+  // than becoming another orphan.
+  async function runHeldItem(item: CalQueueHeldItem, text: string) {
+    try {
+      const job = await createCalJob({
+        source: "wholesaler",
+        model,
+        wholesaler_id: queueWid || null,
+        reviewed: true,
+        items: [{
+          render_text: text,
+          student_id: item.student_id,
+          order_item_id: item.order_item_id,
+          variant: item.variant,
+        }],
+      });
+      localStorage.setItem("cal_last_job", job.job_id);
+      await runCreatedJob(job);
+      await refreshQueue();
+    } catch (e) {
+      toast.error(getApiErrorMessage(e, "تعذّر التوليد"));
+    }
+  }
+
   // Returns the job body (valid names only) plus the junk names that were excluded,
   // so junk never reaches the paid generator. null = nothing usable (with a toast).
   function buildItems(): { body: CreateJobBody; junk: string[] } | null {
     let allItems: CreateJobBody["items"] = [];
     let base: Omit<CreateJobBody, "items">;
+    let instructionRows: string[] = [];
 
     const isCapLike = (v: CalVariant) => v === "cap" || v === "cap_side";
 
@@ -880,7 +1052,13 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
         return null;
       }
       base = { source: "wholesaler", model, wholesaler_id: selectedWid };
-      allItems = selected.map((r) => {
+      // Rows the server already classified as messages to the shop. Excluded here so the
+      // confirm dialog's count matches what will actually be generated — the server refuses
+      // them either way, this just stops the preview from lying about how many.
+      instructionRows = selected
+        .filter((r) => r.text_is_instruction)
+        .map((r) => r.render_text);
+      allItems = selected.filter((r) => !r.text_is_instruction).map((r) => {
         const isCap = isCapLike(r.variant);
         const element = isCap ? (capElements[r.order_item_id] ?? "").trim() : "";
         return {
@@ -894,9 +1072,12 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
     }
 
     const valid = allItems.filter((it) => isRealName(it.render_text));
-    const junk = allItems.filter((it) => !isRealName(it.render_text)).map((it) => it.render_text);
+    const junk = [
+      ...allItems.filter((it) => !isRealName(it.render_text)).map((it) => it.render_text),
+      ...instructionRows,
+    ];
     if (!valid.length) {
-      toast.error("لا توجد أسماء صالحة — يجب أن يحتوي الاسم على حروف عربية");
+      toast.error("لا توجد أسماء صالحة — تحقق من النص: قد يكون تعليمات للمحل وليس اسماً");
       return null;
     }
     return { body: { ...base, items: valid }, junk };
@@ -926,10 +1107,13 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
   }
 
   // ── reroll ───────────────────────────────────────────────────────────────────
-  async function handleReroll(id: string) {
+  // `overrides` carries the corrected name when the stored render_text turned out to be an
+  // instruction. The server saves it onto the plate, so the fix sticks and the next reroll
+  // starts from the right words.
+  async function handleReroll(id: string, overrides?: { render_text?: string }) {
     setRerollingId(id);
     try {
-      const updated = await rerollPlate(id);
+      const updated = await rerollPlate(id, overrides);
       setPlates((prev) => prev.map((p) => (p.id === id ? updated : p)));
       toast.success("تم إعادة توليد الصورة");
     } catch (e) {
@@ -1316,6 +1500,7 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
                     zone={queue[v] as CalQueueZone}
                     running={running}
                     onGenerate={runQueue}
+                    onGenerateHeld={runHeldItem}
                   />
                 ))}
               </div>
@@ -1848,7 +2033,7 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
             {confirm.junk.length > 0 && (
               <div className="rounded-xl border border-red-200 bg-red-50 p-3">
                 <p className="font-semibold text-red-700">
-                  {confirm.junk.length} اسم غير صالح سيُستبعد (لن يُولَّد):
+                  {confirm.junk.length} نص سيُستبعد — غير صالح أو تعليمات للمحل (لن يُولَّد):
                 </p>
                 <p className="mt-1 break-words text-xs text-red-600">
                   {confirm.junk.slice(0, 12).join(" · ")}

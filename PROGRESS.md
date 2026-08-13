@@ -1,5 +1,51 @@
 # Progress
 
+## 2026-08-13 — Track B: the calligraphy plate stops eating the student's photo (bugs 4·5·6)
+
+Branch `fix/calligraphy-photo-loss`, cut from `main` (`871a257` + the spec doc). **Not merged** —
+Tracks A and C are separate branches and the deploy rule is one track at a time.
+
+**Bug 4 — the plate destroyed the reference photo.** `order_items.customer_image_url` held two
+different things under one name, and `calligraphyEngine.autoLinkPlate` overwrote it
+unconditionally, so every generate / reroll / compose deleted the student's upload. Migration
+**080** gives the plate its own column (`plate_image_url`), backfills the damaged rows out of the
+customer's column, and the link now targets the new one. Proved against a live order line: the
+photo survives the write and the plate lands in its own column (probe rolled back, dev DB clean).
+Sixteen readers updated across both apps — `retailQueue`, four `productionController` detectors,
+the queue's `has_design_images`, `designTeamController` JOB_SELECT, the TV wall spotlight,
+`orderZoneClause`, the staff order page, PrepConsole's spec partition, DesignGallery and the
+retail review board. `orderEditController` needed no change: its keyed reconciliation already
+updates in place, so a plate survives an admin edit.
+
+**Bug 5 — «إعادة التوليد».** Four defects, all fixed: no guard at all (now junk + instruction);
+regenerating from `render_text` that is itself the instruction (the designer can now pass the
+corrected name, and it is saved onto the plate); a single-name generation whose scale and framing
+did not match the 10-name sheet the siblings came from (new `matchPlateGeometry` reframes onto the
+exact geometry of the plate being replaced, measured from that file — 5 unit tests); and no cost
+ceiling (`reroll_count` + a limit of 10, surfaced in the UI).
+
+**Bug 6 — «يخصّني الآن» showed orders the queue could not.** New `lib/calligraphyText.js`
+classifies text students wrote *to the shop* («نفس الصوره») before any money is spent, and
+`getQueue` now returns the two populations it used to hide: `held` (refused, with the reason) and
+`plated` (already carries a done plate — the 55 invisible orders). Held lines are actionable in
+place: retype the name, or press «ولّد كما هو», which sets `reviewed: true`.
+
+⚠️ **The classifier was calibrated against the live table, not invented.** A first draft flagged
+**real** back-of-sash text — ﴿مَّن كَانَ يُرِيدُ ثَوَابَ الدُّنْيَا﴾, «الحمدلله هذا ماسعيت له»,
+«الى عائلتي انتم حكاية نجاحي» — because «يريد» «هذا» and «الى» (which normalises to «الي») looked
+like instruction words. Pointing words, «نفس», «مثل», «فقط» and third-person «يريد» were all
+removed; the four instructions measured on prod are caught anyway because **every one of them
+names a photo**. Final rate: **91 of 954** distinct strings (9.5%), each one eyeballed. All four
+false positives are locked in as regression tests.
+
+**Recovery:** `npm run photo-recovery` (read-only) lists the damaged lines and proposes upload
+files by mtime, flagging the ones whose own text names a photo. It writes nothing and deletes
+nothing — the timestamps are a hint, not an identification, and the owner confirms each match.
+
+**Verified:** `node --test test/` **197/197** (185 baseline + 12 new), `tsc --noEmit` clean,
+`eslint` clean, `next build` completes. Migration 080 applied to the dev DB and re-run to prove
+idempotency (61 rows moved, identical on the second pass).
+
 ## 2026-08-10 — iOS 1.0.4 uploaded, APNs verified against Apple, both platforms at parity
 
 Prod runs `11a7a43`, confirmed over SSH. CI green, all 3 PM2 processes online, site 200.

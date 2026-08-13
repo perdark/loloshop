@@ -419,8 +419,18 @@ export function RetailReviewBoard({
                                   نص الطالب كما كتبه (لا يتغيّر)
                                 </p>
                                 <p className="whitespace-pre-wrap text-xs text-ink">{z.raw_text}</p>
+                                {z.text_is_instruction && (
+                                  <p className="mt-1.5 text-[11px] font-semibold leading-5 text-amber-700">
+                                    ⚠ هذا كلام موجّه للمحل وليس اسماً — اكتب الاسم المطلوب في
+                                    الحقل أدناه، ولا تولّد النص كما هو
+                                  </p>
+                                )}
                               </div>
 
+                              {/* The student's OWN photo. Until migration 080 a generated plate
+                                  overwrote this column, so a zone that had a reference showed the
+                                  machine's output instead — and «تطريز هذه الصورة فقط» pointed at
+                                  something nobody could open any more. */}
                               {z.customer_image_url && (
                                 <a
                                   href={absUrl(z.customer_image_url)}
@@ -435,6 +445,22 @@ export function RetailReviewBoard({
                                     className="h-24 w-auto rounded-lg border border-line object-cover"
                                   />
                                 </a>
+                              )}
+
+                              {z.plate_image_url && (
+                                <div className="mt-2">
+                                  <p className="mb-1 text-[11px] font-semibold text-ink-soft">
+                                    الخط المولّد حالياً
+                                  </p>
+                                  <a href={absUrl(z.plate_image_url)} target="_blank" rel="noreferrer">
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img
+                                      src={absUrl(z.plate_image_url)}
+                                      alt="الخط المولّد"
+                                      className="h-24 w-auto rounded-lg border border-line bg-white object-contain"
+                                    />
+                                  </a>
+                                </div>
                               )}
 
                               <label className="mt-3 block">

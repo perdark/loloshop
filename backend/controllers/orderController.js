@@ -118,8 +118,10 @@ const ZONE_NEEDS_CONTENT = new Set([
 function orderZoneClause(zone, alias = 'o') {
   const match = ORDER_ZONE_MATCH[zone];
   if (!match) return null;
+  // Migration 080: a zone whose only content is a generated plate still has content.
   const content = ZONE_NEEDS_CONTENT.has(zone)
-    ? ` AND ((oi.customer_text IS NOT NULL AND btrim(oi.customer_text) <> '') OR oi.customer_image_url IS NOT NULL)`
+    ? ` AND ((oi.customer_text IS NOT NULL AND btrim(oi.customer_text) <> '')
+             OR oi.customer_image_url IS NOT NULL OR oi.plate_image_url IS NOT NULL)`
     : '';
   return `EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = ${alias}.id AND ${match}${content})`;
 }
@@ -1382,8 +1384,10 @@ async function getOrderBreakdown(req, res) {
     return res.status(403).json({ error: 'ممنوع', code: 'ERR_FORBIDDEN' });
   }
   const items = await query(
-    `SELECT label_snapshot, price_snapshot, qty, customer_image_url, customer_text FROM order_items
-     WHERE order_id = $1 ORDER BY created_at`,
+    `SELECT label_snapshot, price_snapshot, qty, customer_image_url, plate_image_url,
+            customer_text
+       FROM order_items
+      WHERE order_id = $1 ORDER BY created_at`,
     [id]
   );
   res.json({
