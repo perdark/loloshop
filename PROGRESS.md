@@ -1,5 +1,63 @@
 # Progress
 
+## 2026-08-13 — Track C: the designer console opens on your own station (bugs 2 + 3)
+
+Branch `fix/designer-console`, cut from `main` (`8498c4d`) — **not** from `ai-assistant`, checked
+per the spec's `4eb01c8` landmine. Three files, none owned by Track A or B:
+`backend/controllers/staffController.js` · the rep students page · `frontend/lib/staff.ts`.
+
+**Bug 2 — the console showed every station's work.** `wholesalerOrders` returned every approved
+non-cancelled order in every status with no role scoping, and «الكل» was the default. The response
+now carries `my_stages` and the console opens on «مرحلتي»; «الكل» stays one tap away.
+
+`my_stages` is **derived from orderController's `STAGE_AUTHZ`** — a status is yours when you may
+move an order out of it — rather than being a second copy of `productionController.QUEUE_STAGES`.
+That was deliberate on two counts: Track B has to edit `productionController`, so importing from it
+would have meant editing their file; and a hand-copied stage table is exactly the kind of thing
+that drifts. Asserted equal to QUEUE_STAGES for all five working staff_types in
+`test/viewerStages.test.js` (11 new tests), so a future `STAGE_AUTHZ` edit fails a test instead of
+quietly giving a worker the wrong queue.
+
+Measured by driving the real controller against the dev DB (محمد باقر عباس هاشم, 402 rows):
+
+| viewer | «الكل» | opens on «مرحلتي» |
+|---|---|---|
+| designer | 402 | **281** |
+| preparer | 402 | **120** |
+| presser | 402 | **1** |
+| manager · admin · مفصل | 402 | 402 — no personal station, unchanged by design |
+
+⚠️ **The dev DB is an older snapshot than the prod numbers in the spec** — globally embroidery is
+108 here vs the spec's 854, pressing 107 vs 460. On the spec's prod distribution for this rep
+(276 قيد التطريز + 120 قيد التجهيز + 1 قيد الكوي + 5 بانتظار التصميم) the same filter yields the
+**5** the spec predicts. So the spec's bug-2 breakdown is right about prod and simply does not
+reproduce against this laptop's DB; don't "fix" the filter to chase 281.
+
+Two things fell out of the investigation that are **not** bug 2 and were left alone:
+`«يخصّني الآن»` (`can_advance`) happens to equal the stage filter for these three roles in this
+snapshot — it diverges for a preparer's «جاهز للاستلام» rows, which are their work but deliberately
+not bulk-advanceable, which is why the default is stage-based and not a reuse of `can_advance`.
+And the console does **not** exclude `returned_to_customer` rows the way `/staff/queue` does
+(0 rows for this rep, so no visible effect); that is bug 9 / Track A territory.
+
+**Bug 3 — back button lost the designer's place.** Zone/view/search/selection already survived
+back-navigation; scroll did not. Cause: returning re-mounts the tab with `orders` empty, so it
+paints six skeletons and the document is a few hundred px tall at the exact moment the offset would
+be re-applied — it clamps to 0, and by the time 400 rows arrive the position is gone. The offset is
+now saved to the same per-rep sessionStorage bucket (trailing-throttled at 200 ms) and re-applied
+one frame after the real rows paint, clamped to the list height, and skipped if the worker has
+already started scrolling.
+
+**Verified:** `node --test test/` **196/196** (185 baseline + 11 new) · `tsc --noEmit` clean ·
+`npm run lint` 0 errors · `next build` completes.
+
+**⚠️ NOT verified — bug 3 has had no browser test,** which the spec explicitly asked for. Ports
+3000/4000 were held by other work (4000 = Track A's backend) and the box had ~2.8 GB free with
+swap already in use, so standing up a third dev server risked the sibling track sessions. The fix
+is reasoned from the code, not observed. **Repro to close it:** open a rep with 400+ rows as a
+designer, tap «الكل», scroll well down, open an order, press back — the list should return to the
+same offset instead of the top.
+
 ## 2026-08-10 — iOS 1.0.4 uploaded, APNs verified against Apple, both platforms at parity
 
 Prod runs `11a7a43`, confirmed over SSH. CI green, all 3 PM2 processes online, site 200.

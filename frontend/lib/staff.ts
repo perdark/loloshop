@@ -675,15 +675,24 @@ interface WholesalerAccountSummaryApi {
  * GET /{staff,admin}/wholesalers/:id/orders — every order for the rep's students.
  * `isAdmin` picks the admin route (the staff route is requireRole('staff')).
  * Optional `zone` filters by embroidery zone (e.g. "sash_front", "cap_side").
+ *
+ * `myStages` = the production stages the VIEWER personally works, so the console can open
+ * on their own station instead of every station's work. EMPTY for manager/admin/مفصل, who
+ * have no personal station — those viewers default to «الكل». See backend viewerStages().
  */
 export async function getWholesalerOrders(
   wholesalerId: string,
   opts: { zone?: string; isAdmin?: boolean } = {}
-): Promise<{ orders: WholesalerOrderRow[]; summary: WholesalerAccountSummary | null }> {
+): Promise<{
+  orders: WholesalerOrderRow[];
+  summary: WholesalerAccountSummary | null;
+  myStages: OrderStatus[];
+}> {
   const base = opts.isAdmin ? "/admin" : "/staff";
   const { data } = await api.get<{
     data: WholesalerOrderApiRow[];
     summary: WholesalerAccountSummaryApi | null;
+    my_stages?: OrderStatus[];
   }>(
     `${base}/wholesalers/${wholesalerId}/orders`,
     { params: opts.zone ? { zone: opts.zone } : undefined }
@@ -707,6 +716,9 @@ export async function getWholesalerOrders(
   }));
   const raw = data.summary;
   return {
+    // Tolerate an older API that predates my_stages: [] simply means «الكل», the previous
+    // behaviour, so a stale backend degrades to exactly what the console did before.
+    myStages: Array.isArray(data.my_stages) ? data.my_stages : [],
     orders,
     summary: raw
       ? {
