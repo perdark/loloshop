@@ -40,8 +40,32 @@ const bundlesExpr = (a = 'o') => `COUNT(DISTINCT ${bundleKey(a)})::int`;
 const studentsExpr = (a = 'o') => `COUNT(DISTINCT ${a}.student_id)::int`;
 
 /** Live = everything except cancelled. This is the OPERATIONAL filter; money
- *  aggregates use billableOrderSql (approval-gated) and are NOT this file's job. */
+ *  aggregates use billableOrderSql (approval-gated) below. */
 const liveSql = (a = 'o') => `${a}.status <> 'cancelled'`;
+
+/**
+ * The SETTLEMENT filter — the money counterpart to liveSql.
+ *
+ * Money shown as revenue/cost/profit is settlement money: retail rows have NULL approval;
+ * representative rows count only after approval. Pending/rejected rows stay operationally
+ * visible elsewhere but never inflate settled totals.
+ *
+ * Lives here (moved out of adminController 2026-08-10) so the admin dashboard and the AI
+ * analytics assistant compute revenue the SAME way. Two definitions of "revenue" that
+ * disagree by a few pending bundles is exactly the bug that destroys trust in an assistant
+ * the owner cannot audit — there must be one.
+ */
+function billableOrderSql(alias = 'o') {
+  return `${alias}.status <> 'cancelled'
+    AND (
+      ${alias}.wholesaler_approval = 'approved'
+      OR (${alias}.wholesaler_approval IS NULL AND EXISTS (
+        SELECT 1 FROM students settled_student
+        WHERE settled_student.id = ${alias}.student_id
+          AND settled_student.wholesaler_id IS NULL
+      ))
+    )`;
+}
 
 const finishedSql = (a = 'o') =>
   `${a}.status IN (${FINISHED_STATUSES.map((s) => `'${s}'`).join(', ')})`;
@@ -151,6 +175,150 @@ async function stageFunnel(scope = buildScope()) {
   return r.rows;
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// THE MONEY VOCABULARY (2026-08-13, bug 11)
+//
+// Same disease as the units above, in dinars: one word, two populations.
+//
+// `orders.profit` is a STORED GENERATED column, `price - COALESCE(cost, 0)`. For a
+// REPRESENTATIVE's order that reads:
+//     price = what the student paid the REP
+//     cost  = «حصة الإدارة» — the shop's cut, i.e. THE SHOP'S INCOME
+//     profit = price − cost = THE REP'S MARGIN. It never reaches the shop.
+// staffController.buildWholesalerAccountSummary labels this exact expression
+// `representative_profit`, correctly. The admin dashboard called the same number
+// «إجمالي الربح» / «صافي الربح», so the shop was reading the reps' earnings as its own
+// (4,240,000 IQD of it on prod, 2026-08-13).
+//
+// For a RETAIL order there is no rep, so `price` is the shop's income outright — and
+// `cost` is NULL on every retail row ever written, because nobody has entered a
+// production cost. profit therefore collapses to `price`: it is REVENUE wearing the
+// word "profit". `retail_pieces_costed` exists so the UI can say that out loud instead
+// of printing a profit figure that cannot be true.
+//
+// Hence exactly two honest aggregates, and they partition the settled set:
+//     shop income  = حصة الإدارة (rep rows) + price (retail rows)
+//     rep margin   = profit (rep rows) — THEIRS, reported separately and labelled so
+//
+// ⚠️ Do NOT redefine `orders.profit` to fix this. It is a generated column that
+// wholesaler payouts, the rep account summary and the TV board all read with the
+// per-row meaning above; the bug is the AGGREGATE and its LABEL, not the column.
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * Inside billableOrderSql the approval column is a two-valued flag: 'approved' for a
+ * row that went through a rep, NULL for a direct retail row (pending/rejected never
+ * get in). So these two predicates PARTITION the settled set by construction — which
+ * is what lets every split below reconcile to its total instead of merely looking close.
+ *
+ * Deliberately keyed off `wholesaler_approval`, not `students.wholesaler_id`: deleting a
+ * rep NULLs its students' `wholesaler_id` but leaves their orders 'approved', and those
+ * orders were still priced with a حصة الإدارة. Keying off the student would silently
+ * reclassify that money as retail revenue.
+ */
+const repRowSql = (a = 'o') => `${a}.wholesaler_approval IS NOT NULL`;
+const retailRowSql = (a = 'o') => `${a}.wholesaler_approval IS NULL`;
+
+/**
+ * WHAT THE SHOP ACTUALLY TAKES IN — حصة الإدارة on rep rows, the full price on retail.
+ *
+ * `filter` is an optional extra predicate for callers whose WHERE clause is wider than the
+ * settled set (the daily chart counts every live bundle but may only earn from settled ones).
+ * It is spliced into the aggregate's own FILTER, which is the only place SQL accepts it —
+ * a cast sits outside the aggregate, so appending `FILTER` to the finished expression is a
+ * syntax error rather than a narrower sum.
+ */
+const shopIncomeExpr = (a = 'o', filter = null) =>
+  `COALESCE(SUM(CASE WHEN ${repRowSql(a)} THEN COALESCE(${a}.cost, 0) ELSE ${a}.price END)` +
+  `${filter ? ` FILTER (WHERE ${filter})` : ''}, 0)::bigint`;
+
+/** WHAT THE REPS TAKE — their margin. Never the shop's, never added to shop income. */
+const repMarginExpr = (a = 'o', filter = null) =>
+  `COALESCE(SUM(${a}.profit) FILTER (WHERE ${repRowSql(a)}${filter ? ` AND ${filter}` : ''}), 0)::bigint`;
+
+/**
+ * The settled money split for one optional extra filter (e.g. a date window).
+ * Every field is derived from the same rows, so the reconciliation the dashboard
+ * prints — `shop_income = rep_admin_share + retail_revenue` — is an identity, not a
+ * hope. `gross_collected` is the OLD «إجمالي الإيرادات»: it is money students paid
+ * *somebody*, and it is kept only so the UI can show how much of it was never the shop's.
+ */
+async function settledMoney({ where = null, params = [] } = {}) {
+  const extra = where ? ` AND ${where}` : '';
+  const r = await query(
+    `SELECT
+       ${shopIncomeExpr('o')} AS shop_income,
+       ${repMarginExpr('o')}  AS rep_margin,
+       COALESCE(SUM(COALESCE(o.cost, 0)) FILTER (WHERE ${repRowSql('o')}), 0)::bigint AS rep_admin_share,
+       COALESCE(SUM(o.price)             FILTER (WHERE ${repRowSql('o')}), 0)::bigint AS rep_gross,
+       COALESCE(SUM(o.price)             FILTER (WHERE ${retailRowSql('o')}), 0)::bigint AS retail_revenue,
+       COALESCE(SUM(o.cost)              FILTER (WHERE ${retailRowSql('o')}), 0)::bigint AS retail_cost,
+       COALESCE(SUM(o.price), 0)::bigint AS gross_collected,
+       COUNT(*) FILTER (WHERE ${retailRowSql('o')})::int AS retail_pieces,
+       COUNT(*) FILTER (WHERE ${retailRowSql('o')} AND o.cost IS NOT NULL)::int AS retail_pieces_costed,
+       ${bundlesExpr('o')} AS orders
+     FROM orders o
+     WHERE ${billableOrderSql('o')}${extra}`,
+    params
+  );
+  return r.rows[0];
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// WORKABLE vs BLOCKED (2026-08-13, bug 9)
+//
+// A stage total answers «how many pieces are sitting here», which is not the question
+// the owner is asking when they read it — they are asking «how much work is waiting».
+// The staff queue (productionController.getQueue) answers the second one, and drops two
+// populations the admin total keeps: rep orders nobody approved yet, and orders returned
+// to the student to edit. On prod 2026-08-13 that was admin 1,162 vs designer 797 at
+// «بانتظار التصميم» — a 365-piece gap that read as a broken screen.
+//
+// ⚠️ The staff screens are CORRECT. These predicates MIRROR getQueue's two gates and must
+// keep mirroring them; if that query's gates ever change, change these in the same commit.
+// (The third gate there — `users.order_scope` — is per-account and has no meaning for an
+// admin total, so it is deliberately absent.)
+// ───────────────────────────────────────────────────────────────────────────
+
+/** Rep orders still waiting on their rep's verdict. Invisible to every station. */
+const awaitingRepSql = (o = 'o', s = 's') =>
+  `NOT (${s}.wholesaler_id IS NULL OR ${o}.wholesaler_approval = 'approved')`;
+
+/** «إرجاع للطالب» — out of production until the student resubmits. */
+const returnedSql = (o = 'o') => `${o}.returned_to_customer = TRUE`;
+
+/** What a station can actually pick up: approved (or retail) AND not returned. */
+const workableSql = (o = 'o', s = 's') =>
+  `NOT ${awaitingRepSql(o, s)} AND NOT ${returnedSql(o)}`;
+
+/**
+ * The stage funnel, split into work a station can start and work that is blocked.
+ *
+ * `workable + awaiting_rep + returned = pieces` EXACTLY: the three buckets are written as
+ * mutually exclusive predicates (a returned row that is also unapproved counts once, under
+ * `awaiting_rep`, because it is blocked on the rep first). The dashboard reconciles against
+ * that identity, so a future edit that breaks it fails the test rather than the owner's trust.
+ *
+ * Scope note: `buildScope` may already JOIN students; this query always does, because the
+ * approval gate needs `s.wholesaler_id`.
+ */
+async function stageFunnelSplit(scope = buildScope()) {
+  const r = await query(
+    `SELECT o.status AS stage,
+            ${piecesExpr()} AS pieces,
+            ${studentsExpr('o')} AS students,
+            COUNT(*) FILTER (WHERE ${workableSql('o', 's')})::int AS workable,
+            COUNT(*) FILTER (WHERE ${awaitingRepSql('o', 's')})::int AS awaiting_rep,
+            COUNT(*) FILTER (WHERE NOT ${awaitingRepSql('o', 's')} AND ${returnedSql('o')})::int AS returned
+     FROM orders o JOIN students s ON s.id = o.student_id
+     WHERE ${scope.where}
+     GROUP BY o.status
+     ORDER BY pieces DESC`,
+    scope.params
+  );
+  return r.rows;
+}
+
 /** Every headline number for one scope in a single round trip. */
 async function summary(scope = buildScope()) {
   const [pieces, bundles, students, inProgress] = await Promise.all([
@@ -169,6 +337,7 @@ module.exports = {
   bundlesExpr,
   studentsExpr,
   liveSql,
+  billableOrderSql,
   finishedSql,
   buildScope,
   countPieces,
@@ -177,4 +346,15 @@ module.exports = {
   countBundlesInProgress,
   stageFunnel,
   summary,
+  // Money vocabulary (bug 11)
+  repRowSql,
+  retailRowSql,
+  shopIncomeExpr,
+  repMarginExpr,
+  settledMoney,
+  // Workable vs blocked (bug 9)
+  awaitingRepSql,
+  returnedSql,
+  workableSql,
+  stageFunnelSplit,
 };
