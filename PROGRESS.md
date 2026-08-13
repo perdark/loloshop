@@ -45,18 +45,35 @@ back-navigation; scroll did not. Cause: returning re-mounts the tab with `orders
 paints six skeletons and the document is a few hundred px tall at the exact moment the offset would
 be re-applied — it clamps to 0, and by the time 400 rows arrive the position is gone. The offset is
 now saved to the same per-rep sessionStorage bucket (trailing-throttled at 200 ms) and re-applied
-one frame after the real rows paint, clamped to the list height, and skipped if the worker has
-already started scrolling.
+after the real rows paint, clamped to the list height, and skipped if the worker has already
+started scrolling.
 
-**Verified:** `node --test test/` **196/196** (185 baseline + 11 new) · `tsc --noEmit` clean ·
+**⚠️ The browser test the spec demanded was worth it — the first version of the bug-3 fix did
+not work, and both static gates and code review passed it.** Two separate defects, each of which
+would have shipped as "scroll restore, still broken":
+
+1. **`requestAnimationFrame` never fires in a tab that is not painting**, so a restore scheduled
+   only inside a rAF callback silently never happens. Measured: rAF callbacks 0, `scrollTo` calls
+   0. Now applied immediately, with the rAF kept only as a corrective second pass for late height
+   changes (images/fonts).
+2. **`globals.css:499` sets `scroll-behavior: smooth` on the root**, so the plain
+   `scrollTo(0, y)` form starts an *animation* — and the router's own post-navigation scroll
+   cancels it before it travels. Measured in a visible, focused tab: the restore ran with the
+   correct offset (`scrollTo [0, 5200]`) and the page never moved; not one scroll event fired.
+   Fixed with `scrollTo({ top, left: 0, behavior: "instant" })`, which is what restoring a
+   remembered position should do anyway rather than riding visibly down 281 rows.
+
+**Verified in a real browser** (Track C build on :3005 against its own API on :4005, signed in as
+مضر محمد, a real `{designer}`): lands on «مرحلتي (281)» with 281 rows rendered, «الكل (402)» one
+tap away · scrolled to 5200, opened حسن علي حسين's order, pressed back → **returned to 5200**, same
+row on screen. Control: same journey with the saved offset stripped → lands at 0, reproducing the
+original bug. Also `node --test test/` **196/196** (185 baseline + 11 new) · `tsc --noEmit` clean ·
 `npm run lint` 0 errors · `next build` completes.
 
-**⚠️ NOT verified — bug 3 has had no browser test,** which the spec explicitly asked for. Ports
-3000/4000 were held by other work (4000 = Track A's backend) and the box had ~2.8 GB free with
-swap already in use, so standing up a third dev server risked the sibling track sessions. The fix
-is reasoned from the code, not observed. **Repro to close it:** open a rep with 400+ rows as a
-designer, tap «الكل», scroll well down, open an order, press back — the list should return to the
-same offset instead of the top.
+⚠️ **For whoever writes the next scroll-restore anywhere in this app:** `scroll-behavior: smooth`
+is global, so **every** programmatic `scrollTo`/`scrollIntoView` in this codebase animates by
+default and can be cancelled mid-flight. Pass `behavior: "instant"` for anything that is restoring
+state rather than responding to a click.
 
 ## 2026-08-10 — iOS 1.0.4 uploaded, APNs verified against Apple, both platforms at parity
 

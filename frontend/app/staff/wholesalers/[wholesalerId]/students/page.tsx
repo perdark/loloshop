@@ -305,12 +305,25 @@ function OrdersTab({
     setScrollReady(true); // arms the saver above, even when there is nothing to restore
     if (typeof y !== "number" || y <= 0) return;
     if (window.scrollY > 4) return; // they already started scrolling — don't yank them back
-    // One frame after paint, so the real list height exists to scroll into, and clamped so
-    // a shorter filtered list can't leave the page stranded past its own end.
-    const raf = requestAnimationFrame(() => {
+    // Clamped, so a shorter filtered list can't leave the page stranded past its own end.
+    const apply = () => {
       const max = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-      window.scrollTo(0, Math.min(y, max));
-    });
+      // behavior:"instant" is REQUIRED here, not a preference. globals.css:499 sets
+      // `scroll-behavior: smooth` on the root, so the plain scrollTo(0, y) form starts an
+      // ANIMATION — and the router's own post-navigation scroll cancels it before it
+      // travels. Measured in a real browser: the restore ran with the correct offset and
+      // the page never moved, no scroll event ever fired. Restoring a remembered position
+      // should be a jump anyway, not a visible ride down 281 rows.
+      window.scrollTo({ top: Math.min(y, max), left: 0, behavior: "instant" });
+    };
+    // Apply immediately: the rows are committed and laid out by the time an effect runs, so
+    // this is enough on its own. It must NOT be left to requestAnimationFrame alone — a tab
+    // that is not painting never fires one, and the restore would silently never happen
+    // (measured in a backgrounded tab: rAF callbacks 0, scrollTo calls 0).
+    apply();
+    // Then once more next frame, to absorb a late height change (images, fonts) that would
+    // otherwise leave the offset slightly off. Harmless when it never fires.
+    const raf = requestAnimationFrame(apply);
     return () => cancelAnimationFrame(raf);
   }, [wholesalerId, loading, loadedOnce, scrollReady]);
 
