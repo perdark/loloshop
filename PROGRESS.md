@@ -1,5 +1,50 @@
 # Progress
 
+## 2026-08-14 — Track A merged and DEPLOYED, after the browser gate it left open
+
+Merge `df2fa48` on `origin/main`; CI green, **Deploy to VPS** succeeded, prod confirmed at
+`df2fa48` over SSH with all three PM2 processes restarted and the site/API answering 200.
+Gates on the merged tree: **211/211** backend tests (185 baseline + 11 Track C + 15 Track A —
+the first time the two tracks' suites ran together), `tsc` clean, eslint 0 errors, `next build`
+complete, and **both `npm audit` deploy gates exit 0**. Only conflict was `PROGRESS.md`
+(both tracks prepended a session entry); both were kept.
+
+**The gate the branch itself left open is now closed — verified in a real browser** against the
+dev DB as a real admin, money-gate opened by the owner. All six figures render exactly as the API
+computes them: دخل المحل ٣٧٬٨٧٧٬٣٠٠ · حصة الإدارة ١٦٬٦٨١٬٠٠٠ · مبيعات التجزئة ٢١٬١٩٦٬٣٠٠ ·
+دفعه الطلاب للممثل ١٩٬٦٧٦٬٠٠٠ · ربح الممثل ٢٬٩٩٥٬٠٠٠ · طلبات محتسبة ٤٩٥. Internally consistent on
+screen (19,676,000 − 2,995,000 = 16,681,000) and the sub-label «93٪ مما دفعه الطلاب» checks out.
+Bug 9's header reconciles to the funnel (**١٤٥٥ قابلة للعمل من ١٧٣١ قطعة**) and bug 10 plots both
+populations with the backlog as the band between them. Console clean apart from two transient
+Recharts `width(-1)` warnings at mount.
+
+**Live prod numbers, computed by the deployed code:** دخل المحل **74,179,800** = حصة الإدارة
+23,923,000 + تجزئة 50,256,800; مال الممثلين 4,255,000; إجمالي التحصيل 78,434,800; retail pieces
+costed **0 / 1,493**. The old «صافي الربح» would read 54,511,800 today — the +19,668,000 is exactly
+23,923,000 − 4,255,000, the swap of the reps' margin for the shop's share.
+
+⚠️ **A near-miss worth recording.** The daily-chart header read 145/101 while a curl taken twenty
+minutes earlier said 146/102, and it looked like an off-by-one in the new chart. It was not: the
+query is `WHERE o.created_at > NOW() - INTERVAL '30 days'` and `NOW()` is an *instant*, so the
+leftmost day sheds orders minute by minute. Confirmed byte-identical on the merge-base — pre-existing,
+not a Track A regression. Side effect worth knowing: **the leftmost day of that chart is always a
+partial day and always under-reports.** Don't compare a cached API fetch against a live render.
+
+**Rep-facing numbers proved unchanged, not assumed.** Two backends were run against the same DB
+(Track A on :4000, `main` on :4001) and driven with a real rep's token:
+`/api/wholesaler/{dashboard,students,orders}` and `/api/admin/reps-overview` are **byte-identical**,
+and the `wholesalerOrders` account block (يجمعه الممثل ١٠٬٢٩٨٬٠٠٠ · حصة الإدارة ٨٬٦٩٨٬٠٠٠ ·
+ربح الممثل ١٬٦٠٠٬٠٠٠) is byte-equal across 402 order rows. The only diff in that response is
+Track C's `my_stages`. This matters because the owner does his real accounting on those screens,
+not on the dashboard totals.
+
+**Prod DB backed up first:** `~/Desktop/_private/loloshop-db/loloshop-prod-2026-08-14.dump`, taken
+with the server's own PG17 `pg_dump`, sha256 verified server↔laptop, and **restore-tested** —
+`pg_restore` decompressed the whole archive (12.6 MB of SQL, exit 0, empty stderr) and the row
+counts read out of it match live prod exactly (users 1,694 · orders 3,209 · order_items 13,844).
+⚠️ The laptop's client is PG16 against a PG17 server, so the dump **must** be taken on the box.
+⚠️ The 4.9 GB of uploads (6,957 files) is still NOT backed up — the laptop has 7.1 GB free at 88%.
+
 ## 2026-08-13 — Track A: the admin numbers now say what they mean (bugs 9, 10, 11)
 
 Branch `fix/admin-numbers`, cut from `main`. Spec:

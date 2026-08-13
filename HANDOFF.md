@@ -13,21 +13,24 @@ this file if something on the board opened, closed, or changed.
 
 ---
 
-## 📍 WHERE THE TREE IS — 2026-08-10
+## 📍 WHERE THE TREE IS — 2026-08-14
 
-Verified against git, against the running box over SSH, and against App Store Connect / the
-Apple Developer console in a browser this session.
+Verified against git, against the running box over SSH, and (for the admin dashboard) in a real
+browser this session. Store/push rows below were last verified 2026-08-10 and are unchanged.
 
 | | |
 |---|---|
-| `origin/main` | `11a7a43` — merge of `ios-appstore`; now also carries the **Codemagic iOS pipeline** |
-| `origin/ios-appstore` | `11a7a43` — **fast-forwarded to `main`**, no longer a divergent branch |
+| `origin/main` | `df2fa48` — **Track A merged and DEPLOYED**; prod confirmed at this SHA over SSH |
+| Eleven-bug tracks | **C shipped** (bugs 2, 3) · **A shipped** (bugs 9, 10, 11) · **B built, unmerged** (bugs 4, 5, 6) · bugs 1, 7, 8 not started |
+| `fix/calligraphy-photo-loss` | `6f016a5` in `~/Desktop/active/lolo-B` — carries **migration 080**, must ride the same deploy |
 | Migration 077 | ✅ applied to prod AND the dev DB — 3,311 prod rows retired to `skipped` |
+| Migration 080 | ✅ dev DB only (`order_items.plate_image_url`) — **NOT on prod**, ships with Track B |
 | Android | **v1.0.4 (versionCode 5) IN PRODUCTION REVIEW** — deep links + GPS + push in one review |
 | iOS | **1.0.4 (build 1786309948) SUBMITTED — «Waiting for Review»** (2026-08-10, ≤48h) |
 | Android push | ✅ working end to end |
 | iOS push | ✅ **APNs key installed and verified against Apple** — `push.configured()` → `{"android":true,"ios":true}` |
-| Backend tests | **185/185 pass** against the dev DB with 077 applied |
+| Backend tests | **211/211 pass** on merged `main` (185 baseline + 11 Track C + 15 Track A) |
+| Prod DB backup | ✅ `~/Desktop/_private/loloshop-db/loloshop-prod-2026-08-14.dump` — restore-tested, row counts match live |
 
 **Both platforms are now on the same version (1.0.4) carrying the same three features.**
 
