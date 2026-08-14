@@ -95,14 +95,26 @@ export async function fetchMe(): Promise<User> {
 // Phone-based reset: send a WhatsApp OTP, then reset with the challenge + code + new
 // password. An id comes back even for an unregistered number (a decoy that matches no
 // row), so the response can't be used to test whether a phone has an account.
-export async function forgotPasswordByPhone(phone: string): Promise<string> {
+// Reset is the one flow that is never degraded while the OTP gateway is down — the code IS
+// the credential here, so the backend refuses and points the customer at a human instead.
+// That is a normal outcome, not a failure, so it comes back as a result the caller branches
+// on rather than a thrown error: the UI presents it as guidance, not as a red validation
+// error under the phone field.
+export type PhoneResetRequest =
+  | { challengeId: string }
+  | { supportRequired: true; message: string };
+
+export async function forgotPasswordByPhone(phone: string): Promise<PhoneResetRequest> {
   try {
     const { data } = await api.post<{ sent: boolean; challenge_id: string }>(
       "/auth/forgot-password-phone",
       { phone }
     );
-    return data.challenge_id;
+    return { challengeId: data.challenge_id };
   } catch (e) {
+    if (axios.isAxiosError(e) && e.response?.data?.code === "ERR_OTP_UNAVAILABLE") {
+      return { supportRequired: true, message: extractMessage(e, "تواصل مع دعم المتجر") };
+    }
     throw new Error(extractMessage(e, "تعذّر إرسال الرمز"));
   }
 }
@@ -140,6 +152,9 @@ export async function resendLoginOtp(challengeId: string): Promise<string> {
 
 // Open retail sign-up: creates a pre-approved student and sends a WhatsApp
 // verify OTP. Returns the new user id; caller then verifies the OTP.
+// While the WhatsApp gateway is banned the backend cannot deliver that code, so it
+// answers `otp_required: false` with a null `challenge_id` — the account exists and the
+// caller must send the student to sign in instead of to a code screen nothing can fill.
 export async function register(body: {
   name: string;
   phone: string;
@@ -149,10 +164,10 @@ export async function register(body: {
   department: string;
   study_type: "morning" | "evening";
   instagram_username: string;
-}): Promise<{ user_id: string; otp_required: boolean; challenge_id: string }> {
+}): Promise<{ user_id: string; otp_required: boolean; challenge_id: string | null }> {
   try {
     const { data } = await api.post<{
-      data: { user_id: string; otp_required: boolean; challenge_id: string };
+      data: { user_id: string; otp_required: boolean; challenge_id: string | null };
     }>("/auth/register", body);
     return data.data;
   } catch (e) {

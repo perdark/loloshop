@@ -80,6 +80,15 @@ export default function RegisterPage() {
         study_type: form.study_type as "morning" | "evening",
         instagram_username: form.instagram_username.trim().replace(/^@+/, ""),
       });
+      // WhatsApp gateway down → the backend created the account but could not send a code,
+      // and says so with otp_required:false. Sending them to the OTP screen here would be a
+      // dead end: the box would never fill. Their account and password already work, so
+      // hand them to the login form instead.
+      if (!created.otp_required || !created.challenge_id) {
+        toast.success("تم إنشاء حسابك — سجّل الدخول برقمك وكلمة المرور");
+        router.push("/login");
+        return;
+      }
       setChallengeId(created.challenge_id);
       toast.success("تم إرسال رمز التحقق عبر واتساب");
       setStep("otp");
