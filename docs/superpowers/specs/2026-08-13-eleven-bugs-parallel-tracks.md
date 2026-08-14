@@ -213,20 +213,33 @@ as "it forgot where I was". Confirm in a browser first, then restore scroll.
 
 ---
 
-## NOT a bug — the highest-value action available, needs no deploy
+## ⛔ «بانتظار موافقة الممثل» — DO NOT TOUCH. NOT OUR CALL.
 
-**471 rep orders worth 11,774,000 IQD are frozen at «بانتظار موافقة الممثل».**
+**Owner ruling, 2026-08-14. This overrides everything this section used to say.**
 
-| ممثل | orders | IQD | avg days waiting |
-|---|---|---|---|
-| مهدي علي حسين | 165 | 4,213,000 | **26** |
-| عبدالعزيز رعد خضير | 141 | 3,402,000 | **23** |
-| مصطفى هيثم هادي | 51 | 1,243,000 | 3 |
-| أنس صباح صبري حسن | 46 | 1,292,000 | 4 |
-| طارق زيد علي | 28 | 653,000 | 11 |
-| 5 others | 40 | 971,000 | — |
+An earlier version of this file called the ~471 orders sitting at «بانتظار موافقة الممثل» "the
+highest-value action available" and pointed at `POST /api/admin/orders/:checkoutGroupId/approve` as
+the way to clear them. **That advice was wrong and has been removed. Do not act on it, do not
+re-derive it, and do not put it back.**
 
-Two reps hold 306 orders / 7.6M IQD for over three weeks; the oldest has waited since 2 July. They
-are excluded from production queues AND from «الحساب المؤكد» — which is most of the
-"admin says 1,162, designer sees 355" gap. Admin can approve them directly
-(`POST /api/admin/orders/:checkoutGroupId/approve`, already built).
+Those orders are **not a queue we are allowed to drain**. They are parked on unresolved disputes
+between students and their ممثل — money, sizes, who promised what. The «pending» state is doing
+real work: it is the shop staying *out* of an argument it is not party to. An admin bulk-approve
+would silently take a side in every one of those disputes at once, commit the shop to fulfilling
+orders whose terms are still contested, and destroy the only record that the dispute existed.
+
+**Consequences of touching it are social, not technical, which is exactly why no test or migration
+will catch the mistake and why it cannot be undone by a revert.**
+
+So:
+
+- ⛔ Never bulk-approve, auto-approve, expire, or "clean up" rows in this state.
+- ⛔ Never propose it as a quick win because the money looks stranded. It is not stranded; it is
+  *withheld*, deliberately.
+- ✅ Reporting the count is fine — the split «قابل للعمل» / «بانتظار موافقة الممثل» that bug 9
+  added to `/admin` is exactly the right treatment: make the backlog visible, change nothing.
+- ✅ If someone asks why production queues and `/admin` disagree, this is most of the gap. That is
+  an explanation, not a to-do.
+
+Individual approvals are the **ممثل's** to make, one at a time, after they settle it with their
+student. Not ours, and not in bulk.

@@ -277,6 +277,19 @@ longer stranded on a branch · the laptop's loose credentials are filed in
 
 ## 💣 LANDMINES
 
+- **⛔ «بانتظار موافقة الممثل» IS NOT A QUEUE TO DRAIN — DO NOT TOUCH IT. Owner ruling 2026-08-14.**
+  The ~471 rep orders parked in this state are sitting on **unresolved disputes between students and
+  their ممثل**. The pending state is deliberate: it keeps the shop out of an argument it is not
+  party to. **Never bulk-approve, auto-approve, expire, or "tidy" these rows**, and never pitch it
+  as a quick win because ~11.7M IQD looks stranded — that money is *withheld*, not stuck. An admin
+  bulk-approve would take a side in every dispute at once and erase the record that one existed.
+  The damage is social, so **no test, migration or revert will catch or undo it**. Approvals belong
+  to the ممثل, individually, after they settle with their student. Counting and *displaying* the
+  backlog is fine and is exactly what bug 9's «قابل للعمل» / «بانتظار موافقة الممثل» split does.
+  ⚠️ An earlier version of `docs/superpowers/specs/2026-08-13-eleven-bugs-parallel-tracks.md` called
+  this "the highest-value action available" and named the approve endpoint. That was wrong and has
+  been rewritten. If you find that advice anywhere else, it is stale — delete it, do not follow it.
+
 - **⚠️ MERGING `ai-assistant` MUST UPDATE «لولو»'s MONEY DEFINITION — or it will quote a
   different profit than the dashboard.** Track A (`fix/admin-numbers`, 2026-08-13) changed what
   «الربح» *means*: the admin dashboard no longer reports `SUM(orders.profit)`, because on a rep's
