@@ -1,5 +1,51 @@
 # Progress
 
+## 2026-08-14 (b) — WhatsApp gateway banned again; outage switch built, ON A PR, NOT DEPLOYED
+
+The Zentramsg sender device was spam-banned by Meta for 24h (again), so no OTP is delivered
+and every OTP-gated flow dead-ends. Built `OTP_DEGRADED_UNTIL` — one server-only env var that
+trades the second factor for availability while the ban runs.
+
+**Measured first, and it reframed the job.** On prod: 1,020 rep-linked students already skip
+OTP (`authController.js:133`), 563 self-registered retail and 22 privileged users hold live
+trusted devices. **~1,605 of 1,694 users were never affected.** The real outage is ~89 people
+who happen to open the app on a new phone, ~24 signups/day, and every password reset.
+
+**What the flag does** (retail + wholesaler only — owner's choice): login on the verified
+password alone, registration without phone verification. What it deliberately does NOT do is
+the reason it is safe: bcrypt still runs; admin/staff/worker/design_helper never bypass; no
+trusted-device token is issued (a password-only login must not buy 90 days that outlive the
+window); `phone_verified` is not flipped.
+
+⚠️ **Password reset is NOT degraded, and that asymmetry is the whole design.** Login degrades
+safely because bcrypt already ran. On `forgotPasswordPhone` the OTP is the *only* credential,
+so bypassing it would read as "reset any account whose phone number you can guess" — 1,660 of
+them, from a trivially enumerable format. It refuses with 503 `ERR_OTP_UNAVAILABLE` and points
+the customer at shop support.
+
+**Fail-safe and capped at 48h:** empty, past, unparseable, or a typo'd year all read as OFF.
+Forgetting to unset it is not how this becomes permanent — the clock is.
+
+**Owner's correction, and it turned out to be security-relevant:** the refusal message must
+name no channel and disclose no outage. Publishing "the second factor is unavailable right
+now" on a public endpoint tells anyone probing the login exactly when to come back. It now
+reads «لاستعادة كلمة المرور، تواصل مع دعم المتجر وسنساعدك مباشرة.» and renders as a neutral
+`role="status"` notice, not a red validation error — replacing the «سيصلك رمز عبر واتساب» hint
+that would otherwise promise a message that isn't coming.
+
+Gates: **246/246** backend tests (228 baseline + 18 new), `tsc` clean, eslint 0 errors,
+`next build` complete. CI green on the PR; both `npm audit` gates clear (zero new deps).
+
+🚧 **NOT DONE — this is inert until two owner actions:** merge
+[PR #5](https://github.com/perdark/loloshop/pull/5) (`fix/otp-gateway-outage-mode`, `7c27dbb`),
+then set `OTP_DEGRADED_UNTIL` in the prod backend `.env` + `pm2 restart loloshop-api
+--update-env`. The var is not in git, so the deploy alone changes nothing.
+
+⚠️ **This is the airbag, not the brakes.** Zentramsg drives a real WhatsApp account through a
+linked device, which is what Meta bans; repeated temp bans escalate to permanent. The actual
+fixes are a second sender number (`ZENTRAMSG_DEVICE_UUID` is just an env var) or the official
+WhatsApp Cloud API with an Authentication template. Neither is done.
+
 ## 2026-08-14 — Track A merged and DEPLOYED, after the browser gate it left open
 
 Merge `df2fa48` on `origin/main`; CI green, **Deploy to VPS** succeeded, prod confirmed at
