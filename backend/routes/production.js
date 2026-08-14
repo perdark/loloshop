@@ -15,6 +15,9 @@ router.use(authRequired, requireRole('admin', 'staff'));
 
 router.get('/queue', c.getQueue);
 router.get('/monitor', requireStaffType(), c.monitor); // no types → manager staff_type + admin only
+// «يعمل الآن» alone, for the admin dashboard's 30s poll. SAME guard as /monitor —
+// it is a slice of the same data, so it must not be reachable by anyone /monitor isn't.
+router.get('/presence', requireStaffType(), c.presence);
 router.get('/completed', c.completed);
 router.get('/orders/:id', c.getOrder);
 router.post('/orders/:id/advance', c.advance);
