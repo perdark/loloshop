@@ -444,16 +444,12 @@ function actionsArabic(n: number): string {
   return `${n} إجراءً`;
 }
 
-/** Extended MonitorData to include optional working[] array */
-type MonitorDataExtended = MonitorData & {
-  working?: {
-    staff_id: string;
-    staff_name: string;
-    order_id: string;
-    product_name: string;
-    since: string;
-  }[];
-};
+/**
+ * `working` now lives on MonitorData itself, with the field names the API actually sends.
+ * The page-local guess this replaces named five fields and got four of them wrong, which is
+ * why «يعمل الآن» showed «الموظف  يعمل على وشاح» and linked to /staff/orders/undefined.
+ */
+type MonitorDataExtended = MonitorData;
 
 function MonitorDashboard({
   showSourceFilter,
@@ -645,13 +641,13 @@ function MonitorDashboard({
                   </h2>
                   <ul className="space-y-2">
                     {data.working.map((w) => (
-                      <li key={`${w.staff_id}-${w.order_id}`}>
+                      <li key={w.id}>
                         <Link
-                          href={`/staff/orders/${w.order_id}?from=${encodeURIComponent("/staff")}`}
+                          href={`/staff/orders/${w.id}?from=${encodeURIComponent("/staff")}`}
                           className="flex items-center justify-between gap-3 rounded-xl border border-line bg-surface px-4 py-3 text-sm transition-colors hover:border-orange-ink/30 hover:bg-surface-sink/50"
                         >
                           <span className="font-medium text-ink">
-                            الموظف {w.staff_name} يعمل على {w.product_name}
+                            الموظف {w.working_staff_name} يعمل على {w.product_name} — {w.student_name}
                           </span>
                           <span className="shrink-0 rounded-full border border-orange-ink/25 bg-orange-ink/8 px-2.5 py-0.5 text-xs font-semibold text-orange-ink">
                             نشط
