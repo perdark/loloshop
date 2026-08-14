@@ -302,9 +302,25 @@ function RecipientRow({
         </button>
       )}
 
+      {/* استُحق / حُوِّل / المتبقي. Showing only the accrual is what let the same salary
+          be transferred twice — the card said «المبلغ المقترح ٥٥٠٬٠٠٠» just as loudly
+          after 550,000 had already been sent. */}
       <div>
         <p className="text-xs text-ink-soft">المبلغ المقترح</p>
         <p className="mt-1 font-bold text-ink">{formatIQD(recipient.suggestedAmount)}</p>
+        {recipient.paidTotal > 0 && (
+          <p className="mt-1 text-xs text-ink-soft">
+            استُحق {formatIQD(recipient.accruedAmount)} · حُوِّل{" "}
+            {formatIQD(recipient.paidTotal)}
+          </p>
+        )}
+        {recipient.netDue < 0 && (
+          <p className="mt-1 text-xs font-semibold text-danger">
+            {recipient.paidTotal > recipient.accruedAmount
+              ? `حُوِّل أكثر من المستحق بـ ${formatIQD(-recipient.netDue)}`
+              : `الاستقطاعات تتجاوز المستحق بـ ${formatIQD(-recipient.netDue)}`}
+          </p>
+        )}
       </div>
 
       <div className="flex flex-wrap gap-2 md:justify-end">
