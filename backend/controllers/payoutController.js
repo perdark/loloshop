@@ -17,10 +17,38 @@ const {
   isValidCardNumber,
   isValidAccountNumber,
 } = require('../lib/payoutAccount');
+const {
+  accruedAmount,
+  netDue,
+  suggestedTransfer,
+  mergeRecipients,
+} = require('../lib/payoutMath');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const RECIPIENT_KINDS = new Set(['staff', 'tailor', 'workshop']);
 const n = (value) => Number(value || 0);
+
+/**
+ * Payout actions were the only admin money mutations writing NOTHING to `audit_log`
+ * (0 occurrences in this file before 2026-08-14), so a repointed card or a recorded
+ * transfer left no trace of who did it. Never called with a card or account number —
+ * only the last four digits, see the call sites.
+ *
+ * Deliberately non-fatal: an audit insert that throws must not roll back a transfer the
+ * admin has already made in their banking app. A missing log line is recoverable; a
+ * payout the shop cannot see is not.
+ */
+async function writePayoutAudit(actorId, action, entity, entityId, details) {
+  try {
+    await query(
+      `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [actorId, action, entity, entityId, JSON.stringify(details)]
+    );
+  } catch (err) {
+    console.error('[payout] audit_log write failed', action, entityId, err.message);
+  }
+}
 
 function mapAccount(row) {
   return {
@@ -89,6 +117,15 @@ async function upsertAccount(userId, body, actorId) {
       actorId,
     ]
   );
+  // Changing where someone's salary lands is a money action and belongs in the same
+  // log as every other admin mutation — it was the one that wrote nothing. Only the
+  // last four digits are recorded: the log answers «who repointed this card, when»,
+  // and a full PAN in a table half the admin screens can read is not worth that.
+  await writePayoutAudit(actorId, 'update_payout_account', 'payout_account', userId, {
+    card_last4: validated.cardNumber.slice(-4),
+    account_last4: validated.accountNumber.slice(-4),
+    self_service: actorId === userId,
+  });
   return { account: mapAccount(rows[0]) };
 }
 
@@ -171,7 +208,8 @@ async function staffRecipients() {
        pa.cardholder_name,
        pa.updated_at AS card_updated_at,
        lp.amount AS last_payout_amount,
-       lp.paid_at AS last_payout_at
+       lp.paid_at AS last_payout_at,
+       COALESCE(tp.paid_total, 0) AS paid_total
      FROM users u
      LEFT JOIN staff_salaries ss ON ss.user_id = u.id
      LEFT JOIN (
@@ -191,22 +229,42 @@ async function staffRecipients() {
        ORDER BY paid_at DESC
        LIMIT 1
      ) lp ON TRUE
+     -- Everything already transferred to this person, on the SAME predicate the
+     -- last-payout lateral uses. Without it «المبلغ المقترح» is a lifetime accrual
+     -- that pays the full salary again on every press (see lib/payoutMath.js).
+     LEFT JOIN (
+       SELECT source_id, SUM(amount) AS paid_total
+       FROM manual_payouts
+       WHERE recipient_kind IN ('staff', 'tailor')
+       GROUP BY source_id
+     ) tp ON tp.source_id = u.id
      WHERE u.role = 'staff'
      ORDER BY u.name`
   );
-  return rows.map((row) => ({
-    user_id: row.user_id,
-    source_id: row.source_id,
-    name: row.name,
-    recipient_kind: row.recipient_kind,
-    suggested_amount: n(row.base_salary) + n(row.bonuses) - n(row.deductions),
-    card_number: row.card_number || null,
-    account_number: row.account_number || null,
-    cardholder_name: row.cardholder_name || null,
-    card_updated_at: row.card_updated_at || null,
-    last_payout_amount: row.last_payout_amount == null ? null : n(row.last_payout_amount),
-    last_payout_at: row.last_payout_at || null,
-  }));
+  return rows.map((row) => {
+    const accrued = accruedAmount({
+      base: row.base_salary,
+      bonuses: row.bonuses,
+      deductions: row.deductions,
+    });
+    const due = netDue(accrued, row.paid_total);
+    return {
+      user_id: row.user_id,
+      source_id: row.source_id,
+      name: row.name,
+      recipient_kind: row.recipient_kind,
+      accrued_amount: accrued,
+      paid_total: n(row.paid_total),
+      net_due: due,
+      suggested_amount: suggestedTransfer(due),
+      card_number: row.card_number || null,
+      account_number: row.account_number || null,
+      cardholder_name: row.cardholder_name || null,
+      card_updated_at: row.card_updated_at || null,
+      last_payout_amount: row.last_payout_amount == null ? null : n(row.last_payout_amount),
+      last_payout_at: row.last_payout_at || null,
+    };
+  });
 }
 
 async function workshopRecipients() {
@@ -223,7 +281,8 @@ async function workshopRecipients() {
        pa.cardholder_name,
        pa.updated_at AS card_updated_at,
        lp.amount AS last_payout_amount,
-       lp.paid_at AS last_payout_at
+       lp.paid_at AS last_payout_at,
+       COALESCE(tp.paid_total, 0) AS paid_total
      FROM workshop_workers w
      JOIN users u ON u.id = w.user_id
      LEFT JOIN (
@@ -246,22 +305,51 @@ async function workshopRecipients() {
        ORDER BY paid_at DESC
        LIMIT 1
      ) lp ON TRUE
+     -- See the note on the staff query: without this the suggestion is a lifetime
+     -- accrual that re-pays the whole production run on every press.
+     LEFT JOIN (
+       SELECT source_id, SUM(amount) AS paid_total
+       FROM manual_payouts
+       WHERE recipient_kind = 'workshop'
+       GROUP BY source_id
+     ) tp ON tp.source_id = w.id
      WHERE w.active = TRUE
      ORDER BY u.name`
   );
-  return rows.map((row) => ({
-    user_id: row.user_id,
-    source_id: row.source_id,
-    name: row.name,
-    recipient_kind: 'workshop',
-    suggested_amount: n(row.production) + n(row.bonuses) - n(row.deductions),
-    card_number: row.card_number || null,
-    account_number: row.account_number || null,
-    cardholder_name: row.cardholder_name || null,
-    card_updated_at: row.card_updated_at || null,
-    last_payout_amount: row.last_payout_amount == null ? null : n(row.last_payout_amount),
-    last_payout_at: row.last_payout_at || null,
-  }));
+  return rows.map((row) => {
+    const accrued = accruedAmount({
+      production: row.production,
+      bonuses: row.bonuses,
+      deductions: row.deductions,
+    });
+    const due = netDue(accrued, row.paid_total);
+    return {
+      user_id: row.user_id,
+      source_id: row.source_id,
+      name: row.name,
+      recipient_kind: 'workshop',
+      accrued_amount: accrued,
+      paid_total: n(row.paid_total),
+      net_due: due,
+      suggested_amount: suggestedTransfer(due),
+      card_number: row.card_number || null,
+      account_number: row.account_number || null,
+      cardholder_name: row.cardholder_name || null,
+      card_updated_at: row.card_updated_at || null,
+      last_payout_amount: row.last_payout_amount == null ? null : n(row.last_payout_amount),
+      last_payout_at: row.last_payout_at || null,
+    };
+  });
+}
+
+/**
+ * The payout board, deduplicated. Exported so the money tests can assert against the
+ * real rows rather than a mock — the defects this closes were all in the SQL and the
+ * merge, which a mocked query would have happily reproduced.
+ */
+async function listRecipients() {
+  const [staff, workshop] = await Promise.all([staffRecipients(), workshopRecipients()]);
+  return mergeRecipients(staff, workshop);
 }
 
 async function payoutHistory() {
@@ -289,12 +377,8 @@ async function payoutHistory() {
 }
 
 async function adminDashboard(req, res) {
-  const [staff, workshop, history] = await Promise.all([
-    staffRecipients(),
-    workshopRecipients(),
-    payoutHistory(),
-  ]);
-  res.json({ data: { recipients: [...staff, ...workshop], history } });
+  const [recipients, history] = await Promise.all([listRecipients(), payoutHistory()]);
+  res.json({ data: { recipients, history } });
 }
 
 async function resolveRecipient(userId, sourceId, requestedKind) {
@@ -373,6 +457,14 @@ async function recordManualPayout(req, res) {
       req.user.id,
     ]
   );
+  await writePayoutAudit(req.user.id, 'record_manual_payout', 'manual_payout', rows[0].id, {
+    recipient_user_id: userId,
+    recipient_kind: requestedKind,
+    source_id: sourceId,
+    amount,
+    card_last4: account.card_number.slice(-4),
+  });
+
   res.status(201).json({ data: { ...rows[0], amount: n(rows[0].amount) } });
 }
 
@@ -382,4 +474,5 @@ module.exports = {
   adminSaveAccount,
   adminDashboard,
   recordManualPayout,
+  listRecipients,
 };
