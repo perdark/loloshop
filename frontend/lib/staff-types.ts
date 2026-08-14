@@ -159,7 +159,14 @@ export interface StationZone {
   label: string;
   done: boolean;
   text: string | null;
+  /** What to STITCH — the generated plate when there is one, else the student's own upload. */
   image_url: string | null;
+  /**
+   * The student's OWN photo, when a plate is what's being stitched. Migration 080 split the
+   * two; before that a plate overwrote the photo, so text like «نفس الصوره» pointed at an
+   * image nobody could see any more.
+   */
+  reference_image_url?: string | null;
 }
 
 /** One item in the `items[]` array on the production order detail */
@@ -168,7 +175,10 @@ export interface ProductionOrderItem {
   label_snapshot: string;
   price_snapshot: number;
   qty: number;
+  /** What the STUDENT uploaded as reference. */
   customer_image_url: string | null;
+  /** What the calligraphy generator produced for this line (migration 080). */
+  plate_image_url: string | null;
   /** Student's typed embroidery instruction (cap/sleeve embroidery). */
   customer_text: string | null;
   group_id: string | null;

@@ -173,6 +173,105 @@ original bug. Also `node --test test/` **196/196** (185 baseline + 11 new) · `t
 is global, so **every** programmatic `scrollTo`/`scrollIntoView` in this codebase animates by
 default and can be cancelled mid-flight. Pass `behavior: "instant"` for anything that is restoring
 state rather than responding to a click.
+## 2026-08-14 — Track B verified before merge; two defects found and fixed, one deferred
+
+First time this branch has ever run: `lolo-B/backend/.env` did not exist, so its original
+verification was DB scripts and a rolled-back transaction — never an HTTP request, never a browser.
+Booted it (`:4000` API, `:3007` web) and drove it as a real designer (مضر محمد) against the dev DB.
+
+**Bug 4's core fix is PROVEN, in a browser.** On order `1c38893f` the student's uploaded photo and
+the generated plate now render as two separate, labelled slots — «صورة الطالب — تطريز الوشاح من
+الخلف» and «الخط المولّد — تطريز الوشاح من الأمام». Before this branch, generating that plate
+destroyed that photo. Migration 080's backfill checks out on dev too: 7,653 lines, **0** with both
+columns set, 61 plate-only, and **zero** `customer_image_url` values still pointing at a plate.
+
+**Bug 6's partition is live**: every zone returns `pending / items / held / plated`, 149 held lines
+(91 instruction, 58 junk), each with an actionable Arabic hint.
+
+### Fixed here (commit `d56f288`)
+
+1. **`persistFullSetOrder` was destroying the plate on every طقم edit** — a regression this branch
+   introduces, found independently by three lenses of a 25-agent adversarial review. Detail in the
+   commit message. Guarded by `test/fullSetPlateSurvival.test.js`, which goes red without the fix.
+2. **«رجاء» held real names** — proven by running the matcher on the two real prod rows containing
+   it. Now fires only as the first token. Guarded by 3 new cases in `test/calligraphyText.test.js`.
+
+`node --test test/` → **202/202** (197 + 5 new).
+
+### ⚠️ DEFERRED — the reroll geometry ratchet (medium, needs migration 081)
+
+`calligraphyController.js:472` passes `p.plate_path` — *the plate being replaced* — to
+`matchPlateGeometry`, and the same handler overwrites `plate_path` at :481. So reroll N+1 anchors
+on reroll N's output. `imageFx.js:71-77` resizes with `fit:'inside'`, which never upscales, so ink
+height is **monotone non-increasing and can never recover**. Reproduced with sharp on realistic
+`extractBands` geometry: ink 700×140 → reroll1 (long name, width-bound) 1024×**73** → reroll2
+(normal name) 365×**73** → reroll3 **73**. The plate ends up pinned at the scale demanded by the
+widest generation it ever had — the exact sibling-scale mismatch `matchPlateGeometry` exists to
+close. `REROLL_LIMIT=10` exists precisely because designers press the button repeatedly.
+
+Not fixed here because there is **no immutable geometry anchor on the row**: `plate_path` is
+overwritten, and `sheet_path` is the whole 10-name sheet whose geometry is not the band's (the
+reviewer that first proposed `sheet_path` was wrong about this, and its own verifier said so). The
+fix needs a new column — the original band's geometry, or an untouched `original_plate_path` — i.e.
+migration 081, plus image-pipeline tests. Bounded severity: it converges to a running max of aspect
+rather than running away, and costs letter height, not data.
+
+### Still open on this branch before it merges
+
+- **`configureOrder` / `configureFullSet`** (`orderController.js:630/1140`) have the same
+  DELETE + re-INSERT shape with no status guard. The review panel refuted them on *reachability*
+  (`orderController.js:727` 403s rep-linked students, and plates live overwhelmingly on rep
+  orders) — which is an argument about who can reach the path, not about the path being safe.
+  Worth closing the same way `fullSetOrder` was.
+- **The audit was not clean:** 1 agent died mid-response, 5 stalled and retried, and the safety
+  classifier timed out on one. The dead agent is what "refuted" the «رجاء» finding, which then
+  turned out to be real. Treat that run's 14 refutations as weaker evidence than its 4 confirmations.
+
+## 2026-08-13 — Track B: the calligraphy plate stops eating the student's photo (bugs 4·5·6)
+
+Branch `fix/calligraphy-photo-loss`, cut from `main` (`871a257` + the spec doc). **Not merged** —
+Tracks A and C are separate branches and the deploy rule is one track at a time.
+
+**Bug 4 — the plate destroyed the reference photo.** `order_items.customer_image_url` held two
+different things under one name, and `calligraphyEngine.autoLinkPlate` overwrote it
+unconditionally, so every generate / reroll / compose deleted the student's upload. Migration
+**080** gives the plate its own column (`plate_image_url`), backfills the damaged rows out of the
+customer's column, and the link now targets the new one. Proved against a live order line: the
+photo survives the write and the plate lands in its own column (probe rolled back, dev DB clean).
+Sixteen readers updated across both apps — `retailQueue`, four `productionController` detectors,
+the queue's `has_design_images`, `designTeamController` JOB_SELECT, the TV wall spotlight,
+`orderZoneClause`, the staff order page, PrepConsole's spec partition, DesignGallery and the
+retail review board. `orderEditController` needed no change: its keyed reconciliation already
+updates in place, so a plate survives an admin edit.
+
+**Bug 5 — «إعادة التوليد».** Four defects, all fixed: no guard at all (now junk + instruction);
+regenerating from `render_text` that is itself the instruction (the designer can now pass the
+corrected name, and it is saved onto the plate); a single-name generation whose scale and framing
+did not match the 10-name sheet the siblings came from (new `matchPlateGeometry` reframes onto the
+exact geometry of the plate being replaced, measured from that file — 5 unit tests); and no cost
+ceiling (`reroll_count` + a limit of 10, surfaced in the UI).
+
+**Bug 6 — «يخصّني الآن» showed orders the queue could not.** New `lib/calligraphyText.js`
+classifies text students wrote *to the shop* («نفس الصوره») before any money is spent, and
+`getQueue` now returns the two populations it used to hide: `held` (refused, with the reason) and
+`plated` (already carries a done plate — the 55 invisible orders). Held lines are actionable in
+place: retype the name, or press «ولّد كما هو», which sets `reviewed: true`.
+
+⚠️ **The classifier was calibrated against the live table, not invented.** A first draft flagged
+**real** back-of-sash text — ﴿مَّن كَانَ يُرِيدُ ثَوَابَ الدُّنْيَا﴾, «الحمدلله هذا ماسعيت له»,
+«الى عائلتي انتم حكاية نجاحي» — because «يريد» «هذا» and «الى» (which normalises to «الي») looked
+like instruction words. Pointing words, «نفس», «مثل», «فقط» and third-person «يريد» were all
+removed; the four instructions measured on prod are caught anyway because **every one of them
+names a photo**. Final rate: **91 of 954** distinct strings (9.5%), each one eyeballed. All four
+false positives are locked in as regression tests.
+
+**Recovery:** `npm run photo-recovery` (read-only) lists the damaged lines and proposes upload
+files by mtime, flagging the ones whose own text names a photo. It writes nothing and deletes
+nothing — the timestamps are a hint, not an identification, and the owner confirms each match.
+
+**Verified:** `node --test test/` **197/197** (185 baseline + 12 new), `tsc --noEmit` clean,
+`eslint` clean, `next build` completes. Migration 080 applied to the dev DB and re-run to prove
+idempotency (61 rows moved, identical on the second pass).
 
 ## 2026-08-10 — iOS 1.0.4 uploaded, APNs verified against Apple, both platforms at parity
 

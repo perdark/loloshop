@@ -1,5 +1,6 @@
 // backend/controllers/calligraphyController.js
 const crypto = require('crypto');
+const fs = require('fs');
 // archiver v8 dropped the callable default export in favour of named classes.
 // The instance API (file/append/pipe/finalize/on) is unchanged. v8 is required:
 // every release up to 7.0.1 is inside GHSA-mh99-v99m-4gvg (brace-expansion DoS).
@@ -14,6 +15,10 @@ const {
   processNextBatch, toPlate, autoLinkPlate, attachOrderContext,
   jobCounts, jobCost, promptVariant, BATCH,
 } = require('../lib/calligraphyEngine');
+const {
+  isRealName, looksLikeInstruction, checkRenderText,
+} = require('../lib/calligraphyText');
+const { matchPlateGeometry } = require('../lib/imageFx');
 const { enqueueGeneration } = require('../lib/queue');
 
 const FRONT_LABEL    = 'تطريز الوشاح من الأمام';
@@ -35,15 +40,10 @@ function bad(res, msg, code = 'ERR_VALIDATION', status = 400) {
 function pickModel(model) {
   return model === 'premium' ? MODELS.premium : MODELS.standard;
 }
-// A real embroiderable name has at least two Arabic letters. Rejects pure numbers,
-// Latin, emoji, single chars and punctuation so the PAID generator is never spent
-// on junk (the "no API call for a retarded name" guard). Tatweel/diacritics aren't
-// letters and don't count. This is the server-side choke point; the UI mirrors it.
-const ARABIC_LETTER = /[ء-يٱ-ۓۺ-ۼ]/g;
-function isRealName(text) {
-  const m = String(text || '').match(ARABIC_LETTER);
-  return !!m && m.length >= 2;
-}
+// isRealName + looksLikeInstruction moved to lib/calligraphyText.js 2026-08-13 (imported
+// above) — the junk guard is now shared with the queue/pool and the reroll endpoint, and it
+// gained a sibling that catches text the student wrote AT us rather than for the sash. Both
+// are unit-tested against the real prod strings in test/calligraphyText.test.js.
 
 // GET /wholesalers — pickers
 async function listWholesalers(req, res) {
@@ -83,6 +83,10 @@ async function wholesalerNames(req, res) {
     variant: LABEL_VARIANT[r.label] || 'front',
     plate_id: r.plate_id, plate_status: r.plate_status,
     plate_path: r.plate_path, linked: !!r.linked_at,
+    // This list is raw `customer_text`, so a share of it is students writing TO the shop.
+    // Flagging it here is what lets «لصق أسماء» stop being the route those strings took into
+    // the paid generator — the designer sees which rows are messages before ticking them.
+    text_is_instruction: looksLikeInstruction(r.render_text),
   })) });
 }
 
@@ -149,7 +153,8 @@ async function retailQueue(req, res) {
             s.id AS student_id, s.instagram_username, s.university_name, s.department,
             u.name AS student_name,
             p.name_ar AS product_name, p.type AS product_type,
-            oi.id AS order_item_id, oi.label_snapshot, oi.customer_text, oi.customer_image_url,
+            oi.id AS order_item_id, oi.label_snapshot, oi.customer_text,
+            oi.customer_image_url, oi.plate_image_url,
             EXISTS (SELECT 1 FROM calligraphy_plates cp
                      WHERE cp.order_item_id = oi.id AND cp.status = 'done') AS has_plate
        FROM orders o
@@ -187,6 +192,10 @@ async function retailQueue(req, res) {
       };
       byOrder.set(r.order_id, card);
     }
+    // `images` is the student's OWN uploads and nothing else. Before migration 080 a
+    // generated plate landed in this same column, so this strip filled up with machine
+    // calligraphy presented to the designer as «صور الزبون» — the exact confusion that let
+    // «تطريز هذه الصورة فقط» be rendered as words while the photo it named was deleted.
     if (r.customer_image_url && !card.images.includes(r.customer_image_url)) {
       card.images.push(r.customer_image_url);
     }
@@ -201,7 +210,12 @@ async function retailQueue(req, res) {
       label_snapshot: r.label_snapshot,
       raw_text: r.customer_text,
       customer_image_url: r.customer_image_url || null,
+      plate_image_url: r.plate_image_url || null,
       has_plate: r.has_plate,
+      // Reviewing BEFORE generating is the whole point of this screen (owner rule: «تجزئة =
+      // review first, then generate»), so say out loud when the raw text is a message rather
+      // than a name — the designer retypes it instead of paying for a plate of a sentence.
+      text_is_instruction: looksLikeInstruction(r.customer_text),
     });
   }
   // Orders with no embroidery text at all are not calligraphy work — drop them.
@@ -222,36 +236,72 @@ async function retailQueue(req, res) {
 // ---------------------------------------------------------------------------
 const ZONE_LABEL = { front: FRONT_LABEL, back: BACK_LABEL, cap: CAP_TOP_LABEL, cap_side: CAP_SIDE_LABEL };
 
-async function poolFor(variant, limit = 1000, wholesalerId = null) {
+// EVERY line of this zone, partitioned into what the designer can act on. One query.
+//
+// WHY THIS REPLACED A "just give me the pool" QUERY (bug 6, 2026-08-13). The old poolFor
+// asked SQL for lines with NO done plate and threw away anything that failed isRealName —
+// so a line was either work or it silently did not exist. That produced two invisible
+// populations the designer could never reach:
+//
+//   · plated — a junk plate generated from instruction text counts as `status='done'`, so the
+//     line left the queue forever while its order stayed in «يخصّني الآن». Measured on prod:
+//     55 orders across reps, محمد باقر 5 of 5, showing in his list and in no queue.
+//   · held   — junk or instruction text, dropped by a JS filter after the query, reported
+//     nowhere. The designer saw a smaller number and no reason.
+//
+// Nothing is dropped now; each line lands in exactly one bucket and getQueue returns all of
+// them. `held` is the money-saving half (nothing paid runs on it) and `plated` is the
+// visibility half (the queue and «يخصّني» finally describe the same orders).
+async function zoneBuckets(variant, wholesalerId = null, limit = 10000) {
   const label = ZONE_LABEL[variant];
-  if (!label) return [];
+  if (!label) return { pool: [], held: [], plated: [] };
   const { rows } = await query(
     `SELECT oi.id AS order_item_id, s.id AS student_id, u.name AS student_name,
-            oi.customer_text AS render_text, s.wholesaler_id
+            oi.customer_text AS render_text, s.wholesaler_id, o.id AS order_id,
+            cp.id AS plate_id, cp.plate_path
        FROM order_items oi
        JOIN orders o    ON o.id = oi.order_id AND o.status::text <> 'cancelled'
        JOIN products p  ON p.id = o.product_id AND p.type IN ('sash','cap')
        JOIN students s  ON s.id = o.student_id
        JOIN users u     ON u.id = s.user_id
+       LEFT JOIN LATERAL (
+            SELECT id, plate_path FROM calligraphy_plates c
+             WHERE c.order_item_id = oi.id AND c.status = 'done'
+             ORDER BY c.created_at DESC LIMIT 1
+       ) cp ON TRUE
       WHERE oi.label_snapshot = $1 AND COALESCE(oi.customer_text,'') <> ''
         AND ($3::uuid IS NULL OR s.wholesaler_id = $3)
-        AND NOT EXISTS (
-              SELECT 1 FROM calligraphy_plates cp
-               WHERE cp.order_item_id = oi.id AND cp.status = 'done')
       ORDER BY o.created_at
       LIMIT $2`,
     [label, limit, wholesalerId]);
-  // Apply the same junk guard used in createJob — never pool non-Arabic junk
-  return rows
-    .filter((r) => isRealName(r.render_text))
-    .map((r) => ({
+
+  const pool = []; const held = []; const plated = [];
+  for (const r of rows) {
+    const base = {
       order_item_id: r.order_item_id,
       student_id: r.student_id,
       student_name: r.student_name,
       render_text: r.render_text,
       variant,
       wholesaler_id: r.wholesaler_id,
-    }));
+    };
+    if (r.plate_id) {
+      plated.push({ ...base, order_id: r.order_id, plate_id: r.plate_id, plate_path: r.plate_path });
+      continue;
+    }
+    const verdict = checkRenderText(r.render_text);
+    if (verdict.ok) pool.push(base);
+    else held.push({ ...base, order_id: r.order_id, reason: verdict.reason, hint: verdict.message });
+  }
+  return { pool, held, plated };
+}
+
+// The generatable pool only — what «توليد» is allowed to spend money on.
+// `limit` now applies AFTER the guards, so asking for 1000 no longer returns 700 because
+// 300 of the first thousand rows were junk.
+async function poolFor(variant, limit = 1000, wholesalerId = null) {
+  const { pool } = await zoneBuckets(variant, wholesalerId);
+  return pool.slice(0, limit);
 }
 
 // POST /jobs — create pending rows (dedup), no generation yet
@@ -273,12 +323,32 @@ async function createJob(req, res) {
     .filter((it) => it.render_text);
   if (!items.length) return bad(res, 'لا توجد أسماء صالحة');
 
-  // Junk guard (defense-in-depth): drop anything that isn't a real Arabic name
-  // BEFORE any paid generation. The UI flags these too, but a direct API call can't
-  // bypass it. Batch SIZE is intentionally NOT capped here (admin's choice).
-  const dropped = items.filter((it) => !isRealName(it.render_text)).map((it) => it.render_text);
-  items = items.filter((it) => isRealName(it.render_text));
-  if (!items.length) return bad(res, 'لا توجد أسماء صالحة — يجب أن يحتوي الاسم على حروف عربية');
+  // Junk + instruction guard (defense-in-depth), BEFORE any paid generation. The UI flags
+  // these too, but a direct API call can't bypass it. Batch SIZE is intentionally NOT capped
+  // here (admin's choice).
+  //
+  // THE GUARD IS SOURCE-AWARE, on the owner's rule «ممثل = generate in bulk then review ·
+  // تجزئة = review first, then generate»:
+  //   · typed/wholesaler — nobody has read these strings. A line that reads as a message to
+  //     the shop («نفس الصوره») is dropped, not billed.
+  //   · retail — a designer typed this text on the review board deliberately. Blocking them
+  //     would be overruling the review that already happened, so instruction-looking text is
+  //     WARNED about and still generated. Only genuine junk (no Arabic) is dropped.
+  // `reviewed` is also settable per call — the workbench sets it when a designer has read one
+  // held line and pressed generate on it deliberately. No word list is perfect (a sash verse
+  // carrying «أريد» reads exactly like a request), and a guard with no override would strand
+  // real work in «موقوف» forever, which is the failure this whole track is about.
+  const reviewed = source === 'retail' || (req.body && req.body.reviewed === true);
+  const dropped = [];
+  const warned = [];
+  items = items.filter((it) => {
+    const verdict = checkRenderText(it.render_text);
+    if (verdict.ok) return true;
+    if (reviewed && verdict.reason === 'instruction') { warned.push(it.render_text); return true; }
+    dropped.push(it.render_text);
+    return false;
+  });
+  if (!items.length) return bad(res, 'لا توجد أسماء صالحة — تحقق من النص: قد يكون تعليمات للمحل وليس اسماً');
   if (items.length > 1000) return bad(res, 'الحد الأقصى 1000 اسم لكل مهمة');
 
   // Retail: the workbench sends a designer-cleaned render_text per order_item, so the TEXT is
@@ -319,7 +389,9 @@ async function createJob(req, res) {
     source, model: pickModel(model), createdBy: req.user.id,
   });
   enqueueGeneration(jobId); // server-side generation (worker); FE just polls getJob
-  res.status(201).json({ data: { job_id: jobId, total: out.length, dropped, plates: await attachOrderContext(out) } });
+  res.status(201).json({
+    data: { job_id: jobId, total: out.length, dropped, warned, plates: await attachOrderContext(out) },
+  });
 }
 
 // autoLinkPlate / attachOrderContext / jobCost / jobCounts moved to
@@ -346,24 +418,70 @@ async function getJob(req, res) {
   res.json({ data: { job_id: jobId, ...c, job_cost: await jobCost(jobId), plates: await attachOrderContext(rows.map(toPlate)) } });
 }
 
-// POST /plates/:id/reroll
+// Ten paid images on ONE plate is already far past "the model had a bad day". Before this the
+// endpoint had no ceiling at all: every press bought a fresh generation, cost_usd quietly
+// accumulated, and a designer holding the button could spend without any surface saying so.
+const REROLL_LIMIT = 10;
+
+// POST /plates/:id/reroll   body (all optional): { render_text, element_text, variant }
+//
+// FOUR THINGS WERE WRONG HERE (bug 5, fixed 2026-08-13) and they compounded:
+//   1. No guard at all — createJob refuses junk and instructions, this re-billed them happily.
+//   2. It regenerated from the STORED render_text, which for these plates is exactly the text
+//      that was wrong: «نفس الصوره» rerolled into another paid picture of «نفس الصوره». So the
+//      designer can now hand over the corrected name, and it is SAVED onto the plate — the
+//      queue and the artwork stop disagreeing about what this line says.
+//   3. buildSinglePrompt + cropSheet(buf, 1) produced a different geometry from the 10-name
+//      sheet the siblings came from (see matchPlateGeometry).
+//   4. It re-ran autoLinkPlate, which used to overwrite the student's photo — every reroll
+//      destroyed it again. Closed by migration 080; the link now targets plate_image_url.
 async function reroll(req, res) {
   const { id } = req.params;
   const { rows: pr } = await query(`SELECT * FROM calligraphy_plates WHERE id=$1`, [id]);
   if (!pr.length) return bad(res, 'الصورة غير موجودة', 'ERR_NOT_FOUND', 404);
   const p = pr[0];
+
+  if (Number(p.reroll_count || 0) >= REROLL_LIMIT) {
+    return bad(res, `تم بلوغ الحد الأقصى لإعادة التوليد (${REROLL_LIMIT} مرات) لهذه الصورة`,
+      'ERR_REROLL_LIMIT', 429);
+  }
+
+  const body = req.body || {};
+  const hasOverride = typeof body.render_text === 'string' && body.render_text.trim() !== '';
+  const renderText = hasOverride ? body.render_text.trim() : p.render_text;
+  const verdict = checkRenderText(renderText);
+  if (!verdict.ok) {
+    return bad(res, verdict.message,
+      verdict.reason === 'instruction' ? 'ERR_INSTRUCTION_TEXT' : 'ERR_VALIDATION');
+  }
+  const elementText = typeof body.element_text === 'string'
+    ? (body.element_text.trim() || null) : p.element_text;
+  const variant = VARIANTS.includes(body.variant) ? body.variant : p.variant;
+
   const model = p.model || MODELS.standard;
   let gen;
-  try { gen = await generateImage({ model, prompt: buildSinglePrompt(p.render_text, promptVariant(p.variant), p.element_text) }); }
+  try { gen = await generateImage({ model, prompt: buildSinglePrompt(renderText, promptVariant(variant), elementText) }); }
   catch (err) { return res.status(err.status || 502).json({ error: err.message, code: err.code || 'ERR_OPENROUTER' }); }
   // single-name image: trim to one band (expected 1); fall back to full image
   let plateBuf = gen.buffer;
   try { const { plates } = await cropSheet(gen.buffer, 1); if (plates[0]) plateBuf = plates[0]; } catch { /* keep full */ }
+
+  // Reframe onto the geometry of the plate this one replaces, so it drops into the same slot
+  // as the nine it was generated beside. No-op when the old file is gone.
+  const { absFromUrl } = require('../lib/upload');
+  const refAbs = absFromUrl(p.plate_path);
+  if (refAbs) {
+    try { plateBuf = await matchPlateGeometry(plateBuf, await fs.promises.readFile(refAbs)); }
+    catch { /* reference unreadable — ship the new plate as generated */ }
+  }
+
   const plate = saveBufferToUploads(req, 'calligraphy/plates', plateBuf, 'png');
   const { rows } = await query(
-    `UPDATE calligraphy_plates SET status='done', plate_path=$2, cost_usd = cost_usd + $3, error=NULL,
-            linked_at = NULL WHERE id=$1 RETURNING *`,
-    [id, plate.url, Number(gen.cost || 0)]);
+    `UPDATE calligraphy_plates
+        SET status='done', plate_path=$2, cost_usd = cost_usd + $3, error=NULL, linked_at = NULL,
+            render_text=$4, element_text=$5, variant=$6, reroll_count = reroll_count + 1
+      WHERE id=$1 RETURNING *`,
+    [id, plate.url, Number(gen.cost || 0), renderText, elementText, variant]);
   // Re-attach the fresh artwork onto the order line right away (auto-link, no manual step).
   const [withCtx] = await attachOrderContext([toPlate(await autoLinkPlate(rows[0]))]);
   res.json({ data: withCtx });
@@ -422,11 +540,20 @@ async function getQueue(req, res) {
   const wid = req.query.wholesaler_id && UUID_RE.test(req.query.wholesaler_id)
     ? req.query.wholesaler_id : null;
   const data = {};
+  const strip = ({ wholesaler_id: _wid, ...rest }) => rest; // wholesaler_id is not the FE's business
   for (const variant of VARIANTS) {
-    // TRUE count: pool with a high limit so we never under-count
-    const full = await poolFor(variant, 10000, wid);
-    const items = full.slice(0, 200).map(({ wholesaler_id: _wid, ...rest }) => rest); // strip wholesaler_id
-    data[variant] = { pending: full.length, items };
+    const { pool, held, plated } = await zoneBuckets(variant, wid);
+    data[variant] = {
+      pending: pool.length,
+      items: pool.slice(0, 200).map(strip),
+      // Lines the generator REFUSED, with the reason, so «توليد» being smaller than the
+      // designer expects is explained on screen instead of being a mystery.
+      held: { count: held.length, items: held.slice(0, 200).map(strip) },
+      // Lines that already carry a done plate. These are why an order can sit in «يخصّني
+      // الآن» while the queue shows nothing to do — before this they were unreachable from
+      // here, and re-plating one meant hunting it down by student name.
+      plated: { count: plated.length, items: plated.slice(0, 200).map(strip) },
+    };
   }
   res.json({ data });
 }
@@ -553,14 +680,17 @@ async function sendOrder(req, res) {
     return res.status(403).json({ error: 'ممنوع', code: 'ERR_FORBIDDEN' });
   }
   // Catch-up: attach any DONE plates generated before auto-linking shipped (idempotent —
-  // only fills lines that still have no image; newest plate per line wins).
+  // only fills lines that still have no plate; newest plate per line wins).
+  // Targets `plate_image_url` since migration 080 — this used to fill the customer's column,
+  // which is the same data loss autoLinkPlate caused, just on a different trigger. The
+  // `IS NULL` guard was already the right INTENT; it was pointed at the wrong column.
   await query(
-    `UPDATE order_items oi SET customer_image_url = cp.plate_path
+    `UPDATE order_items oi SET plate_image_url = cp.plate_path
        FROM (SELECT DISTINCT ON (order_item_id) order_item_id, plate_path
                FROM calligraphy_plates
               WHERE status='done' AND plate_path IS NOT NULL AND order_item_id IS NOT NULL
               ORDER BY order_item_id, created_at DESC) cp
-      WHERE cp.order_item_id = oi.id AND oi.order_id = $1 AND oi.customer_image_url IS NULL`,
+      WHERE cp.order_item_id = oi.id AND oi.order_id = $1 AND oi.plate_image_url IS NULL`,
     [orderId]);
   const updated = await production.performAdvance(row, req.user);
   res.json({ data: { ok: true, order_id: orderId, status: updated.status } });

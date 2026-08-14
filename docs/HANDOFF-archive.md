@@ -16,6 +16,79 @@ written against an uncommitted tree; **(d)** committed it, so that caveat is dis
 
 ---
 
+## 2026-08-13 — 🧵 Track B: the calligraphy plate stops eating the student's photo
+
+Branch `fix/calligraphy-photo-loss`, cut from `main`. Bugs 4·5·6 of
+`docs/superpowers/specs/2026-08-13-eleven-bugs-parallel-tracks.md`. **Committed, not merged.**
+
+**One column, two meanings — that is the whole bug.** `order_items.customer_image_url` held both
+the photo a student uploaded and the plate the AI generated, and `autoLinkPlate` wrote it with a
+bare `UPDATE`. There was no guard because there was nothing to guard *against* until the plate
+started arriving in the same column. Migration 080 splits them, backfills the damaged rows out of
+the customer's column (safe because it only moves a value byte-identical to a `plate_path` that
+line's own plate row recorded), and every reader was re-pointed at the meaning it actually wants.
+
+**The part worth remembering: the fix is mostly READERS, not the write.** The write is one line.
+Sixteen call sites across two apps had to be told which of the two images they meant, and getting
+one wrong is invisible in review and obvious in the workshop — miss `detectZonesForOrders` and the
+embroiderer's queue loses its artwork; miss `isZoneLine` and 459 zone lines silently migrate from
+the embroiderer's checklist into the preparer's spec list. They were found by grepping the column,
+not by reasoning about the feature.
+
+**Bug 5 (reroll) had four defects that each hid the next.** No guard, so junk re-billed; it
+regenerated from `render_text`, which for these plates IS the wrong text, so a reroll bought
+another picture of «نفس الصوره»; it used `buildSinglePrompt` + `cropSheet(buf, 1)` while the
+siblings came off a 10-name sheet, so even a *correct* reroll came back at the wrong scale and
+looked like a generation failure; and it re-ran `autoLinkPlate`, destroying the photo again. The
+scale fix is the interesting one: rather than tuning a "right" size, `matchPlateGeometry` measures
+the plate being replaced — canvas dimensions and ink height, read from the file already sitting on
+the order line — and reproduces it. Exact by construction, and unit-testable with sharp-drawn
+fixtures and no network. It returns the new plate untouched on any failure, because losing a paid
+generation to framing cosmetics would be worse than the mismatch.
+
+**Bug 6 was a visibility bug wearing a data bug's clothes.** Orders sat in a designer's «يخصّني
+الآن» and appeared nowhere in the calligraphy queue — correctly, because they already carried a
+`done` plate. The plate was junk, generated from instruction text, but «done» is «done». The old
+`poolFor` asked SQL only for lines with no plate and dropped the rest in a JS filter, so a line
+was either work or it did not exist. `zoneBuckets` now partitions every line into `pool` / `held`
+/ `plated` and `getQueue` returns all three.
+
+⚠️ **CALIBRATION IS THE STORY HERE, AND IT WAS MEASURED, NOT REASONED.** The first instruction
+word list looked obviously right and flagged real work on the live table: ﴿مَّن كَانَ يُرِيدُ
+ثَوَابَ الدُّنْيَا﴾ («يريد»), «الحمدلله هذا ماسعيت له» («هذا»), «الى عائلتي انتم حكاية نجاحي» —
+that last one because «الى» normalises to «الي», which had been added for the colloquial "which".
+The back of a sash is where students put Quranic verses and dedications, so pointing words,
+«نفس», «مثل», «فقط», «الخط» and third-person «يريد» are all *sash text*. Every one was removed and
+the four instructions measured on prod are still caught, because **all four name a photo**. The
+final matcher fires only on an explicit image reference or a first-person request/command verb:
+91 of 954 distinct strings (9.5%), read one by one. All four false positives are regression tests.
+
+**And a guard with no override is the same bug again.** A held line that is genuinely embroidery
+text (a verse containing «أريد») would be stranded silently — which is bug 6 restated. So held
+lines are actionable in place: retype the name, or press «ولّد كما هو», which sends
+`reviewed: true` and downgrades the block to a warning. That is the same treatment `source:
+'retail'` already gets, for the same reason: a human read it.
+
+**Found in passing, fixed:** the junk guard's own comment claimed tatweel doesn't count as a
+letter. Tatweel (U+0640) sits *inside* the `ء`–`ي` range, so «ـــ» passed `isRealName` and bought
+a paid image. Stripping diacritics before the match is what finally makes the comment true.
+
+**Recovery is a report, not a repair.** The files were never deleted — only the pointers. But
+which file belonged to which line is not in the database any more, and the only surviving evidence
+is mtime. `backend/scripts/calligraphy-photo-recovery.js` proposes candidates with their time
+distance and refuses to bulk-apply the nearest one. Run it on the prod box: mtimes on a copied
+tree are the copy date and match nothing.
+
+**Verified:** 197/197 backend tests (185 baseline + 12 new), `tsc` clean, `eslint` clean, `next
+build` completes, migration 080 applied to dev and re-run to prove idempotency. The core claim was
+proved directly rather than argued: `autoLinkPlate` was driven against a real order line inside a
+transaction — photo unchanged, plate in its own column, rolled back, dev DB confirmed clean.
+
+**Open:** not merged. Migration 080 must ride the same deploy as the code. Tracks A and C are
+independent branches and merge one at a time.
+
+---
+
 ## 2026-08-10 — 🍎 iOS 1.0.4 uploaded, APNs verified against Apple, both platforms at parity
 
 **Two bugs, both of which produced a *successful-looking* run that failed later.** That is the

@@ -137,6 +137,37 @@ code side of this queue is closed.
 
 ---
 
+## 🧵 TRACK B (calligraphy) — MERGED AND DEPLOYED 2026-08-14
+
+`fix/calligraphy-photo-loss` closed bugs 4·5·6. Migration 080 rode the same deploy: `schema.sql`
+carries the column, the backfill **and** `reroll_count`, and `scripts/deploy.sh:17` runs
+`npm run migrate` *before* the frontend build, so the column existed before the new code served.
+
+**Owner action this unlocks:** `npm run photo-recovery` on the prod box (read-only, deletes
+nothing) proposes which upload file was each deleted reference photo, by mtime. Run it **there** —
+mtimes on a copied tree are the copy date and match nothing. It cannot prove a match; the owner
+confirms each one, and lines whose own text names a photo (★) are the ones worth the time.
+
+⚠️ **STILL OPEN on the merged code — the reroll geometry ratchet.**
+`calligraphyController.js:472` hands `matchPlateGeometry` the plate it is about to overwrite
+(`:481`), so reroll N+1 anchors on reroll N's output; `imageFx.js:71-77` resizes with
+`fit:'inside'`, which never upscales. Ink height is therefore **monotone non-increasing and cannot
+recover**: reproduced with sharp at 700×140 → 1024×**73** → 365×**73** → **73**. The plate ends up
+pinned at the scale demanded by the widest generation it ever had — the exact sibling-scale
+mismatch `matchPlateGeometry` exists to close — and `REROLL_LIMIT=10` exists because designers
+press the button repeatedly. It costs letter height, not data, and converges rather than running
+away. **Not fixable without a new column**: `plate_path` is overwritten and `sheet_path` is the
+whole 10-name sheet, whose geometry is not the band's. Needs migration 081.
+
+⚠️ **Same shape, unclosed:** `orderController.configureOrder` (`:630`) and `configureFullSet`
+(`:1140`) DELETE and re-INSERT `order_items` with no status guard and never carry
+`plate_image_url` — the identical defect that was destroying plates via `persistFullSetOrder`. A
+review panel refuted these on *reachability* (`orderController.js:727` 403s rep-linked students,
+and plates live overwhelmingly on rep orders), which is an argument about who can reach the path,
+not about the path being safe. Close them the way `lib/fullSetOrder.js` was closed.
+
+---
+
 ## ☁️ CLOUD BOARD — what a session with no laptop can do
 
 Everything here is repo work. Start from `main` (`11a7a43`).
@@ -269,6 +300,16 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   drop out of every SUM. `npm run migrate` applies `schema.sql` with `CREATE TABLE IF NOT EXISTS`,
   so it does not currently rewrite the column; **do not "fix" the drift by making the live table
   match the file.** Owned by Track B (`db/schema.sql`), so Track A left it alone.
+- **⚠️ The calligraphy plate writes `order_items.plate_image_url`, NEVER `customer_image_url`**
+  (migration 080, on `fix/calligraphy-photo-loss`). The two columns are the generator's output and
+  the student's own upload, and they shared one name until 2026-08-13 — so every generate / reroll
+  / compose deleted the photo, 459 prod lines across 628 link events, 27 of them carrying text
+  that pointed AT the image being deleted. Anything that attaches student media belongs in
+  `customer_image_url`; anything the generator produces belongs in `plate_image_url`. A reader
+  that wants «the artwork to stitch» takes `COALESCE(plate_image_url, customer_image_url)`.
+  ⚠️ **080's backfill is repeated in `db/schema.sql` on purpose**, exactly like 077's — that is
+  the file `npm run migrate` applies to a database that already holds the damaged rows. Do not
+  tidy it out.
 - **⚠️ `notifications.push_state` DEFAULTS TO `'pending'` — the backfill is not optional.**
   Migration 077 retires every pre-existing row to `'skipped'`, and the same `UPDATE` is repeated
   in `db/schema.sql` **on purpose**, because that is the file `npm run migrate` applies to a

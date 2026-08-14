@@ -13,7 +13,8 @@
     "migrate:file": "node migrate.js",
     "seed:fullset": "node seed-full-set.js",
     "set-password": "node scripts/set-password.js",
-    "demo-account": "node scripts/demo-account.js"
+    "demo-account": "node scripts/demo-account.js",
+    "photo-recovery": "node scripts/calligraphy-photo-recovery.js"
   },
   "keywords": [],
   "author": "",

@@ -24,7 +24,10 @@ function resolveUrl(url: string | null | undefined): string | null {
 
 interface DesignGalleryItem {
   label_snapshot: string;
+  /** What the STUDENT uploaded as reference. */
   customer_image_url: string | null;
+  /** What the calligraphy generator produced for this line (migration 080). */
+  plate_image_url?: string | null;
 }
 
 export function DesignGallery({
@@ -36,8 +39,13 @@ export function DesignGallery({
   finalDesignUrl?: string | null;
   title?: string;
 }) {
+  // Both images per line, plate first — it is the artwork to work from, and the student's
+  // photo is the reference behind it. They used to be the same column, so whichever was
+  // written last was the only one anybody could see.
   const entries: GalleryEntry[] = [];
   for (const it of items) {
+    const plate = resolveUrl(it.plate_image_url ?? null);
+    if (plate) entries.push({ title: `${it.label_snapshot} — الخط المولّد`, url: plate });
     const url = resolveUrl(it.customer_image_url);
     if (url) entries.push({ title: it.label_snapshot, url });
   }

@@ -576,11 +576,18 @@ const JOB_SELECT = `
       SELECT json_agg(json_build_object(
                'label', oi.label_snapshot,
                'text', oi.customer_text,
-               'image_url', oi.customer_image_url
+               -- Migration 080: image_url is what the STUDENT sent (the thing أيادي التصميم
+               -- is asked to follow); plate_image_url is what the generator already made.
+               -- One column used to carry both, so a generated plate arrived here disguised as
+               -- the student's reference and the design team worked from the wrong image.
+               'image_url', oi.customer_image_url,
+               'plate_image_url', oi.plate_image_url
              ) ORDER BY oi.id) AS lines
         FROM order_items oi
        WHERE oi.order_id = o.id
-         AND (oi.customer_text IS NOT NULL OR oi.customer_image_url IS NOT NULL)
+         AND (oi.customer_text IS NOT NULL
+              OR oi.customer_image_url IS NOT NULL
+              OR oi.plate_image_url IS NOT NULL)
     ) spec ON TRUE`;
 
 // Normalize an Instagram handle for display + a clean profile link (strip @, URL, spaces).

@@ -112,6 +112,54 @@ function ProductPhotoCard({
   );
 }
 
+/**
+ * Both images an order line can carry, labelled so nobody has to guess which is which.
+ *
+ * Migration 080 split them apart: `plate_image_url` is the calligraphy the generator made and
+ * `customer_image_url` is what the student uploaded. They shared one column until 2026-08-13,
+ * so generating a plate deleted the photo — and on this very screen the embroiderer would read
+ * «نفس الصوره» beside a picture of those words, with the photo they named gone. Showing the
+ * plate WITHOUT the reference is what made that unnoticeable, so both render or neither does.
+ */
+function ItemArtwork({ item }: { item: ProductionOrderItem }) {
+  const shots: { url: string; caption: string }[] = [];
+  const plate = resolveImageUrl(item.plate_image_url);
+  if (plate) shots.push({ url: plate, caption: "الخط المولّد" });
+  const photo = resolveImageUrl(item.customer_image_url);
+  if (photo) shots.push({ url: photo, caption: "صورة الطالب" });
+  if (!shots.length) return null;
+
+  return (
+    <div className="flex flex-wrap gap-3">
+      {shots.map((shot) => (
+        <figure key={shot.url} className="w-fit">
+          <a
+            href={shot.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block w-fit"
+            aria-label={`عرض ${shot.caption} — ${item.label_snapshot} بالحجم الكامل`}
+          >
+            <Image
+              src={shot.url}
+              alt={`${shot.caption} — ${item.label_snapshot}`}
+              width={240}
+              height={240}
+              className="max-h-56 w-auto rounded-lg border border-line object-contain"
+              loading="lazy"
+            />
+          </a>
+          {shots.length > 1 && (
+            <figcaption className="mt-1 text-[11px] font-semibold text-ink-soft">
+              {shot.caption}
+            </figcaption>
+          )}
+        </figure>
+      ))}
+    </div>
+  );
+}
+
 // ─── Intake helpers ───────────────────────────────────────────────────────────
 
 function daysUntil(dateStr: string | null): number | null {
@@ -1193,24 +1241,7 @@ function ProductionOrderDetailContent() {
                           <span className="font-semibold text-ink">{item.customer_text}</span>
                         )}
                       </div>
-                      {item.customer_image_url && (
-                        <a
-                          href={resolveImageUrl(item.customer_image_url) ?? "#"}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="block w-fit"
-                          aria-label={`عرض صورة ${item.label_snapshot} بالحجم الكامل`}
-                        >
-                          <Image
-                            src={resolveImageUrl(item.customer_image_url) ?? ""}
-                            alt={`صورة — ${item.label_snapshot}`}
-                            width={240}
-                            height={240}
-                            className="max-h-56 w-auto rounded-lg border border-line object-contain"
-                            loading="lazy"
-                          />
-                        </a>
-                      )}
+                      <ItemArtwork item={item} />
                     </li>
                   ))}
                 </ul>
@@ -1228,7 +1259,7 @@ function ProductionOrderDetailContent() {
   // server-side. Ticking every zone auto-advances; a no-zone order shows the advance button.
   if (isEmbroideryOnly) {
     const embroideryItems = items.filter(
-      (i) => i.group_id !== null || !!i.customer_text || !!i.customer_image_url
+      (i) => i.group_id !== null || !!i.customer_text || !!i.customer_image_url || !!i.plate_image_url
     );
     return (
       <div dir="rtl" lang="ar">
@@ -1271,24 +1302,7 @@ function ProductionOrderDetailContent() {
                         <span className="font-semibold text-ink">{item.customer_text}</span>
                       )}
                     </div>
-                    {item.customer_image_url && (
-                      <a
-                        href={resolveImageUrl(item.customer_image_url) ?? "#"}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="block w-fit"
-                        aria-label={`عرض صورة ${item.label_snapshot} بالحجم الكامل`}
-                      >
-                        <Image
-                          src={resolveImageUrl(item.customer_image_url) ?? ""}
-                          alt={`صورة — ${item.label_snapshot}`}
-                          width={240}
-                          height={240}
-                          className="max-h-56 w-auto rounded-lg border border-line object-contain"
-                          loading="lazy"
-                        />
-                      </a>
-                    )}
+                    <ItemArtwork item={item} />
                   </li>
                 ))}
               </ul>
@@ -1970,7 +1984,7 @@ function ProductionOrderDetailContent() {
               row that has a group OR customer content; only the contentless synthetic
               package base-price row ("طقم: …") is hidden. */}
           {items.filter(
-            (i) => i.group_id !== null || !!i.customer_text || !!i.customer_image_url
+            (i) => i.group_id !== null || !!i.customer_text || !!i.customer_image_url || !!i.plate_image_url
           ).length > 0 && (
             <article className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
               <div className="mb-3 flex items-center justify-between gap-3">
@@ -1985,7 +1999,7 @@ function ProductionOrderDetailContent() {
               <ul className="space-y-3">
                 {items
                   .filter(
-                    (i) => i.group_id !== null || !!i.customer_text || !!i.customer_image_url
+                    (i) => i.group_id !== null || !!i.customer_text || !!i.customer_image_url || !!i.plate_image_url
                   )
                   .map((item, idx) => (
                     <li key={item.id ?? idx} className="space-y-1.5">
@@ -2020,26 +2034,11 @@ function ProductionOrderDetailContent() {
                           )}
                         </span>
                       </div>
-                      {/* Customer reference photo shown inline (no download step) */}
-                      {item.customer_image_url && (
+                      {/* Reference photo + generated plate, inline (no download step) */}
+                      {(item.customer_image_url || item.plate_image_url) && (
                         <div className="flex items-start gap-2">
-                          <a
-                            href={resolveImageUrl(item.customer_image_url) ?? "#"}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="block w-fit"
-                            aria-label={`عرض صورة ${item.label_snapshot} بالحجم الكامل`}
-                          >
-                            <Image
-                              src={resolveImageUrl(item.customer_image_url) ?? ""}
-                              alt={`صورة العميل — ${item.label_snapshot}`}
-                              width={240}
-                              height={240}
-                              className="max-h-56 w-auto rounded-lg border border-line object-contain"
-                              loading="lazy"
-                            />
-                          </a>
-                          {canEdit && (
+                          <ItemArtwork item={item} />
+                          {canEdit && item.customer_image_url && (
                             <StructuredEditLink
                               href={`/staff/orders/${order.id}/edit#options`}
                               label={`استبدال صورة ${item.label_snapshot}`}

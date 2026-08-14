@@ -8,6 +8,7 @@ const { generateImage, MODELS } = require('./openrouter');
 const { cropSheet } = require('./sheetCrop');
 const { buildSheetPrompt } = require('./calligraphyPrompt');
 const { saveBufferToUploads } = require('./upload');
+const { looksLikeInstruction } = require('./calligraphyText');
 
 const BATCH = 10;
 // The prompt library only knows front/back/cap styles — cap_side renders with the cap style.
@@ -20,16 +21,30 @@ function toPlate(r) {
     plate_path: r.plate_path, sheet_path: r.sheet_path,
     student_id: r.student_id, order_item_id: r.order_item_id,
     linked: !!r.linked_at, cost_usd: Number(r.cost_usd || 0), error: r.error,
+    // How many paid regenerations this plate has already had, so the workbench can grey
+    // «إعادة التوليد» out at the cap instead of letting the button 429.
+    reroll_count: Number(r.reroll_count || 0),
+    // The stored text reads as a message to the shop rather than a name. The classifier lives
+    // on the server so the workbench and the queue can never disagree about what counts —
+    // rerolling one of these without correcting the text just buys the same mistake again.
+    text_is_instruction: looksLikeInstruction(r.render_text),
   };
 }
 
 // «ربط بالطلب» removed (user 2026-07-15): a finished plate attaches itself to its order
 // line immediately — the plate IS the design the later stations see. Idempotent; a deleted
 // order line just leaves the plate unlinked (it falls into the «بدون طلب» group).
+//
+// ⚠️ THIS WRITES `plate_image_url`, NEVER `customer_image_url` (migration 080). Until
+// 2026-08-13 it wrote the customer's column unconditionally, so every generate / reroll /
+// compose deleted the reference photo the student had uploaded — 459 prod lines across 628
+// link events, 27 of them carrying text that pointed AT the photo being deleted. The two
+// meanings now live in two columns and this one owns exactly one of them. Any future writer
+// of student-supplied media belongs in customer_image_url and nowhere near here.
 async function autoLinkPlate(plateRow) {
   if (!plateRow || !plateRow.order_item_id || !plateRow.plate_path) return plateRow;
   const upd = await query(
-    `UPDATE order_items SET customer_image_url = $2 WHERE id = $1 RETURNING id`,
+    `UPDATE order_items SET plate_image_url = $2 WHERE id = $1 RETURNING id`,
     [plateRow.order_item_id, plateRow.plate_path]);
   if (!upd.rows.length) return plateRow;
   const { rows } = await query(
