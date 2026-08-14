@@ -2,7 +2,7 @@ const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const { query } = require('../lib/db');
 const { signToken } = require('../middleware/auth');
-const { createOtp, verifyOtpByChallenge, refreshOtp, isValidIqMobile, isDemoLoginPhone } = require('../lib/otp');
+const { createOtp, verifyOtpByChallenge, refreshOtp, isValidIqMobile, isDemoLoginPhone, isOtpDegraded } = require('../lib/otp');
 const { issueDeviceToken, isTrustedDevice, revokeUserDevices } = require('../lib/trustedDevice');
 const { secretMatches } = require('../lib/secretCompare');
 const { assertPasswordOk, tierForRole } = require('../lib/password');
@@ -17,6 +17,28 @@ const SALT_ROUNDS = 10;
 // here is reset by an admin from the staff/workshop/design screens, or — for the admin
 // account itself — on the server with `npm run set-password`.
 const PHONE_RESET_ROLES = ['retail', 'wholesaler'];
+
+// Roles that may skip the OTP while the WhatsApp gateway is banned (`isOtpDegraded`).
+// Same membership as PHONE_RESET_ROLES today but a SEPARATE list on purpose: that one
+// answers "may an OTP alone reset this account", this one answers "may this account log
+// in on a verified password alone during an outage". They will drift — keep them apart.
+//
+// admin / staff / worker / design_helper are excluded: those accounts move money, wages
+// and other people's orders, so they keep the second factor even when it costs them a
+// day of access. The admin has `npm run set-password` on the server as a backstop; staff
+// and workshop roles are re-let-in by an admin. Students and reps are phone-only users
+// with no such backstop, and a locked-out rep blocks the 100+ students behind them.
+const OTP_DEGRADED_ROLES = ['retail', 'wholesaler'];
+
+// Where a user is sent when a flow genuinely cannot be degraded (password reset).
+// Deliberately says NOTHING about why: not that WhatsApp is down, not that anything failed,
+// and it names no channel or handle. Two reasons, and the second is the load-bearing one:
+//   * the customer should read a normal instruction, not a broken shop;
+//   * announcing "the second factor is unavailable right now" tells anyone probing the
+//     login exactly when to come back — the outage window is the one thing this response
+//     must not publish.
+// Phrased as a plain next step so it can be rendered as a notice rather than an error.
+const SUPPORT_CONTACT_AR = 'لاستعادة كلمة المرور، تواصل مع دعم المتجر وسنساعدك مباشرة.';
 
 // Free-text registration fields are stored and shown to staff/admin later; cap
 // length so a 5MB JSON body can't stuff multi-MB junk into a column.
@@ -89,6 +111,20 @@ async function register(req, res) {
      VALUES ($1, $2, $3, $4, $5, $6, $7, 'approved')`,
     [u.rows[0].id, name, String(university_name).trim(), String(department).trim(), gender || null, study_type, cleanInstagram]
   );
+  // Gateway banned → no verification code can reach this phone, so demanding one would
+  // strand every new signup on a dead code screen. The row is already INSERTed above
+  // either way; what the OTP buys is proof the phone belongs to the person typing. We
+  // give that up for the window and leave `phone_verified` FALSE, which is the honest
+  // record: this account was never phone-proven, and the next OTP-backed login (once the
+  // gateway is back) is what flips it. No token is minted here — they sign in with the
+  // password they just set, which is a path that already exists.
+  if (isOtpDegraded()) {
+    console.warn(
+      `[OTP-DEGRADED] registration without phone verification: user=${u.rows[0].id} ` +
+      `until=${process.env.OTP_DEGRADED_UNTIL}`
+    );
+    return res.status(201).json({ data: { user_id: u.rows[0].id, otp_required: false, challenge_id: null } });
+  }
   // The challenge is bound to the account we just created, so the verify step can only
   // ever finish THIS registration (it cannot be pointed at an existing/privileged user).
   const { challenge_id } = await createOtp(phone, 'verify', { userId: u.rows[0].id });
@@ -169,6 +205,33 @@ async function login(req, res) {
     return res.json({
       token,
       user: { id: user.id, name: user.name, role: user.role, phone_verified: user.phone_verified },
+    });
+  }
+  // WhatsApp gateway banned → the OTP below would be created but never delivered, leaving
+  // this user staring at a code entry box nothing can ever fill. Fall back to the verified
+  // password alone, for the two phone-only roles, for the length of the outage window.
+  // Deliberately NOT done here, and each one matters:
+  //   * no device token is issued — a password-only login must not buy 90 days of trust
+  //     (that would outlive the outage by three months and quietly re-enter through the
+  //     trusted-device branch above long after the flag expires);
+  //   * phone_verified is NOT set — no phone ownership was proven, and `loginVerifyOtp`
+  //     setting it is precisely what earns that flag.
+  if (isOtpDegraded() && OTP_DEGRADED_ROLES.includes(user.role)) {
+    console.warn(
+      `[OTP-DEGRADED] password-only login granted: user=${user.id} role=${user.role} ` +
+      `until=${process.env.OTP_DEGRADED_UNTIL}`
+    );
+    const token = signToken(user);
+    return res.json({
+      token,
+      degraded_auth: true,
+      user: {
+        id: user.id,
+        name: user.name,
+        role: user.role,
+        phone_verified: user.phone_verified,
+        student_status: user.student_status || null,
+      },
     });
   }
   // The password is now verified, so this challenge is the second factor — it exists only
@@ -322,6 +385,15 @@ async function forgotPasswordPhone(req, res) {
   if (!phone) return res.status(400).json({ error: 'بيانات ناقصة', code: 'ERR_VALIDATION' });
   if (!isValidIqMobile(phone)) {
     return res.status(400).json({ error: 'رقم هاتف غير صحيح', code: 'ERR_INVALID_PHONE' });
+  }
+  // This flow is NOT degraded, and that asymmetry with login/register is the whole point.
+  // Login degrades safely because bcrypt already ran; here the OTP is the ONLY credential,
+  // so "skip the OTP during the outage" reads as "reset any account whose phone number you
+  // can guess" — 1,660 of them, from a phone-number format that is trivially enumerable.
+  // Refuse and hand the user to a human who can identify them out of band.
+  // Returned BEFORE the user lookup so it leaks nothing about whether the number exists.
+  if (isOtpDegraded()) {
+    return res.status(503).json({ error: SUPPORT_CONTACT_AR, code: 'ERR_OTP_UNAVAILABLE' });
   }
   const { rows } = await query(`SELECT id, role FROM users WHERE phone = $1`, [phone]);
   let challenge_id = null;

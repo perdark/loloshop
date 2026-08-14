@@ -306,10 +306,22 @@ export default function AdminDashboardPage() {
     return <DashboardSkeleton />;
   }
 
-  const margin =
-    data.totalRevenue > 0
-      ? `هامش الربح ${Math.round((data.totalProfit / data.totalRevenue) * 100)}٪`
+  // ── THE MONEY (bug 11, 2026-08-13) ──
+  // «إجمالي الربح» used to print SUM(orders.profit), which on a representative's order is
+  // `price − حصة الإدارة` — the REP's margin, money that never reaches this shop. The same
+  // number is labelled «ربح الممثل» on the rep's own page. What the shop actually takes in
+  // is حصة الإدارة on rep orders plus the full price on retail ones; that is `shopIncome`,
+  // and the reps' margin is now shown beside it, named as theirs. See backend/lib/counts.js.
+  const money = data.money;
+  // Share of everything students paid that reaches the shop. Replaces «هامش الربح», which
+  // divided the reps' profit by the reps' gross and called the result the shop's margin.
+  const shopShare =
+    money.grossCollected > 0
+      ? `${Math.round((money.shopIncome / money.grossCollected) * 100)}٪ مما دفعه الطلاب`
       : undefined;
+  // No production cost has ever been entered against a retail order, so retail income is
+  // REVENUE, not profit. Say it rather than printing a net-profit figure that cannot be true.
+  const retailCostMissing = money.retailPiecesCosted === 0 && money.retailPieces > 0;
 
   // Breakdown groups for the accounting receipt; empty groups are dropped.
   const accountingGroups = [
@@ -433,52 +445,102 @@ export default function AdminDashboardPage() {
         </ol>
       </section>
 
-      {/* Headline ledger — the four figures that define the business.
+      {/* Headline ledger — what the SHOP takes in, and where it comes from.
           The three money figures mask behind the gate; the order count is
-          never sensitive and always shows. */}
+          never sensitive and always shows. The first figure is the sum of the
+          next two, so the row reconciles on sight. */}
       <dl className="grid grid-cols-2 divide-x divide-y divide-ink/10 border-y border-ink/10 [&>*]:border-ink/10 lg:grid-cols-4 lg:divide-y-0">
         <Figure
-          label="إجمالي الإيرادات"
+          label="دخل المحل"
           value={
             <MoneyMask show={showMoney}>
-              <Money amount={data.totalRevenue} />
-            </MoneyMask>
-          }
-        />
-        <Figure
-          label="إجمالي التكلفة"
-          value={
-            <MoneyMask show={showMoney}>
-              <Money amount={data.totalCost} />
-            </MoneyMask>
-          }
-        />
-        <Figure
-          label="إجمالي الربح"
-          value={
-            <MoneyMask show={showMoney}>
-              <Money amount={data.totalProfit} />
+              <Money amount={money.shopIncome} />
             </MoneyMask>
           }
           accent
-          hint={showMoney ? margin : undefined}
+          hint={showMoney ? shopShare : undefined}
+        />
+        <Figure
+          label="حصة الإدارة من الممثلين"
+          value={
+            <MoneyMask show={showMoney}>
+              <Money amount={money.repAdminShare} />
+            </MoneyMask>
+          }
+        />
+        <Figure
+          label="مبيعات التجزئة"
+          value={
+            <MoneyMask show={showMoney}>
+              <Money amount={money.retailRevenue} />
+            </MoneyMask>
+          }
         />
         {/* SCOPE, not unit: this figure sits in the MONEY ledger, so it counts only
             settled طلبات (retail + rep-approved) — deliberately fewer than the
             operational total in the hero above. The label says which, so the two
             numbers can never look like a contradiction. */}
-        <Figure label="طلبات محتسبة" value={`${toArabicDigits(data.orderCount)} طلب`} />
+        <Figure label="طلبات محتسبة" value={`${toArabicDigits(money.orders)} طلب`} />
       </dl>
+
+      {/* The representatives' money — collected through the shop, but not the shop's.
+          Kept OUT of the ledger above and labelled outright, because printing it as
+          «إجمالي الربح» was the whole bug. Hidden entirely when no rep has sold
+          anything, so a retail-only shop isn't shown a row of zeros to interpret. */}
+      {money.repGross > 0 && (
+      <section className="mt-4 rounded-2xl border border-ink/10 bg-surface px-5 py-4">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
+          <div>
+            <p className="text-sm font-semibold text-ink">مال الممثلين — ليس من دخل المحل</p>
+            <p className="mt-1 text-xs text-[var(--shop-muted)]">
+              الطالب يدفع للممثل، والممثل يسلّم حصة الإدارة. الفرق ربحه هو.
+            </p>
+          </div>
+          <dl className="flex flex-wrap gap-x-7 gap-y-2">
+            <div>
+              <dt className="text-xs text-[var(--shop-muted)]">دفعه الطلاب للممثلين</dt>
+              <dd className="mt-0.5 text-lg font-bold text-ink-soft">
+                <MoneyMask show={showMoney} placeholder="••••">
+                  <Money amount={money.repGross} />
+                </MoneyMask>
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-[var(--shop-muted)]">ربح الممثلين</dt>
+              <dd className="mt-0.5 text-lg font-bold text-ink-soft">
+                <MoneyMask show={showMoney} placeholder="••••">
+                  <Money amount={money.repMargin} />
+                </MoneyMask>
+              </dd>
+            </div>
+          </dl>
+        </div>
+      </section>
+      )}
+
+      {/* Honest gap, not a warning: with no production cost entered anywhere, the shop's
+          NET profit is simply unknown. Better an admitted blank than a confident lie. */}
+      {retailCostMissing && (
+        <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-900">
+          لم تُدخل تكلفة إنتاج لأي طلب تجزئة (٠ من {toArabicDigits(money.retailPieces)} قطعة)، لذلك
+          «مبيعات التجزئة» إيراد وليس ربحاً، ولا يمكن حساب صافي ربح المحل بعد. أدخل التكلفة من
+          صفحة الطلبات ليصبح الرقم صافياً.
+        </p>
+      )}
+
       <CalculationDetails summary="كيف حُسبت أرقام لوحة التحكم؟" className="mt-3 bg-surface">
         <p>
           المحاسبة تشمل طلبات التجزئة غير الملغاة، وطلبات الممثلين الموافق عليها وغير الملغاة فقط.
-          الطلب المعلّق أو المُرجع لا يدخل في الإيراد أو التكلفة أو الربح.
+          الطلب المعلّق أو المُرجع لا يدخل في أي رقم هنا.
         </p>
         <div className="mt-2 space-y-1 rounded-lg bg-ink/[0.04] px-2.5 py-2 text-ink">
-          <p>الإيراد = مجموع السعر النهائي المخزن للطلبات الداخلة في المحاسبة.</p>
-          <p>التكلفة = مجموع تكلفة التجزئة أو حصة الإدارة في طلبات الممثلين.</p>
-          <p>الربح = الإيراد − التكلفة.</p>
-          <p>هامش الربح = الربح ÷ الإيراد × ١٠٠، مقرباً لأقرب نسبة صحيحة.</p>
+          <p>دخل المحل = حصة الإدارة من طلبات الممثلين + مبيعات التجزئة.</p>
+          <p>حصة الإدارة = المبلغ الذي يسلّمه الممثل للمحل عن كل طلب.</p>
+          <p>مبيعات التجزئة = ما يدفعه الطالب للمحل مباشرة (بدون ممثل).</p>
+          <p>ربح الممثلين = ما دفعه الطلاب للممثلين − حصة الإدارة. هذا المبلغ يبقى عند الممثل.</p>
+          <p>
+            صافي ربح المحل = دخل المحل − تكلفة الإنتاج، ولا يظهر هنا لأن تكلفة الإنتاج غير مُدخلة.
+          </p>
           <p>عدد الطلبات / الباقات = كل طلب منفرد مرة، وكل مجموعة شراء مرتبطة مرة واحدة مهما كان عدد قطعها.</p>
         </div>
       </CalculationDetails>
@@ -536,7 +598,18 @@ export default function AdminDashboardPage() {
         <DashboardCharts daily={data.dailyOrders} funnel={data.funnel} />
         <CalculationDetails summary="كيف حُسبت الرسوم؟" className="mt-4 bg-surface">
           <p>
-            النطاق المحاسبي نفسه مطبق هنا: لا ملغى، ولا طلب ممثل معلّق أو مُرجع.
+            «حركة الطلبات» تعرض خطّين: «كل الطلبات» يشمل كل طلب غير ملغى في ذلك اليوم، و«طلبات
+            محتسبة» هو الجزء الداخل في المحاسبة فقط (تجزئة، أو طلب ممثل موافق عليه). الفرق بينهما
+            هو الطلبات التي لم يوافق عليها الممثل بعد.
+          </p>
+          <p className="mt-2">
+            «مراحل الإنتاج» تُحسب بالقطعة لأن المرحلة تخصّ القطعة لا الطلب. كل عمود مقسوم إلى
+            «قابل للعمل» — وهو نفسه ما يراه الموظف في قائمته — و«بانتظار موافقة الممثل» و«مُرجع
+            للطالب»، وهي أعمال لا تظهر لأي محطة. مجموع الثلاثة يساوي إجمالي المرحلة بالضبط.
+          </p>
+          <p className="mt-2">
+            شريط «طلاب لديهم قطعة هنا» عدد انتماء لا حصة: الطالب الذي له قطعتان في مرحلتين يُحسب في
+            الاثنتين، فلا تُجمع هذه الأرقام.
           </p>
         </CalculationDetails>
       </section>
@@ -608,21 +681,38 @@ export default function AdminDashboardPage() {
               إيصال النظام
             </span>
           </div>
+          {/* The receipt subtracts its way to the bottom line, so the arithmetic is
+              visible: ما دفعه الطلاب − ربح الممثلين = دخل المحل. Both identities are
+              computed from one set of rows on the server, so they always tie out. */}
           <ul className="mt-3.5 list-none p-0">
             <li className="flex items-baseline justify-between gap-4 py-1.5">
-              <span className="text-[0.92rem] text-ink-soft">الإيراد</span>
+              <span className="text-[0.92rem] text-ink-soft">إجمالي ما دفعه الطلاب</span>
               <span className="text-[0.95rem] font-bold tabular-nums text-ink" dir="ltr">
                 <MoneyMask show={showMoney} placeholder="••••">
-                  {formatIQD(accounting.totals.revenue)}
+                  {formatIQD(accounting.totals.grossCollected)}
                 </MoneyMask>
               </span>
             </li>
             <li className="flex items-baseline justify-between gap-4 py-1.5">
-              <span className="text-[0.92rem] text-ink-soft">التكلفة</span>
+              <span className="text-[0.92rem] text-ink-soft">− ربح الممثلين (يبقى عندهم)</span>
               <span className="text-[0.95rem] font-bold tabular-nums text-ink" dir="ltr">
                 <MoneyMask show={showMoney} placeholder="••••">
-                  {formatIQD(accounting.totals.cost)}
+                  {formatIQD(accounting.totals.repMargin)}
                 </MoneyMask>
+              </span>
+            </li>
+            <li className="flex items-baseline justify-between gap-4 py-1.5">
+              <span className="text-[0.92rem] text-ink-soft">تكلفة الإنتاج</span>
+              <span className="text-[0.95rem] font-bold tabular-nums text-ink" dir="ltr">
+                {retailCostMissing ? (
+                  <span className="text-[0.8rem] font-semibold text-[var(--shop-muted)]">
+                    غير مُدخلة
+                  </span>
+                ) : (
+                  <MoneyMask show={showMoney} placeholder="••••">
+                    {formatIQD(accounting.totals.retailCost)}
+                  </MoneyMask>
+                )}
               </span>
             </li>
             <li className="flex items-baseline justify-between gap-4 py-1.5">
@@ -635,6 +725,9 @@ export default function AdminDashboardPage() {
               <Fragment key={group.title}>
                 <li className="pt-4 pb-0.5 text-[0.74rem] font-bold tracking-[0.04em] text-[var(--shop-muted)]">
                   {group.title}
+                  <span className="ms-1.5 font-medium tracking-normal">
+                    — دخل المحل
+                  </span>
                 </li>
                 {group.rows.map((row) => (
                   <li
@@ -646,6 +739,16 @@ export default function AdminDashboardPage() {
                       <span className="text-xs text-[var(--shop-muted)]">
                         {" · "}
                         {toArabicDigits(row.orders)} طلب
+                        {row.repMargin > 0 && (
+                          <>
+                            {" · للممثل "}
+                            <span dir="ltr" className="tabular-nums">
+                              <MoneyMask show={showMoney} placeholder="••••">
+                                {formatIQD(row.repMargin)}
+                              </MoneyMask>
+                            </span>
+                          </>
+                        )}
                       </span>
                     </span>
                     <span
@@ -653,7 +756,7 @@ export default function AdminDashboardPage() {
                       dir="ltr"
                     >
                       <MoneyMask show={showMoney} placeholder="••••">
-                        {formatIQD(row.profit)}
+                        {formatIQD(row.shopIncome)}
                       </MoneyMask>
                     </span>
                   </li>
@@ -662,21 +765,31 @@ export default function AdminDashboardPage() {
             ))}
           </ul>
           <div className="mt-3.5 flex items-center justify-between gap-4 border-t-2 border-ink pt-4">
-            <span className="font-display text-xl font-bold text-ink">صافي الربح</span>
+            <span className="font-display text-xl font-bold text-ink">دخل المحل</span>
             <span
               className="text-[2rem] font-bold tabular-nums text-orange-ink"
               dir="ltr"
               style={{ fontFamily: "var(--font-amiri)" }}
             >
               <MoneyMask show={showMoney} placeholder="••••">
-                {formatIQD(accounting.totals.profit)}
+                {formatIQD(accounting.totals.shopIncome)}
               </MoneyMask>
             </span>
           </div>
           <CalculationDetails summary="شرح إيصال المحاسبة" className="mt-4 bg-surface">
             <p>
-              صافي الربح = الإيراد − التكلفة. صفوف «حسب الدفعة» و«حسب الممثل» طريقتان بديلتان لعرض طلبات الممثلين نفسها؛ لا تُجمع إحداهما مع الأخرى.
-              «تجزئة مستقلة» تعرض الطلبات التي لا ترتبط بممثل.
+              دخل المحل = إجمالي ما دفعه الطلاب − ربح الممثلين. وهو نفسه = حصة الإدارة من طلبات
+              الممثلين + مبيعات التجزئة.
+            </p>
+            <p className="mt-2">
+              كل صف يعرض ما دخل المحل من ذلك المصدر، وبجانبه ما بقي عند الممثل. صفوف «حسب الدفعة»
+              و«حسب الممثل» طريقتان بديلتان لعرض طلبات الممثلين نفسها؛ لا تُجمع إحداهما مع الأخرى.
+              «تجزئة مستقلة» تعرض الطلبات التي لا ترتبط بممثل، ومجموع «حسب الممثل» مع «تجزئة مستقلة»
+              يساوي دخل المحل.
+            </p>
+            <p className="mt-2">
+              هذا الرقم دخل وليس صافي ربح: صافي الربح = دخل المحل − تكلفة الإنتاج، وتكلفة الإنتاج
+              غير مُدخلة على طلبات التجزئة.
             </p>
             <p className="mt-2">
               عدد الطلبات يحسب الباقة مرة واحدة، والحساب لا يشمل طلبات الممثلين المعلّقة أو المُرجعة ولا أي طلب ملغى.

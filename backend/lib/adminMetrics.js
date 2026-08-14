@@ -6,11 +6,24 @@
 // "arbitrary read" — which matters because this DB has no RLS and Postgres access is the
 // whole shop. Adding a metric is a deliberate code change, reviewed like any other.
 //
-// Money metrics all go through counts.billableOrderSql so the assistant and the /admin
-// dashboard agree to the dinar. Operational counts use liveSql, matching the funnel.
+// Money metrics all go through counts.billableOrderSql AND counts' money vocabulary
+// (settledMoney · shopIncomeExpr · repMarginExpr) so the assistant and the /admin dashboard
+// agree to the dinar. Operational counts use liveSql, matching the funnel.
+//
+// ⚠️ NEVER answer a money question with SUM(price)/SUM(cost)/SUM(profit) here. On a
+// representative's order `price − cost` is the REP's margin — money that never reaches this
+// shop — so that triple under the words مبيعات/تكاليف/أرباح quotes the reps' earnings as the
+// shop's. counts.js documents this at length; read it before adding a money metric.
 
 const { query } = require('./db');
-const { billableOrderSql, liveSql, bundleKey } = require('./counts');
+const {
+  billableOrderSql,
+  liveSql,
+  bundleKey,
+  settledMoney,
+  shopIncomeExpr,
+  repMarginExpr,
+} = require('./counts');
 
 const fmtIQD = (n) => `${Number(n || 0).toLocaleString('en-US')} دينار`;
 
@@ -21,43 +34,55 @@ const clampDays = (d) => Math.min(Math.max(parseInt(d, 10) || 30, 1), 730);
 
 const METRICS = {
   revenue_summary: {
-    desc: 'إجمالي المبيعات والأرباح والتكاليف خلال فترة (بالأيام)',
+    desc: 'دخل المحل وحصة الإدارة ومبيعات التجزئة وربح الممثلين خلال فترة (بالأيام)',
     params: ['days'],
+    // ⚠️ This metric MUST stay on counts.settledMoney. It used to answer with
+    // SUM(price)/SUM(cost)/SUM(profit) under the words مبيعات/تكاليف/أرباح, which is
+    // exactly the failure counts.js warns about in its own header: on a rep's order
+    // `price − cost` is THE REP's margin, so «الأرباح» was quoting money that never
+    // reaches this shop — and quoting it in a voice the owner cannot audit, beside a
+    // dashboard that now says something different. One definition, one file.
     run: async ({ days }) => {
       const d = clampDays(days);
-      const { rows } = await query(
-        `SELECT COALESCE(SUM(o.price), 0)::bigint  AS revenue,
-                COALESCE(SUM(o.cost), 0)::bigint   AS cost,
-                COALESCE(SUM(o.profit), 0)::bigint AS profit,
-                COUNT(DISTINCT ${bundleKey('o')})::int AS orders
-           FROM orders o
-          WHERE ${billableOrderSql('o')}
-            AND o.created_at > NOW() - INTERVAL '${d} days'`
-      );
-      const r = rows[0];
-      return {
-        label: `آخر ${d} يوم`,
-        facts: [
-          `المبيعات: ${fmtIQD(r.revenue)}`,
-          `التكاليف: ${fmtIQD(r.cost)}`,
-          `الأرباح: ${fmtIQD(r.profit)}`,
-          `عدد الطلبات: ${r.orders}`,
-        ],
-      };
+      const m = await settledMoney({
+        where: `o.created_at > NOW() - INTERVAL '${d} days'`,
+      });
+      const facts = [
+        `دخل المحل: ${fmtIQD(m.shop_income)}`,
+        `منها حصة الإدارة من طلبات الممثلين: ${fmtIQD(m.rep_admin_share)}`,
+        `ومنها مبيعات التجزئة: ${fmtIQD(m.retail_revenue)}`,
+        `ربح الممثلين (يبقى عندهم، مو من دخل المحل): ${fmtIQD(m.rep_margin)}`,
+        `إجمالي اللي دفعه الطلاب: ${fmtIQD(m.gross_collected)}`,
+        `عدد الطلبات: ${m.orders}`,
+      ];
+      // The dashboard refuses to print a net profit while no production cost exists;
+      // the assistant must refuse in the same breath, or it becomes the easy place to
+      // get the number the dashboard would not give.
+      if (Number(m.retail_pieces_costed) === 0) {
+        facts.push(
+          'ماكو تكلفة إنتاج مُدخلة لأي طلب تجزئة، فمبيعات التجزئة إيراد مو ربح، وصافي ربح المحل ما ينحسب بعد'
+        );
+      }
+      return { label: `آخر ${d} يوم`, facts };
     },
   },
 
   top_reps: {
-    desc: 'أفضل ممثلي الجامعات حسب المبيعات خلال فترة',
+    desc: 'أفضل ممثلي الجامعات حسب دخل المحل منهم خلال فترة',
     params: ['days', 'limit'],
+    // Ranked by what the SHOP takes from each rep (حصة الإدارة), not by what students
+    // handed the rep. The old ordering was `SUM(o.price) DESC`, which ranks reps by the
+    // size of their own business — a rep who marks up heavily outranks one who sends the
+    // shop more money. The rep's margin is still reported, labelled as theirs.
     run: async ({ days, limit }) => {
       const d = clampDays(days);
       const n = Math.min(Math.max(parseInt(limit, 10) || 5, 1), 20);
       const { rows } = await query(
         `SELECT u.name AS rep_name,
                 s.university_name,
-                COALESCE(SUM(o.price), 0)::bigint  AS revenue,
-                COALESCE(SUM(o.profit), 0)::bigint AS profit,
+                ${shopIncomeExpr('o')} AS shop_income,
+                ${repMarginExpr('o')}  AS rep_margin,
+                COALESCE(SUM(o.price), 0)::bigint AS student_paid,
                 COUNT(DISTINCT ${bundleKey('o')})::int AS orders
            FROM orders o
            JOIN students     s  ON s.id = o.student_id
@@ -66,7 +91,7 @@ const METRICS = {
           WHERE ${billableOrderSql('o')}
             AND o.created_at > NOW() - INTERVAL '${d} days'
           GROUP BY u.name, s.university_name
-          ORDER BY revenue DESC
+          ORDER BY shop_income DESC
           LIMIT $1`,
         [n]
       );
@@ -76,7 +101,8 @@ const METRICS = {
         facts: rows.map(
           (r, i) =>
             `${i + 1}. ${r.rep_name}${r.university_name ? ` (${r.university_name})` : ''} — ` +
-            `مبيعات ${fmtIQD(r.revenue)}، أرباح ${fmtIQD(r.profit)}، ${r.orders} طلب`
+            `دخل المحل ${fmtIQD(r.shop_income)}، دفع الطلاب ${fmtIQD(r.student_paid)}، ` +
+            `ربح الممثل ${fmtIQD(r.rep_margin)}، ${r.orders} طلب`
         ),
       };
     },

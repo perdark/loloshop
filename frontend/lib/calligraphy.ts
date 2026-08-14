@@ -23,6 +23,14 @@ export interface CalPlate {
   error: string | null;
   variant: CalVariant;
   element_text: string | null;
+  /** Paid regenerations already spent on this plate. The server refuses past CAL_REROLL_LIMIT. */
+  reroll_count?: number;
+  /**
+   * `render_text` reads as a message to the shop, not a name («نفس الصوره»). Classified
+   * server-side so this screen and the queue can never disagree. Rerolling one of these
+   * without correcting the text just buys another picture of the same wrong words.
+   */
+  text_is_instruction?: boolean;
   /** Order context (attached server-side when the plate belongs to an order line). */
   order_id?: string | null;
   order_status?: string | null;
@@ -41,8 +49,14 @@ export interface CalJob {
   failed: number;
   pending: number;
   job_cost: number;
-  /** Names the server refused to generate (no ≥2 Arabic letters). */
+  /** Names the server refused to generate — junk, or a message written to the shop. */
   dropped?: string[];
+  /**
+   * Retail only: text that reads as an instruction but was generated anyway, because a
+   * designer typed it on the review board and that review is the authority («تجزئة = review
+   * first, then generate»). Worth showing so a slip is still visible.
+   */
+  warned?: string[];
   plates: CalPlate[];
 }
 
@@ -76,6 +90,12 @@ export interface CalGrabRow {
   plate_path: string | null;
   linked: boolean;
   variant: CalVariant;
+  /**
+   * This row's text is a message to the shop, not a name — classified server-side. The grab
+   * list is raw `customer_text`, so «لصق أسماء» was the route these strings took into the
+   * paid generator.
+   */
+  text_is_instruction?: boolean;
 }
 
 export interface CreateJobItem {
@@ -92,6 +112,17 @@ export interface CreateJobBody {
   wholesaler_id?: string | null;
   variant?: CalVariant;
   items: CreateJobItem[];
+  /**
+   * «A human has read these exact strings and wants them generated.» Downgrades the
+   * instruction guard from blocking to warning — the same treatment `source: "retail"` gets
+   * for free, because that board IS a review step.
+   *
+   * The escape hatch exists because no word list is perfect: a sash verse containing «أريد»
+   * (﴿إن أريد إلا الإصلاح﴾) reads exactly like a request. Without this, a wrong guess would
+   * silently strand real work in «موقوف» — which is the very failure mode bug 6 describes.
+   * Never set it for a bulk generate the designer has not looked at line by line.
+   */
+  reviewed?: boolean;
 }
 
 /** Below this, the UI warns (a sheet costs the same whether it holds 1 or 10 names). */
@@ -143,9 +174,25 @@ export async function getCalJob(jobId: string): Promise<CalJob> {
   return data.data;
 }
 
-export async function rerollPlate(id: string): Promise<CalPlate> {
+/**
+ * Server-side cap on paid regenerations per plate — mirrors REROLL_LIMIT in
+ * backend/controllers/calligraphyController.js. Past it the endpoint 429s.
+ */
+export const CAL_REROLL_LIMIT = 10;
+
+/**
+ * Regenerate one plate. `overrides` is how a designer corrects a line whose stored
+ * `render_text` is an instruction rather than a name («نفس الصوره») — rerolling without it
+ * just buys another picture of the same wrong words. The corrected text is saved onto the
+ * plate, so the queue and the artwork stop disagreeing.
+ */
+export async function rerollPlate(
+  id: string,
+  overrides?: { render_text?: string; element_text?: string | null; variant?: CalVariant }
+): Promise<CalPlate> {
   const { data } = await api.post<{ data: CalPlate }>(
-    `/calligraphy/plates/${id}/reroll`
+    `/calligraphy/plates/${id}/reroll`,
+    overrides ?? {}
   );
   return data.data;
 }
@@ -157,7 +204,12 @@ export async function rerollPlate(id: string): Promise<CalPlate> {
 export interface CalZone {
   key: string;
   label: string;
+  /** Artwork of any kind is attached — plate OR the student's photo. Drives the send gate. */
   has_image: boolean;
+  /** A generated plate is attached (migration 080). */
+  has_plate?: boolean;
+  /** The student uploaded a reference photo for this zone (migration 080). */
+  has_photo?: boolean;
 }
 
 export interface CalOrderZones {
@@ -212,9 +264,26 @@ export interface CalQueueItem {
   variant: CalVariant;
 }
 
+/** A line the generator refused, with the reason, so an unexpectedly small «توليد» is explained. */
+export interface CalQueueHeldItem extends CalQueueItem {
+  order_id: string;
+  reason: "nonempty" | "junk" | "instruction";
+  hint: string;
+}
+
+/** A line that already carries a done plate — the population «يخصّني الآن» could see and the
+ *  queue could not, because the queue's whole definition of work is "has no done plate". */
+export interface CalQueuePlatedItem extends CalQueueItem {
+  order_id: string;
+  plate_id: string;
+  plate_path: string | null;
+}
+
 export interface CalQueueZone {
   pending: number;
   items: CalQueueItem[];
+  held: { count: number; items: CalQueueHeldItem[] };
+  plated: { count: number; items: CalQueuePlatedItem[] };
 }
 
 export interface CalQueue {
@@ -255,8 +324,13 @@ export interface CalRetailZone {
   zone_label: string;
   label_snapshot: string;
   raw_text: string;
+  /** What the STUDENT uploaded for this zone. */
   customer_image_url: string | null;
+  /** The plate already generated for this zone, if any (migration 080). */
+  plate_image_url: string | null;
   has_plate: boolean;
+  /** The raw text reads as a message to the shop, not a name — retype before generating. */
+  text_is_instruction: boolean;
 }
 
 export interface CalRetailOrder {

@@ -13,22 +13,24 @@ this file if something on the board opened, closed, or changed.
 
 ---
 
-## 📍 WHERE THE TREE IS — 2026-08-10
+## 📍 WHERE THE TREE IS — 2026-08-14
 
-Verified against git, against the running box over SSH, and against App Store Connect / the
-Apple Developer console in a browser this session.
+Verified against git, against the running box over SSH, and (for the admin dashboard) in a real
+browser this session. Store/push rows below were last verified 2026-08-10 and are unchanged.
 
 | | |
 |---|---|
-| `origin/main` | `11a7a43` — merge of `ios-appstore`; now also carries the **Codemagic iOS pipeline** |
-| `origin/ios-appstore` | `11a7a43` — **fast-forwarded to `main`**, no longer a divergent branch |
+| `origin/main` | `6b62738` — **Tracks A, B and C all merged and DEPLOYED**; prod confirmed at this SHA over SSH |
+| Eleven-bug tracks | **C shipped** (2, 3) · **A shipped** (9, 10, 11) · **B shipped** (4, 5, 6) · **bugs 1, 7, 8 NOT started** |
 | Migration 077 | ✅ applied to prod AND the dev DB — 3,311 prod rows retired to `skipped` |
+| Migration 080 | ✅ **applied to prod 2026-08-14** — 459 plates moved to their own column, **0** left in `customer_image_url`, 1,885 student photos intact |
 | Migration 078 | ⚠️ **applied to the DEV DB only** — the AI assistant's `ai_chat_messages`. It is in `db/schema.sql` too, so the next prod `npm run migrate` creates it. **Run it in the same deploy as the code:** until the table exists the cap check throws and both assistant endpoints 500 (the rest of the site is unaffected — nothing else reads that table). |
 | Android | **v1.0.4 (versionCode 5) IN PRODUCTION REVIEW** — deep links + GPS + push in one review |
 | iOS | **1.0.4 (build 1786309948) SUBMITTED — «Waiting for Review»** (2026-08-10, ≤48h) |
 | Android push | ✅ working end to end |
 | iOS push | ✅ **APNs key installed and verified against Apple** — `push.configured()` → `{"android":true,"ios":true}` |
-| Backend tests | **185/185 pass** against the dev DB with 077 applied |
+| Backend tests | **228/228 pass** on merged `main` (185 baseline + 11 Track C + 15 Track A + 12 Track B + 5 verification) |
+| Prod DB backup | ✅ `~/Desktop/_private/loloshop-db/loloshop-prod-2026-08-14.dump` — restore-tested, row counts match live |
 
 **Both platforms are now on the same version (1.0.4) carrying the same three features.**
 
@@ -134,6 +136,37 @@ code side of this queue is closed.
    TestFlight are fast (no full review) and are the only honest check:
    `adb shell pm get-app-links com.loloshop96.app`.
 6. Only then submit for review. Apple ~24h–2 days, Google hours–days, a rejection costs days.
+
+---
+
+## 🧵 TRACK B (calligraphy) — MERGED AND DEPLOYED 2026-08-14
+
+`fix/calligraphy-photo-loss` closed bugs 4·5·6. Migration 080 rode the same deploy: `schema.sql`
+carries the column, the backfill **and** `reroll_count`, and `scripts/deploy.sh:17` runs
+`npm run migrate` *before* the frontend build, so the column existed before the new code served.
+
+**Owner action this unlocks:** `npm run photo-recovery` on the prod box (read-only, deletes
+nothing) proposes which upload file was each deleted reference photo, by mtime. Run it **there** —
+mtimes on a copied tree are the copy date and match nothing. It cannot prove a match; the owner
+confirms each one, and lines whose own text names a photo (★) are the ones worth the time.
+
+⚠️ **STILL OPEN on the merged code — the reroll geometry ratchet.**
+`calligraphyController.js:472` hands `matchPlateGeometry` the plate it is about to overwrite
+(`:481`), so reroll N+1 anchors on reroll N's output; `imageFx.js:71-77` resizes with
+`fit:'inside'`, which never upscales. Ink height is therefore **monotone non-increasing and cannot
+recover**: reproduced with sharp at 700×140 → 1024×**73** → 365×**73** → **73**. The plate ends up
+pinned at the scale demanded by the widest generation it ever had — the exact sibling-scale
+mismatch `matchPlateGeometry` exists to close — and `REROLL_LIMIT=10` exists because designers
+press the button repeatedly. It costs letter height, not data, and converges rather than running
+away. **Not fixable without a new column**: `plate_path` is overwritten and `sheet_path` is the
+whole 10-name sheet, whose geometry is not the band's. Needs migration 081.
+
+⚠️ **Same shape, unclosed:** `orderController.configureOrder` (`:630`) and `configureFullSet`
+(`:1140`) DELETE and re-INSERT `order_items` with no status guard and never carry
+`plate_image_url` — the identical defect that was destroying plates via `persistFullSetOrder`. A
+review panel refuted these on *reachability* (`orderController.js:727` 403s rep-linked students,
+and plates live overwhelmingly on rep orders), which is an argument about who can reach the path,
+not about the path being safe. Close them the way `lib/fullSetOrder.js` was closed.
 
 ---
 
@@ -310,6 +343,51 @@ longer stranded on a branch · the laptop's loose credentials are filed in
 
 ## 💣 LANDMINES
 
+- **⛔ «بانتظار موافقة الممثل» IS NOT A QUEUE TO DRAIN — DO NOT TOUCH IT. Owner ruling 2026-08-14.**
+  The ~471 rep orders parked in this state are sitting on **unresolved disputes between students and
+  their ممثل**. The pending state is deliberate: it keeps the shop out of an argument it is not
+  party to. **Never bulk-approve, auto-approve, expire, or "tidy" these rows**, and never pitch it
+  as a quick win because ~11.7M IQD looks stranded — that money is *withheld*, not stuck. An admin
+  bulk-approve would take a side in every dispute at once and erase the record that one existed.
+  The damage is social, so **no test, migration or revert will catch or undo it**. Approvals belong
+  to the ممثل, individually, after they settle with their student. Counting and *displaying* the
+  backlog is fine and is exactly what bug 9's «قابل للعمل» / «بانتظار موافقة الممثل» split does.
+  ⚠️ An earlier version of `docs/superpowers/specs/2026-08-13-eleven-bugs-parallel-tracks.md` called
+  this "the highest-value action available" and named the approve endpoint. That was wrong and has
+  been rewritten. If you find that advice anywhere else, it is stale — delete it, do not follow it.
+
+- **⚠️ MERGING `ai-assistant` MUST UPDATE «لولو»'s MONEY DEFINITION — or it will quote a
+  different profit than the dashboard.** Track A (`fix/admin-numbers`, 2026-08-13) changed what
+  «الربح» *means*: the admin dashboard no longer reports `SUM(orders.profit)`, because on a rep's
+  order that is **the rep's margin**, not the shop's. It now reports **دخل المحل** = حصة الإدارة
+  (rep rows) + price (retail rows), with the reps' margin shown separately as theirs. The whole
+  vocabulary lives in `backend/lib/counts.js` (`shopIncomeExpr` · `repMarginExpr` · `settledMoney`).
+  `ai-assistant`'s `lib/adminMetrics.js` still answers `revenue_summary` / `top_reps` with the OLD
+  `SUM(o.price)/SUM(o.cost)/SUM(o.profit)` triple under the words مبيعات/تكاليف/أرباح — which is
+  exactly the failure `lib/counts.js` warns about in its own header. **Rewrite those metrics onto
+  `settledMoney` in the same commit that merges the branch.**
+  · Mechanical part of that merge is already handled: Track A moved `billableOrderSql` from
+  `adminController` into `lib/counts.js` **byte-identically** to the way `ai-assistant` moved it,
+  so that hunk auto-resolves. The conflict left is `adminController.analytics`/`accounting`, and
+  it is a real one — resolve toward Track A's shape (`money`, not `totals`).
+- **⚠️ `db/schema.sql` DISAGREES WITH THE LIVE `orders` TABLE about money columns.** The file says
+  `cost BIGINT NOT NULL DEFAULT 0` and `profit GENERATED ALWAYS AS (price - cost)`; the real table
+  (measured 2026-08-13) has `cost` **nullable, no default** and `profit GENERATED ALWAYS AS
+  (price - COALESCE(cost, 0))`. Under the file's version every retail row — all of which have a
+  NULL cost, because no production cost has ever been entered — would compute `profit = NULL` and
+  drop out of every SUM. `npm run migrate` applies `schema.sql` with `CREATE TABLE IF NOT EXISTS`,
+  so it does not currently rewrite the column; **do not "fix" the drift by making the live table
+  match the file.** Owned by Track B (`db/schema.sql`), so Track A left it alone.
+- **⚠️ The calligraphy plate writes `order_items.plate_image_url`, NEVER `customer_image_url`**
+  (migration 080, on `fix/calligraphy-photo-loss`). The two columns are the generator's output and
+  the student's own upload, and they shared one name until 2026-08-13 — so every generate / reroll
+  / compose deleted the photo, 459 prod lines across 628 link events, 27 of them carrying text
+  that pointed AT the image being deleted. Anything that attaches student media belongs in
+  `customer_image_url`; anything the generator produces belongs in `plate_image_url`. A reader
+  that wants «the artwork to stitch» takes `COALESCE(plate_image_url, customer_image_url)`.
+  ⚠️ **080's backfill is repeated in `db/schema.sql` on purpose**, exactly like 077's — that is
+  the file `npm run migrate` applies to a database that already holds the damaged rows. Do not
+  tidy it out.
 - **⚠️ `AI_CHAT_SESSION_MINTS_PER_HOUR` IS THE ONE ASSISTANT LIMIT CGNAT CAN BREAK — do not
   "tighten" it.** It bounds identity *harvesting* only; the per-IP ask limiter already caps one
   address at 100 requests/15min however many identities it holds, so rotation buys an attacker
@@ -407,6 +485,10 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   rows (95.6%) carry a spec**, 281 carry measurements, **19 cards remain empty and all 19 are
   correct** — they are American shawls whose only order line is «السعر الأساسي», because the product
   name (*شال امريكي 10*) already IS the spec. The detector was not touched, as the board insisted.
+- **`/admin/orders` still shows the bug Track A fixed on `/admin`.** `app/admin/orders/page.tsx`
+  sums each row's `o.profit` into a «الربح» column — on a rep's order that is the *rep's* margin.
+  Track A does not own that file, so it was left alone deliberately; the fix is the same one, and
+  `AdminOrder.profit` should be presented as «ربح الممثل» there or replaced with the shop's share.
 - **Payout cards are shipped but their numbers are still wrong:** `suggested_amount` is a lifetime
   accrual that manual payouts never reduce · ابو عبدو is listed twice · مضر محمد renders −775,000 ·
   no `audit_log` row is written on card changes. *(The feature itself is committed and on

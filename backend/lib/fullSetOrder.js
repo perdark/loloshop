@@ -451,8 +451,22 @@ async function persistFullSetOrder({ student, body, actorUserId, approval }) {
         [student.id, prodId]
       );
       let oid;
+      // ⚠️ The generated calligraphy plate is a SERVER-SIDE artifact — it is never in the payload,
+      // so the DELETE + re-INSERT below would drop it. Before migration 080 the plate rode in
+      // `customer_image_url`, which readFullSetOrder DOES round-trip, so a طقم edit preserved it by
+      // accident. Once the plate moved to its own column that accident stopped working, and any
+      // save here (a measurement, a piece toggle) silently threw away already-paid-for artwork.
+      // Capture it keyed by label, restore it after the re-insert. Deliberately NOT round-tripped
+      // through the client: the browser must not be able to clear a plate by posting an empty field.
+      let preservedPlates = new Map();
       if (existing.rows.length) {
         oid = existing.rows[0].id;
+        const plates = await client.query(
+          `SELECT label_snapshot, plate_image_url FROM order_items
+            WHERE order_id = $1 AND plate_image_url IS NOT NULL`,
+          [oid]
+        );
+        for (const p of plates.rows) preservedPlates.set(p.label_snapshot, p.plate_image_url);
         // Any edit re-enters approval: reset wholesaler_approval to 'pending' and clear reject reason.
         // status is NOT touched — the production state machine lives in orderController only.
         await client.query(
@@ -510,9 +524,10 @@ async function persistFullSetOrder({ student, body, actorUserId, approval }) {
       for (const it of lines) {
         await client.query(
           `INSERT INTO order_items (order_id, group_id, option_id, label_snapshot, price_snapshot, admin_price_snapshot, qty,
-                                    customer_image_url, customer_text)
-           VALUES ($1,NULL,NULL,$2,$3,$4,1,$5,$6)`,
-          [oid, it.label, it.price || 0, it.admin_price || 0, it.customer_image_url || null, it.customer_text || null]
+                                    customer_image_url, customer_text, plate_image_url)
+           VALUES ($1,NULL,NULL,$2,$3,$4,1,$5,$6,$7)`,
+          [oid, it.label, it.price || 0, it.admin_price || 0, it.customer_image_url || null, it.customer_text || null,
+           preservedPlates.get(it.label) || null]
         );
       }
       ids[type] = oid;

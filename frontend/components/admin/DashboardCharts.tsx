@@ -13,7 +13,6 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
-  Cell,
   Legend,
   ResponsiveContainer,
   Tooltip,
@@ -40,8 +39,12 @@ const TIP = {
   fontSize: 13,
 } as const;
 
-/* Cool→warm ladder used to tint pipeline bars so the eye reads flow. */
-const STAGE_TINTS = ["#C99B6B", "#E0A25A", GOLD, ORANGE, "#E86A3A", "#16A34A"];
+/* Pipeline segment colours. The stack is semantic, not per-stage: the question the
+   owner asks a stage bar is «how much work is waiting», and the answer splits into
+   startable vs blocked — so the colour encodes THAT, not which stage it is. */
+const WORKABLE = ORANGE;
+const AWAITING_REP = "#C99B6B";
+const RETURNED = "#9a6a3a";
 
 const toArabic = (n: number | string) =>
   String(n).replace(/\d/g, (d) => "٠١٢٣٤٥٦٧٨٩"[Number(d)]);
@@ -79,33 +82,59 @@ function Empty() {
 }
 
 export interface DashboardChartsProps {
-  daily: { date: string; count: number }[];
-  /** Stage funnel in BOTH units — see backend/lib/counts.js. */
-  funnel: { stage: string; pieces: number; students: number }[];
+  /** `count` = every live bundle that day. `billableCount` = the settled subset that
+   *  actually produced revenue. Two different populations — see backend/lib/counts.js. */
+  daily: { date: string; count: number; billableCount: number }[];
+  /** Stage funnel in BOTH units, split by workability — see backend/lib/counts.js. */
+  funnel: {
+    stage: string;
+    pieces: number;
+    students: number;
+    workable: number;
+    awaitingRep: number;
+    returned: number;
+  }[];
 }
 
 export function DashboardCharts({ daily, funnel }: DashboardChartsProps) {
-  // 1) Orders trend — daily counts as a soft area (money-free).
+  // 1) Orders trend (bug 10, 2026-08-13). This chart used to plot ONE series — every
+  // live bundle — while the revenue that travelled on the same row was filtered to
+  // settled bundles only. Anyone dividing the two got an average-per-order off by up
+  // to 3× (10 Aug: 32 bars' worth of orders against revenue produced by 18). Both
+  // populations are now drawn, so the gap between them IS the pending-approval backlog
+  // instead of an invisible modelling error.
   const trend = daily.map((d) => ({
     label: formatDateShort(d.date),
     count: d.count,
+    billable: d.billableCount,
   }));
   const trendTotal = daily.reduce((sum, d) => sum + d.count, 0);
+  const trendBillable = daily.reduce((sum, d) => sum + d.billableCount, 0);
 
   // 2) Production pipeline. UNITS MATTER HERE (2026-07-21): only PIECES have a
   // stage — 76% of orders span 2-3 stages at once, so a per-stage ORDER count would
-  // overcount by ~79% and could never sum to the order total. `value` is pieces and
-  // sums exactly; `students` rides along as a per-stage MEMBERSHIP count (a student
-  // with pieces in two stages appears in both) and is labelled so it is never summed.
+  // overcount by ~79% and could never sum to the order total. The three stacked
+  // segments are pieces and sum EXACTLY to the stage total; `students` rides along as
+  // a per-stage MEMBERSHIP count (a student with pieces in two stages appears in both)
+  // and is labelled so it is never summed.
+  //
+  // WORKABLE (bug 9, 2026-08-13): a bare stage total mixes work a station can start
+  // with work blocked on someone else, which is why /admin read 1,162 at بانتظار التصميم
+  // while the designer's own queue showed 797. The staff screens were right; the split
+  // is now visible here so the two numbers explain each other.
   const pipeline = funnel
     .map((f) => ({
       name: ORDER_STATUS_LABELS[f.stage as OrderStatus] ?? f.stage,
       value: f.pieces,
+      workable: f.workable,
+      awaitingRep: f.awaitingRep,
+      returned: f.returned,
       students: f.students,
     }))
     .filter((s) => s.value > 0)
     .sort((a, b) => b.value - a.value);
   const inPipeline = pipeline.reduce((sum, s) => sum + s.value, 0);
+  const workableTotal = pipeline.reduce((sum, s) => sum + s.workable, 0);
 
   return (
     <div dir="rtl" className="grid gap-5 lg:grid-cols-2">
@@ -114,7 +143,7 @@ export function DashboardCharts({ daily, funnel }: DashboardChartsProps) {
         title="حركة الطلبات"
         hint={
           daily.length
-            ? `${toArabic(trendTotal)} طلب · ${toArabic(daily.length)} يوم`
+            ? `${toArabic(trendBillable)} محتسب من ${toArabic(trendTotal)} · ${toArabic(daily.length)} يوم`
             : undefined
         }
       >
@@ -129,6 +158,10 @@ export function DashboardCharts({ daily, funnel }: DashboardChartsProps) {
                   <linearGradient id="adminTrend" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor={ORANGE} stopOpacity={0.45} />
                     <stop offset="100%" stopColor={ORANGE} stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="adminTrendAll" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={GOLD} stopOpacity={0.22} />
+                    <stop offset="100%" stopColor={GOLD} stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
@@ -150,12 +183,31 @@ export function DashboardCharts({ daily, funnel }: DashboardChartsProps) {
                   contentStyle={TIP}
                   cursor={{ stroke: ORANGE, strokeOpacity: 0.3 }}
                   labelStyle={{ color: SUB, fontWeight: 700 }}
-                  formatter={(v) => [toArabic(Number(v)), "طلبات"]}
+                  formatter={(v, n) => [toArabic(Number(v)), String(n)]}
                 />
+                <Legend
+                  verticalAlign="top"
+                  align="right"
+                  height={26}
+                  iconSize={9}
+                  wrapperStyle={{ fontSize: 12, color: SUB, paddingBottom: 4 }}
+                />
+                {/* Drawn FIRST so the smaller settled series sits on top of it. The
+                    band between the two is the pending-approval backlog. */}
                 <Area
                   type="monotone"
                   dataKey="count"
-                  name="طلبات"
+                  name="كل الطلبات"
+                  stroke={GOLD}
+                  strokeWidth={2}
+                  fill="url(#adminTrendAll)"
+                  dot={false}
+                  activeDot={{ r: 3, fill: GOLD }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="billable"
+                  name="طلبات محتسبة"
                   stroke={ORANGE}
                   strokeWidth={3}
                   fill="url(#adminTrend)"
@@ -173,7 +225,11 @@ export function DashboardCharts({ daily, funnel }: DashboardChartsProps) {
       {/* Production pipeline */}
       <ChartCard
         title="مراحل الإنتاج"
-        hint={inPipeline ? `${toArabic(inPipeline)} قطعة` : undefined}
+        hint={
+          inPipeline
+            ? `${toArabic(workableTotal)} قابلة للعمل من ${toArabic(inPipeline)} قطعة`
+            : undefined
+        }
       >
         {pipeline.length ? (
           <div
@@ -216,11 +272,32 @@ export function DashboardCharts({ daily, funnel }: DashboardChartsProps) {
                   iconSize={9}
                   wrapperStyle={{ fontSize: 12, color: SUB, paddingBottom: 4 }}
                 />
-                <Bar dataKey="value" name="قطع" radius={[0, 8, 8, 0]} barSize={14}>
-                  {pipeline.map((s, i) => (
-                    <Cell key={s.name} fill={STAGE_TINTS[i % STAGE_TINTS.length]} />
-                  ))}
-                </Bar>
+                {/* One stack, three segments that sum EXACTLY to the stage total — so
+                    the bar still reads as «how many pieces are here» while showing how
+                    many of them anybody can actually start. The orange segment is what
+                    the station's own queue shows; the rest is what it correctly hides. */}
+                <Bar
+                  dataKey="workable"
+                  stackId="stage"
+                  name="قابل للعمل"
+                  fill={WORKABLE}
+                  barSize={14}
+                />
+                <Bar
+                  dataKey="awaitingRep"
+                  stackId="stage"
+                  name="بانتظار موافقة الممثل"
+                  fill={AWAITING_REP}
+                  barSize={14}
+                />
+                <Bar
+                  dataKey="returned"
+                  stackId="stage"
+                  name="مُرجع للطالب"
+                  fill={RETURNED}
+                  radius={[0, 8, 8, 0]}
+                  barSize={14}
+                />
                 {/* Membership count, NOT a share of a total — the series name says so
                     outright, so the two bars can never be mistakenly added together. */}
                 <Bar

@@ -167,10 +167,43 @@ async function wholesalerStudents(req, res) {
   res.json({ data });
 }
 
+const ALL_STATUSES = Object.keys(STATUS_LABEL_AR);
+
+/**
+ * Which production stages the VIEWER personally works — their own station(s).
+ *
+ * Derived from the same authz table `advance` enforces rather than kept as a second copy
+ * of productionController's QUEUE_STAGES: a status is "mine" exactly when I am allowed to
+ * move an order OUT of it. That equivalence is exact for the five working staff_types
+ * (designer→بانتظار التصميم · digitizer→converting · embroiderer→تطريز · presser→كوي ·
+ * preparer→تجهيز/جاهز/مُسلّم), unions correctly for multi-role staff, and self-maintains
+ * if a transition is ever added — one definition, so the console can never drift from the
+ * queue the way a duplicated stage table would.
+ *
+ * Returns [] = "no personal station, show الكل", which is the correct default for:
+ *   · manager / admin — they own the whole line (canStaffTransition passes them everything,
+ *     so they MUST be short-circuited here or they'd "own" every stage)
+ *   · tailor (مفصل) — a deliberately read-only viewer of every in-production order
+ */
+function viewerStages(user) {
+  if (user.role === 'admin' || staffTypesOf(user).includes('manager')) return [];
+  return ALL_STATUSES.filter(
+    (from) =>
+      from !== 'cancelled' &&
+      ALL_STATUSES.some((to) => to !== from && canStaffTransition(user, from, to))
+  );
+}
+
 // ---------- Orders of one rep's students — the wholesaler order-working console ----------
 // Per order we return `can_advance` (computed from the SAME state machine the advance
 // endpoint enforces) so the UI never shows a checkbox that would 409. Optional ?zone=
 // filter lets an embroiderer batch by zone ("10 right sashes, then 10 left, …").
+//
+// The row set is deliberately still EVERY approved non-cancelled order: the console offers
+// «الكل», and one payload keeps all four view counts live without a refetch per toggle
+// (these are phone/iPad users on slow networks). What the response adds is `my_stages`, so
+// the client can OPEN on the viewer's own station instead of 402 rows of other stations'
+// finished work — see the designer case in the 2026-08-13 bug plan (bug 2).
 async function wholesalerOrders(req, res) {
   const { id } = req.params; // wholesaler id
   if (!staffScopeAllows(req.user, false)) {
@@ -236,7 +269,7 @@ async function wholesalerOrders(req, res) {
     };
   });
 
-  res.json({ data, summary });
+  res.json({ data, summary, my_stages: viewerStages(req.user) });
 }
 
 module.exports = {
@@ -246,4 +279,7 @@ module.exports = {
   // Exported for focused tests of confirmed-only inventory/account math.
   wholesalerAccountSummary,
   buildWholesalerAccountSummary,
+  // Exported for tests: the viewer→station mapping is pure, so it is asserted directly
+  // against productionController's QUEUE_STAGES rather than through an HTTP round trip.
+  viewerStages,
 };

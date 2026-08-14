@@ -119,9 +119,17 @@ const ZONE_DEFS = [
 // Zone lines are dropped too — they render as artwork in `zones`, and showing them twice
 // would pad the card that has to stay fast to read.
 
+// Migration 080 split `order_items.customer_image_url` (what the STUDENT uploaded) from
+// `plate_image_url` (what the calligraphy generator produced). Every zone/content check below
+// has to see BOTH or a line whose only image is a plate stops counting as embroidery — which
+// would silently move 459 lines out of the embroiderer's checklist and into the preparer's
+// spec list. `artworkOf` is what a station stitches; the photo is reference.
+const artworkOf = (it) => it.plate_image_url || it.customer_image_url || null;
+const hasImageContent = (it) => !!(it.plate_image_url || it.customer_image_url);
+
 /** True when this line is already rendered as embroidery artwork in `zones`. */
-function isZoneLine(label, customerText, customerImageUrl) {
-  const hasContent = (customerText && customerText.trim() !== '') || customerImageUrl;
+function isZoneLine(label, customerText, customerImageUrl, plateImageUrl = null) {
+  const hasContent = (customerText && customerText.trim() !== '') || customerImageUrl || plateImageUrl;
   if (!hasContent) return false;
   return ZONE_DEFS.some((z) => z.test(label || ''));
 }
@@ -138,8 +146,11 @@ function buildPieceSpec(items) {
   for (const it of items) {
     const label = it.label_snapshot || '';
     const text = (it.customer_text || '').trim();
+    // The preparer pulls a garment off a shelf — the student's own photo is the useful
+    // reference here, never the generated plate (that is the embroiderer's artwork and is
+    // already rendered in `zones`).
     const image = it.customer_image_url || null;
-    if (isZoneLine(label, text, image)) continue;
+    if (isZoneLine(label, text, image, it.plate_image_url || null)) continue;
 
     const group = it.group_ar || null;
     // Ungrouped AND silent → bookkeeping, not a spec.
@@ -169,7 +180,7 @@ async function detectSpecForOrders(ids) {
   if (!ids.length) return byOrder;
   const { rows } = await query(
     `SELECT oi.order_id, oi.label_snapshot, oi.customer_text, oi.customer_image_url,
-            og.name_ar AS group_ar
+            oi.plate_image_url, og.name_ar AS group_ar
      FROM order_items oi
      LEFT JOIN option_groups og ON og.id = oi.group_id
      WHERE oi.order_id = ANY($1)
@@ -186,12 +197,13 @@ async function detectSpecForOrders(ids) {
 }
 async function detectEmbroideryZones(orderId, progress) {
   const { rows } = await query(
-    `SELECT label_snapshot, customer_text, customer_image_url FROM order_items WHERE order_id = $1`, [orderId]);
+    `SELECT label_snapshot, customer_text, customer_image_url, plate_image_url
+       FROM order_items WHERE order_id = $1`, [orderId]);
   const seen = new Set();
   const zones = [];
   for (const it of rows) {
     const label = it.label_snapshot || '';
-    const hasContent = (it.customer_text && it.customer_text.trim() !== '') || it.customer_image_url;
+    const hasContent = (it.customer_text && it.customer_text.trim() !== '') || hasImageContent(it);
     if (!hasContent) continue;
     for (const z of ZONE_DEFS) {
       if (!seen.has(z.key) && z.test(label)) {
@@ -206,19 +218,29 @@ async function detectEmbroideryZones(orderId, progress) {
 // Zones + image-presence for the calligraphy workbench: which embroidery zones does this
 // order carry, and does each already have its artwork (plate/photo) attached? Same ZONE_DEFS
 // matching as the embroiderer checklist, but keyed on has_image instead of the tick-progress.
+//
+// `has_plate` and `has_photo` are reported SEPARATELY as well as combined, because the
+// workbench's two questions are different ones: «does this zone still need generating» is
+// has_plate, and «did the student send us a reference to follow» is has_photo. Before
+// migration 080 one column answered both, so a generated plate made a zone look like it
+// carried a customer reference — which is precisely how «نفس الصوره» got rendered as words.
 async function detectZonesWithImages(orderId) {
   const { rows } = await query(
-    `SELECT label_snapshot, customer_text, customer_image_url FROM order_items WHERE order_id = $1`, [orderId]);
+    `SELECT label_snapshot, customer_text, customer_image_url, plate_image_url
+       FROM order_items WHERE order_id = $1`, [orderId]);
   const seen = new Map();
   for (const it of rows) {
     const label = it.label_snapshot || '';
-    const hasContent = (it.customer_text && it.customer_text.trim() !== '') || it.customer_image_url;
+    const hasContent = (it.customer_text && it.customer_text.trim() !== '') || hasImageContent(it);
     if (!hasContent) continue;
     for (const z of ZONE_DEFS) {
       if (z.test(label)) {
         const prev = seen.get(z.key);
-        const has_image = !!it.customer_image_url || !!(prev && prev.has_image);
-        seen.set(z.key, { key: z.key, label: z.label, has_image });
+        const has_plate = !!it.plate_image_url || !!(prev && prev.has_plate);
+        const has_photo = !!it.customer_image_url || !!(prev && prev.has_photo);
+        seen.set(z.key, {
+          key: z.key, label: z.label, has_plate, has_photo, has_image: has_plate || has_photo,
+        });
       }
     }
   }
@@ -233,7 +255,7 @@ async function detectZonesForOrders(ids, progressById) {
   const byOrder = new Map(ids.map((id) => [id, []]));
   if (!ids.length) return byOrder;
   const { rows } = await query(
-    `SELECT order_id, label_snapshot, customer_text, customer_image_url
+    `SELECT order_id, label_snapshot, customer_text, customer_image_url, plate_image_url
      FROM order_items WHERE order_id = ANY($1) ORDER BY order_id`,
     [ids]
   );
@@ -241,7 +263,7 @@ async function detectZonesForOrders(ids, progressById) {
   for (const it of rows) {
     const label = it.label_snapshot || '';
     const text = (it.customer_text || '').trim();
-    const hasContent = text !== '' || it.customer_image_url;
+    const hasContent = text !== '' || hasImageContent(it);
     if (!hasContent) continue;
     for (const z of ZONE_DEFS) {
       let seen = seenByOrder.get(it.order_id);
@@ -254,7 +276,11 @@ async function detectZonesForOrders(ids, progressById) {
           label: z.label,
           done: !!progress[z.key],
           text: text || null,
-          image_url: it.customer_image_url || null,
+          // What to STITCH: the generated plate when there is one, else whatever the student
+          // uploaded. `reference_image_url` carries the student's own photo alongside it, so
+          // the embroiderer can still see «نفس الصوره» meant THIS photo.
+          image_url: artworkOf(it),
+          reference_image_url: it.customer_image_url || null,
         });
       }
     }
@@ -379,7 +405,9 @@ async function getQueue(req, res) {
             o.working_staff_id, o.working_since,
             o.final_design_url, o.has_embroidery,
             EXISTS(SELECT 1 FROM order_items oi2
-                    WHERE oi2.order_id = o.id AND oi2.customer_image_url IS NOT NULL) AS has_design_images,
+                    WHERE oi2.order_id = o.id
+                      AND (oi2.plate_image_url IS NOT NULL
+                           OR oi2.customer_image_url IS NOT NULL)) AS has_design_images,
             u.name AS student_name, s.university_name, s.department, s.study_type,
             p.name_ar AS product_name, p.type AS product_type,
             -- Robe tailoring measurements, for التجهيز only. Gated in SQL rather than sent
@@ -661,7 +689,8 @@ async function getOrder(req, res) {
   // images now (his station is name + product photo + sizes + design — user 2026-07-15);
   // money/contact stay stripped below.
   const itemsRes = await query(
-    `SELECT id, label_snapshot, price_snapshot, qty, customer_image_url, customer_text, group_id, option_id
+    `SELECT id, label_snapshot, price_snapshot, qty, customer_image_url, plate_image_url,
+            customer_text, group_id, option_id
      FROM order_items WHERE order_id = $1 ORDER BY created_at`,
     [id]
   );

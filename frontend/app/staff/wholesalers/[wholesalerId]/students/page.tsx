@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { toast } from "sonner";
@@ -71,6 +71,8 @@ interface StoredConsoleState {
   view?: CompletionView;
   search?: string;
   selected?: string[];
+  /** Where they were in the work list — see "Scroll restore" in OrdersTab. */
+  scrollY?: number;
 }
 
 function readStored(wholesalerId: string): StoredConsoleState {
@@ -96,7 +98,7 @@ function isValidZone(z: unknown): z is FullSetZone | "" {
   return z === "" || FULLSET_ZONE_ORDER.includes(z as FullSetZone);
 }
 function isValidCompletionView(v: unknown): v is CompletionView {
-  return v === "all" || v === "actionable" || v === "done";
+  return v === "all" || v === "actionable" || v === "done" || v === "mine";
 }
 
 export default function StaffWholesalerStudentsPage() {
@@ -164,7 +166,13 @@ export default function StaffWholesalerStudentsPage() {
 // Orders tab — the rep-scoped order-working console
 // ══════════════════════════════════════════════════════════════════════════════
 
-type CompletionView = "all" | "actionable" | "done";
+// "mine" = only the stages the VIEWER personally works (backend `my_stages`). It is the
+// default for anyone who has a station, because «الكل» meant a designer opened a rep with
+// 402 rows — 276 قيد التطريز, 120 قيد التجهيز, 1 قيد الكوي — and 5 of them were his.
+// Distinct from "actionable": a preparer's «جاهز للاستلام» rows are their work but are
+// deliberately NOT bulk-advanceable (delivery needs the modal), so they'd vanish from
+// "actionable" while still belonging in "mine".
+type CompletionView = "all" | "actionable" | "done" | "mine";
 
 function OrdersTab({
   wholesalerId,
@@ -191,6 +199,19 @@ function OrdersTab({
   // TRUE after the first successful fetch — the restored selection must not be pruned
   // against the EMPTY pre-fetch order list (mirrors StationConsole's loadedOnce).
   const [loadedOnce, setLoadedOnce] = useState(false);
+  // The stages this viewer personally works, from the backend. [] = manager/admin/مفصل,
+  // who have no station and therefore stay on «الكل».
+  const [myStages, setMyStages] = useState<OrderStatus[]>([]);
+  // Did sessionStorage already hold a view? If so it is the worker's own last choice and
+  // outranks the stage default — otherwise switching to «الكل» would not survive a tap
+  // into an order and back.
+  const hadStoredView = useRef(false);
+  // The stage default is applied at most ONCE per rep, on the first load. Without this the
+  // zone-chip refetch would drag the worker back to «مرحلتي» every time they filtered.
+  const stageDefaultSettled = useRef(false);
+  // TRUE once the scroll offset has been re-applied (or deliberately skipped) — see
+  // "Scroll restore" below.
+  const [scrollReady, setScrollReady] = useState(false);
 
   // Restore this rep's last zone/view/search/selection.
   useEffect(() => {
@@ -199,6 +220,9 @@ function OrdersTab({
     if (isValidCompletionView(stored.view)) setView(stored.view);
     if (typeof stored.search === "string") setSearch(stored.search);
     if (Array.isArray(stored.selected)) setSelected(new Set(stored.selected));
+    hadStoredView.current = isValidCompletionView(stored.view);
+    stageDefaultSettled.current = false;
+    setScrollReady(false);
     setRestored(true);
   }, [wholesalerId]);
 
@@ -214,10 +238,24 @@ function OrdersTab({
     setLoading(true);
     setFetchError(false);
     getWholesalerOrders(wholesalerId, { zone: zone || undefined, isAdmin })
-      .then(({ orders: rows, summary }) => {
+      .then(({ orders: rows, summary, myStages: stages }) => {
         setOrders(rows);
         setAccountSummary(summary);
+        setMyStages(stages);
         setLoadedOnce(true);
+        // Open on the viewer's own station the first time they land on this rep. Batched
+        // with setOrders and applied while `loading` is still true, so the list never
+        // flashes «الكل» before snapping down to the smaller stage view.
+        if (!stageDefaultSettled.current) {
+          stageDefaultSettled.current = true;
+          if (stages.length === 0) {
+            // No station (manager/admin/مفصل). A "mine" left in storage — a changed role,
+            // a shared device — would filter to nothing, so fall back to «الكل».
+            setView((v) => (v === "mine" ? "all" : v));
+          } else if (!hadStoredView.current) {
+            setView("mine");
+          }
+        }
       })
       .catch((err) => {
         toast.error(getApiErrorMessage(err, "تعذر تحميل الطلبات"));
@@ -231,6 +269,64 @@ function OrdersTab({
     load();
   }, [ready, restored, load]);
 
+  // ─── Scroll restore ─────────────────────────────────────────────────────────
+  // Zone/view/search/selection already survived back-navigation; the scroll offset did not,
+  // and with 400+ rows that is what actually reads as "it forgot where I was". The reason
+  // it cannot be left to the browser: coming back re-mounts this tab with `orders` empty,
+  // so it paints six skeletons and the document is a few hundred px tall at exactly the
+  // moment the offset would be re-applied — it clamps to 0, and by the time the rows land
+  // the position is gone. So we remember it ourselves and re-apply AFTER the rows paint.
+
+  // Save. Trailing-throttled: a fast flick on a low-end Android would otherwise re-serialise
+  // the whole bucket every frame. Gated on `scrollReady` so a scroll event fired while the
+  // list is still short (including the browser's own restore attempt) cannot overwrite the
+  // saved offset with ~0 before we have read it.
+  useEffect(() => {
+    if (!scrollReady) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const onScroll = () => {
+      if (timer) return;
+      timer = setTimeout(() => {
+        timer = null;
+        writeStored(wholesalerId, { scrollY: Math.round(window.scrollY) });
+      }, 200);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      if (timer) clearTimeout(timer);
+    };
+  }, [wholesalerId, scrollReady]);
+
+  // Restore, once, on the first render that actually has rows in it.
+  useEffect(() => {
+    if (scrollReady || loading || !loadedOnce) return;
+    const y = readStored(wholesalerId).scrollY;
+    setScrollReady(true); // arms the saver above, even when there is nothing to restore
+    if (typeof y !== "number" || y <= 0) return;
+    if (window.scrollY > 4) return; // they already started scrolling — don't yank them back
+    // Clamped, so a shorter filtered list can't leave the page stranded past its own end.
+    const apply = () => {
+      const max = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+      // behavior:"instant" is REQUIRED here, not a preference. globals.css:499 sets
+      // `scroll-behavior: smooth` on the root, so the plain scrollTo(0, y) form starts an
+      // ANIMATION — and the router's own post-navigation scroll cancels it before it
+      // travels. Measured in a real browser: the restore ran with the correct offset and
+      // the page never moved, no scroll event ever fired. Restoring a remembered position
+      // should be a jump anyway, not a visible ride down 281 rows.
+      window.scrollTo({ top: Math.min(y, max), left: 0, behavior: "instant" });
+    };
+    // Apply immediately: the rows are committed and laid out by the time an effect runs, so
+    // this is enough on its own. It must NOT be left to requestAnimationFrame alone — a tab
+    // that is not painting never fires one, and the restore would silently never happen
+    // (measured in a backgrounded tab: rAF callbacks 0, scrollTo calls 0).
+    apply();
+    // Then once more next frame, to absorb a late height change (images, fonts) that would
+    // otherwise leave the offset slightly off. Harmless when it never fires.
+    const raf = requestAnimationFrame(apply);
+    return () => cancelAnimationFrame(raf);
+  }, [wholesalerId, loading, loadedOnce, scrollReady]);
+
   // Selection can only reference orders that still exist AND are still advanceable
   // (a reload prunes it). Gated on loadedOnce so a RESTORED selection isn't wiped
   // against the empty pre-fetch order list.
@@ -243,16 +339,21 @@ function OrdersTab({
     });
   }, [orders, loadedOnce]);
 
+  const myStageSet = useMemo(() => new Set<string>(myStages), [myStages]);
+
   const filtered = useMemo(() => {
     let out = orders;
     if (view === "actionable") out = out.filter((o) => o.canAdvance);
     else if (view === "done") out = out.filter((o) => o.isDone);
+    // A viewer with no station falls through to «الكل» rather than an empty list.
+    else if (view === "mine" && myStageSet.size > 0)
+      out = out.filter((o) => myStageSet.has(o.status));
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       out = out.filter((o) => o.studentName.toLowerCase().includes(q));
     }
     return out;
-  }, [orders, view, search]);
+  }, [orders, view, search, myStageSet]);
 
   // Only advanceable rows in the current view can be batch-completed.
   const selectableIds = useMemo(
@@ -309,8 +410,9 @@ function OrdersTab({
       total: orders.length,
       actionable: orders.filter((o) => o.canAdvance).length,
       done: orders.filter((o) => o.isDone).length,
+      mine: orders.filter((o) => myStageSet.has(o.status)).length,
     }),
-    [orders]
+    [orders, myStageSet]
   );
   // Opening an order should return to THIS rep's page (not the generic /staff home).
   const backFrom = `/staff/wholesalers/${wholesalerId}/students`;
@@ -338,6 +440,11 @@ function OrdersTab({
       <div className="surface-card space-y-3 rounded-2xl p-3.5">
         <div className="flex flex-wrap gap-2">
           {([
+            // «مرحلتي» leads because it is the default — but only for a viewer who HAS a
+            // station. A manager/admin/مفصل gets the original three, unchanged.
+            ...(myStages.length > 0
+              ? [{ id: "mine" as CompletionView, label: `مرحلتي (${counts.mine})` }]
+              : []),
             { id: "all", label: `الكل (${counts.total})` },
             { id: "actionable", label: `يخصّني الآن (${counts.actionable})` },
             { id: "done", label: `منجز (${counts.done})` },
@@ -375,7 +482,25 @@ function OrdersTab({
           <Button className="mt-4" onClick={load}>إعادة المحاولة</Button>
         </div>
       ) : filtered.length === 0 ? (
-        <EmptyState message="لا توجد طلبات مطابقة لهذا التصفية." />
+        // «مرحلتي» is the DEFAULT now, so "nothing at my station for this rep" is a normal,
+        // frequent landing — it has to read as an answer with a way onward, not as a broken
+        // page. Requires counts.total > 0: a rep with no orders at all is genuinely empty,
+        // and offering «عرض كل الطلبات (0)» there would be a dead end. Neutral wording, not
+        // «أنهيت», because the usual reason is that the work was never his, not that he
+        // finished it. Every other filter keeps the original one-liner.
+        view === "mine" && !search.trim() && counts.total > 0 ? (
+          <EmptyState
+            title="لا يوجد عمل يخصّك عند هذا الممثل"
+            message={`لا توجد طلبات في مرحلتك هنا — لدى هذا الممثل ${counts.total} طلب في مراحل أخرى.`}
+            action={
+              <Button size="sm" variant="ghost" onClick={() => setView("all")}>
+                عرض كل الطلبات ({counts.total})
+              </Button>
+            }
+          />
+        ) : (
+          <EmptyState message="لا توجد طلبات مطابقة لهذا التصفية." />
+        )
       ) : (
         <>
           {/* Select-all-completable affordance */}

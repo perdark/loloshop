@@ -1104,6 +1104,37 @@ CREATE INDEX IF NOT EXISTS idx_calligraphy_student ON calligraphy_plates(student
 CREATE INDEX IF NOT EXISTS idx_calligraphy_status  ON calligraphy_plates(status);
 CREATE INDEX IF NOT EXISTS idx_calligraphy_orderitem ON calligraphy_plates(order_item_id);
 
+-- Migration 080: «إعادة التوليد» was uncapped — each press bought a fresh image on the same
+-- plate row with nothing recording how many had been spent. cost_usd already accumulated;
+-- this counts the presses so calligraphyController.reroll can refuse the eleventh.
+ALTER TABLE calligraphy_plates ADD COLUMN IF NOT EXISTS reroll_count INTEGER NOT NULL DEFAULT 0;
+
+-- ---------------------------------------------------------------------------------------
+-- Migration 080: the calligraphy plate gets its OWN column on order_items.
+--
+-- `customer_image_url` used to hold two different things under one name — the reference photo
+-- the STUDENT uploaded, and the plate the generator produced — and autoLinkPlate wrote it
+-- unconditionally, so every generate/reroll/compose deleted the photo. 459 prod lines were
+-- overwritten across 628 link events before this landed. Full reasoning in
+-- db/migrations/080_calligraphy_plate_column.sql.
+--
+-- ⚠️ THE BACKFILL BELOW IS REPEATED FROM THE MIGRATION ON PURPOSE, exactly like 077's
+-- push_state backfill. `npm run migrate` applies THIS file to a production database that
+-- already carries the damaged rows; without the UPDATE the ALTER lands, the new column stays
+-- empty, and every reader keeps showing a machine plate labelled as the student's photo.
+-- It fires only when the value is EXACTLY equal to a plate_path this line's own
+-- calligraphy_plates row recorded, so a surviving photo can never match it. Do not tidy it out.
+ALTER TABLE order_items ADD COLUMN IF NOT EXISTS plate_image_url TEXT;
+
+UPDATE order_items oi
+   SET plate_image_url    = oi.customer_image_url,
+       customer_image_url = NULL
+  FROM calligraphy_plates cp
+ WHERE cp.order_item_id = oi.id
+   AND cp.plate_path IS NOT NULL
+   AND cp.plate_path = oi.customer_image_url
+   AND oi.plate_image_url IS NULL;
+
 -- =====================================================
 -- WORKSHOP (الورشة / Team B) — direct piecework production + wage ledger.
 -- Does NOT touch orders / the Team-A pipeline. See db/migrations/060_workshop.sql for the

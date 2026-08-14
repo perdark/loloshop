@@ -5,6 +5,7 @@ import type { CreateFullSetPayload, FullSetPackage, FullSetPricing } from "./who
 import type {
   AdminAccounting,
   AdminAnalytics,
+  AdminMoney,
   AdminOrder,
   AdminWholesaler,
   AccountingRow,
@@ -102,26 +103,65 @@ export async function getVisitorStats(): Promise<VisitorStats> {
   return data.data;
 }
 
+interface ApiMoney {
+  shop_income: number;
+  rep_margin: number;
+  rep_admin_share: number;
+  rep_gross: number;
+  retail_revenue: number;
+  retail_cost: number;
+  gross_collected: number;
+  retail_pieces: number;
+  retail_pieces_costed: number;
+  orders: number;
+}
+
 interface ApiAnalytics {
-  totals: {
-    revenue: number;
-    cost: number;
-    profit: number;
-    orders: number;
-  };
+  /** The settled money split — see backend/lib/counts.js. Replaced the old
+   *  revenue/cost/profit triple, which reported the REPS' margin as the shop's profit. */
+  money: ApiMoney;
   by_status: Record<string, number>;
-  /** Stage funnel in BOTH units. `pieces` sums to the piece total; `students` is a
-   *  MEMBERSHIP count (a student with pieces in two stages appears in both rows)
-   *  and deliberately does NOT sum. See backend/lib/counts.js. */
-  funnel: { stage: string; pieces: number; students: number }[];
+  /** Stage funnel in BOTH units, split by workability. `pieces` sums to the piece total;
+   *  `students` is a MEMBERSHIP count (a student with pieces in two stages appears in both
+   *  rows) and deliberately does NOT sum. `workable + awaiting_rep + returned = pieces`.
+   *  See backend/lib/counts.js. */
+  funnel: {
+    stage: string;
+    pieces: number;
+    students: number;
+    workable: number;
+    awaiting_rep: number;
+    returned: number;
+  }[];
   headline: { pieces: number; bundles: number; students: number; in_progress: number };
   rank: {
     key: string; label: string; next_label: string | null; next_at: number | null;
     to_next: number; progress: number; total: number;
     ladder: { key: string; label: string; min: number }[];
   };
-  daily: { date: string; orders: number; revenue: number }[];
+  daily: {
+    date: string;
+    orders: number;
+    billable_orders: number;
+    revenue: number;
+    shop_income: number;
+  }[];
   top_wholesalers: { id: string; name: string; order_count: number }[];
+}
+
+function mapMoney(raw: ApiMoney): AdminMoney {
+  return {
+    shopIncome: Number(raw?.shop_income ?? 0),
+    repMargin: Number(raw?.rep_margin ?? 0),
+    repAdminShare: Number(raw?.rep_admin_share ?? 0),
+    repGross: Number(raw?.rep_gross ?? 0),
+    retailRevenue: Number(raw?.retail_revenue ?? 0),
+    retailCost: Number(raw?.retail_cost ?? 0),
+    grossCollected: Number(raw?.gross_collected ?? 0),
+    retailPieces: Number(raw?.retail_pieces ?? 0),
+    retailPiecesCosted: Number(raw?.retail_pieces_costed ?? 0),
+    orders: Number(raw?.orders ?? 0),
+  };
 }
 
 interface ApiOrderRow {
@@ -286,15 +326,15 @@ function mapWholesaler(row: ApiWholesalerRow): AdminWholesaler {
 
 function mapAnalytics(raw: ApiAnalytics): AdminAnalytics {
   return {
-    totalRevenue: Number(raw.totals.revenue),
-    totalCost: Number(raw.totals.cost),
-    totalProfit: Number(raw.totals.profit),
-    orderCount: Number(raw.totals.orders),
+    money: mapMoney(raw.money),
     ordersByStatus: raw.by_status,
     funnel: (raw.funnel ?? []).map((f) => ({
       stage: f.stage,
       pieces: Number(f.pieces),
       students: Number(f.students),
+      workable: Number(f.workable ?? 0),
+      awaitingRep: Number(f.awaiting_rep ?? 0),
+      returned: Number(f.returned ?? 0),
     })),
     headline: {
       pieces: Number(raw.headline?.pieces ?? 0),
@@ -314,8 +354,10 @@ function mapAnalytics(raw: ApiAnalytics): AdminAnalytics {
     },
     dailyOrders: raw.daily.map((d) => ({
       date: String(d.date).slice(0, 10),
-      count: d.orders,
+      count: Number(d.orders),
+      billableCount: Number(d.billable_orders ?? 0),
       revenue: Number(d.revenue),
+      shopIncome: Number(d.shop_income ?? 0),
     })),
     topWholesalers: raw.top_wholesalers.map((w) => ({
       id: w.id,
@@ -734,54 +776,39 @@ export async function deleteStaff(id: string): Promise<void> {
   await api.delete(`/admin/staff/${id}`);
 }
 
+/** Every accounting bucket now carries what the SHOP took and what the REP kept, side by
+ *  side, instead of one `profit` column that meant a different thing in each bucket. */
+interface ApiAccountingRow {
+  shop_income: number;
+  rep_margin: number;
+  revenue: number;
+  cost: number;
+  orders: number;
+}
+
 interface ApiAccounting {
-  totals: {
-    revenue: number;
-    cost: number;
-    profit: number;
-    orders: number;
-  };
-  by_batch: {
+  totals: ApiMoney;
+  by_batch: (ApiAccountingRow & {
     id: string;
     name_ar: string;
     wholesaler_name: string | null;
-    revenue: number;
-    cost: number;
-    profit: number;
-    orders: number;
-  }[];
-  by_wholesaler: {
-    id: string;
-    wholesaler_name: string;
-    revenue: number;
-    cost: number;
-    profit: number;
-    orders: number;
-  }[];
-  independent_retail: {
-    revenue: number;
-    cost: number;
-    profit: number;
-    orders: number;
-  };
+  })[];
+  by_wholesaler: (ApiAccountingRow & { id: string; wholesaler_name: string })[];
+  independent_retail: ApiAccountingRow;
 }
 
 function mapAccountingRow(
   label: string,
-  raw: {
-    revenue: number;
-    cost: number;
-    profit: number;
-    orders: number;
-  },
+  raw: ApiAccountingRow,
   id?: string
 ): AccountingRow {
   return {
     id,
     label,
+    shopIncome: Number(raw.shop_income ?? 0),
+    repMargin: Number(raw.rep_margin ?? 0),
     revenue: Number(raw.revenue),
     cost: Number(raw.cost),
-    profit: Number(raw.profit),
     orders: Number(raw.orders),
   };
 }
@@ -789,12 +816,7 @@ function mapAccountingRow(
 export async function getAdminAccounting(): Promise<AdminAccounting> {
   const { data } = await api.get<ApiAccounting>("/admin/accounting");
   return {
-    totals: {
-      revenue: Number(data.totals.revenue),
-      cost: Number(data.totals.cost),
-      profit: Number(data.totals.profit),
-      orders: Number(data.totals.orders),
-    },
+    totals: mapMoney(data.totals),
     byBatch: data.by_batch.map((b) =>
       mapAccountingRow(
         `${b.name_ar}${b.wholesaler_name ? ` — ${b.wholesaler_name}` : ""}`,

@@ -14,7 +14,8 @@
     "seed:fullset": "node seed-full-set.js",
     "set-password": "node scripts/set-password.js",
     "demo-account": "node scripts/demo-account.js",
-    "ai:scenarios": "node scripts/ai-scenarios.js"
+    "ai:scenarios": "node scripts/ai-scenarios.js",
+    "photo-recovery": "node scripts/calligraphy-photo-recovery.js"
   },
   "keywords": [],
   "author": "",

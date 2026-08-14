@@ -44,10 +44,12 @@ function pricingOrderIsValid(adminPrice, sellingPrice, addons) {
   return sellingPrice >= adminPrice && Object.values(addons).every((pair) => pair.selling >= pair.admin);
 }
 
-// Settlement filter. Moved to lib/counts.js 2026-08-10 and re-exported here under the same
-// name so every call site below is unchanged — the AI analytics assistant needs the identical
-// definition, and two "revenue" definitions that disagree would be worse than no assistant.
-const { billableOrderSql } = counts;
+// The settlement filter + the money vocabulary it feeds now live in lib/counts.js, so the
+// dashboard and every other reader compute revenue the SAME way. The AI analytics assistant
+// reads the identical definitions from there — two "revenue" definitions that disagree would
+// be worse than no assistant. See the block comments there before changing what «دخل المحل»
+// or «ربح الممثلين» mean.
+const { billableOrderSql, shopIncomeExpr, repMarginExpr } = counts;
 
 const STAFF_TYPES = ['designer', 'embroiderer', 'presser', 'preparer', 'manager', 'digitizer', 'tailor'];
 const STAFF_SCOPES = ['retail', 'wholesaler', 'both'];
@@ -65,35 +67,45 @@ function normalizeStaffTypes(body) {
 }
 
 async function analytics(req, res) {
-  const totals = await query(
-    `SELECT
-       COALESCE(SUM(o.price), 0)::bigint AS revenue,
-       COALESCE(SUM(o.cost), 0)::bigint AS cost,
-       COALESCE(SUM(o.profit), 0)::bigint AS profit,
-       COUNT(DISTINCT COALESCE(o.checkout_group_id, o.id))::int AS orders
-     FROM orders o WHERE ${billableOrderSql('o')}`
-  );
+  // MONEY (2026-08-13, bug 11): `totals` no longer reports SUM(price)/SUM(cost)/SUM(profit)
+  // under the words إيراد/تكلفة/ربح. On a rep's order those three mean «what the student paid
+  // the REP» / «the shop's own income» / «the REP's margin» — so the old «إجمالي الربح» was
+  // literally the representatives' earnings, and «إجمالي التكلفة» was the shop's revenue.
+  // counts.settledMoney returns the honest split; the whole vocabulary is documented there.
+  const money = await counts.settledMoney();
   // Pipeline funnel = OPERATIONAL, not settlement (decision locked 2026-07-17): count every
   // active order (incl. pending/rejected rep bundles awaiting approval) so WIP isn't
-  // understated. Only the MONEY aggregates (totals/topWholesalers/accounting) stay on
+  // understated. Only the MONEY aggregates (money/topWholesalers/accounting) stay on
   // billableOrderSql — this is the one place that deliberately does NOT gate on approval.
   //
   // UNITS (2026-07-21): the funnel is counted in PIECES (قطعة) because only pieces have a
   // stage — 76% of bundles span 2-3 statuses at once, so a bundle funnel overcounted by 79%.
   // `students` rides along as a MEMBERSHIP count (a student with pieces in two stages is in
   // both rows); it deliberately does NOT sum to totals.students. See lib/counts.js.
+  //
+  // WORKABLE (2026-08-13, bug 9): each stage row now also splits into what a station can
+  // actually pick up vs what is blocked, so the admin total and the staff queue stop
+  // disagreeing by 365 pieces with no way to see why. stageFunnelSplit mirrors getQueue.
   const scope = counts.buildScope();
   const [funnel, headline, retailOrders] = await Promise.all([
-    counts.stageFunnel(scope),
+    counts.stageFunnelSplit(scope),
     counts.summary(scope),
     // The rank ladder climbs on RETAIL طلب (owner goal: 3000). Same ladder the TV
     // board shows, so the two screens can never disagree about the current rung.
     counts.countBundles(counts.buildScope({ source: 'retail' })),
   ]);
+  // DAILY (2026-08-13, bug 10): `orders` counted EVERY live bundle while `revenue` was
+  // filtered to settled ones, so one bar mixed two populations — 10 Aug read 32 orders
+  // against revenue that only 18 of them produced, throwing average-per-order off by 3×.
+  // Both counts now ride on the row so the chart can show them explicitly instead of
+  // silently dividing one population by the other.
   const daily = await query(
     `SELECT DATE(o.created_at AT TIME ZONE 'Asia/Baghdad') AS date,
             COUNT(DISTINCT COALESCE(o.checkout_group_id, o.id))::int AS orders,
-            COALESCE(SUM(o.price) FILTER (WHERE ${billableOrderSql('o')}), 0)::bigint AS revenue
+            COUNT(DISTINCT COALESCE(o.checkout_group_id, o.id))
+              FILTER (WHERE ${billableOrderSql('o')})::int AS billable_orders,
+            COALESCE(SUM(o.price) FILTER (WHERE ${billableOrderSql('o')}), 0)::bigint AS revenue,
+            ${shopIncomeExpr('o', billableOrderSql('o'))} AS shop_income
      FROM orders o
      WHERE o.created_at > NOW() - INTERVAL '30 days'
        AND o.status <> 'cancelled'
@@ -116,7 +128,7 @@ async function analytics(req, res) {
   const status = {};
   funnel.forEach((r) => (status[r.stage] = r.pieces));
   res.json({
-    totals: totals.rows[0],
+    money,
     by_status: status,
     funnel,
     headline,
@@ -127,18 +139,17 @@ async function analytics(req, res) {
 }
 
 async function accounting(req, res) {
-  const totals = await query(
-    `SELECT COALESCE(SUM(o.price),0)::bigint AS revenue,
-            COALESCE(SUM(o.cost),0)::bigint AS cost,
-            COALESCE(SUM(o.profit),0)::bigint AS profit,
-            COUNT(DISTINCT COALESCE(o.checkout_group_id, o.id))::int AS orders
-     FROM orders o WHERE ${billableOrderSql('o')}`
-  );
+  // Same money vocabulary as analytics (bug 11): every bucket reports what the SHOP takes
+  // in — حصة الإدارة on a rep's order, the full price on a retail one — and reports the
+  // reps' own margin beside it, never inside it. `shop_income` is the column that sums:
+  // by_wholesaler + independent_retail + orphaned_billable == totals.shop_income.
+  const totals = await counts.settledMoney();
   const byBatch = await query(
     `SELECT b.id, b.name_ar, wu.name AS wholesaler_name,
+            ${shopIncomeExpr('o')} AS shop_income,
+            ${repMarginExpr('o')} AS rep_margin,
             COALESCE(SUM(o.price),0)::bigint AS revenue,
             COALESCE(SUM(o.cost),0)::bigint AS cost,
-            COALESCE(SUM(o.profit),0)::bigint AS profit,
             COUNT(DISTINCT COALESCE(o.checkout_group_id, o.id))::int AS orders
      FROM batches b
      LEFT JOIN wholesalers w ON w.id = b.wholesaler_id
@@ -146,14 +157,17 @@ async function accounting(req, res) {
      LEFT JOIN orders o ON o.batch_id = b.id
        AND o.status <> 'cancelled'
        AND o.wholesaler_approval = 'approved'
-     GROUP BY b.id, wu.name ORDER BY revenue DESC`
+     GROUP BY b.id, wu.name ORDER BY shop_income DESC`
   );
   const byWholesaler = await query(
     `SELECT w.id, u.name AS wholesaler_name, w.commission_rate,
+            ${shopIncomeExpr('o')} AS shop_income,
+            ${repMarginExpr('o')} AS rep_margin,
             COALESCE(SUM(o.price),0)::bigint AS revenue,
             COALESCE(SUM(o.cost),0)::bigint AS cost,
-            COALESCE(SUM(o.profit),0)::bigint AS profit,
-            COALESCE(SUM(o.profit),0)::bigint AS commission,
+            -- «العمولة» IS the rep's margin (price − حصة الإدارة). Same number as
+            -- staffController's representative_profit — the rep's, not the shop's.
+            ${repMarginExpr('o')} AS commission,
             COUNT(DISTINCT COALESCE(o.checkout_group_id, o.id))::int AS orders
      FROM wholesalers w
      JOIN users u ON u.id = w.user_id
@@ -161,12 +175,13 @@ async function accounting(req, res) {
      LEFT JOIN orders o ON o.student_id = s.id
        AND o.status <> 'cancelled'
        AND o.wholesaler_approval = 'approved'
-     GROUP BY w.id, u.name, w.commission_rate ORDER BY revenue DESC`
+     GROUP BY w.id, u.name, w.commission_rate ORDER BY shop_income DESC`
   );
   const retail = await query(
-    `SELECT COALESCE(SUM(o.price),0)::bigint AS revenue,
+    `SELECT ${shopIncomeExpr('o')} AS shop_income,
+            ${repMarginExpr('o')} AS rep_margin,
+            COALESCE(SUM(o.price),0)::bigint AS revenue,
             COALESCE(SUM(o.cost),0)::bigint AS cost,
-            COALESCE(SUM(o.profit),0)::bigint AS profit,
             COUNT(DISTINCT COALESCE(o.checkout_group_id, o.id))::int AS orders
      FROM orders o
      JOIN students s ON s.id = o.student_id
@@ -181,9 +196,10 @@ async function accounting(req, res) {
   // and the breakdown would stop summing to `totals`. Catch them here so
   // by_wholesaler + independent_retail + orphaned_billable == totals always holds.
   const orphaned = await query(
-    `SELECT COALESCE(SUM(o.price),0)::bigint AS revenue,
+    `SELECT ${shopIncomeExpr('o')} AS shop_income,
+            ${repMarginExpr('o')} AS rep_margin,
+            COALESCE(SUM(o.price),0)::bigint AS revenue,
             COALESCE(SUM(o.cost),0)::bigint AS cost,
-            COALESCE(SUM(o.profit),0)::bigint AS profit,
             COUNT(DISTINCT COALESCE(o.checkout_group_id, o.id))::int AS orders
      FROM orders o
      JOIN students s ON s.id = o.student_id
@@ -192,7 +208,7 @@ async function accounting(req, res) {
        AND o.wholesaler_approval = 'approved'`
   );
   res.json({
-    totals: totals.rows[0],
+    totals,
     by_batch: byBatch.rows,
     by_wholesaler: byWholesaler.rows,
     independent_retail: retail.rows[0],

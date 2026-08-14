@@ -1,5 +1,323 @@
 # Progress
 
+## 2026-08-14 (b) — WhatsApp gateway banned again; outage switch built, ON A PR, NOT DEPLOYED
+
+The Zentramsg sender device was spam-banned by Meta for 24h (again), so no OTP is delivered
+and every OTP-gated flow dead-ends. Built `OTP_DEGRADED_UNTIL` — one server-only env var that
+trades the second factor for availability while the ban runs.
+
+**Measured first, and it reframed the job.** On prod: 1,020 rep-linked students already skip
+OTP (`authController.js:133`), 563 self-registered retail and 22 privileged users hold live
+trusted devices. **~1,605 of 1,694 users were never affected.** The real outage is ~89 people
+who happen to open the app on a new phone, ~24 signups/day, and every password reset.
+
+**What the flag does** (retail + wholesaler only — owner's choice): login on the verified
+password alone, registration without phone verification. What it deliberately does NOT do is
+the reason it is safe: bcrypt still runs; admin/staff/worker/design_helper never bypass; no
+trusted-device token is issued (a password-only login must not buy 90 days that outlive the
+window); `phone_verified` is not flipped.
+
+⚠️ **Password reset is NOT degraded, and that asymmetry is the whole design.** Login degrades
+safely because bcrypt already ran. On `forgotPasswordPhone` the OTP is the *only* credential,
+so bypassing it would read as "reset any account whose phone number you can guess" — 1,660 of
+them, from a trivially enumerable format. It refuses with 503 `ERR_OTP_UNAVAILABLE` and points
+the customer at shop support.
+
+**Fail-safe and capped at 48h:** empty, past, unparseable, or a typo'd year all read as OFF.
+Forgetting to unset it is not how this becomes permanent — the clock is.
+
+**Owner's correction, and it turned out to be security-relevant:** the refusal message must
+name no channel and disclose no outage. Publishing "the second factor is unavailable right
+now" on a public endpoint tells anyone probing the login exactly when to come back. It now
+reads «لاستعادة كلمة المرور، تواصل مع دعم المتجر وسنساعدك مباشرة.» and renders as a neutral
+`role="status"` notice, not a red validation error — replacing the «سيصلك رمز عبر واتساب» hint
+that would otherwise promise a message that isn't coming.
+
+Gates: **246/246** backend tests (228 baseline + 18 new), `tsc` clean, eslint 0 errors,
+`next build` complete. CI green on the PR; both `npm audit` gates clear (zero new deps).
+
+🚧 **NOT DONE — this is inert until two owner actions:** merge
+[PR #5](https://github.com/perdark/loloshop/pull/5) (`fix/otp-gateway-outage-mode`, `7c27dbb`),
+then set `OTP_DEGRADED_UNTIL` in the prod backend `.env` + `pm2 restart loloshop-api
+--update-env`. The var is not in git, so the deploy alone changes nothing.
+
+⚠️ **This is the airbag, not the brakes.** Zentramsg drives a real WhatsApp account through a
+linked device, which is what Meta bans; repeated temp bans escalate to permanent. The actual
+fixes are a second sender number (`ZENTRAMSG_DEVICE_UUID` is just an env var) or the official
+WhatsApp Cloud API with an Authentication template. Neither is done.
+
+## 2026-08-14 — Track A merged and DEPLOYED, after the browser gate it left open
+
+Merge `df2fa48` on `origin/main`; CI green, **Deploy to VPS** succeeded, prod confirmed at
+`df2fa48` over SSH with all three PM2 processes restarted and the site/API answering 200.
+Gates on the merged tree: **211/211** backend tests (185 baseline + 11 Track C + 15 Track A —
+the first time the two tracks' suites ran together), `tsc` clean, eslint 0 errors, `next build`
+complete, and **both `npm audit` deploy gates exit 0**. Only conflict was `PROGRESS.md`
+(both tracks prepended a session entry); both were kept.
+
+**The gate the branch itself left open is now closed — verified in a real browser** against the
+dev DB as a real admin, money-gate opened by the owner. All six figures render exactly as the API
+computes them: دخل المحل ٣٧٬٨٧٧٬٣٠٠ · حصة الإدارة ١٦٬٦٨١٬٠٠٠ · مبيعات التجزئة ٢١٬١٩٦٬٣٠٠ ·
+دفعه الطلاب للممثل ١٩٬٦٧٦٬٠٠٠ · ربح الممثل ٢٬٩٩٥٬٠٠٠ · طلبات محتسبة ٤٩٥. Internally consistent on
+screen (19,676,000 − 2,995,000 = 16,681,000) and the sub-label «93٪ مما دفعه الطلاب» checks out.
+Bug 9's header reconciles to the funnel (**١٤٥٥ قابلة للعمل من ١٧٣١ قطعة**) and bug 10 plots both
+populations with the backlog as the band between them. Console clean apart from two transient
+Recharts `width(-1)` warnings at mount.
+
+**Live prod numbers, computed by the deployed code:** دخل المحل **74,179,800** = حصة الإدارة
+23,923,000 + تجزئة 50,256,800; مال الممثلين 4,255,000; إجمالي التحصيل 78,434,800; retail pieces
+costed **0 / 1,493**. The old «صافي الربح» would read 54,511,800 today — the +19,668,000 is exactly
+23,923,000 − 4,255,000, the swap of the reps' margin for the shop's share.
+
+⚠️ **A near-miss worth recording.** The daily-chart header read 145/101 while a curl taken twenty
+minutes earlier said 146/102, and it looked like an off-by-one in the new chart. It was not: the
+query is `WHERE o.created_at > NOW() - INTERVAL '30 days'` and `NOW()` is an *instant*, so the
+leftmost day sheds orders minute by minute. Confirmed byte-identical on the merge-base — pre-existing,
+not a Track A regression. Side effect worth knowing: **the leftmost day of that chart is always a
+partial day and always under-reports.** Don't compare a cached API fetch against a live render.
+
+**Rep-facing numbers proved unchanged, not assumed.** Two backends were run against the same DB
+(Track A on :4000, `main` on :4001) and driven with a real rep's token:
+`/api/wholesaler/{dashboard,students,orders}` and `/api/admin/reps-overview` are **byte-identical**,
+and the `wholesalerOrders` account block (يجمعه الممثل ١٠٬٢٩٨٬٠٠٠ · حصة الإدارة ٨٬٦٩٨٬٠٠٠ ·
+ربح الممثل ١٬٦٠٠٬٠٠٠) is byte-equal across 402 order rows. The only diff in that response is
+Track C's `my_stages`. This matters because the owner does his real accounting on those screens,
+not on the dashboard totals.
+
+**Prod DB backed up first:** `~/Desktop/_private/loloshop-db/loloshop-prod-2026-08-14.dump`, taken
+with the server's own PG17 `pg_dump`, sha256 verified server↔laptop, and **restore-tested** —
+`pg_restore` decompressed the whole archive (12.6 MB of SQL, exit 0, empty stderr) and the row
+counts read out of it match live prod exactly (users 1,694 · orders 3,209 · order_items 13,844).
+⚠️ The laptop's client is PG16 against a PG17 server, so the dump **must** be taken on the box.
+⚠️ The 4.9 GB of uploads (6,957 files) is still NOT backed up — the laptop has 7.1 GB free at 88%.
+
+## 2026-08-13 — Track A: the admin numbers now say what they mean (bugs 9, 10, 11)
+
+Branch `fix/admin-numbers`, cut from `main`. Spec:
+`docs/superpowers/specs/2026-08-13-eleven-bugs-parallel-tracks.md`. Tracks B and C untouched —
+no file under `calligraphy*`, `staffController.js` or the rep students page was modified.
+
+**Bug 11 — «إجمالي الربح» was the REPRESENTATIVES' profit, not the shop's.** On a rep's order
+`price` is what the student paid the *rep*, `cost` is «حصة الإدارة» (the shop's actual income),
+and the generated column `profit = price − COALESCE(cost,0)` is therefore **the rep's margin** —
+the same number the rep's own page correctly labels «ربح الممثل». The dashboard summed it and
+called it «إجمالي الربح» / «صافي الربح», so on dev **2,995,000 IQD of representatives' earnings
+was being reported as shop profit** (prod: 4,240,000). «إجمالي التكلفة» was, symmetrically, the
+shop's *income*. Fixed in presentation and aggregate only — `orders.profit` is untouched, because
+wholesaler payouts and the rep account summary read it with the correct per-row meaning.
+The ledger now reads **دخل المحل = حصة الإدارة + مبيعات التجزئة**, with the reps' money in its own
+labelled block («مال الممثلين — ليس من دخل المحل»).
+
+⚠️ **Retail production cost has never been entered** (0 of 708 dev pieces, 0 of 1,467 on prod), so
+retail "profit" is revenue. The dashboard now says that outright instead of printing a net profit
+that cannot be true; «صافي الربح» is gone until a cost exists.
+
+**Bug 10 — the daily chart counted one population and earned from another.** `orders` counted
+every live bundle while `revenue` was filtered to settled ones, so anyone dividing got an average
+per order off by up to 3× (dev 16 Jul: 24 bundles against revenue from 15). Both counts now ride
+on the row and the chart plots both lines; the band between them is the pending-approval backlog.
+
+**Bug 9 — stage totals mixed workable with blocked.** Every stage row now splits into
+«قابل للعمل» / «بانتظار موافقة الممثل» / «مُرجع للطالب», summing exactly to the stage total. Dev
+بانتظار التصميم: 1,024 total = 838 workable + 167 unapproved + 19 returned — which is *why*
+/admin and the designer's queue disagreed. **The staff screens were correct and were not touched**;
+`stageFunnelSplit` mirrors `productionController.getQueue`'s own two gates.
+
+**Where the definitions live:** `billableOrderSql` moved from `adminController` into
+`lib/counts.js` — byte-identical to the same move on `ai-assistant`, so that merge auto-resolves —
+and the new money vocabulary (`shopIncomeExpr`, `repMarginExpr`, `settledMoney`) plus the
+workable/blocked predicates sit beside it with the reasoning in block comments.
+
+**Verified:** `node --test test/` **200/200** (185 before + 15 new in `test/adminNumbers.test.js`),
+`tsc --noEmit` clean, `eslint` clean, `next build` succeeds. Both endpoints driven over HTTP with a
+real admin JWT: `دخل المحل 37,877,300 = 16,681,000 + 21,196,300`, the receipt's
+`40,872,300 − 2,995,000 = 37,877,300`, and `by_wholesaler + independent_retail + orphaned` sums to
+the bottom line exactly. Every stage's three-way split reconciles, and «قابل للعمل» matches a
+hand-written mirror of the staff queue's filter.
+
+**Not verified:** the rendered page in a browser — the Claude-in-Chrome extension was not
+connected this session. Every layer below the pixels is proven; the labels/layout are not.
+
+**Also found (NOT fixed — outside Track A's files):** `db/schema.sql:305` declares
+`profit GENERATED ALWAYS AS (price - cost)` and `cost BIGINT NOT NULL DEFAULT 0`, but the live
+table has `cost` **nullable with no default** and the generated expression
+`price - COALESCE(cost, 0)`. The schema file is Track B's; the drift matters because under the
+file's version every retail row's profit would be NULL. Also `/admin/orders` still sums `o.profit`
+into a «الربح» column — the same mislabel on a screen Track A does not own.
+
+## 2026-08-13 — Track C: the designer console opens on your own station (bugs 2 + 3)
+
+Branch `fix/designer-console`, cut from `main` (`8498c4d`) — **not** from `ai-assistant`, checked
+per the spec's `4eb01c8` landmine. Three files, none owned by Track A or B:
+`backend/controllers/staffController.js` · the rep students page · `frontend/lib/staff.ts`.
+
+**Bug 2 — the console showed every station's work.** `wholesalerOrders` returned every approved
+non-cancelled order in every status with no role scoping, and «الكل» was the default. The response
+now carries `my_stages` and the console opens on «مرحلتي»; «الكل» stays one tap away.
+
+`my_stages` is **derived from orderController's `STAGE_AUTHZ`** — a status is yours when you may
+move an order out of it — rather than being a second copy of `productionController.QUEUE_STAGES`.
+That was deliberate on two counts: Track B has to edit `productionController`, so importing from it
+would have meant editing their file; and a hand-copied stage table is exactly the kind of thing
+that drifts. Asserted equal to QUEUE_STAGES for all five working staff_types in
+`test/viewerStages.test.js` (11 new tests), so a future `STAGE_AUTHZ` edit fails a test instead of
+quietly giving a worker the wrong queue.
+
+Measured by driving the real controller against the dev DB (محمد باقر عباس هاشم, 402 rows):
+
+| viewer | «الكل» | opens on «مرحلتي» |
+|---|---|---|
+| designer | 402 | **281** |
+| preparer | 402 | **120** |
+| presser | 402 | **1** |
+| manager · admin · مفصل | 402 | 402 — no personal station, unchanged by design |
+
+⚠️ **The dev DB is an older snapshot than the prod numbers in the spec** — globally embroidery is
+108 here vs the spec's 854, pressing 107 vs 460. On the spec's prod distribution for this rep
+(276 قيد التطريز + 120 قيد التجهيز + 1 قيد الكوي + 5 بانتظار التصميم) the same filter yields the
+**5** the spec predicts. So the spec's bug-2 breakdown is right about prod and simply does not
+reproduce against this laptop's DB; don't "fix" the filter to chase 281.
+
+Two things fell out of the investigation that are **not** bug 2 and were left alone:
+`«يخصّني الآن»` (`can_advance`) happens to equal the stage filter for these three roles in this
+snapshot — it diverges for a preparer's «جاهز للاستلام» rows, which are their work but deliberately
+not bulk-advanceable, which is why the default is stage-based and not a reuse of `can_advance`.
+And the console does **not** exclude `returned_to_customer` rows the way `/staff/queue` does
+(0 rows for this rep, so no visible effect); that is bug 9 / Track A territory.
+
+**Bug 3 — back button lost the designer's place.** Zone/view/search/selection already survived
+back-navigation; scroll did not. Cause: returning re-mounts the tab with `orders` empty, so it
+paints six skeletons and the document is a few hundred px tall at the exact moment the offset would
+be re-applied — it clamps to 0, and by the time 400 rows arrive the position is gone. The offset is
+now saved to the same per-rep sessionStorage bucket (trailing-throttled at 200 ms) and re-applied
+after the real rows paint, clamped to the list height, and skipped if the worker has already
+started scrolling.
+
+**⚠️ The browser test the spec demanded was worth it — the first version of the bug-3 fix did
+not work, and both static gates and code review passed it.** Two separate defects, each of which
+would have shipped as "scroll restore, still broken":
+
+1. **`requestAnimationFrame` never fires in a tab that is not painting**, so a restore scheduled
+   only inside a rAF callback silently never happens. Measured: rAF callbacks 0, `scrollTo` calls
+   0. Now applied immediately, with the rAF kept only as a corrective second pass for late height
+   changes (images/fonts).
+2. **`globals.css:499` sets `scroll-behavior: smooth` on the root**, so the plain
+   `scrollTo(0, y)` form starts an *animation* — and the router's own post-navigation scroll
+   cancels it before it travels. Measured in a visible, focused tab: the restore ran with the
+   correct offset (`scrollTo [0, 5200]`) and the page never moved; not one scroll event fired.
+   Fixed with `scrollTo({ top, left: 0, behavior: "instant" })`, which is what restoring a
+   remembered position should do anyway rather than riding visibly down 281 rows.
+
+**Verified in a real browser** (Track C build on :3005 against its own API on :4005, signed in as
+مضر محمد, a real `{designer}`): lands on «مرحلتي (281)» with 281 rows rendered, «الكل (402)» one
+tap away · scrolled to 5200, opened حسن علي حسين's order, pressed back → **returned to 5200**, same
+row on screen. Control: same journey with the saved offset stripped → lands at 0, reproducing the
+original bug. Also `node --test test/` **196/196** (185 baseline + 11 new) · `tsc --noEmit` clean ·
+`npm run lint` 0 errors · `next build` completes.
+
+⚠️ **For whoever writes the next scroll-restore anywhere in this app:** `scroll-behavior: smooth`
+is global, so **every** programmatic `scrollTo`/`scrollIntoView` in this codebase animates by
+default and can be cancelled mid-flight. Pass `behavior: "instant"` for anything that is restoring
+state rather than responding to a click.
+## 2026-08-14 — Track B verified before merge; two defects found and fixed, one deferred
+
+First time this branch has ever run: `lolo-B/backend/.env` did not exist, so its original
+verification was DB scripts and a rolled-back transaction — never an HTTP request, never a browser.
+Booted it (`:4000` API, `:3007` web) and drove it as a real designer (مضر محمد) against the dev DB.
+
+**Bug 4's core fix is PROVEN, in a browser.** On order `1c38893f` the student's uploaded photo and
+the generated plate now render as two separate, labelled slots — «صورة الطالب — تطريز الوشاح من
+الخلف» and «الخط المولّد — تطريز الوشاح من الأمام». Before this branch, generating that plate
+destroyed that photo. Migration 080's backfill checks out on dev too: 7,653 lines, **0** with both
+columns set, 61 plate-only, and **zero** `customer_image_url` values still pointing at a plate.
+
+**Bug 6's partition is live**: every zone returns `pending / items / held / plated`, 149 held lines
+(91 instruction, 58 junk), each with an actionable Arabic hint.
+
+### Fixed here (commit `d56f288`)
+
+1. **`persistFullSetOrder` was destroying the plate on every طقم edit** — a regression this branch
+   introduces, found independently by three lenses of a 25-agent adversarial review. Detail in the
+   commit message. Guarded by `test/fullSetPlateSurvival.test.js`, which goes red without the fix.
+2. **«رجاء» held real names** — proven by running the matcher on the two real prod rows containing
+   it. Now fires only as the first token. Guarded by 3 new cases in `test/calligraphyText.test.js`.
+
+`node --test test/` → **202/202** (197 + 5 new).
+
+### ⚠️ DEFERRED — the reroll geometry ratchet (medium, needs migration 081)
+
+`calligraphyController.js:472` passes `p.plate_path` — *the plate being replaced* — to
+`matchPlateGeometry`, and the same handler overwrites `plate_path` at :481. So reroll N+1 anchors
+on reroll N's output. `imageFx.js:71-77` resizes with `fit:'inside'`, which never upscales, so ink
+height is **monotone non-increasing and can never recover**. Reproduced with sharp on realistic
+`extractBands` geometry: ink 700×140 → reroll1 (long name, width-bound) 1024×**73** → reroll2
+(normal name) 365×**73** → reroll3 **73**. The plate ends up pinned at the scale demanded by the
+widest generation it ever had — the exact sibling-scale mismatch `matchPlateGeometry` exists to
+close. `REROLL_LIMIT=10` exists precisely because designers press the button repeatedly.
+
+Not fixed here because there is **no immutable geometry anchor on the row**: `plate_path` is
+overwritten, and `sheet_path` is the whole 10-name sheet whose geometry is not the band's (the
+reviewer that first proposed `sheet_path` was wrong about this, and its own verifier said so). The
+fix needs a new column — the original band's geometry, or an untouched `original_plate_path` — i.e.
+migration 081, plus image-pipeline tests. Bounded severity: it converges to a running max of aspect
+rather than running away, and costs letter height, not data.
+
+### Still open on this branch before it merges
+
+- **`configureOrder` / `configureFullSet`** (`orderController.js:630/1140`) have the same
+  DELETE + re-INSERT shape with no status guard. The review panel refuted them on *reachability*
+  (`orderController.js:727` 403s rep-linked students, and plates live overwhelmingly on rep
+  orders) — which is an argument about who can reach the path, not about the path being safe.
+  Worth closing the same way `fullSetOrder` was.
+- **The audit was not clean:** 1 agent died mid-response, 5 stalled and retried, and the safety
+  classifier timed out on one. The dead agent is what "refuted" the «رجاء» finding, which then
+  turned out to be real. Treat that run's 14 refutations as weaker evidence than its 4 confirmations.
+
+## 2026-08-13 — Track B: the calligraphy plate stops eating the student's photo (bugs 4·5·6)
+
+Branch `fix/calligraphy-photo-loss`, cut from `main` (`871a257` + the spec doc). **Not merged** —
+Tracks A and C are separate branches and the deploy rule is one track at a time.
+
+**Bug 4 — the plate destroyed the reference photo.** `order_items.customer_image_url` held two
+different things under one name, and `calligraphyEngine.autoLinkPlate` overwrote it
+unconditionally, so every generate / reroll / compose deleted the student's upload. Migration
+**080** gives the plate its own column (`plate_image_url`), backfills the damaged rows out of the
+customer's column, and the link now targets the new one. Proved against a live order line: the
+photo survives the write and the plate lands in its own column (probe rolled back, dev DB clean).
+Sixteen readers updated across both apps — `retailQueue`, four `productionController` detectors,
+the queue's `has_design_images`, `designTeamController` JOB_SELECT, the TV wall spotlight,
+`orderZoneClause`, the staff order page, PrepConsole's spec partition, DesignGallery and the
+retail review board. `orderEditController` needed no change: its keyed reconciliation already
+updates in place, so a plate survives an admin edit.
+
+**Bug 5 — «إعادة التوليد».** Four defects, all fixed: no guard at all (now junk + instruction);
+regenerating from `render_text` that is itself the instruction (the designer can now pass the
+corrected name, and it is saved onto the plate); a single-name generation whose scale and framing
+did not match the 10-name sheet the siblings came from (new `matchPlateGeometry` reframes onto the
+exact geometry of the plate being replaced, measured from that file — 5 unit tests); and no cost
+ceiling (`reroll_count` + a limit of 10, surfaced in the UI).
+
+**Bug 6 — «يخصّني الآن» showed orders the queue could not.** New `lib/calligraphyText.js`
+classifies text students wrote *to the shop* («نفس الصوره») before any money is spent, and
+`getQueue` now returns the two populations it used to hide: `held` (refused, with the reason) and
+`plated` (already carries a done plate — the 55 invisible orders). Held lines are actionable in
+place: retype the name, or press «ولّد كما هو», which sets `reviewed: true`.
+
+⚠️ **The classifier was calibrated against the live table, not invented.** A first draft flagged
+**real** back-of-sash text — ﴿مَّن كَانَ يُرِيدُ ثَوَابَ الدُّنْيَا﴾, «الحمدلله هذا ماسعيت له»,
+«الى عائلتي انتم حكاية نجاحي» — because «يريد» «هذا» and «الى» (which normalises to «الي») looked
+like instruction words. Pointing words, «نفس», «مثل», «فقط» and third-person «يريد» were all
+removed; the four instructions measured on prod are caught anyway because **every one of them
+names a photo**. Final rate: **91 of 954** distinct strings (9.5%), each one eyeballed. All four
+false positives are locked in as regression tests.
+
+**Recovery:** `npm run photo-recovery` (read-only) lists the damaged lines and proposes upload
+files by mtime, flagging the ones whose own text names a photo. It writes nothing and deletes
+nothing — the timestamps are a hint, not an identification, and the owner confirms each match.
+
+**Verified:** `node --test test/` **197/197** (185 baseline + 12 new), `tsc --noEmit` clean,
+`eslint` clean, `next build` completes. Migration 080 applied to the dev DB and re-run to prove
+idempotency (61 rows moved, identical on the second pass).
 ## 2026-08-12 (b) — the assistant becomes the marketing surface: quotas out, guard in
 
 Owner reframe: «لولو» is the shop's **main marketing content**, and individual users should not

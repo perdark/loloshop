@@ -464,20 +464,25 @@ async function buildSnapshot(source, range) {
     // SOURCE FIXED 2026-07-21: this read `orders.final_design_url`, a DEAD field since
     // FinalDesignUpload was deleted (2026-07-15) — only 5 orders carry one, so the wall
     // cycled the same 5 stale images forever. The real artwork now lives per-zone on
-    // order_items.customer_image_url (784 orders). DISTINCT ON the image so the same
-    // photo reused across zones doesn't fill the gallery with duplicates.
+    // order_items (784 orders). DISTINCT ON the image so the same photo reused across zones
+    // doesn't fill the gallery with duplicates.
+    //
+    // Migration 080 split the artwork out of customer_image_url, so «finished artwork» is now
+    // the plate when there is one and the student's own upload otherwise — COALESCE keeps the
+    // wall showing exactly what it showed before the split, from two columns instead of one.
     query(
       `SELECT * FROM (
-         SELECT DISTINCT ON (oi.customer_image_url)
-                o.id, oi.customer_image_url AS final_design_url,
+         SELECT DISTINCT ON (COALESCE(oi.plate_image_url, oi.customer_image_url))
+                o.id, COALESCE(oi.plate_image_url, oi.customer_image_url) AS final_design_url,
                 u.name AS student_name, s.university_name, o.updated_at
          FROM order_items oi
          JOIN orders o ON o.id = oi.order_id
          JOIN students s ON s.id = o.student_id
          JOIN users u ON u.id = s.user_id
-         WHERE oi.customer_image_url IS NOT NULL AND oi.customer_image_url <> ''
+         WHERE COALESCE(oi.plate_image_url, oi.customer_image_url) IS NOT NULL
+           AND COALESCE(oi.plate_image_url, oi.customer_image_url) <> ''
            AND o.status::text <> 'cancelled' ${src}
-         ORDER BY oi.customer_image_url, o.updated_at DESC
+         ORDER BY COALESCE(oi.plate_image_url, oi.customer_image_url), o.updated_at DESC
        ) z ORDER BY z.updated_at DESC LIMIT 24`
     ),
     // Ticker seed — recent order events.
