@@ -117,3 +117,31 @@ test('checkRenderText messages are Arabic and name the offending words', () => {
   assert.ok(out.message.includes('تعليمات'));
   assert.ok(out.markers.length >= 2);
 });
+
+// ---------------------------------------------------------------------------
+// «رجاء» — the one marker that is also a name (added 2026-08-14)
+// ---------------------------------------------------------------------------
+// The marker list's own comment claims every word in it "never appears inside an Iraqi name".
+// That was false for «رجاء» (Rajaa). Both strings below are REAL prod `order_items.customer_text`
+// values — they are the only two rows on prod containing «رجاء» as a standalone token, and the
+// matcher has to split them: one is a pure name, the other is genuinely a layout instruction.
+// Position is what separates the two senses — politeness leads, a name trails.
+test('«رجاء» as a trailing surname is a NAME, not an instruction', () => {
+  assert.deepStrictEqual(instructionMarkers('الصيدلانية ساره رجاء'), []);
+  assert.strictEqual(looksLikeInstruction('الصيدلانية ساره رجاء'), false);
+  assert.strictEqual(checkRenderText('الصيدلانية ساره رجاء').ok, true);
+});
+
+test('«رجاء» leading the text is still caught as politeness', () => {
+  // Real prod row: a name followed by genuine layout directions.
+  assert.ok(instructionMarkers('رجاء رعد عبدالله ع الجهة اليمنى.. والجهة اليسرى اسم الجامعة والقسم').includes('رجاء'));
+  assert.strictEqual(looksLikeInstruction('رجاء اكتب اسمي بخط جميل'), true);
+  assert.strictEqual(looksLikeInstruction('رجاءا اكتبوا الاسم بخط الرقعة'), true);
+});
+
+test('a positional marker mid-text does not fire, but a normal marker still does', () => {
+  // «اكتب» is unconditional — position must not weaken the ordinary markers.
+  assert.ok(instructionMarkers('سارة رجاء اكتب الاسم').includes('اكتب'));
+  // ...and the positional one stays silent when it trails.
+  assert.ok(!instructionMarkers('سارة رجاء').includes('رجاء'));
+});

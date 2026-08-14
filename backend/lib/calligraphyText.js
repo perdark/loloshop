@@ -79,6 +79,11 @@ const INSTRUCTION_WORDS = new Set([
   'تطريز', 'تطريزه',
 ]);
 
+// Markers that only count as instructions when they LEAD the text. See instructionMarkers for the
+// measurement behind this. Keep this set tiny: it exists for words that are genuinely ambiguous
+// between "asking" and "being a name", not as a general escape hatch for weak markers.
+const POSITIONAL_WORDS = new Set(['رجاء', 'رجاءا']);
+
 // A real embroiderable name has at least two Arabic letters. Rejects pure numbers, Latin,
 // emoji, single chars and punctuation so the PAID generator is never spent on junk (the "no
 // API call for a retarded name" guard). This is the server-side choke point; the UI mirrors it.
@@ -104,7 +109,16 @@ function instructionMarkers(text) {
     .split(/[^ء-ي٠-٩a-zA-Z0-9]+/)
     .filter(Boolean);
   const hits = [];
-  for (const tok of tokens) {
+  for (let i = 0; i < tokens.length; i += 1) {
+    const tok = tokens[i];
+    // «رجاء» is the one marker that is ALSO an ordinary Iraqi given name (Rajaa), so the blanket
+    // claim above — "never appears inside a name" — does not hold for it. Measured on prod
+    // 2026-08-14: «الصيدلانية ساره رجاء» is a pure name and was being held with a message telling
+    // the designer it was instructions. Position disambiguates the two senses cleanly: as
+    // politeness it LEADS the sentence («رجاء اكتب…»), as a name it trails («ساره رجاء»). Both
+    // live prod rows classify correctly under this rule. Note the polite form is normally caught
+    // twice anyway — «رجاء اكتب اسمي» also hits «اكتب» — so this loses almost no coverage.
+    if (POSITIONAL_WORDS.has(tok) && i !== 0) continue;
     if (INSTRUCTION_WORDS.has(tok) || INSTRUCTION_WORDS.has(stripPrefix(tok))) hits.push(tok);
   }
   return hits;
