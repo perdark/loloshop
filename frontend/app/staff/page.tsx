@@ -570,13 +570,17 @@ function MonitorDashboard({
     );
   }
 
+  // PIECES, not bundles. This sums monitor's per-stage `wip`, which is COUNT(*) over `orders`
+  // rows — and only pieces have a stage (76% of bundles span 2-3 statuses at once, so a
+  // bundle total could never be built this way). Labelling it «طلب» is what made this header
+  // disagree with /admin, which counts bundles. See the header of backend/lib/counts.js.
   const totalWip = STAGE_ORDER.reduce((s, st) => s + (data?.wip[st] ?? 0), 0);
 
   return (
     <div dir="rtl" lang="ar" className="space-y-6 animate-fade-page-in">
       <PageHeader
         title="المتابعة"
-        subtitle={`${totalWip} طلب نشط في خط الإنتاج`}
+        subtitle={`${totalWip} قطعة نشطة في خط الإنتاج`}
         action={
           activeTab === "monitor" ? (
             <Button variant="ghost" onClick={() => load()} loading={loading}>

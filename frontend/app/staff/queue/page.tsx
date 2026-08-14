@@ -597,7 +597,8 @@ function RepCardGrid({
               {rep.name}
             </span>
             <span className="shrink-0 rounded-full bg-orange-ink/10 px-2.5 py-0.5 text-xs font-bold tabular-nums text-orange-ink">
-              {rep.orderCount} طلب
+              {/* PIECES — `orderCount` is `repItems.length`, one queue row per piece. */}
+              {rep.orderCount} قطعة
             </span>
           </div>
           {rep.batches.length > 0 && (
@@ -678,7 +679,8 @@ function Pagination({
       {btn(page - 1, "‹", page === 1)}
       {pageButtons}
       {btn(page + 1, "›", page === totalPages)}
-      <span className="ms-2 text-xs text-muted">{total} طلب</span>
+      {/* PIECES — `total` filters `items`, one row per piece. */}
+      <span className="ms-2 text-xs text-muted">{total} قطعة</span>
     </div>
   );
 }
@@ -1157,7 +1159,8 @@ function ConsoleContent() {
 
               {!loading && (
                 <span className="me-auto text-xs text-muted ms-auto">
-                  يُعرض <strong className="text-ink">{filtered.length}</strong> طلب
+                  {/* PIECES — `filtered` holds queue rows, one per piece. */}
+                  يُعرض <strong className="text-ink">{filtered.length}</strong> قطعة
                 </span>
               )}
             </div>

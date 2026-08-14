@@ -489,12 +489,14 @@ function OrdersTab({
         // «أنهيت», because the usual reason is that the work was never his, not that he
         // finished it. Every other filter keeps the original one-liner.
         view === "mine" && !search.trim() && counts.total > 0 ? (
+          // PIECES — `counts.total` is `orders.length`, one row per piece. This screen saying
+          // «طلب» is why the same rep read 40 on /admin (bundles) and 118 here.
           <EmptyState
             title="لا يوجد عمل يخصّك عند هذا الممثل"
-            message={`لا توجد طلبات في مرحلتك هنا — لدى هذا الممثل ${counts.total} طلب في مراحل أخرى.`}
+            message={`لا توجد قطع في مرحلتك هنا — لدى هذا الممثل ${counts.total} قطعة في مراحل أخرى.`}
             action={
               <Button size="sm" variant="ghost" onClick={() => setView("all")}>
-                عرض كل الطلبات ({counts.total})
+                عرض كل القطع ({counts.total})
               </Button>
             }
           />
