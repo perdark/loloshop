@@ -1,5 +1,59 @@
 # Progress
 
+## 2026-08-14 — Track B verified before merge; two defects found and fixed, one deferred
+
+First time this branch has ever run: `lolo-B/backend/.env` did not exist, so its original
+verification was DB scripts and a rolled-back transaction — never an HTTP request, never a browser.
+Booted it (`:4000` API, `:3007` web) and drove it as a real designer (مضر محمد) against the dev DB.
+
+**Bug 4's core fix is PROVEN, in a browser.** On order `1c38893f` the student's uploaded photo and
+the generated plate now render as two separate, labelled slots — «صورة الطالب — تطريز الوشاح من
+الخلف» and «الخط المولّد — تطريز الوشاح من الأمام». Before this branch, generating that plate
+destroyed that photo. Migration 080's backfill checks out on dev too: 7,653 lines, **0** with both
+columns set, 61 plate-only, and **zero** `customer_image_url` values still pointing at a plate.
+
+**Bug 6's partition is live**: every zone returns `pending / items / held / plated`, 149 held lines
+(91 instruction, 58 junk), each with an actionable Arabic hint.
+
+### Fixed here (commit `d56f288`)
+
+1. **`persistFullSetOrder` was destroying the plate on every طقم edit** — a regression this branch
+   introduces, found independently by three lenses of a 25-agent adversarial review. Detail in the
+   commit message. Guarded by `test/fullSetPlateSurvival.test.js`, which goes red without the fix.
+2. **«رجاء» held real names** — proven by running the matcher on the two real prod rows containing
+   it. Now fires only as the first token. Guarded by 3 new cases in `test/calligraphyText.test.js`.
+
+`node --test test/` → **202/202** (197 + 5 new).
+
+### ⚠️ DEFERRED — the reroll geometry ratchet (medium, needs migration 081)
+
+`calligraphyController.js:472` passes `p.plate_path` — *the plate being replaced* — to
+`matchPlateGeometry`, and the same handler overwrites `plate_path` at :481. So reroll N+1 anchors
+on reroll N's output. `imageFx.js:71-77` resizes with `fit:'inside'`, which never upscales, so ink
+height is **monotone non-increasing and can never recover**. Reproduced with sharp on realistic
+`extractBands` geometry: ink 700×140 → reroll1 (long name, width-bound) 1024×**73** → reroll2
+(normal name) 365×**73** → reroll3 **73**. The plate ends up pinned at the scale demanded by the
+widest generation it ever had — the exact sibling-scale mismatch `matchPlateGeometry` exists to
+close. `REROLL_LIMIT=10` exists precisely because designers press the button repeatedly.
+
+Not fixed here because there is **no immutable geometry anchor on the row**: `plate_path` is
+overwritten, and `sheet_path` is the whole 10-name sheet whose geometry is not the band's (the
+reviewer that first proposed `sheet_path` was wrong about this, and its own verifier said so). The
+fix needs a new column — the original band's geometry, or an untouched `original_plate_path` — i.e.
+migration 081, plus image-pipeline tests. Bounded severity: it converges to a running max of aspect
+rather than running away, and costs letter height, not data.
+
+### Still open on this branch before it merges
+
+- **`configureOrder` / `configureFullSet`** (`orderController.js:630/1140`) have the same
+  DELETE + re-INSERT shape with no status guard. The review panel refuted them on *reachability*
+  (`orderController.js:727` 403s rep-linked students, and plates live overwhelmingly on rep
+  orders) — which is an argument about who can reach the path, not about the path being safe.
+  Worth closing the same way `fullSetOrder` was.
+- **The audit was not clean:** 1 agent died mid-response, 5 stalled and retried, and the safety
+  classifier timed out on one. The dead agent is what "refuted" the «رجاء» finding, which then
+  turned out to be real. Treat that run's 14 refutations as weaker evidence than its 4 confirmations.
+
 ## 2026-08-13 — Track B: the calligraphy plate stops eating the student's photo (bugs 4·5·6)
 
 Branch `fix/calligraphy-photo-loss`, cut from `main` (`871a257` + the spec doc). **Not merged** —
