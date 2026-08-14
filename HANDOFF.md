@@ -429,6 +429,12 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   code defects were real; the urgency was not. The one that mattered is the accrual — it re-offers
   the full salary on every press and had not fired only because `manual_payouts` has 0 rows.
 
+- ✅ **ALL FOUR MONEY BRANCHES ARE MERGED AND DEPLOYED — 2026-08-14 (d), prod at `fde0cce`.**
+  Three deploys, DB backed up first. Bug 7 is closed on both halves. Bug 8 shipped **part 1
+  only** (garment-level chips for المجهز); parts 2-4 were never written — see the PROGRESS
+  entry for how to resume the stopped workflow. `fix/ai-assistant-money` stays UNMERGED on
+  purpose: it is correct, but merging it ships the whole assistant.
+  The superseded note below is kept for its reasoning:
 - **⚠️ FOUR MONEY BRANCHES ARE READY AND UNMERGED — 2026-08-14 (c).** Every push to `main`
   auto-deploys, so merge **one at a time** and open the screen before the next:
   `fix/payout-money` (payout accrual · duplicate recipient · negative suggestion · audit trail) ·
