@@ -108,12 +108,31 @@ const ORDER_ZONE_MATCH = {
   robe_sleeve_right: `(oi.label_snapshot ILIKE '%ردن%' AND oi.label_snapshot ILIKE '%أيمن%')`,
   robe_sleeve_left:  `(oi.label_snapshot ILIKE '%ردن%' AND oi.label_snapshot ILIKE '%أيسر%')`,
   american_shawl:    `(oi.label_snapshot ILIKE '%شال%امريكي%' OR oi.label_snapshot ILIKE '%شال%أمريكي%')`,
+  // ── Merged garment-level zones — التجهيز only (owner 2026-08-14) ──────────────────────
+  // The preparer packs GARMENTS, not embroidery positions: يمين/يسار/خلف/أمام are ONE sash in
+  // their hands, so three chips is noise. These keys OR the per-position predicates above so
+  // «وشاح» is a single chip on قائمة الإنتاج for a المجهز. التطريز is untouched and keeps every
+  // position separate — it batches by position (components/staff/station/StationConsole.tsx
+  // builds its own chips from the per-piece `zones` payload, not from this table).
+  // Measured on the dev DB 2026-08-14: sash-zone lines appear ONLY on product type 'sash'
+  // (1,342 lines / 586 orders), cap-zone lines ONLY on 'cap' (749 / 437), كسرة lines ONLY on
+  // 'robe' (329). Zero cross-garment matches, so the OR is exact, not a heuristic.
+  // «شال امريكي» is deliberately NOT part of sash_any — it is an add-on, not تطريز (same rule
+  // as productionController's ZONE_DEFS header).
+  sash_any: `(oi.label_snapshot ILIKE '%يمين%' OR oi.label_snapshot ILIKE '%اليمن%'
+              OR oi.label_snapshot ILIKE '%يسار%' OR oi.label_snapshot ILIKE '%اليسر%'
+              OR oi.label_snapshot ILIKE '%خلف%'
+              OR oi.label_snapshot ILIKE '%وشاح%أمام%')`,
+  cap_any:  `(oi.label_snapshot ILIKE '%جانب%'
+              OR oi.label_snapshot ILIKE '%أعلى%' OR oi.label_snapshot ILIKE '%اعلى%')`,
 };
 // Embroidery zones additionally require the zone to carry real content (text/image), so
 // "بيها تطريز" excludes a plain (سادة) zone. Pleats encode their yes/no in customer_text.
 const ZONE_NEEDS_CONTENT = new Set([
   'sash_right', 'sash_left', 'sash_back', 'cap_side', 'cap_top',
   'sash_front', 'robe_sleeve_right', 'robe_sleeve_left', 'american_shawl',
+  // Merged garment zones inherit the content rule from their members.
+  'sash_any', 'cap_any',
 ]);
 
 function orderZoneClause(zone, alias = 'o') {

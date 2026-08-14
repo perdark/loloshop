@@ -81,7 +81,9 @@ export const ORDER_SOURCE_LABELS: Record<"retail" | "wholesaler", string> = {
 export type EmbroideryZone =
   | "sash_right" | "sash_left" | "sash_back"
   | "cap_side" | "cap_top"
-  | "robe_pleat" | "robe_no_pleat";
+  | "robe_pleat" | "robe_no_pleat"
+  // Merged garment-level keys — التجهيز only. MIRROR backend ORDER_ZONE_MATCH.
+  | "sash_any" | "cap_any";
 export const EMBROIDERY_ZONE_LABELS: Record<EmbroideryZone, string> = {
   sash_right: "وشاح — تطريز يمين",
   sash_left: "وشاح — تطريز يسار",
@@ -90,9 +92,20 @@ export const EMBROIDERY_ZONE_LABELS: Record<EmbroideryZone, string> = {
   cap_top: "قبعة — تطريز أعلى",
   robe_pleat: "روب — بكسرات",
   robe_no_pleat: "روب — بدون كسرات",
+  // Merged garment-level chips (التجهيز). No «— تطريز يمين» suffix on purpose: the whole
+  // point is that the preparer sees a GARMENT, not an embroidery position.
+  sash_any: "وشاح",
+  cap_any: "قبعة",
 };
 export const EMBROIDERY_ZONE_ORDER: EmbroideryZone[] = [
   "sash_right", "sash_left", "sash_back", "cap_side", "cap_top", "robe_pleat", "robe_no_pleat",
+];
+/** قائمة الإنتاج chip set for a المجهز (owner 2026-08-14) — garments, not embroidery positions.
+ *  وشاح merges يمين/يسار/خلف/أمام into one chip; قبعة merges جانب/أعلى. The two روب chips stay
+ *  SPLIT: بكسرات/بدون كسرات is a garment spec the preparer actually picks by (86 vs 116 pieces
+ *  on the live queue, measured 2026-08-14), not an embroidery position. */
+export const PREPARER_ZONE_ORDER: EmbroideryZone[] = [
+  "sash_any", "cap_any", "robe_pleat", "robe_no_pleat",
 ];
 
 /** Wholesaler full-set (طقم) embroidery zones — match the label set persisted by
