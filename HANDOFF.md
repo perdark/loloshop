@@ -262,8 +262,11 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   in the «Set the marketing version…» step and carries this warning inline.
 - **Codemagic has no `triggering:` block** — pushing any branch starts nothing, by design. Every
   iOS build is started by hand from the Codemagic UI.
-- **Enter the real تجزئة piece rates** at `/admin/workshop → أسعار القطع`. Migration 072 seeded them
-  equal to the ممثلين rates, so retail work still pays the wholesale wage.
+- **Finish the تجزئة piece rates** at `/admin/workshop → أسعار القطع`. Migration 072 seeded them
+  equal to the ممثلين rates. Measured on prod 2026-08-14: **2 of 10 have been entered**
+  (`robe_sew/robe` 2000 vs 1000, `shawl_close/sash` 1000 vs 800) — the other **8 still pay the
+  wholesale wage**. (`cut/cap` and `cut/shawl` are 0 on both sides; confirm that is deliberate
+  rather than unset.)
 - **The app-only gate is deployed with the flag OFF.** Turning it on is an env edit **plus a
   rebuild** (~2–3 min), not a runtime toggle — `NEXT_PUBLIC_*` is inlined at build time. Runbook +
   the 4 real-phone checks are in the 2026-07-31 (b) archive entry.
@@ -290,7 +293,13 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   this "the highest-value action available" and named the approve endpoint. That was wrong and has
   been rewritten. If you find that advice anywhere else, it is stale — delete it, do not follow it.
 
-- **⚠️ MERGING `ai-assistant` MUST UPDATE «لولو»'s MONEY DEFINITION — or it will quote a
+- ✅ **DONE 2026-08-14 (c) on `fix/ai-assistant-money` — this landmine is defused, not deleted.**
+  `main` is merged into the branch, `revenue_summary`/`top_reps` are rewritten onto `settledMoney`,
+  and `test/assistantMoneyAgreement.test.js` reads the assistant AND the dashboard and compares
+  them, so they cannot drift apart again. Merge **that** branch, not raw `ai-assistant` — raw
+  `ai-assistant` still carries the defect described below. The description stays because it is the
+  reason the fix exists:
+  **⚠️ MERGING `ai-assistant` MUST UPDATE «لولو»'s MONEY DEFINITION — or it will quote a
   different profit than the dashboard.** Track A (`fix/admin-numbers`, 2026-08-13) changed what
   «الربح» *means*: the admin dashboard no longer reports `SUM(orders.profit)`, because on a rep's
   order that is **the rep's margin**, not the shop's. It now reports **دخل المحل** = حصة الإدارة
@@ -304,7 +313,11 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   `adminController` into `lib/counts.js` **byte-identically** to the way `ai-assistant` moved it,
   so that hunk auto-resolves. The conflict left is `adminController.analytics`/`accounting`, and
   it is a real one — resolve toward Track A's shape (`money`, not `totals`).
-- **⚠️ `db/schema.sql` DISAGREES WITH THE LIVE `orders` TABLE about money columns.** The file says
+- ✅ **FIXED 2026-08-14 (c) on `fix/schema-money-drift` (unmerged) — the FILE was corrected to
+  describe production, never the reverse.** Verified by building the corrected DDL as a throwaway
+  table inside a rolled-back transaction: the fresh shape matches prod column for column. The
+  warning below stays because it is still true of `main`:
+  **⚠️ `db/schema.sql` DISAGREES WITH THE LIVE `orders` TABLE about money columns.** The file says
   `cost BIGINT NOT NULL DEFAULT 0` and `profit GENERATED ALWAYS AS (price - cost)`; the real table
   (measured 2026-08-13) has `cost` **nullable, no default** and `profit GENERATED ALWAYS AS
   (price - COALESCE(cost, 0))`. Under the file's version every retail row — all of which have a
@@ -375,7 +388,10 @@ longer stranded on a branch · the laptop's loose credentials are filed in
 - **Unit vocabulary pass 2 is not done** — rep + staff screens still say «طلب» for pieces, so
   `/admin` and `/staff/queue` disagree about the same rep (40 vs 118).
 - **`backend/` has no `npm test`** — verified in `backend/package.json`. The real command is
-  **`node --test test/`** (167 tests).
+  **`node --test test/`**, and it **must be run from `backend/`** (246 tests on `main`).
+  ⚠️ Run it from the repo root as `node --test backend/test/` and dotenv cannot find `.env`, so
+  `DATABASE_URL` is undefined and **147 tests fail** for a reason that has nothing to do with the
+  code under test. Cost real time on 2026-08-14 (c) — the failure looks like a broken change.
 - **The Next 16 dev server OOMs on this laptop** (V8 heap ~3.5 GB with system RAM still free); it
   died 3× on 2026-08-05, first time *before any code changed*. `--max-old-space-size` did not save
   it. `next build` is unaffected.
@@ -403,14 +419,25 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   rows (95.6%) carry a spec**, 281 carry measurements, **19 cards remain empty and all 19 are
   correct** — they are American shawls whose only order line is «السعر الأساسي», because the product
   name (*شال امريكي 10*) already IS the spec. The detector was not touched, as the board insisted.
-- **`/admin/orders` still shows the bug Track A fixed on `/admin`.** `app/admin/orders/page.tsx`
-  sums each row's `o.profit` into a «الربح» column — on a rep's order that is the *rep's* margin.
-  Track A does not own that file, so it was left alone deliberately; the fix is the same one, and
-  `AdminOrder.profit` should be presented as «ربح الممثل» there or replaced with the shop's share.
-- **Payout cards are shipped but their numbers are still wrong:** `suggested_amount` is a lifetime
-  accrual that manual payouts never reduce · ابو عبدو is listed twice · مضر محمد renders −775,000 ·
-  no `audit_log` row is written on card changes. *(The feature itself is committed and on
-  `origin/main` — only the data behaviour is open.)*
+- ~~**`/admin/orders` still shows the bug Track A fixed on `/admin`**~~ — **FIXED 2026-08-14 (c)
+  on `fix/admin-orders-profit`, NOT MERGED.** Measured on prod first: the rep tab was showing
+  ربح الممثلين 6,235,000 as «الربح» and never showing دخل المحل 35,160,000 at all.
+- ~~**Payout cards are shipped but their numbers are still wrong**~~ — **ALL FOUR FIXED
+  2026-08-14 (c) on `fix/payout-money`, NOT MERGED.** ⚠️ Two of the four claims were **dev-DB
+  artifacts**: مضر محمد's −775,000 needs deduction rows prod does not have, and ابو عبدو is
+  `active = FALSE` on the prod workshop roster so he was never actually listed twice there. The
+  code defects were real; the urgency was not. The one that mattered is the accrual — it re-offers
+  the full salary on every press and had not fired only because `manual_payouts` has 0 rows.
+
+- **⚠️ FOUR MONEY BRANCHES ARE READY AND UNMERGED — 2026-08-14 (c).** Every push to `main`
+  auto-deploys, so merge **one at a time** and open the screen before the next:
+  `fix/payout-money` (payout accrual · duplicate recipient · negative suggestion · audit trail) ·
+  `fix/admin-orders-profit` (bug 11's second home) · `fix/schema-money-drift` (`db/schema.sql`
+  told a fresh database that `cost` is `NOT NULL DEFAULT 0`, which silently changes what money
+  means) · `fix/ai-assistant-money` (merges `main` into `ai-assistant` and puts «لولو» on
+  `settledMoney`). Full reasoning in the PROGRESS entry.
+  ⚠️ The `ai-assistant` merge is **still not deployable** for the reasons the owner gave on
+  2026-08-13; the branch is now *correct*, not *cleared*.
 - **Should lateness deductions reach the salary?** Today «مبلغ التأخير» is display-only, while break
   deductions do hit it.
 - **Backfill the 54 existing 4–6 MB catalog photos?** Not a pure file job: re-encoding changes

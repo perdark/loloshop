@@ -1,5 +1,60 @@
 # Progress
 
+## 2026-08-14 (c) — the money audit: five open money bugs found, all five fixed, NOTHING MERGED
+
+Audited every remaining money claim on the board against the code **and the live prod DB**,
+because two of them turned out to be dev-only artifacts. Result: **five real money bugs**, each
+now closed on its own branch. None is merged — every push to `main` auto-deploys to 1,141 live
+users, so the merges are the owner's call, one at a time.
+
+**Two board claims were wrong and are corrected:** «مضر محمد renders −775,000» and «ابو عبدو is
+listed twice» reproduce on the **dev** DB only. Prod has zero payout deductions and ابو عبدو is
+`active = FALSE` on the workshop roster, so neither symptom is visible there. The code defects
+behind them are real and are fixed; the urgency was not.
+
+| branch | bug | what it was |
+|---|---|---|
+| `fix/payout-money` | 2·3·4·5 | «المبلغ المقترح» was a lifetime accrual |
+| `fix/admin-orders-profit` | 1 | /admin/orders called the reps' margin «الربح» |
+| `fix/schema-money-drift` | — | schema.sql disagreed with the live table about `cost` |
+| `fix/ai-assistant-money` | — | «لولو» quoted a profit the dashboard no longer computes |
+
+**The one that would have moved real cash:** `payoutController` computed
+`base + bonuses − deductions` and printed it as «المبلغ المقترح», while `manual_payouts` was
+joined only to *display* the last transfer, never to reduce the figure. It is right exactly once,
+on the first payout, and re-offers the whole accrual every press after that. It never fired only
+because `manual_payouts` has **0 rows** on prod — the first recorded transfer would have started
+double-paying. Now `max(0, accrued − paid)`, with استُحق / حُوِّل / المتبقي reported separately.
+The same commit stops a negative suggestion being offered as a transfer the API then rejects,
+deduplicates anyone who is both `role=staff` and on the workshop roster, and gives payout actions
+the `audit_log` rows they never had — they were the only admin money mutations writing nothing.
+
+**The one that was visibly wrong every day:** `/admin/orders` summed `o.profit` under «الربح».
+Measured on prod, the representatives tab: دفع الطلاب 41,395,000 · **دخل المحل 35,160,000, never
+shown at all** · ربح الممثلين 6,235,000, shown and counted as the shop's. Track A fixed this
+meaning on `/admin` in August; this screen was outside its scope and kept the old vocabulary.
+
+**«لولو» is now on the dashboard's definition.** `fix/ai-assistant-money` merges `main` into
+`ai-assistant` (conflicts were far smaller than the board feared — `analytics`/`accounting`
+auto-merged) and rewrites `revenue_summary`/`top_reps` onto `settledMoney`. On dev the assistant
+would have answered «الأرباح: 24,191,300»; it now answers «دخل المحل: 37,877,300», the dashboard's
+number to the dinar, and a test reads both and compares them so they cannot drift again.
+
+Gates per branch: **260/260**, tsc + eslint + `next build` clean, **246/246** with `npm run
+migrate` idempotent, **318/318** on the merged assistant branch. Every new test was confirmed red
+against the pre-fix code before being called green — the assistant's seven were re-run against the
+old `adminMetrics.js` and all seven failed.
+
+⚠️ `node --test test/` **must be run from `backend/`.** From the repo root dotenv cannot find
+`.env`, `DATABASE_URL` is undefined and 147 tests fail for a reason that has nothing to do with
+the code under test.
+
+**Still owner actions, not code:** production cost is entered on **0 of 1,497** retail pieces, so
+«مبيعات التجزئة» is revenue and all three surfaces now say so instead of printing a profit that
+cannot be true. And the تجزئة piece rates are **partially** entered — 2 of 10 differ from the
+ممثلين rate (`robe_sew` 2000/1000, `shawl_close/sash` 1000/800); the other **8 still pay the
+wholesale wage**.
+
 ## 2026-08-14 (b) — WhatsApp gateway banned again; outage switch built, ON A PR, NOT DEPLOYED
 
 The Zentramsg sender device was spam-banned by Meta for 24h (again), so no OTP is delivered
