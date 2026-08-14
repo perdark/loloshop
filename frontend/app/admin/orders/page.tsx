@@ -1470,7 +1470,12 @@ function AdminOrdersContent() {
               {activeSource === "retail" ? "طلبات التجزئة" : "طلبات الممثلين"}
             </p>
             <p className="mt-0.5 font-bold tabular-nums text-ink">
-              {viewMode === "bundle" ? activeBundles.length : activeOrders.length} طلب
+              {/* The unit FLIPS with the view: «عرض بالباقة» counts bundles (طلب), «عرض
+                  بالقطعة» counts order rows (قطعة). One fixed word here was wrong in
+                  exactly one of the two modes. See backend/lib/counts.js. */}
+              {viewMode === "bundle"
+                ? `${activeBundles.length} طلب`
+                : `${activeOrders.length} قطعة`}
             </p>
           </div>
           {viewMode === "item" && (
@@ -1705,10 +1710,14 @@ function AdminOrdersContent() {
       {/* Cross-source counts for admin awareness */}
       {!loading && !fetchError && (
         <div className="mt-6 rounded-xl border border-line bg-surface-sink px-4 py-3 text-xs text-muted">
+          {/* Same flip as the tile above: these are bundles in «عرض بالباقة» and pieces in
+              «عرض بالقطعة», so the noun has to move with the mode. */}
           <span className="font-semibold text-ink-soft">إجمالي النظام: </span>
-          طلبات التجزئة {viewMode === "bundle" ? retailBundles.length : retailOrders.length}
+          {viewMode === "bundle" ? "طلبات" : "قطع"} التجزئة{" "}
+          {viewMode === "bundle" ? retailBundles.length : retailOrders.length}
           {" · "}
-          طلبات الممثلين {viewMode === "bundle" ? wholesalerBundles.length : wholesalerOrders.length}
+          {viewMode === "bundle" ? "طلبات" : "قطع"} الممثلين{" "}
+          {viewMode === "bundle" ? wholesalerBundles.length : wholesalerOrders.length}
           {" · "}
           المجموع {
             viewMode === "bundle"
