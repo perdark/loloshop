@@ -47,7 +47,9 @@ function GoalCard({ goal }: { goal: StaffGoal }) {
       </div>
 
       <p className="mt-1 text-sm text-ink-soft">
-        أكمل <span className="font-bold text-ink">{goal.targetCount}</span> طلب قبل{" "}
+        {/* PIECES — progress counts one activity-log row per piece advanced, not per bundle.
+            Same number the team page shows; the two must use the same word. */}
+        أكمل <span className="font-bold text-ink">{goal.targetCount}</span> قطعة قبل{" "}
         {formatDateShort(goal.deadline)}
       </p>
 

@@ -816,9 +816,12 @@ export default function DesignSupportPage() {
               <span className="pointer-events-none absolute inset-y-0 end-3 flex items-center text-ink-soft">🔍</span>
             </div>
             <p className="text-xs text-ink-soft">
+              {/* PIECES. A design job is one `orders` row (designTeamController JOB_SELECT,
+                  `FROM orders o`), so a student's sash and cap are two jobs here — calling
+                  them «طلب» made this screen disagree with /admin about the same cohort. */}
               {search.trim()
-                ? `${filteredJobs.length} من ${jobs.length} طلب`
-                : `${jobs.length} طلب بانتظار التصميم`}
+                ? `${filteredJobs.length} من ${jobs.length} قطعة`
+                : `${jobs.length} قطعة بانتظار التصميم`}
             </p>
             {filteredJobs.length === 0 ? (
               <EmptyState title="لا نتائج" message="لا يوجد طالب يطابق بحثك." />
