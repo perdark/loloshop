@@ -20,16 +20,15 @@ browser this session. Store/push rows below were last verified 2026-08-10 and ar
 
 | | |
 |---|---|
-| `origin/main` | `df2fa48` — **Track A merged and DEPLOYED**; prod confirmed at this SHA over SSH |
-| Eleven-bug tracks | **C shipped** (bugs 2, 3) · **A shipped** (bugs 9, 10, 11) · **B built, unmerged** (bugs 4, 5, 6) · bugs 1, 7, 8 not started |
-| `fix/calligraphy-photo-loss` | `6f016a5` in `~/Desktop/active/lolo-B` — carries **migration 080**, must ride the same deploy |
+| `origin/main` | `6b62738` — **Tracks A, B and C all merged and DEPLOYED**; prod confirmed at this SHA over SSH |
+| Eleven-bug tracks | **C shipped** (2, 3) · **A shipped** (9, 10, 11) · **B shipped** (4, 5, 6) · **bugs 1, 7, 8 NOT started** |
 | Migration 077 | ✅ applied to prod AND the dev DB — 3,311 prod rows retired to `skipped` |
-| Migration 080 | ✅ dev DB only (`order_items.plate_image_url`) — **NOT on prod**, ships with Track B |
+| Migration 080 | ✅ **applied to prod 2026-08-14** — 459 plates moved to their own column, **0** left in `customer_image_url`, 1,885 student photos intact |
 | Android | **v1.0.4 (versionCode 5) IN PRODUCTION REVIEW** — deep links + GPS + push in one review |
 | iOS | **1.0.4 (build 1786309948) SUBMITTED — «Waiting for Review»** (2026-08-10, ≤48h) |
 | Android push | ✅ working end to end |
 | iOS push | ✅ **APNs key installed and verified against Apple** — `push.configured()` → `{"android":true,"ios":true}` |
-| Backend tests | **211/211 pass** on merged `main` (185 baseline + 11 Track C + 15 Track A) |
+| Backend tests | **228/228 pass** on merged `main` (185 baseline + 11 Track C + 15 Track A + 12 Track B + 5 verification) |
 | Prod DB backup | ✅ `~/Desktop/_private/loloshop-db/loloshop-prod-2026-08-14.dump` — restore-tested, row counts match live |
 
 **Both platforms are now on the same version (1.0.4) carrying the same three features.**
