@@ -50,6 +50,31 @@ function isDemoLoginPhone(phone) {
   return list.includes(normalizeIqPhone(phone));
 }
 
+// ── Gateway-outage degraded mode ────────────────────────────────────────────────
+// The WhatsApp sender is an unofficial gateway *device* (ZENTRAMSG_DEVICE_UUID below),
+// i.e. a real WhatsApp account driven by automation — which Meta bans periodically.
+// While it is banned NOTHING is delivered: `sendWhatsApp` returns success:false and every
+// OTP flow dead-ends with no way for the user to finish. This flag trades the OTP second
+// factor for availability during such an outage, and it is deliberately hard to leave on:
+//
+//   * It EXPIRES. Unset, unparseable, or past OTP_DEGRADED_UNTIL → OTP is ON. Fail-safe,
+//     so forgetting to unset it is not how this becomes permanent — the clock is.
+//   * It is CAPPED at MAX_DEGRADED_WINDOW_MS. A fat-fingered year (2027) is not a
+//     multi-year bypass; it reads as OFF, because it is further away than the cap.
+//   * It only ever covers flows where bcrypt ALREADY passed. Password RESET is never
+//     degraded — there the OTP is the sole credential (`forgotPasswordPhone`), so
+//     skipping it would hand any account to anyone who knows its phone number. That
+//     flow is redirected to human support instead.
+//
+// This answers "is the gateway presumed down", NOT "may this user skip" — callers must
+// also check the role against OTP_DEGRADED_ROLES in authController.
+const MAX_DEGRADED_WINDOW_MS = 48 * 60 * 60 * 1000;
+function isOtpDegraded() {
+  const until = Date.parse(process.env.OTP_DEGRADED_UNTIL || '');
+  const remaining = until - Date.now();
+  return Number.isFinite(until) && remaining > 0 && remaining <= MAX_DEGRADED_WINDOW_MS;
+}
+
 // Express middleware: normalise `req.body.phone` on the way in so every downstream
 // handler (register/login/OTP/reset) sees the canonical form.
 function normalizePhoneBody(req, _res, next) {
@@ -329,4 +354,4 @@ async function sendViaZentramsg(phone, code) {
 // NB: the old phone-addressed `verifyOtp(phone, code, purpose)` is deliberately GONE.
 // Re-adding it re-opens LS-01 — any caller that can name a phone could mint that
 // account's session. Verification must stay addressed by challenge.
-module.exports = { createOtp, verifyOtpByChallenge, refreshOtp, toIntlDigits, normalizeIqPhone, normalizePhoneBody, isValidIqMobile, isDemoLoginPhone };
+module.exports = { createOtp, verifyOtpByChallenge, refreshOtp, toIntlDigits, normalizeIqPhone, normalizePhoneBody, isValidIqMobile, isDemoLoginPhone, isOtpDegraded };

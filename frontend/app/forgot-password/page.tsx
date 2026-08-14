@@ -29,6 +29,9 @@ export default function ForgotPasswordPage() {
   const [code, setCode] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [phoneError, setPhoneError] = useState("");
+  // Guidance, not a failure — kept separate from phoneError so it never renders red or
+  // marks the input invalid. See the ERR_OTP_UNAVAILABLE branch in handleSubmit.
+  const [notice, setNotice] = useState("");
   const [phoneStep, setPhoneStep] = useState<PhoneStep>("request");
   // Reset OTP challenge. Returned for ANY number (a decoy when the phone isn't
   // registered), so this never reveals whether an account exists.
@@ -45,9 +48,18 @@ export default function ForgotPasswordPage() {
         return;
       }
       setPhoneError("");
+      setNotice("");
       setLoading(true);
       try {
-        setChallengeId(await forgotPasswordByPhone(phone.trim()));
+        const result = await forgotPasswordByPhone(phone.trim());
+        // Self-service reset is unavailable — show it as a calm next step, not a failure.
+        // No toast (it would flash and leave), no red, and we stay on this step so the
+        // customer can still read it. Nothing here says why.
+        if ("supportRequired" in result) {
+          setNotice(result.message);
+          return;
+        }
+        setChallengeId(result.challengeId);
         setPhoneStep("verify");
         toast.success("إذا كان الرقم مسجّلاً، ستصلك رسالة واتساب بالرمز");
       } catch (err) {
@@ -128,9 +140,21 @@ export default function ForgotPasswordPage() {
                 {phoneError}
               </p>
             )}
-            <p className="text-xs text-[var(--shop-muted)]">
-              سيصلك رمز عبر واتساب لإعادة التعيين
-            </p>
+            {notice ? (
+              // Neutral card, not text-danger and not role="alert" — this is a next step,
+              // not something the customer did wrong. It also replaces the «سيصلك رمز عبر
+              // واتساب» hint below, which would otherwise promise a message that isn't coming.
+              <p
+                className="rounded-xl border border-line bg-beige px-3.5 py-3 text-sm font-medium leading-relaxed text-ink"
+                role="status"
+              >
+                {notice}
+              </p>
+            ) : (
+              <p className="text-xs text-[var(--shop-muted)]">
+                سيصلك رمز عبر واتساب لإعادة التعيين
+              </p>
+            )}
           </div>
         ) : (
           <>
