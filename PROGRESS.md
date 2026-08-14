@@ -1,5 +1,50 @@
 # Progress
 
+## 2026-08-15 — the last two of the eleven bugs, on `fix/admin-presence-panel` (UNMERGED)
+
+Bug 1 and the three unwritten parts of bug 8. **All eleven bugs are now closed in code.**
+Branch is off `main` (`49dd36b`) — deliberately NOT off `fix/ai-assistant-money`, which is
+still parked.
+
+**Bug 1 — «يعمل الآن» on `/admin`.** The rows have existed since the منتور tab shipped; the
+owner just had to leave the dashboard to see them. New `GET /production/presence` rather than
+calling `/monitor`: the dashboard polls every 30s AND reloads on every production event, and
+`monitor()` runs five queries including a 30-day `audit_log` aggregation to answer something
+that needs one. Same `requireStaffType()` guard — it is a slice of manager-only data. Both
+endpoints now read one `workingNow()`, so `/admin` and `/staff` cannot name different people.
+
+**Bug 8 part 2 — search finds the التطريز text.** Neither console could: `/staff/queue`
+matched student/university/department/rep, PrepConsole matched the student name ALONE, and
+the stitched words were on neither list because the queue was never sent them. New
+`search_text` per row (every distinct `customer_text`, one string) + ONE shared matcher in
+`lib/queue-search.ts` with Arabic folding (أ/ا/إ, ة/ه, ى/ي, tashkeel) and any-order tokens.
+The folding is the half that decides whether the box works: three different people type these
+names. +121 KB on a 1,447-row manager queue (+8.8%); rows are already fully loaded, so search
+stays instant with no debounce and no round trip per keystroke.
+
+**Bug 8 parts 3 + 4 — stepping, and the set.** «السابق»/«التالي» carry the console's FILTERED
+order through sessionStorage; disabled (not omitted) at the ends; read in an effect because
+the order page is server-rendered and reading storage during render is a hydration mismatch.
+Part 4 gives التجهيز the whole `checkout_group` per row.
+⚠️ **Measuring first changed the design:** 421 of 432 prep rows have a set piece still
+upstream, so a «ناقص» warning would fire on 97% of the list. The badge went on the rare,
+actionable state instead — «الطقم مكتمل» (11 sets right now) — with the absentees listed
+quietly on the sheet.
+
+**Gates:** 275/275 backend tests (9 new) · tsc + eslint + `next build` clean · both new
+endpoints/fields driven live against the dev DB (1,196 of 1,447 rows carry `search_text`;
+432 of 435 prep rows carry the bundle) · 27 behaviour assertions against the compiled
+`queue-search.ts` / `queue-neighbors.ts`, since the frontend has no test runner.
+
+⚠️ **NOT verified in a browser — Chrome was not running on this machine.** Everything above
+is API- and logic-level evidence. What still needs a real pass: the presence panel on
+`/admin`, the step controls at the ends of a list, and the sheet's waiting panel at phone
+width. `npm run dev` in `backend/` + `npm start` in `frontend/`, then
+`/dev-login.html#next=/admin` (the local token file now holds an admin's, not a preparer's).
+
+⚠️ One test failed once mid-session and did not reproduce across two full clean runs after
+it — shared dev-DB flake, not chased.
+
 ## 2026-08-14 (e) — the shop is in ديالى, and /login has a way out
 
 Two owner-reported defects, both on screens a student sees first.
