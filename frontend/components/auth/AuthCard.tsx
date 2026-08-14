@@ -17,6 +17,18 @@ interface AuthCardProps {
    * because it showed students a staff entrance. See the note in app/login/page.tsx.
    */
   footer?: ReactNode;
+  /**
+   * Renders a back chevron at the START of the header (right, in RTL). Pass it and the screen
+   * gets a way out; omit it and the header is exactly what it was.
+   *
+   * ⚠️ This is not decoration on the native shells: they are Capacitor webviews with NO
+   * ADDRESS BAR and no browser chrome, so an auth screen without this prop is a dead end —
+   * the only exits are whatever links the page itself prints. Android's hardware back still
+   * works; iOS has nothing.
+   */
+  onBack?: () => void;
+  /** Accessible name for the back control. Defaults to «رجوع». */
+  backLabel?: string;
 }
 
 /**
@@ -34,7 +46,14 @@ interface AuthCardProps {
  * (left/right), NOT logical — `padding-inline-start` paired with `safe-area-inset-left` would
  * be backwards on these RTL screens.
  */
-export function AuthCard({ title, subtitle, children, footer }: AuthCardProps) {
+export function AuthCard({
+  title,
+  subtitle,
+  children,
+  footer,
+  onBack,
+  backLabel = "رجوع",
+}: AuthCardProps) {
   const safeArea: CSSProperties = {
     paddingTop: "max(1.5rem, calc(env(safe-area-inset-top, 0px) + 0.75rem))",
     paddingBottom: "max(1.25rem, calc(env(safe-area-inset-bottom, 0px) + 0.75rem))",
@@ -52,7 +71,34 @@ export function AuthCard({ title, subtitle, children, footer }: AuthCardProps) {
       {/* Brand lockup — mark centred, title set start-aligned underneath. A large
           start-aligned title over a quiet subtitle is the native pattern; a centred
           heading inside a bordered box is the web-form one. */}
-      <header className="mx-auto w-full max-w-md shrink-0">
+      <header className="relative mx-auto w-full max-w-md shrink-0">
+        {onBack && (
+          // Absolutely placed so the brand mark stays optically centred on the screen —
+          // putting the button in the flow would shove the lockup off-centre on the screens
+          // that have a back and leave the family inconsistent. 44px box = the tap target.
+          // The chevron points RIGHT because this shell is RTL and "back" is rightwards here;
+          // it is drawn, not typed, because the ←/→ characters are bidi-mirrored and flip
+          // depending on the surrounding run.
+          <button
+            type="button"
+            onClick={onBack}
+            aria-label={backLabel}
+            className="absolute -top-0.5 start-0 inline-flex h-11 w-11 items-center justify-center rounded-full text-ink transition-colors duration-200 hover:bg-ink/5 active:bg-ink/10"
+          >
+            <svg
+              aria-hidden
+              viewBox="0 0 24 24"
+              className="h-6 w-6"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="m9 6 6 6-6 6" />
+            </svg>
+          </button>
+        )}
         <BrandMark size={60} className="mx-auto" />
         <h1 className="mt-5 font-display-ar text-[1.7rem] font-bold leading-tight text-ink">
           {title}

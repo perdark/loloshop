@@ -108,10 +108,28 @@ export default function LoginPage() {
 
   const onOtp = step === "otp";
 
+  // The way out of this screen. On the OTP step "back" means the previous STEP, which is what
+  // the pane's own «تغيير الرقم» does — the header must agree with it, not fight it.
+  //
+  // On the credentials step it means the previous PAGE. `router.back()` alone is not enough:
+  // the native shells are Capacitor webviews with no address bar, and a student who arrived by
+  // tapping a WhatsApp link lands here with an EMPTY history, where back() is a silent no-op —
+  // a button that visibly does nothing. Real history is still preferred when it exists, so a
+  // student who came from /cart returns to /cart rather than being dumped on the storefront.
+  function goBack() {
+    if (onOtp) {
+      setStep("credentials");
+      return;
+    }
+    if (typeof window !== "undefined" && window.history.length > 1) router.back();
+    else router.replace("/");
+  }
+
   return (
     <AuthCard
       title={onOtp ? "رمز التحقق" : "تسجيل الدخول"}
       subtitle={onOtp ? undefined : "أدخل رقمك وكلمة المرور للمتابعة"}
+      onBack={goBack}
       /*
         ⚠️ NO «فريق العمل؟» ENTRY HERE (owner, 2026-08-06). `TeamKeyEntry` used to sit in
         AuthCard's footer slot on this screen, which meant every STUDENT arriving at /login
