@@ -1,5 +1,136 @@
 # Progress
 
+## 2026-08-14 (e) — the shop is in ديالى, and /login has a way out
+
+Two owner-reported defects, both on screens a student sees first.
+
+- **The storefront said the shop is in بغداد. It is in ديالى.** Six strings in
+  `lib/copy-ar.ts` (the «محل حقيقي ببغداد» bullet and the `visitBody` line, each ×3 genders)
+  plus the `/shop` metadata description. ⚠️ The MAP was never wrong — `StoreLocation`'s embed
+  pins 33.749, 44.618, which is Baqubah, not Baghdad. Only the prose disagreed with the pin.
+  (`visitTitle`/`visitBody` are declared but currently rendered nowhere; fixed anyway so the
+  next consumer does not reintroduce the claim.)
+- **`/login` had no back button at all.** Added an optional `onBack` to `AuthCard` — a 44px
+  chevron at the header's start, pointing RIGHT because the shell is RTL, drawn as an SVG
+  because the ←/→ characters are bidi-mirrored and flip with the surrounding run. It is
+  absolutely positioned so the brand mark stays optically centred on the screens that have no
+  back. `/login` wires it: on the OTP step it means the previous STEP (agreeing with the pane's
+  own «تغيير الرقم»), on the credentials step the previous PAGE.
+  ⚠️ `router.back()` ALONE IS NOT ENOUGH: the shells are Capacitor webviews with no address
+  bar, and a student arriving from a WhatsApp deep link has an EMPTY history where `back()` is
+  a silent no-op — a button that visibly does nothing. Guarded with
+  `window.history.length > 1`, falling back to `router.replace("/")`.
+  The other six `AuthCard` screens (register · forgot-password · join · /s /w /d) still have
+  no back and are the same dead end; only /login was reported, so only /login was wired.
+
+Verified in a real browser: the «ليش لولو شوب؟» bullet reads «محل حقيقي بديالى», and
+`/` → «دخول» → back chevron returns to `/`. `tsc --noEmit` clean; `eslint` 0 errors (6
+pre-existing warnings, all in a generated `android/app/build` asset).
+
+## 2026-08-14 (d) — THREE DEPLOYS to prod, ahead of a live staff testing session
+
+Owner needed the shop working for staff to test in person, so the rule for this session was
+**ship only what passed every gate**, and say plainly what did not ship.
+
+**Prod DB backed up first:** `/var/backups/loloshop/predeploy-20260814-1739.dump` (3.5 MB).
+⚠️ `pg_dump` as the `loloshop` role FAILS — it lacks rights on the leftover
+`_price_restore_backup_20260724` table. Use `sudo -u postgres pg_dump -Fc loloshop -f
+/var/backups/loloshop/…`; `/tmp` is not writable by postgres either. Nightly dumps already run
+at 04:10 into the same directory.
+
+| deploy | SHA | what |
+|---|---|---|
+| 1 | `760ab90` | designer-work protection · «يعمل الآن» · bug 7 staff half |
+| 2 | `ddc1184` | the four money branches + bug 7 admin half |
+| 3 | `fde0cce` | bug 8 **part 1 only** — garment-level chips for المجهز |
+
+**What shipped, and why each mattered:**
+
+- **Reconfiguring an order destroyed the designer's calligraphy plate.** `configureOrder` ·
+  `configurePackage` · `configureFullSet` rebuilt `order_items` by DELETE + re-INSERT from the
+  payload, and the plate is server-side so it was never in that payload. `upgradeToVip` was
+  named in the audit too — checked, and it is SAFE: its DELETE is scoped to marker rows.
+  Guarded by a structural test, because the defect is an omission that spreads to each new
+  rebuild path; it is confirmed red against the pre-fix controller.
+- **«يعمل الآن» on `/staff`** declared its own field names and four of five did not match the
+  API, so it showed a blank staff name and linked every row to `/staff/orders/undefined`.
+- **Bug 7 (units), both halves.** Seven staff/rep labels printed a PIECE count under «طلب» —
+  the reason the same rep read 40 on `/admin` and 118 on the staff console. `/admin/orders`
+  additionally needed the noun to FLIP with the view mode. Two labels were deliberately left
+  as «طلب» because they really are bundles (verified, not assumed).
+- **The five money bugs** from entry (c), all four branches.
+
+**NOT shipped — say so plainly:**
+
+- **Bug 8 parts 2, 3, 4** — server-side search including التطريز text, next/back on the order
+  detail, and the missing-piece view. A workflow was decomposing these; it was **stopped
+  mid-implement** when the deploy deadline landed, and only part 1 was complete. Parts 2-4 were
+  never written. Resume: `Workflow({scriptPath: …/bug8-prep-production-list-wf_a5d25b83-3ee.js,
+  resumeFromRunId: 'wf_a5d25b83-3ee'})` — the four investigation specs are cached and will
+  return instantly.
+- **The reroll geometry ratchet** — dropped by explicit owner decision this session, not
+  forgotten. Still needs migration 081.
+- **`ai-assistant`** stays local. `fix/ai-assistant-money` is correct but deliberately unmerged:
+  merging it ships the whole assistant, which the owner has not cleared.
+
+⚠️ **Do not chain `sleep N && <check>` to wait for CI** — the harness blocks it. Use
+`run_in_background` with an `until` loop.
+
+## 2026-08-14 (c) — the money audit: five open money bugs found, all five fixed, NOTHING MERGED
+
+Audited every remaining money claim on the board against the code **and the live prod DB**,
+because two of them turned out to be dev-only artifacts. Result: **five real money bugs**, each
+now closed on its own branch. None is merged — every push to `main` auto-deploys to 1,141 live
+users, so the merges are the owner's call, one at a time.
+
+**Two board claims were wrong and are corrected:** «مضر محمد renders −775,000» and «ابو عبدو is
+listed twice» reproduce on the **dev** DB only. Prod has zero payout deductions and ابو عبدو is
+`active = FALSE` on the workshop roster, so neither symptom is visible there. The code defects
+behind them are real and are fixed; the urgency was not.
+
+| branch | bug | what it was |
+|---|---|---|
+| `fix/payout-money` | 2·3·4·5 | «المبلغ المقترح» was a lifetime accrual |
+| `fix/admin-orders-profit` | 1 | /admin/orders called the reps' margin «الربح» |
+| `fix/schema-money-drift` | — | schema.sql disagreed with the live table about `cost` |
+| `fix/ai-assistant-money` | — | «لولو» quoted a profit the dashboard no longer computes |
+
+**The one that would have moved real cash:** `payoutController` computed
+`base + bonuses − deductions` and printed it as «المبلغ المقترح», while `manual_payouts` was
+joined only to *display* the last transfer, never to reduce the figure. It is right exactly once,
+on the first payout, and re-offers the whole accrual every press after that. It never fired only
+because `manual_payouts` has **0 rows** on prod — the first recorded transfer would have started
+double-paying. Now `max(0, accrued − paid)`, with استُحق / حُوِّل / المتبقي reported separately.
+The same commit stops a negative suggestion being offered as a transfer the API then rejects,
+deduplicates anyone who is both `role=staff` and on the workshop roster, and gives payout actions
+the `audit_log` rows they never had — they were the only admin money mutations writing nothing.
+
+**The one that was visibly wrong every day:** `/admin/orders` summed `o.profit` under «الربح».
+Measured on prod, the representatives tab: دفع الطلاب 41,395,000 · **دخل المحل 35,160,000, never
+shown at all** · ربح الممثلين 6,235,000, shown and counted as the shop's. Track A fixed this
+meaning on `/admin` in August; this screen was outside its scope and kept the old vocabulary.
+
+**«لولو» is now on the dashboard's definition.** `fix/ai-assistant-money` merges `main` into
+`ai-assistant` (conflicts were far smaller than the board feared — `analytics`/`accounting`
+auto-merged) and rewrites `revenue_summary`/`top_reps` onto `settledMoney`. On dev the assistant
+would have answered «الأرباح: 24,191,300»; it now answers «دخل المحل: 37,877,300», the dashboard's
+number to the dinar, and a test reads both and compares them so they cannot drift again.
+
+Gates per branch: **260/260**, tsc + eslint + `next build` clean, **246/246** with `npm run
+migrate` idempotent, **318/318** on the merged assistant branch. Every new test was confirmed red
+against the pre-fix code before being called green — the assistant's seven were re-run against the
+old `adminMetrics.js` and all seven failed.
+
+⚠️ `node --test test/` **must be run from `backend/`.** From the repo root dotenv cannot find
+`.env`, `DATABASE_URL` is undefined and 147 tests fail for a reason that has nothing to do with
+the code under test.
+
+**Still owner actions, not code:** production cost is entered on **0 of 1,497** retail pieces, so
+«مبيعات التجزئة» is revenue and all three surfaces now say so instead of printing a profit that
+cannot be true. And the تجزئة piece rates are **partially** entered — 2 of 10 differ from the
+ممثلين rate (`robe_sew` 2000/1000, `shawl_close/sash` 1000/800); the other **8 still pay the
+wholesale wage**.
+
 ## 2026-08-14 (b) — WhatsApp gateway banned again; outage switch built, ON A PR, NOT DEPLOYED
 
 The Zentramsg sender device was spam-banned by Meta for 24h (again), so no OTP is delivered

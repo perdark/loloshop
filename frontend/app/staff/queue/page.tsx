@@ -15,13 +15,14 @@ import {
   ORDER_SOURCE_LABELS,
   EMBROIDERY_ZONE_LABELS,
   EMBROIDERY_ZONE_ORDER,
+  PREPARER_ZONE_ORDER,
   PRODUCT_TYPE_LABELS,
   type EmbroideryZone,
 } from "@/lib/constants";
 import { usePolling } from "@/lib/hooks/usePolling";
 import { useScrollRestore } from "@/hooks/useScrollRestore";
 import type { ProductionQueueItem } from "@/lib/staff-types";
-import type { OrderStatus } from "@/lib/types";
+import type { OrderStatus, StaffType } from "@/lib/types";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -597,7 +598,8 @@ function RepCardGrid({
               {rep.name}
             </span>
             <span className="shrink-0 rounded-full bg-orange-ink/10 px-2.5 py-0.5 text-xs font-bold tabular-nums text-orange-ink">
-              {rep.orderCount} طلب
+              {/* PIECES — `orderCount` is `repItems.length`, one queue row per piece. */}
+              {rep.orderCount} قطعة
             </span>
           </div>
           {rep.batches.length > 0 && (
@@ -678,7 +680,8 @@ function Pagination({
       {btn(page - 1, "‹", page === 1)}
       {pageButtons}
       {btn(page + 1, "›", page === totalPages)}
-      <span className="ms-2 text-xs text-muted">{total} طلب</span>
+      {/* PIECES — `total` filters `items`, one row per piece. */}
+      <span className="ms-2 text-xs text-muted">{total} قطعة</span>
     </div>
   );
 }
@@ -730,6 +733,27 @@ function ConsoleContent() {
   const router = useRouter();
   const currentUser = getUser();
   const canDelete = currentUser?.role === "admin" || currentUser?.staff_type === "manager" || currentUser?.staff_types?.includes("manager") === true;
+
+  // ── Whose chip set? (owner 2026-08-14) ─────────────────────────────────────
+  // قائمة الإنتاج is ONE page for every production role (StaffSidebar.tsx:114-121 gives the
+  // link to all of them), so the merge is scoped here rather than by editing
+  // EMBROIDERY_ZONE_ORDER — /admin/orders and the designer/digitizer QueueView still need
+  // the granular set. A المجهز holds ONE sash, so يمين/يسار/خلف as three chips is noise;
+  // a التطريز staffer batches BY position and must keep them apart. Anyone who also
+  // manages/embroiders/designs/digitizes keeps the granular set.
+  const myTypes: StaffType[] =
+    currentUser?.staff_types && currentUser.staff_types.length
+      ? currentUser.staff_types
+      : currentUser?.staff_type
+        ? [currentUser.staff_type]
+        : [];
+  const isPreparerView =
+    currentUser?.role !== "admin" &&
+    myTypes.includes("preparer") &&
+    !myTypes.some(
+      (t) => t === "manager" || t === "embroiderer" || t === "designer" || t === "digitizer"
+    );
+  const zoneOptions = isPreparerView ? PREPARER_ZONE_ORDER : EMBROIDERY_ZONE_ORDER;
 
   // Restore the last UI state (see StoredConsoleState above).
   const [stored] = useState<StoredConsoleState>(() => readStored());
@@ -892,6 +916,15 @@ function ConsoleContent() {
     router.push(buildUrl({ stage, source, rep: repParam ?? undefined, zone: z }));
     setPage(1);
   }
+
+  // A zone key outside THIS viewer's chip set still filters the list server-side, but no chip
+  // would be lit and «كل المناطق» would look inactive too — which reads as «الفلتر خربان»,
+  // the exact failure staffController.js:217-222 guards against on its own zone param. It is
+  // reachable: the zone is mirrored into sessionStorage (STORAGE_KEY above) and lib/auth.ts
+  // logout() clears localStorage ONLY, so on a shared workshop iPad the next account inherits
+  // it. Keep the stale key visible so it can be cleared with one tap.
+  const visibleZones: EmbroideryZone[] =
+    zoneParam && !zoneOptions.includes(zoneParam) ? [...zoneOptions, zoneParam] : zoneOptions;
 
   // ── Client-side filtering ──────────────────────────────────────────────────
   // Plain derived value — the React Compiler memoizes it automatically (a manual
@@ -1151,13 +1184,14 @@ function ConsoleContent() {
                     : "border-dashed border-line text-muted hover:border-orange-ink/40 hover:text-ink",
                 ].join(" ")}
               >
-                فلتر المنطقة {zonesOpen ? "▲" : "▾"}
+                {isPreparerView ? "فلتر القطعة" : "فلتر المنطقة"} {zonesOpen ? "▲" : "▾"}
                 {zoneParam && <span className="ms-1 h-1.5 w-1.5 rounded-full bg-orange-ink" />}
               </button>
 
               {!loading && (
                 <span className="me-auto text-xs text-muted ms-auto">
-                  يُعرض <strong className="text-ink">{filtered.length}</strong> طلب
+                  {/* PIECES — `filtered` holds queue rows, one per piece. */}
+                  يُعرض <strong className="text-ink">{filtered.length}</strong> قطعة
                 </span>
               )}
             </div>
@@ -1170,9 +1204,9 @@ function ConsoleContent() {
                   onClick={() => setZone(undefined)}
                   className={chipCls(!zoneParam)}
                 >
-                  كل المناطق
+                  {isPreparerView ? "كل القطع" : "كل المناطق"}
                 </button>
-                {EMBROIDERY_ZONE_ORDER.map((z) => (
+                {visibleZones.map((z) => (
                   <button
                     key={z}
                     type="button"

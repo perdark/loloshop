@@ -301,8 +301,27 @@ CREATE TABLE IF NOT EXISTS orders (
   variant_id   UUID REFERENCES product_variants(id) ON DELETE SET NULL,
   design_id    UUID REFERENCES designs(id) ON DELETE SET NULL,
   price        BIGINT NOT NULL CHECK (price >= 0),
-  cost         BIGINT NOT NULL DEFAULT 0 CHECK (cost >= 0),
-  profit       BIGINT GENERATED ALWAYS AS (price - cost) STORED,
+  -- ⚠️ cost IS NULLABLE AND HAS NO DEFAULT, and `profit` COALESCEs it. This file said
+  -- `NOT NULL DEFAULT 0` and `price - cost` until 2026-08-14, while the live table
+  -- (measured on prod 2026-08-13, re-measured 2026-08-14) has always been the shape
+  -- below. `CREATE TABLE IF NOT EXISTS` never rewrites an existing table, so the drift
+  -- was invisible on prod and would only have appeared in a NEW database — where it
+  -- silently changes what money means:
+  --
+  --   · NULL vs 0 is the difference between «no production cost was ever entered» and
+  --     «this order cost nothing to make». All 1,497 live retail pieces are the former.
+  --     `settledMoney.retail_pieces_costed` counts `cost IS NOT NULL` to decide whether
+  --     /admin may print a profit at all; under DEFAULT 0 every retail row looks costed
+  --     and the «لم تُدخل تكلفة إنتاج» warning disappears while staying just as true.
+  --   · Without the COALESCE, `price - cost` is NULL for every uncosted row, so those
+  --     rows vanish from every SUM(profit) instead of contributing their revenue.
+  --
+  -- Do NOT "fix" this by making the live table match an older version of this file.
+  -- (The live columns are INTEGER, not BIGINT — a legacy of the original tables. That
+  -- one is benign: per-row values are ~25,000 IQD against an INT4 ceiling of 2.1bn, and
+  -- Postgres promotes SUM(integer) to bigint, so no total can overflow either.)
+  cost         BIGINT CHECK (cost >= 0),
+  profit       BIGINT GENERATED ALWAYS AS (price - COALESCE(cost, 0)) STORED,
   currency     CHAR(3) NOT NULL DEFAULT 'IQD',
   status       order_status NOT NULL DEFAULT 'pending_approval',
   notes        TEXT,

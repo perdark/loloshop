@@ -8,8 +8,9 @@ import { WHY_WORKSHOP, type StorefrontCopy } from "@/lib/copy-ar";
  * first and second rails earns the story without pushing a single product down.
  *
  * All four claims are things the shop can stand behind: hand embroidery and the
- * in-house workshop (the atelier band says the same), the real Baghdad shop
- * (StoreLocation pins it on a map), and cash on delivery (the only payment
+ * in-house workshop (the atelier band says the same), the real Diyala shop
+ * (StoreLocation pins it on a map — the pin has always been in Diyala; only this
+ * copy said Baghdad, corrected 2026-08-14), and cash on delivery (the only payment
  * method the system has). No delivery-time promise is made here — see copy-ar.
  */
 export function WhyLoloShop({ copy }: { copy: StorefrontCopy }) {

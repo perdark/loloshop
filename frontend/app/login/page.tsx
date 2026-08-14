@@ -108,10 +108,40 @@ export default function LoginPage() {
 
   const onOtp = step === "otp";
 
+  // The way out of this screen. On the OTP step "back" means the previous STEP, which is what
+  // the pane's own «تغيير الرقم» does — the header must agree with it, not fight it.
+  //
+  // On the credentials step it means the previous PAGE — and picking that destination is the
+  // whole difficulty, because `router.back()` is wrong in BOTH directions here:
+  //
+  //   · Capacitor webview, opened by a deep link → the history is EMPTY and back() is a
+  //     silent no-op. A back button that visibly does nothing is worse than none.
+  //   · Browser tab opened straight onto /login → a WhatsApp link on Android opens a NEW
+  //     TAB, whose first history entry is the new-tab page, so `history.length > 1` is true
+  //     and back() walks the student OUT of the site. Measured on prod 2026-08-14 with
+  //     exactly that guard in place; the tab landed on chrome://newtab.
+  //
+  // A same-origin referrer is the honest signal that there is a page of OURS to return to.
+  // Everything else — external referrer, or none at all (webview, deep link, typed URL) —
+  // goes to the storefront, which is where a student who reached /login this way came from
+  // anyway. `replace`, not `push`, so the button can never build a loop back into itself.
+  function goBack() {
+    if (onOtp) {
+      setStep("credentials");
+      return;
+    }
+    const cameFromUs =
+      typeof window !== "undefined" &&
+      document.referrer.startsWith(`${window.location.origin}/`);
+    if (cameFromUs && window.history.length > 1) router.back();
+    else router.replace("/");
+  }
+
   return (
     <AuthCard
       title={onOtp ? "رمز التحقق" : "تسجيل الدخول"}
       subtitle={onOtp ? undefined : "أدخل رقمك وكلمة المرور للمتابعة"}
+      onBack={goBack}
       /*
         ⚠️ NO «فريق العمل؟» ENTRY HERE (owner, 2026-08-06). `TeamKeyEntry` used to sit in
         AuthCard's footer slot on this screen, which meant every STUDENT arriving at /login

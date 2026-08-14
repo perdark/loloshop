@@ -339,7 +339,9 @@ function SalaryPanel({ userId, userName }: SalaryPanelProps) {
                 {goal ? (
                   <div className="mt-2">
                     <p className="text-sm text-ink">
-                      {goal.titleAr || `أكمل ${goal.targetCount} طلب`}
+                      {/* A goal counts staff_activity_log rows for 'advance'/'approve_design'
+                          (salaryController.js:86-90) — one action per PIECE, never per bundle. */}
+                      {goal.titleAr || `أكمل ${goal.targetCount} قطعة`}
                       {goal.bonusAmount > 0 && ` · حافز ${formatIQD(goal.bonusAmount)}`}
                     </p>
                     <div className="mt-1.5 h-2.5 w-full overflow-hidden rounded-full bg-surface-sink">

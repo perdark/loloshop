@@ -34,6 +34,13 @@ export interface PayoutRecipient {
   sourceId: string;
   name: string;
   recipientKind: PayoutRecipientKind;
+  /** استُحق — everything earned, ever. NOT what to transfer. May be negative. */
+  accruedAmount: number;
+  /** حُوِّل — everything already transferred. */
+  paidTotal: number;
+  /** المتبقي — accrued − paid. Negative means over-paid or over-deducted. */
+  netDue: number;
+  /** المقترح — max(0, netDue). Always an amount the API will accept. */
   suggestedAmount: number;
   cardNumber: string | null;
   accountNumber: string | null;
@@ -63,6 +70,9 @@ interface ApiPayoutRecipient {
   source_id: string;
   name: string;
   recipient_kind: PayoutRecipientKind;
+  accrued_amount: number;
+  paid_total: number;
+  net_due: number;
   suggested_amount: number;
   card_number: string | null;
   account_number: string | null;
@@ -103,6 +113,11 @@ function mapRecipient(row: ApiPayoutRecipient): PayoutRecipient {
     sourceId: row.source_id,
     name: row.name,
     recipientKind: row.recipient_kind,
+    // استُحق / حُوِّل / المتبقي are three different numbers — the payout card used to
+    // print the first under the label of the third. See backend/lib/payoutMath.js.
+    accruedAmount: Number(row.accrued_amount) || 0,
+    paidTotal: Number(row.paid_total) || 0,
+    netDue: Number(row.net_due) || 0,
     suggestedAmount: Number(row.suggested_amount) || 0,
     cardNumber: row.card_number,
     accountNumber: row.account_number ?? null,

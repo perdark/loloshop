@@ -362,4 +362,23 @@ export interface MonitorData {
     updated_at: string;
     hours_in_stage: number;
   }[];
+  /**
+   * «يعمل الآن» — orders claimed in the last 30 minutes.
+   *
+   * ⚠️ THESE FIELD NAMES ARE THE BACKEND'S, verified against
+   * `productionController.monitor` (the `working` query). `/staff` used to declare its own
+   * page-local guess — `staff_id` · `staff_name` · `order_id` · `since` — none of which the
+   * API sends. TypeScript could not catch it because the guess was applied with `&` to an
+   * `any`-shaped response, so the panel rendered a blank staff name and linked every row to
+   * `/staff/orders/undefined`. Keep this interface as the single declaration.
+   */
+  working: {
+    /** The ORDER id — the row is an order being worked on, not a staff member. */
+    id: string;
+    status: OrderStatus;
+    student_name: string;
+    product_name: string;
+    working_staff_name: string;
+    working_since: string;
+  }[];
 }

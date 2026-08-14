@@ -4,6 +4,7 @@ const { priceRoleForUser } = require('./catalogController');
 const { publish } = require('../lib/eventBus');
 const { staffScopeAllows, staffTypesOf } = require('../middleware/auth');
 const { persistFullSetOrder, readFullSetOrder, loadWholesalerPricing } = require('../lib/fullSetOrder');
+const { capturePlates, plateFor } = require('../lib/platePreservation');
 const memoCache = require('../lib/memoCache');
 
 const ALL_STATUSES = [
@@ -107,12 +108,31 @@ const ORDER_ZONE_MATCH = {
   robe_sleeve_right: `(oi.label_snapshot ILIKE '%ردن%' AND oi.label_snapshot ILIKE '%أيمن%')`,
   robe_sleeve_left:  `(oi.label_snapshot ILIKE '%ردن%' AND oi.label_snapshot ILIKE '%أيسر%')`,
   american_shawl:    `(oi.label_snapshot ILIKE '%شال%امريكي%' OR oi.label_snapshot ILIKE '%شال%أمريكي%')`,
+  // ── Merged garment-level zones — التجهيز only (owner 2026-08-14) ──────────────────────
+  // The preparer packs GARMENTS, not embroidery positions: يمين/يسار/خلف/أمام are ONE sash in
+  // their hands, so three chips is noise. These keys OR the per-position predicates above so
+  // «وشاح» is a single chip on قائمة الإنتاج for a المجهز. التطريز is untouched and keeps every
+  // position separate — it batches by position (components/staff/station/StationConsole.tsx
+  // builds its own chips from the per-piece `zones` payload, not from this table).
+  // Measured on the dev DB 2026-08-14: sash-zone lines appear ONLY on product type 'sash'
+  // (1,342 lines / 586 orders), cap-zone lines ONLY on 'cap' (749 / 437), كسرة lines ONLY on
+  // 'robe' (329). Zero cross-garment matches, so the OR is exact, not a heuristic.
+  // «شال امريكي» is deliberately NOT part of sash_any — it is an add-on, not تطريز (same rule
+  // as productionController's ZONE_DEFS header).
+  sash_any: `(oi.label_snapshot ILIKE '%يمين%' OR oi.label_snapshot ILIKE '%اليمن%'
+              OR oi.label_snapshot ILIKE '%يسار%' OR oi.label_snapshot ILIKE '%اليسر%'
+              OR oi.label_snapshot ILIKE '%خلف%'
+              OR oi.label_snapshot ILIKE '%وشاح%أمام%')`,
+  cap_any:  `(oi.label_snapshot ILIKE '%جانب%'
+              OR oi.label_snapshot ILIKE '%أعلى%' OR oi.label_snapshot ILIKE '%اعلى%')`,
 };
 // Embroidery zones additionally require the zone to carry real content (text/image), so
 // "بيها تطريز" excludes a plain (سادة) zone. Pleats encode their yes/no in customer_text.
 const ZONE_NEEDS_CONTENT = new Set([
   'sash_right', 'sash_left', 'sash_back', 'cap_side', 'cap_top',
   'sash_front', 'robe_sleeve_right', 'robe_sleeve_left', 'american_shawl',
+  // Merged garment zones inherit the content rule from their members.
+  'sash_any', 'cap_any',
 ]);
 
 function orderZoneClause(zone, alias = 'o') {
@@ -617,8 +637,12 @@ async function configureOrder(req, res) {
 
   const orderId = await tx(async (client) => {
     let oid;
+    // The generated plate is server-side and never in the payload, so the DELETE below
+    // would throw away artwork the shop already paid for. See lib/platePreservation.js.
+    let preservedPlates;
     if (existing.rows.length) {
       oid = existing.rows[0].id;
+      preservedPlates = await capturePlates(client, oid);
       await client.query(
         `UPDATE orders SET price = $1, batch_id = $2, status = $3,
          has_embroidery = $4, needs_pressing = $5, measurements = $6,
@@ -640,10 +664,11 @@ async function configureOrder(req, res) {
     }
     for (const it of items) {
       await client.query(
-        `INSERT INTO order_items (order_id, group_id, option_id, label_snapshot, price_snapshot, qty, customer_image_url, customer_text)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        `INSERT INTO order_items (order_id, group_id, option_id, label_snapshot, price_snapshot, qty, customer_image_url, customer_text, plate_image_url)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
         [oid, it.group_id, it.option_id, it.label, it.price, it.qty,
-         it.customer_image_url || null, it.customer_text || null]
+         it.customer_image_url || null, it.customer_text || null,
+         plateFor(preservedPlates, it.label)]
       );
     }
     return oid;
@@ -794,8 +819,11 @@ async function configurePackage(req, res) {
       // 'preparing' — but keep it type-based for consistency with every other path.)
       const pkgNeedsPressing = prodId === byType.sash || prodId === byType.robe;
       let oid;
+      // Server-side plate must survive the DELETE — see lib/platePreservation.js.
+      let preservedPlates;
       if (existing.rows.length) {
         oid = existing.rows[0].id;
+        preservedPlates = await capturePlates(client, oid);
         await client.query(
           `UPDATE orders SET price = $1, batch_id = $2, package_id = $3, status = $4, needs_pressing = $5 WHERE id = $6`,
           [price, resolvedBatchId, package_id, pkgStatus, pkgNeedsPressing, oid]
@@ -820,13 +848,14 @@ async function configurePackage(req, res) {
         [student.id, pieceType, oid]
       );
       await client.query(
-        `INSERT INTO order_items (order_id, label_snapshot, price_snapshot, qty, option_id)
-         VALUES ($1, $2, $3, 1, $4)`,
+        `INSERT INTO order_items (order_id, label_snapshot, price_snapshot, qty, option_id, plate_image_url)
+         VALUES ($1, $2, $3, 1, $4, $5)`,
         [
           oid,
           `باقة: ${packageRow.name_ar}`,
           price,
           prodId === byType.cap ? cap_option_id || null : packageRow.sash_type_option_id || null,
+          plateFor(preservedPlates, `باقة: ${packageRow.name_ar}`),
         ]
       );
       ids[prodId] = oid;
@@ -1129,8 +1158,11 @@ async function configureFullSet(req, res) {
         [student.id, prodId]
       );
       let oid;
+      // Server-side plate must survive the DELETE — see lib/platePreservation.js.
+      let preservedPlates;
       if (existing.rows.length) {
         oid = existing.rows[0].id;
+        preservedPlates = await capturePlates(client, oid);
         await client.query(
           `UPDATE orders SET price=$1, batch_id=$2, package_id=$3, checkout_group_id=$4,
              status=$5, has_embroidery=$6, needs_pressing=$7, measurements=$8
@@ -1171,10 +1203,11 @@ async function configureFullSet(req, res) {
       for (const it of lines) {
         await client.query(
           `INSERT INTO order_items (order_id, group_id, option_id, label_snapshot, price_snapshot, qty,
-                                    customer_image_url, customer_text)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+                                    customer_image_url, customer_text, plate_image_url)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
           [oid, it.group_id || null, it.option_id || null, it.label, it.price || 0, it.qty || 1,
-           it.customer_image_url || null, it.customer_text || null]
+           it.customer_image_url || null, it.customer_text || null,
+           plateFor(preservedPlates, it.label)]
         );
       }
       ids[type] = oid;

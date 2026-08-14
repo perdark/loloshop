@@ -24,6 +24,7 @@ import {
   type EmbroideryZone,
 } from "@/lib/constants";
 import { formatDateShort, formatIQD } from "@/lib/format";
+import { moneyLabels, summariseOrderMoney } from "@/lib/orderMoney";
 import type { AdminWholesaler, OrderStatus } from "@/lib/types";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Select } from "@/components/ui/Select";
@@ -525,13 +526,19 @@ function BundleCard({
           </p>
         </div>
         <div>
-          <p className="text-muted">التكلفة</p>
+          <p className="text-muted">
+            {source === "wholesaler" ? "حصة الإدارة" : "التكلفة"}
+          </p>
           <p className="font-semibold tabular-nums text-ink-soft" dir="ltr">
             {formatIQD(bundle.total_cost)}
           </p>
         </div>
         <div>
-          <p className="text-muted">الربح</p>
+          {/* The receipt below already said «ربح الممثل»; this tile did not, so the same
+              bundle read two different ways depending on where the eye landed. */}
+          <p className="text-muted">
+            {source === "wholesaler" ? "ربح الممثل" : "الربح"}
+          </p>
           <p className={`font-semibold tabular-nums ${profitColor(bundle.total_profit)}`} dir="ltr">
             {formatIQD(bundle.total_profit)}
           </p>
@@ -611,6 +618,14 @@ function OrdersSection({
 
   const totalPrice = orders.reduce((s, o) => s + (o.price ?? 0), 0);
   const totalCost = orders.reduce((s, o) => s + (o.cost ?? 0), 0);
+  // «الربح» on a rep's order is the REP's margin, not the shop's — bug 11, which Track A
+  // fixed on /admin and which lived on here. summariseOrderMoney keeps the two screens on
+  // one definition; see frontend/lib/orderMoney.ts and backend/lib/counts.js.
+  const money = summariseOrderMoney(orders);
+  const labels = moneyLabels(activeSource);
+  const isRepView = activeSource === "wholesaler";
+  // Unchanged arithmetic — on a rep row this already equalled the rep's margin. What was
+  // wrong was the word above it and the absence of the shop's own figure beside it.
   const totalProfit = orders.reduce((s, o) => s + (o.profit ?? 0), 0);
   const isEmpty = viewMode === "bundle" ? bundles.length === 0 : orders.length === 0;
 
@@ -672,19 +687,19 @@ function OrdersSection({
                 className="cursor-pointer select-none px-4 py-3 font-semibold hover:text-ink/90"
                 onClick={() => onSort("price")}
               >
-                السعر {sortArrow("price")}
+                {labels.price} {sortArrow("price")}
               </th>
               <th
                 className="cursor-pointer select-none px-4 py-3 font-semibold hover:text-ink/90"
                 onClick={() => onSort("cost")}
               >
-                التكلفة {sortArrow("cost")}
+                {labels.cost} {sortArrow("cost")}
               </th>
               <th
                 className="cursor-pointer select-none px-4 py-3 font-semibold hover:text-ink/90"
                 onClick={() => onSort("profit")}
               >
-                الربح {sortArrow("profit")}
+                {labels.profit} {sortArrow("profit")}
               </th>
               <th className="px-4 py-3 font-semibold">الحالة</th>
               <th className="px-4 py-3 font-semibold">تعديل التكلفة</th>
@@ -762,7 +777,15 @@ function OrdersSection({
           <tfoot>
             <tr className="border-t-2 border-ink/20 bg-ink/[0.04] font-semibold text-sm">
               <td className="px-4 py-3 text-muted" colSpan={2}>
-                الإجمالي ({orders.length} طلب)
+                الإجمالي ({orders.length} قطعة)
+                {isRepView && (
+                  <span className="ms-2 font-normal text-[var(--shop-muted)]">
+                    · دخل المحل{" "}
+                    <span className="font-semibold text-ink tabular-nums" dir="ltr">
+                      {formatIQD(money.shopIncome)}
+                    </span>
+                  </span>
+                )}
               </td>
               <td className="px-4 py-3 tabular-nums text-ink-soft" dir="ltr">
                 {formatIQD(totalPrice)}
@@ -806,15 +829,15 @@ function OrdersSection({
             </p>
             <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
               <div>
-                <span className="text-[var(--shop-muted)]">السعر: </span>
+                <span className="text-[var(--shop-muted)]">{labels.price}: </span>
                 <span className="tabular-nums" dir="ltr">{formatIQD(order.price)}</span>
               </div>
               <div>
-                <span className="text-[var(--shop-muted)]">التكلفة: </span>
+                <span className="text-[var(--shop-muted)]">{labels.cost}: </span>
                 <span className="tabular-nums" dir="ltr">{order.cost != null ? formatIQD(order.cost) : "—"}</span>
               </div>
               <div className="col-span-2">
-                <span className="text-[var(--shop-muted)]">الربح: </span>
+                <span className="text-[var(--shop-muted)]">{labels.profit}: </span>
                 <span
                   className={`font-semibold tabular-nums ${profitColor(order.profit)}`}
                   dir="ltr"
@@ -865,19 +888,19 @@ function OrdersSection({
         {/* Mobile summary card */}
         <div className="surface-card rounded-2xl border-2 border-ink/10 p-4 text-sm">
           <p className="mb-3 font-semibold text-ink">
-            الإجمالي — {orders.length} طلب
+            الإجمالي — {orders.length} قطعة
           </p>
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <span className="text-[var(--shop-muted)]">السعر: </span>
+              <span className="text-[var(--shop-muted)]">{labels.price}: </span>
               <span className="tabular-nums" dir="ltr">{formatIQD(totalPrice)}</span>
             </div>
             <div>
-              <span className="text-[var(--shop-muted)]">التكلفة: </span>
+              <span className="text-[var(--shop-muted)]">{labels.cost}: </span>
               <span className="tabular-nums" dir="ltr">{formatIQD(totalCost)}</span>
             </div>
             <div className="col-span-2">
-              <span className="text-[var(--shop-muted)]">الربح: </span>
+              <span className="text-[var(--shop-muted)]">{labels.profit}: </span>
               <span
                 className={`font-semibold tabular-nums ${profitColor(totalProfit)}`}
                 dir="ltr"
@@ -885,6 +908,14 @@ function OrdersSection({
                 {formatIQD(totalProfit)}
               </span>
             </div>
+            {isRepView && (
+              <div className="col-span-2 border-t border-line pt-2">
+                <span className="text-[var(--shop-muted)]">دخل المحل: </span>
+                <span className="font-semibold tabular-nums text-ink" dir="ltr">
+                  {formatIQD(money.shopIncome)}
+                </span>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -1176,6 +1207,16 @@ function AdminOrdersContent() {
 
   const activeOrders = sortOrders(activeSource === "retail" ? retailOrders : wholesalerOrders);
   const activeBundles = activeSource === "retail" ? retailBundles : wholesalerBundles;
+  // The headline tiles said «الربح» over a figure that, on the rep tab, is the REP's margin
+  // — bug 11 again. `دخل المحل` is what the shop actually takes: حصة الإدارة on a rep's
+  // order, the full price on a retail one. See frontend/lib/orderMoney.ts.
+  const activeIsRep = activeSource === "wholesaler";
+  const activeLabels = moneyLabels(activeSource);
+  const activeMoney = summariseOrderMoney(activeOrders);
+  const bundleShopIncome = activeBundles.reduce(
+    (s, b) => s + (activeIsRep ? b.total_cost : b.total_price),
+    0
+  );
 
   function handleBundlesChange(updater: (prev: AdminBundle[]) => AdminBundle[]) {
     if (activeSource === "retail") {
@@ -1429,56 +1470,89 @@ function AdminOrdersContent() {
               {activeSource === "retail" ? "طلبات التجزئة" : "طلبات الممثلين"}
             </p>
             <p className="mt-0.5 font-bold tabular-nums text-ink">
-              {viewMode === "bundle" ? activeBundles.length : activeOrders.length} طلب
+              {/* The unit FLIPS with the view: «عرض بالباقة» counts bundles (طلب), «عرض
+                  بالقطعة» counts order rows (قطعة). One fixed word here was wrong in
+                  exactly one of the two modes. See backend/lib/counts.js. */}
+              {viewMode === "bundle"
+                ? `${activeBundles.length} طلب`
+                : `${activeOrders.length} قطعة`}
             </p>
           </div>
           {viewMode === "item" && (
             <>
               <div>
-                <p className="text-xs text-muted">إجمالي الإيراد</p>
+                <p className="text-xs text-muted">
+                  {activeIsRep ? "دفع الطلاب" : "إجمالي الإيراد"}
+                </p>
                 <p className="mt-0.5 font-bold tabular-nums text-ink" dir="ltr">
-                  {formatIQD(activeOrders.reduce((s, o) => s + (o.price ?? 0), 0))}
+                  {formatIQD(activeMoney.grossCollected)}
                 </p>
               </div>
               <div>
-                <p className="text-xs text-muted">إجمالي التكلفة</p>
-                <p className="mt-0.5 font-bold tabular-nums text-ink-soft" dir="ltr">
-                  {formatIQD(activeOrders.reduce((s, o) => s + (o.cost ?? 0), 0))}
+                <p className="text-xs text-muted">
+                  {activeIsRep ? "دخل المحل" : "إجمالي التكلفة"}
+                </p>
+                <p
+                  className={`mt-0.5 font-bold tabular-nums ${activeIsRep ? "text-ink" : "text-ink-soft"}`}
+                  dir="ltr"
+                >
+                  {formatIQD(
+                    activeIsRep
+                      ? activeMoney.shopIncome
+                      : activeOrders.reduce((s, o) => s + (o.cost ?? 0), 0)
+                  )}
                 </p>
               </div>
               <div>
-                <p className="text-xs text-muted">الربح</p>
+                <p className="text-xs text-muted">{activeLabels.profit}</p>
                 <p
                   className={`mt-0.5 font-bold tabular-nums ${profitColor(activeOrders.reduce((s, o) => s + (o.profit ?? 0), 0))}`}
                   dir="ltr"
                 >
                   {formatIQD(activeOrders.reduce((s, o) => s + (o.profit ?? 0), 0))}
                 </p>
+                {activeIsRep && (
+                  <p className="mt-0.5 text-[0.7rem] leading-tight text-muted">
+                    يبقى عند الممثل
+                  </p>
+                )}
               </div>
             </>
           )}
           {viewMode === "bundle" && (
             <>
               <div>
-                <p className="text-xs text-muted">إجمالي الإيراد</p>
+                <p className="text-xs text-muted">
+                  {activeIsRep ? "دفع الطلاب" : "إجمالي الإيراد"}
+                </p>
                 <p className="mt-0.5 font-bold tabular-nums text-ink" dir="ltr">
                   {formatIQD(activeBundles.reduce((s, b) => s + b.total_price, 0))}
                 </p>
               </div>
               <div>
-                <p className="text-xs text-muted">إجمالي التكلفة</p>
-                <p className="mt-0.5 font-bold tabular-nums text-ink-soft" dir="ltr">
-                  {formatIQD(activeBundles.reduce((s, b) => s + b.total_cost, 0))}
+                <p className="text-xs text-muted">
+                  {activeIsRep ? "دخل المحل" : "إجمالي التكلفة"}
+                </p>
+                <p
+                  className={`mt-0.5 font-bold tabular-nums ${activeIsRep ? "text-ink" : "text-ink-soft"}`}
+                  dir="ltr"
+                >
+                  {formatIQD(bundleShopIncome)}
                 </p>
               </div>
               <div>
-                <p className="text-xs text-muted">الربح</p>
+                <p className="text-xs text-muted">{activeLabels.profit}</p>
                 <p
                   className={`mt-0.5 font-bold tabular-nums ${profitColor(activeBundles.reduce((s, b) => s + b.total_profit, 0))}`}
                   dir="ltr"
                 >
                   {formatIQD(activeBundles.reduce((s, b) => s + b.total_profit, 0))}
                 </p>
+                {activeIsRep && (
+                  <p className="mt-0.5 text-[0.7rem] leading-tight text-muted">
+                    يبقى عند الممثل
+                  </p>
+                )}
               </div>
             </>
           )}
@@ -1501,6 +1575,19 @@ function AdminOrdersContent() {
               <p>الإيراد = مجموع أسعار {viewMode === "bundle" ? "الباقات" : "الطلبات"} الظاهرة.</p>
               <p>{activeSource === "wholesaler" ? "حصة الإدارة" : "التكلفة"} = مجموع المبلغ المحاسبي المخزن لكل طلب.</p>
               <p>{activeSource === "wholesaler" ? "ربح الممثل" : "الربح"} = الإيراد − {activeSource === "wholesaler" ? "حصة الإدارة" : "التكلفة"}.</p>
+              {activeIsRep && (
+                <>
+                  <p className="font-semibold">
+                    دخل المحل = حصة الإدارة. أما «ربح الممثل» فيبقى عند الممثل ولا يدخل المحل.
+                  </p>
+                  <p>الطالب يدفع للممثل، والممثل يسلّم حصة الإدارة للمحل. الفرق ربحه هو.</p>
+                </>
+              )}
+              {!activeIsRep && activeMoney.rows > 0 && activeMoney.rowsCosted === 0 && (
+                <p className="font-semibold">
+                  لم تُدخل تكلفة إنتاج لأي طلب هنا، لذلك «الربح» أعلاه إيراد وليس ربحاً.
+                </p>
+              )}
               {viewMode === "bundle" && <p>داخل كل باقة، القطع الملغاة ظاهرة للمراجعة لكنها مستبعدة من المبالغ.</p>}
             </div>
           </CalculationDetails>
@@ -1623,10 +1710,14 @@ function AdminOrdersContent() {
       {/* Cross-source counts for admin awareness */}
       {!loading && !fetchError && (
         <div className="mt-6 rounded-xl border border-line bg-surface-sink px-4 py-3 text-xs text-muted">
+          {/* Same flip as the tile above: these are bundles in «عرض بالباقة» and pieces in
+              «عرض بالقطعة», so the noun has to move with the mode. */}
           <span className="font-semibold text-ink-soft">إجمالي النظام: </span>
-          طلبات التجزئة {viewMode === "bundle" ? retailBundles.length : retailOrders.length}
+          {viewMode === "bundle" ? "طلبات" : "قطع"} التجزئة{" "}
+          {viewMode === "bundle" ? retailBundles.length : retailOrders.length}
           {" · "}
-          طلبات الممثلين {viewMode === "bundle" ? wholesalerBundles.length : wholesalerOrders.length}
+          {viewMode === "bundle" ? "طلبات" : "قطع"} الممثلين{" "}
+          {viewMode === "bundle" ? wholesalerBundles.length : wholesalerOrders.length}
           {" · "}
           المجموع {
             viewMode === "bundle"
