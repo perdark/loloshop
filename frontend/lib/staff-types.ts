@@ -83,6 +83,14 @@ export interface ProductionQueueItem {
   source: "retail" | "wholesaler";
   /** Populated only when source === "wholesaler". */
   wholesaler_name: string | null;
+  /**
+   * SEARCH INDEX, not a display field — every word the student typed on this piece, joined
+   * into one string. Mostly the التطريز text (what is stitched on the garment), plus
+   * free-text option answers like colour. `lib/queue-search.ts` is its only reader; render
+   * `zones[].text` instead, which is per-zone and carries the artwork with it.
+   * Null when the student typed nothing.
+   */
+  search_text?: string | null;
   /** Non-null when this order belongs to a multi-item checkout bundle. */
   checkout_group_id: string | null;
   /** Staff presence — who is actively working on this order (admin monitor). */

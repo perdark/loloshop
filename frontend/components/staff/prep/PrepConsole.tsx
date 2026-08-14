@@ -35,6 +35,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { matchesQueueSearch } from "@/lib/queue-search";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StudentSheet } from "@/components/staff/station/StudentSheet";
 import { isPieceOverdue, type AdvancedGhost, type StationPiece } from "@/components/staff/station/types";
@@ -200,12 +201,14 @@ export function PrepConsole({ showSourceFilter }: { showSourceFilter: boolean })
     });
 
   const pieces = useMemo(() => {
-    const q = search.trim().toLowerCase();
     return rows
       .filter((r) => r.status === view)
       .filter((r) => !sourceFilter || r.source === sourceFilter)
       .filter((r) => !repFilter || r.wholesaler_name === repFilter)
-      .filter((r) => !q || (r.student_name ?? "").toLowerCase().includes(q))
+      // Was student_name alone. The preparer is holding the garment, so the words stitched
+      // ON it are the fastest handle they have — and the university/department/rep were
+      // searchable on /staff/queue but not here. One shared matcher, one behaviour.
+      .filter((r) => matchesQueueSearch(r, search))
       .map(queueToPiece);
   }, [rows, view, search, sourceFilter, repFilter]);
 
@@ -360,11 +363,11 @@ export function PrepConsole({ showSourceFilter }: { showSourceFilter: boolean })
       <div className="surface-card space-y-3 rounded-2xl p-3.5">
         <Input
           type="search"
-          placeholder="بحث باسم الطالب…"
+          placeholder="بحث بالاسم أو الجامعة أو التطريز…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="w-full"
-          aria-label="بحث باسم الطالب"
+          aria-label="بحث بالاسم أو الجامعة أو التطريز"
         />
         {showSourceFilter && (
           <div className="flex gap-2">

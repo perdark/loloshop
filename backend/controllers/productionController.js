@@ -410,6 +410,20 @@ async function getQueue(req, res) {
                            OR oi2.customer_image_url IS NOT NULL)) AS has_design_images,
             u.name AS student_name, s.university_name, s.department, s.study_type,
             p.name_ar AS product_name, p.type AS product_type,
+            -- Every word the STUDENT typed on this piece, flattened to one string for the
+            -- console's search box (bug 8). The headline case is the التطريز text — a preparer
+            -- holding a sash searches for what is WRITTEN on it, and the console cannot search
+            -- text it was never sent — but customer_text also carries free-text option answers
+            -- (colour, cap type), so this is deliberately «everything the student wrote», not
+            -- «the embroidery zones». Hence the plain name: it is a search index, not a field
+            -- to display. Not the zones array, which is station-mode only, carries image URLs
+            -- and per-zone progress, and is ~20× the bytes of the words themselves.
+            -- Measured on the dev DB: +121 KB across a 1,447-row manager queue (+8.8%).
+            (SELECT string_agg(DISTINCT oi3.customer_text, ' ')
+               FROM order_items oi3
+              WHERE oi3.order_id = o.id
+                AND oi3.customer_text IS NOT NULL
+                AND oi3.customer_text <> '') AS search_text,
             -- Robe tailoring measurements, for التجهيز only. Gated in SQL rather than sent
             -- to every station: the prep queue is ~480 rows and this JSON rides on each of
             -- them, which is dead weight on a workshop-wifi station that cannot use it.
