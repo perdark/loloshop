@@ -1,5 +1,32 @@
 # Progress
 
+## 2026-08-14 (e) — the shop is in ديالى, and /login has a way out
+
+Two owner-reported defects, both on screens a student sees first.
+
+- **The storefront said the shop is in بغداد. It is in ديالى.** Six strings in
+  `lib/copy-ar.ts` (the «محل حقيقي ببغداد» bullet and the `visitBody` line, each ×3 genders)
+  plus the `/shop` metadata description. ⚠️ The MAP was never wrong — `StoreLocation`'s embed
+  pins 33.749, 44.618, which is Baqubah, not Baghdad. Only the prose disagreed with the pin.
+  (`visitTitle`/`visitBody` are declared but currently rendered nowhere; fixed anyway so the
+  next consumer does not reintroduce the claim.)
+- **`/login` had no back button at all.** Added an optional `onBack` to `AuthCard` — a 44px
+  chevron at the header's start, pointing RIGHT because the shell is RTL, drawn as an SVG
+  because the ←/→ characters are bidi-mirrored and flip with the surrounding run. It is
+  absolutely positioned so the brand mark stays optically centred on the screens that have no
+  back. `/login` wires it: on the OTP step it means the previous STEP (agreeing with the pane's
+  own «تغيير الرقم»), on the credentials step the previous PAGE.
+  ⚠️ `router.back()` ALONE IS NOT ENOUGH: the shells are Capacitor webviews with no address
+  bar, and a student arriving from a WhatsApp deep link has an EMPTY history where `back()` is
+  a silent no-op — a button that visibly does nothing. Guarded with
+  `window.history.length > 1`, falling back to `router.replace("/")`.
+  The other six `AuthCard` screens (register · forgot-password · join · /s /w /d) still have
+  no back and are the same dead end; only /login was reported, so only /login was wired.
+
+Verified in a real browser: the «ليش لولو شوب؟» bullet reads «محل حقيقي بديالى», and
+`/` → «دخول» → back chevron returns to `/`. `tsc --noEmit` clean; `eslint` 0 errors (6
+pre-existing warnings, all in a generated `android/app/build` asset).
+
 ## 2026-08-14 (d) — THREE DEPLOYS to prod, ahead of a live staff testing session
 
 Owner needed the shop working for staff to test in person, so the rule for this session was
