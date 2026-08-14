@@ -15,7 +15,7 @@ import { CatalogBrowser } from "@/components/shop/CatalogBrowser";
 export const metadata: Metadata = {
   title: "القطع — لولو شوب",
   description:
-    "كل أوشحة وروبات وقبعات وشالات التخرّج من لولو شوب — بأسماء الطلاب وكلياتهم، مخيوطة ومطرّزة بورشتنا في بغداد.",
+    "كل أوشحة وروبات وقبعات وشالات التخرّج من لولو شوب — بأسماء الطلاب وكلياتهم، مخيوطة ومطرّزة بورشتنا في ديالى.",
 };
 
 export default async function ShopPage() {

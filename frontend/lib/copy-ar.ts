@@ -46,7 +46,7 @@ const FEMALE: StorefrontCopy = {
     rest: "بالخط العربي، مو طباعة تنمسح بعد غسلة.",
   },
   why3: {
-    lead: "محل حقيقي ببغداد",
+    lead: "محل حقيقي بديالى",
     rest: "تكدرين تجين تشوفين القماش بعينچ قبل ما تطلبين.",
   },
   why4: {
@@ -57,7 +57,7 @@ const FEMALE: StorefrontCopy = {
   vipLede: "روب ووشاح وقبعة — باسمچ وكليتچ، بتطريز كامل وتجهيز بأولوية قبل الحفل.",
   vipCta: "شوفي باقة VIP",
   visitTitle: "تعالي شوفينا",
-  visitBody: "محل لولو شوب ببغداد — تعالي شوفي القماش والألوان بعينچ قبل ما تطلبين.",
+  visitBody: "محل لولو شوب بديالى — تعالي شوفي القماش والألوان بعينچ قبل ما تطلبين.",
 };
 
 const MALE: StorefrontCopy = {
@@ -69,7 +69,7 @@ const MALE: StorefrontCopy = {
     rest: "بالخط العربي، مو طباعة تنمسح بعد غسلة.",
   },
   why3: {
-    lead: "محل حقيقي ببغداد",
+    lead: "محل حقيقي بديالى",
     rest: "تكدر تجي تشوف القماش بعينك قبل ما تطلب.",
   },
   why4: {
@@ -80,7 +80,7 @@ const MALE: StorefrontCopy = {
   vipLede: "روب ووشاح وقبعة — باسمك وكليتك، بتطريز كامل وتجهيز بأولوية قبل الحفل.",
   vipCta: "شوف باقة VIP",
   visitTitle: "تعال شوفنا",
-  visitBody: "محل لولو شوب ببغداد — تعال شوف القماش والألوان بعينك قبل ما تطلب.",
+  visitBody: "محل لولو شوب بديالى — تعال شوف القماش والألوان بعينك قبل ما تطلب.",
 };
 
 /** Gender-free wording for a visitor who hasn't told us yet. */
@@ -93,7 +93,7 @@ const NEUTRAL: StorefrontCopy = {
     rest: "بالخط العربي، مو طباعة تنمسح بعد غسلة.",
   },
   why3: {
-    lead: "محل حقيقي ببغداد",
+    lead: "محل حقيقي بديالى",
     rest: "تعال شوف القماش بعينك قبل الطلب.",
   },
   why4: {
@@ -104,7 +104,7 @@ const NEUTRAL: StorefrontCopy = {
   vipLede: "روب ووشاح وقبعة — بالاسم والكلية، بتطريز كامل وتجهيز بأولوية قبل الحفل.",
   vipCta: "شوف باقة VIP",
   visitTitle: "تعال شوفنا",
-  visitBody: "محل لولو شوب ببغداد — شوف القماش والألوان بعينك قبل الطلب.",
+  visitBody: "محل لولو شوب بديالى — شوف القماش والألوان بعينك قبل الطلب.",
 };
 
 /** The one line every component calls. Never index the dictionaries directly. */
