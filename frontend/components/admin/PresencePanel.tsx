@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { ORDER_STATUS_LABELS } from "@/lib/constants";
+import { toArabicDigits } from "@/lib/format";
 import type { MonitorData } from "@/lib/staff-types";
 
 /**
@@ -16,10 +17,6 @@ import type { MonitorData } from "@/lib/staff-types";
  * the whole dashboard; a second copy of either in here would open a second event stream and
  * double the traffic to say the same thing.
  */
-
-/* Latin → Arabic-Indic digits. Local copy: the page-level one is not exported. */
-const toArabicDigits = (n: number | string) =>
-  String(n).replace(/\d/g, (d) => "٠١٢٣٤٥٦٧٨٩"[Number(d)]);
 
 /**
  * «منذ ٤ دقائق». Arabic counts a noun by its number, not by an -s: one, two, a few (3–10)

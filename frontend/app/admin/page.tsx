@@ -10,7 +10,7 @@ import { getTailorSummary, getPresence, type TailorSummary } from "@/lib/staff";
 import { PresencePanel } from "@/components/admin/PresencePanel";
 import type { MonitorData } from "@/lib/staff-types";
 import Link from "next/link";
-import { formatIQD } from "@/lib/format";
+import { formatIQD, toArabicDigits } from "@/lib/format";
 import type { AdminAccounting, AdminAnalytics } from "@/lib/types";
 import { usePolling } from "@/lib/hooks/usePolling";
 import { useProductionEvents } from "@/hooks/useProductionEvents";
@@ -35,9 +35,6 @@ const DashboardCharts = dynamic(
   }
 );
 
-/* Latin → Arabic-Indic digits, for counts rendered outside formatIQD. */
-const toArabicDigits = (n: number | string) =>
-  String(n).replace(/\d/g, (d) => "٠١٢٣٤٥٦٧٨٩"[Number(d)]);
 
 /* ── Editorial money: big numeral, quiet unit ──
    formatIQD returns "<number> د.ع"; we split the unit so the figure reads as

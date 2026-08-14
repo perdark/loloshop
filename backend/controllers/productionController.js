@@ -495,19 +495,52 @@ async function getQueue(req, res) {
     const SPEC_STAGES = new Set(['preparing', 'ready']);
     const zoneIds = rows.filter((r) => ZONE_STAGES.has(r.status)).map((r) => r.id);
     const specIds = rows.filter((r) => SPEC_STAGES.has(r.status)).map((r) => r.id);
-    const [zonesById, specById] = await Promise.all([
+    // Bug 8 part 4 — «القطع الناقصة». The preparer bags a SET (وشاح + قبعة + روب), but the
+    // queue is one row per piece, so a set whose robe is still at التطريز looks exactly like
+    // a set of two. Bagging it early is the expensive mistake: it is found at handover, in
+    // front of the student. checkout_group_id already groups the bundle — this reads the
+    // whole group so the console can say which piece has not arrived yet, and where it is.
+    // Scoped to التجهيز's own stages: no other station packs a set.
+    const setGroupIds = [
+      ...new Set(
+        rows.filter((r) => SPEC_STAGES.has(r.status) && r.checkout_group_id).map((r) => r.checkout_group_id)
+      ),
+    ];
+    const [zonesById, specById, setPieces] = await Promise.all([
       detectZonesForOrders(
         zoneIds,
         new Map(rows.map((r) => [r.id, r.embroidery_zones || {}]))
       ),
       detectSpecForOrders(specIds),
+      setGroupIds.length
+        ? query(
+            `SELECT o.id, o.checkout_group_id, o.status, p.name_ar AS product_name
+               FROM orders o
+               JOIN products p ON p.id = o.product_id
+              WHERE o.checkout_group_id = ANY($1)
+                AND o.status::text <> 'cancelled'
+                AND o.returned_to_customer = FALSE
+              ORDER BY p.name_ar`,
+            [setGroupIds]
+          ).then((r) => r.rows)
+        : Promise.resolve([]),
     ]);
+    const setByGroup = new Map();
+    for (const piece of setPieces) {
+      const list = setByGroup.get(piece.checkout_group_id) || [];
+      list.push({ id: piece.id, status: piece.status, product_name: piece.product_name });
+      setByGroup.set(piece.checkout_group_id, list);
+    }
     for (const r of rows) {
       if (ZONE_STAGES.has(r.status)) {
         r.zones = zonesById.get(r.id) || [];
       }
       if (SPEC_STAGES.has(r.status)) {
         r.spec = specById.get(r.id) || [];
+        // The WHOLE bundle, this piece included — the console needs the denominator
+        // («٢ من ٣ قطع») as much as it needs the absentees. A piece with no
+        // checkout_group_id was bought alone and is a complete set of one.
+        if (r.checkout_group_id) r.set_pieces = setByGroup.get(r.checkout_group_id) || [];
       }
       if (r.status === 'pressing' || r.status === 'preparing') {
         const next = nextStageFor({

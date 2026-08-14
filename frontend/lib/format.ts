@@ -21,6 +21,14 @@ export function formatIQD(amount: number): string {
   return `${IQD_FORMAT.format(amount)} د.ع`;
 }
 
+/**
+ * Latin → Arabic-Indic digits, for counts rendered outside `formatIQD` (positions, tallies,
+ * elapsed minutes). Shared because it had started multiplying into page-local copies.
+ */
+export function toArabicDigits(value: number | string): string {
+  return String(value).replace(/\d/g, (d) => "٠١٢٣٤٥٦٧٨٩"[Number(d)]);
+}
+
 /** Discount percent off the compare-at (old) price, in the same Arabic-Indic
  *  digits as prices — e.g. «خصم ٢٥٪». Returns null when there is no real discount. */
 export function formatDiscountPercent(

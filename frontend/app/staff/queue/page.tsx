@@ -11,6 +11,7 @@ import { deleteProductionOrder, getQueue } from "@/lib/staff";
 import { getUser } from "@/lib/auth";
 import { getApiErrorMessage } from "@/lib/api";
 import { matchesQueueSearch } from "@/lib/queue-search";
+import { rememberQueueOrder } from "@/lib/queue-neighbors";
 import {
   ORDER_STATUS_LABELS,
   ORDER_SOURCE_LABELS,
@@ -947,6 +948,14 @@ function ConsoleContent() {
     if (!matchesQueueSearch(i, q)) return false;
     return true;
   });
+
+  // Hand the order page its «السابق»/«التالي» (bug 8, part 3). The FILTERED list, not the
+  // visible page, so stepping past the bottom of page 1 continues instead of dead-ending.
+  // In an effect, not during render: this writes to sessionStorage.
+  const filteredIds = filtered.map((i) => i.id).join(",");
+  useEffect(() => {
+    rememberQueueOrder(filteredIds ? filteredIds.split(",") : []);
+  }, [filteredIds]);
 
   // ── Source counts (for tab badges) ────────────────────────────────────────
   const stageItems   = stage ? items.filter((i) => i.status === stage) : items;

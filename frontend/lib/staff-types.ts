@@ -105,6 +105,12 @@ export interface ProductionQueueItem {
   has_design_images?: boolean;
   /** Grouping key for the station console («عرض بالطلب»). */
   student_id?: string;
+  /**
+   * Station mode, التجهيز stages only — every piece of this order's checkout bundle (this
+   * one included) with the stage each is at, so the preparer can tell a complete set from
+   * one whose robe has not arrived yet. Absent for a piece bought on its own.
+   */
+  set_pieces?: { id: string; status: OrderStatus; product_name: string }[];
   needs_pressing?: boolean;
   /**
    * Station console only (?station=1). The piece's embroidery zones with the stitch

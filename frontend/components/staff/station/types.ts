@@ -1,4 +1,5 @@
 import type { PieceSpecRow, RobeMeasurements, StationZone } from "@/lib/staff-types";
+import type { OrderStatus } from "@/lib/types";
 
 /** Which production station the console is serving.
  *  'preparing' (التجهيز) reuses this station shell deliberately (owner 2026-08-05:
@@ -7,6 +8,13 @@ import type { PieceSpecRow, RobeMeasurements, StationZone } from "@/lib/staff-ty
  *  the time a piece reaches التجهيز, and the backend exposes no zone-tick endpoint
  *  for it, so the preparer READS the artwork to verify the set and never ticks it. */
 export type StationKind = "embroidery" | "tailor" | "pressing" | "preparing";
+
+/** One piece of a student's checkout bundle, as the set view needs it. */
+export interface SetPiece {
+  id: string;
+  status: OrderStatus;
+  product_name: string;
+}
 
 /**
  * One work piece (an order) normalized for the station console, whatever the
@@ -40,6 +48,13 @@ export interface StationPiece {
   spec: PieceSpecRow[] | null;
   /** التجهيز only — robe measurements, when the order carries them. */
   measurements: RobeMeasurements | null;
+  /**
+   * التجهيز only — every piece of the student's checkout bundle, this one included, with the
+   * stage each is at. The preparer bags a SET; the queue is one row per piece, so without
+   * this a set whose robe is still at التطريز looks exactly like a set of two (bug 8, part 4).
+   * `null` at every other station, which packs nothing, and for a piece bought on its own.
+   */
+  setPieces: SetPiece[] | null;
   /** Backend-granted single-piece complete (الكوي uses can_advance; الفصال pending rows are always completable). */
   canComplete: boolean;
   /** Arabic label for the piece's complete action (backend edge label when available). */
