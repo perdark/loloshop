@@ -1,5 +1,174 @@
 # Progress
 
+## 2026-08-15 — the last two of the eleven bugs, on `fix/admin-presence-panel` (UNMERGED)
+
+Bug 1 and the three unwritten parts of bug 8. **All eleven bugs are now closed in code.**
+Branch is off `main` (`49dd36b`) — deliberately NOT off `fix/ai-assistant-money`, which is
+still parked.
+
+**Bug 1 — «يعمل الآن» on `/admin`.** The rows have existed since the منتور tab shipped; the
+owner just had to leave the dashboard to see them. New `GET /production/presence` rather than
+calling `/monitor`: the dashboard polls every 30s AND reloads on every production event, and
+`monitor()` runs five queries including a 30-day `audit_log` aggregation to answer something
+that needs one. Same `requireStaffType()` guard — it is a slice of manager-only data. Both
+endpoints now read one `workingNow()`, so `/admin` and `/staff` cannot name different people.
+
+**Bug 8 part 2 — search finds the التطريز text.** Neither console could: `/staff/queue`
+matched student/university/department/rep, PrepConsole matched the student name ALONE, and
+the stitched words were on neither list because the queue was never sent them. New
+`search_text` per row (every distinct `customer_text`, one string) + ONE shared matcher in
+`lib/queue-search.ts` with Arabic folding (أ/ا/إ, ة/ه, ى/ي, tashkeel) and any-order tokens.
+The folding is the half that decides whether the box works: three different people type these
+names. +121 KB on a 1,447-row manager queue (+8.8%); rows are already fully loaded, so search
+stays instant with no debounce and no round trip per keystroke.
+
+**Bug 8 parts 3 + 4 — stepping, and the set.** «السابق»/«التالي» carry the console's FILTERED
+order through sessionStorage; disabled (not omitted) at the ends; read in an effect because
+the order page is server-rendered and reading storage during render is a hydration mismatch.
+Part 4 gives التجهيز the whole `checkout_group` per row.
+⚠️ **Measuring first changed the design:** 421 of 432 prep rows have a set piece still
+upstream, so a «ناقص» warning would fire on 97% of the list. The badge went on the rare,
+actionable state instead — «الطقم مكتمل» (11 sets right now) — with the absentees listed
+quietly on the sheet.
+
+**Gates:** 275/275 backend tests (9 new) · tsc + eslint + `next build` clean · both new
+endpoints/fields driven live against the dev DB (1,196 of 1,447 rows carry `search_text`;
+432 of 435 prep rows carry the bundle) · 27 behaviour assertions against the compiled
+`queue-search.ts` / `queue-neighbors.ts`, since the frontend has no test runner.
+
+⚠️ **NOT verified in a browser — Chrome was not running on this machine.** Everything above
+is API- and logic-level evidence. What still needs a real pass: the presence panel on
+`/admin`, the step controls at the ends of a list, and the sheet's waiting panel at phone
+width. `npm run dev` in `backend/` + `npm start` in `frontend/`, then
+`/dev-login.html#next=/admin` (the local token file now holds an admin's, not a preparer's).
+
+⚠️ One test failed once mid-session and did not reproduce across two full clean runs after
+it — shared dev-DB flake, not chased.
+## 2026-08-15 — counter-signup phone double-entry, OTP gateway status, env-tunable cooldown, gender write
+
+Four independent backend changes on `fix/otp-failover-and-surge`. 283 → 292/292 backend tests pass.
+
+- **SECURITY — counter signup now requires `phone_confirm`.** A typo'd phone at the counter
+  silently creates the account on a stranger's number (OTP registration can't produce this — a
+  mistyped number just never gets the code, so it fails loudly instead of succeeding onto the
+  wrong owner). `forgot-password-phone` later sends the reset OTP — the SOLE reset credential —
+  to whoever owns that number: an account-takeover path. `counterSignupController.js` now
+  requires `phone_confirm`, canonicalised with the same `normalizeIqPhone` `normalizePhoneBody`
+  already applies to `phone` (so `7712345678` matches `07712345678`); missing or mismatched →
+  400 `ERR_PHONE_MISMATCH` on field `phone_confirm`. `backend/test/counterSignup.test.js`
+  updated (existing cases now send a matching `phone_confirm`) plus three new cases: missing,
+  mismatched, and same-number-different-spelling.
+- **`GET /admin/otp-gateway`** exposes `lib/otp.js`'s already-existing `gatewayStatus()` (which
+  sender device is active, whether one has been cooled down) to admins, behind the same
+  `authRequired` + `requireRole('admin')` gate as the rest of `routes/admin.js`. Did NOT touch
+  `gatewayStatus()`'s return shape — a frontend agent is coding against it in parallel. New
+  `backend/test/otpGatewayAdminRoute.test.js` drives the route over real HTTP (not a direct
+  controller call) so the admin gate itself is actually exercised: no token → 401, admin → 200
+  with `{ data: { configured, active, devices[] } }`.
+- **`OTP_DEVICE_COOLDOWN_MS` is now env-tunable**, following the `envInt` pattern in
+  `routes/auth.js` — the spec rule that every new limit must be changeable with
+  `pm2 restart --update-env` alone, no deploy. Guarded against NaN/≤0 so a bad env value can't
+  zero out the cooldown. Falls back to the existing 12h default.
+- **`PATCH /auth/me`** writes `students.gender` — `GET /auth/me` has returned this field since
+  the start, but onboarding only ever wrote it to `localStorage` (the HANDOFF landmine "Gender
+  never reaches the DB"). Accepts `{ gender: 'male'|'female' }`; anything else → 400
+  `ERR_VALIDATION` on field `gender`. Only succeeds for an account with a `students` row
+  (retail) — everyone else gets 404 `ERR_NOT_FOUND`. New `backend/test/authUpdateMe.test.js`:
+  happy path, invalid value, missing value, no-students-row.
+
+Files touched: `backend/controllers/counterSignupController.js`,
+`backend/test/counterSignup.test.js`, `backend/routes/admin.js`, `backend/lib/otp.js`,
+`backend/routes/auth.js`, `backend/controllers/authController.js`,
+`backend/test/otpGatewayAdminRoute.test.js` (new), `backend/test/authUpdateMe.test.js` (new).
+`API.md` gained `PATCH /auth/me`, `GET /admin/otp-gateway`, and a first-ever `## Staff` section
+documenting `POST /staff/counter-signup` (was undocumented before this session).
+
+**Frontend, same branch, built against the three contracts above (in parallel with the
+backend work landing them — the phone_confirm mismatch check in particular was added to
+`counterSignupController.js` mid-session; the screen already sent + validated the field, so
+no frontend change was needed once it landed):**
+
+- **«تسجيل طالب في المحل»** (`app/staff/counter-signup/page.tsx`, new) — the counter-signup
+  screen. Manager-staff only (`isAdmin || !isManager` → «غير مصرح», matching the backend's
+  `requireStaffType()` gate — there is no `/admin` mirror for this one, unlike «طلب مخصص»).
+  Phone entered twice (own `PhoneField` used for both `phone` and `phone_confirm`, client-side
+  equality check before submit); 409 `ERR_PHONE_TAKEN` renders as a prominent amber callout
+  with the server's message plus a link into «طلب مخصص» to attach an order to the existing
+  student, rather than a field error; 201 shows a success card with «أنشئ الطلب من شاشة
+  الطلبات» (→ `/staff/custom-order`) and «تسجيل طالب آخر» (resets the form) — plus a note that
+  the password belongs to the student. Linked from `StaffSidebar` (manager/admin block, hidden
+  for `isAdmin` since the backend 403s them). New `lib/staff.ts` wrapper
+  `counterSignupStudent()` + `CounterSignupError` (carries `field` AND the 409's `student_id`,
+  mirroring `FieldError` in `auth-api.ts`).
+- **`GET /admin/otp-gateway` chip** — `components/admin/OtpGatewayStatus.tsx` (new), mounted
+  on `/admin` right under the masthead. Fetches once on load, manual «تحديث» only (no polling,
+  per spec). Three states derived client-side from `gatewayStatus()`'s shape: NORMAL (primary
+  device sending, green), FAILOVER (a non-primary device is active — amber, primary likely
+  banned), DEGRADED (every configured device currently marked unhealthy — red). Documented
+  in the component's own header: DEGRADED can't see a *simultaneous* all-device failure,
+  because `sendViaZentramsg` only marks a device unhealthy when ANOTHER device's success
+  proves the failure was the device's fault — see its "cool down NOTHING" branch. New
+  `lib/admin.ts` wrapper `getOtpGatewayStatus()`.
+- **Gender reaches the DB from the client side too** — `components/student/
+  ProfilePreferences.tsx` now calls `PATCH /auth/me` (fire-and-forget, error toast) whenever a
+  signed-in student saves a gender change, and hydrates its local `gender` state from
+  `GET /auth/me`'s `student.gender` on mount for a signed-in visitor (best-effort; a failed
+  fetch just keeps the localStorage value). `lib/types.ts`'s `User` gained `student?: {
+  gender }`; `lib/auth-api.ts` gained `updateMyGender()`. Scoped deliberately to «تفضيلاتي» —
+  `components/student/Onboarding.tsx` never renders for a signed-in visitor at all (`if
+  (getToken()) return;`), so there is no second call site for this in the current app.
+
+Frontend files touched: `frontend/app/staff/counter-signup/page.tsx` (new),
+`frontend/components/admin/OtpGatewayStatus.tsx` (new), `frontend/lib/staff.ts`,
+`frontend/lib/admin.ts`, `frontend/lib/auth-api.ts`, `frontend/lib/types.ts`,
+`frontend/components/staff/StaffSidebar.tsx`, `frontend/components/student/
+ProfilePreferences.tsx`, `frontend/app/admin/page.tsx`. Zero new npm dependencies.
+`npx tsc --noEmit` and `npm run lint` both clean (frontend/).
+## 2026-08-15 — `configureOrder`'s missing status guard, plus real behavioural coverage
+
+Closes the HANDOFF landmine that named `orderController.configureOrder` (`:630`) and
+`configureFullSet` (`:1140`) as still sharing the plate-loss DELETE+re-INSERT shape. Turned out to
+be two separate claims bundled together:
+
+- **The plate-loss half was already fixed.** Commit `465b2ef` (2026-08-14, deployed the same day —
+  see the (d) entry below) applied `lib/platePreservation.js`'s `capturePlates`/`plateFor` pair to
+  `configureOrder`, `configurePackage` AND `configureFullSet`. `HANDOFF.md` was never updated when
+  that commit landed, so the landmine kept describing a defect that no longer existed. Verified by
+  reading the current code (all three functions already call `capturePlates` before the DELETE and
+  `plateFor` on every re-INSERT) and by the fact `plateSurvivesReconfigure.test.js`'s structural
+  guard was already green.
+- **The status-guard half was real.** `configurePackage`/`configureFullSet`'s "find the existing
+  order" query already filters `AND status <> 'cancelled'`, matching
+  `uq_orders_student_product_nodesign`'s own partial-index definition (`WHERE design_id IS NULL
+  AND status <> 'cancelled'`). `configureOrder`'s equivalent query had NO status filter and no
+  `ORDER BY`/`LIMIT` — if a student's piece for a product had been cancelled (staff cancel, or a
+  prior duplicate cleanup) and the student reconfigured that SAME product, the query could match
+  the cancelled row and silently revive it instead of starting a fresh order the way every sibling
+  "configure" endpoint does. Fixed by adding the identical `status <> 'cancelled'` guard to both
+  branches (design_id-keyed and product_id-keyed) of `configureOrder`'s existing-order lookup.
+
+**New test file**, `backend/test/orderControllerPlateAndStatusGuard.test.js` — the first test to
+drive the actual `configureOrder`/`configureFullSet` controller functions (not just
+`lib/fullSetOrder.js` or a structural source-grep) against a real DB:
+1. A re-save of a retail sash order preserves both `plate_image_url` (server-side artifact,
+   injected directly via SQL the way the calligraphy generator would) and `customer_image_url`
+   (client-supplied, resubmitted the way the frontend resubmits it) on the same line, and the
+   plate never leaks onto a sibling line.
+2. Cancelling that order and reconfiguring the same product creates a genuinely NEW order — the
+   cancelled row stays cancelled and keeps its own plate history, the new order starts clean.
+   Confirmed this test fails (`AssertionError`, same UUID on both sides) with the guard removed,
+   and passes once it's restored — this is a real regression test, not a tautology.
+3. `configureFullSet` (the retail/no-rep full-set path) already preserves a plate across a
+   re-save; pinned with the same behavioural style so a future refactor can't regress it silently.
+
+Full suite: **271/271 pass** (266 baseline + 5 new), run from `backend/` with `node --test test/`.
+No migration, no new dependency, no API contract change — `API.md`'s
+`/orders/configure-full-set` entry gets a one-line addition noting the plate/cancelled-order
+safety already implied by "idempotent re-submission."
+
+Files touched: `backend/controllers/orderController.js` (status guard, `configureOrder` only),
+`backend/test/orderControllerPlateAndStatusGuard.test.js` (new), `HANDOFF.md`, `API.md`.
+
 ## 2026-08-14 (e) — the shop is in ديالى, and /login has a way out
 
 Two owner-reported defects, both on screens a student sees first.

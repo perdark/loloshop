@@ -13,6 +13,8 @@ import { PageLoader } from "@/components/ui/Spinner";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { orderBackTarget } from "@/lib/back";
+import { queueNeighbors, type QueueNeighbors } from "@/lib/queue-neighbors";
+import { toArabicDigits } from "@/lib/format";
 import { ORDER_SOURCE_LABELS, ORDER_STATUS_LABELS } from "@/lib/constants";
 import { formatDateIQ } from "@/lib/format";
 import {
@@ -235,6 +237,39 @@ function StructuredEditLink({
       className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-line text-ink-soft transition-colors hover:border-orange-ink/50 hover:text-orange-ink"
     >
       ✎
+    </Link>
+  );
+}
+
+/**
+ * One step of «السابق»/«التالي» (bug 8, part 3).
+ *
+ * At the ends of the list the control is rendered as a DISABLED span, not omitted: a pair
+ * that silently becomes one button moves «التالي» under the thumb that was about to press
+ * «السابق». `aria-disabled` + no href keeps it out of the tab order and off the a11y tree as
+ * an action, which is what a real <a> without href already does.
+ */
+function QueueStepLink({
+  href,
+  arrow,
+  children,
+}: {
+  href: string | null;
+  arrow: string;
+  children: React.ReactNode;
+}) {
+  const base =
+    "inline-flex min-h-[44px] items-center gap-1 rounded-full px-3 text-sm font-medium transition-colors";
+  if (!href) {
+    return (
+      <span aria-disabled className={`${base} cursor-not-allowed text-muted`}>
+        <span aria-hidden>{arrow}</span> {children}
+      </span>
+    );
+  }
+  return (
+    <Link href={href} className={`${base} text-orange-ink hover:bg-orange-ink/8`}>
+      <span aria-hidden>{arrow}</span> {children}
     </Link>
   );
 }
@@ -736,6 +771,17 @@ function ProductionOrderDetailContent() {
   const [fetchError, setFetchError] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
 
+  // «السابق»/«التالي» through the list the console last showed (bug 8, part 3).
+  // ⚠️ In an EFFECT, not during render: this page is server-rendered on demand, and reading
+  // sessionStorage while rendering makes the server (null) and the client (a list) disagree
+  // — a hydration mismatch. Null whenever this order is not in that list — opened from a
+  // link, or since advanced out of the filter — so the controls simply do not appear rather
+  // than offering a step to somewhere unrelated.
+  const [neighbors, setNeighbors] = useState<QueueNeighbors | null>(null);
+  useEffect(() => {
+    setNeighbors(queueNeighbors(orderId));
+  }, [orderId]);
+
   // Reject modal
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
@@ -1006,6 +1052,9 @@ function ProductionOrderDetailContent() {
   // Where the back button returns to. Prefer the explicit `?from=` the entry
   // point appended; else derive it from the referrer; else the role's home.
   const back = orderBackTarget(fromParam ?? referrerPath(orderId), user?.role ?? "staff");
+
+  const siblingHref = (id: string) =>
+    `/staff/orders/${id}?from=${encodeURIComponent(back.href)}`;
 
   // ── Loading skeleton ──
   if (loading) {
@@ -1553,14 +1602,29 @@ function ProductionOrderDetailContent() {
 
   return (
     <div dir="rtl" lang="ar">
-      {/* Back link */}
-      <div className="mb-4">
+      {/* Back link + step through the queue without returning to the list (bug 8, part 3) */}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <Link
           href={back.href}
           className="inline-flex min-h-[44px] items-center gap-1 text-sm font-medium text-orange-ink transition-colors hover:text-orange-ink"
         >
           <span aria-hidden>→</span> {back.label}
         </Link>
+
+        {neighbors && neighbors.total > 1 && (
+          <nav aria-label="التنقل بين القطع" className="flex items-center gap-1">
+            {/* RTL: «السابق» keeps the same arrow the back link uses, «التالي» mirrors it. */}
+            <QueueStepLink href={neighbors.prev ? siblingHref(neighbors.prev) : null} arrow="→">
+              السابق
+            </QueueStepLink>
+            <span className="px-1 text-xs tabular-nums text-ink-soft" aria-live="polite">
+              {toArabicDigits(neighbors.position)} من {toArabicDigits(neighbors.total)}
+            </span>
+            <QueueStepLink href={neighbors.next ? siblingHref(neighbors.next) : null} arrow="←">
+              التالي
+            </QueueStepLink>
+          </nav>
+        )}
       </div>
 
       <PageHeader

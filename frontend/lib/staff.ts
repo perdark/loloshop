@@ -1,3 +1,4 @@
+import axios from "axios";
 import { api, apiUploadFile } from "./api";
 import type {
   CreateFullSetPayload,
@@ -528,6 +529,94 @@ export async function searchStaffCustomOrderStudents(q: string): Promise<Student
   return data.data ?? [];
 }
 
+// ─── Counter signup — staff creates a student's account in person, no OTP ─────
+// POST /staff/counter-signup, guarded by the SAME requireStaffType() (manager-only) gate as
+// the custom-order endpoints above — see backend/controllers/counterSignupController.js for
+// why: the staff session standing in front of the student IS the authorisation for skipping
+// the WhatsApp OTP, so who holds that session must stay exactly as tight as «طلب مخصص».
+
+export interface CounterSignupPayload {
+  name: string;
+  phone: string;
+  /** Re-entry of the SAME number — an account-takeover guard, not a typo check.
+   *  ⚠️ CONTRACT NOTE (verified 2026-08-15 against `counterSignupController.js` as it stood):
+   *  the backend accepts and IGNORES this field — it never compares it to `phone`, so a
+   *  400 `ERR_PHONE_MISMATCH` never actually fires today, even though that was the spec.
+   *  The equality check below in the counter-signup screen is therefore the ONLY thing
+   *  enforcing it right now. Do not remove the client-side check even after the backend
+   *  gains its own — a phone typo caught before the request leaves the device is cheaper
+   *  than one caught after. */
+  phone_confirm: string;
+  password: string;
+  university_name: string;
+  department: string;
+  gender?: "male" | "female";
+  study_type?: "morning" | "evening";
+  instagram_username?: string;
+}
+
+export interface CounterSignupResult {
+  userId: string;
+  studentId: string;
+  name: string;
+  phone: string;
+  /** Always false today — the account is usable immediately, no OTP step follows. */
+  otpRequired: boolean;
+}
+
+/** Carries the backend's `field` (400) and `student_id` (409 — phone already registered)
+ *  alongside the Arabic message, mirroring `FieldError` in lib/auth-api.ts. */
+export class CounterSignupError extends Error {
+  field?: string;
+  code?: string;
+  studentId?: string;
+  constructor(
+    message: string,
+    opts: { field?: string; code?: string; studentId?: string } = {}
+  ) {
+    super(message);
+    this.name = "CounterSignupError";
+    this.field = opts.field;
+    this.code = opts.code;
+    this.studentId = opts.studentId;
+  }
+}
+
+export async function counterSignupStudent(
+  payload: CounterSignupPayload
+): Promise<CounterSignupResult> {
+  try {
+    const { data } = await api.post<{
+      data: {
+        user_id: string;
+        student_id: string;
+        name: string;
+        phone: string;
+        otp_required: boolean;
+      };
+    }>("/staff/counter-signup", payload);
+    return {
+      userId: data.data.user_id,
+      studentId: data.data.student_id,
+      name: data.data.name,
+      phone: data.data.phone,
+      otpRequired: !!data.data.otp_required,
+    };
+  } catch (e) {
+    if (axios.isAxiosError(e)) {
+      const body = e.response?.data as
+        | { error?: string; code?: string; field?: string; student_id?: string }
+        | undefined;
+      throw new CounterSignupError(body?.error || "تعذر إنشاء الحساب", {
+        field: body?.field,
+        code: body?.code,
+        studentId: body?.student_id,
+      });
+    }
+    throw e;
+  }
+}
+
 /**
  * POST /production/orders/:id/advance
  * Advances the order to the next pipeline stage.
@@ -1011,6 +1100,23 @@ export async function getMonitor(
     params: source ? { source } : undefined,
   });
   return data.data;
+}
+
+/**
+ * GET /production/presence — «يعمل الآن» on its own.
+ *
+ * Same rows and the same manager/admin guard as `getMonitor`, but one query instead of
+ * five. Use THIS on anything that polls (the admin dashboard refreshes every 30s and on
+ * every production event); `getMonitor` drags a 30-day audit_log aggregation behind it.
+ */
+export async function getPresence(
+  source?: "retail" | "wholesaler"
+): Promise<MonitorData["working"]> {
+  const { data } = await api.get<{ data: { working: MonitorData["working"] } }>(
+    "/production/presence",
+    { params: source ? { source } : undefined }
+  );
+  return data.data?.working ?? [];
 }
 
 // ─── Staff self-service payroll + activity (GET /payroll/me/*) ─────────────────

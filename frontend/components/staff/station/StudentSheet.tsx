@@ -15,6 +15,8 @@ import { Lightbox } from "./Lightbox";
 import { ZoneThumb } from "@/components/staff/ZoneThumb";
 import { PieceSpec } from "@/components/staff/PieceSpec";
 import { Button } from "@/components/ui/Button";
+import { ORDER_STATUS_LABELS } from "@/lib/constants";
+import type { OrderStatus } from "@/lib/types";
 
 interface StudentSheetProps {
   kind: StationKind;
@@ -37,6 +39,9 @@ interface StudentSheetProps {
    *  same for both of its tabs, and a piece still at التجهيز must not be told to
    *  confirm a delivery that has not happened. */
   noActionHint?: string;
+  /** التجهيز only — the set's absent pieces, so the sheet can say what it is waiting on
+   *  before anyone bags a partial طقم (bug 8, part 4). Empty/omitted renders nothing. */
+  waitingPieces?: { productName: string; status: OrderStatus }[];
   onClose: () => void;
   onTickZone: (piece: StationPiece, zoneKey: string, done: boolean) => void;
   onComplete: (piece: StationPiece) => void;
@@ -53,6 +58,7 @@ export function StudentSheet({
   fromPath,
   footer,
   noActionHint = "لا يمكن إكمال هذه القطعة من هنا حالياً.",
+  waitingPieces,
   onClose,
   onTickZone,
   onComplete,
@@ -110,6 +116,25 @@ export function StudentSheet({
 
         {/* Pieces */}
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
+          {/* What the set is still waiting on (bug 8, part 4). Stated, not alarmed: at any
+              moment most sets have a piece upstream, and the preparer needs to know WHICH
+              piece and WHERE — not to be warned about the normal case. */}
+          {waitingPieces && waitingPieces.length > 0 && (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+              <p className="text-xs font-bold text-amber-900">لم تصل بعد للتجهيز</p>
+              <ul className="mt-1.5 space-y-0.5">
+                {waitingPieces.map((w, i) => (
+                  <li key={`${w.productName}-${i}`} className="text-xs text-amber-800">
+                    {w.productName} — {ORDER_STATUS_LABELS[w.status] ?? w.status}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1.5 text-[11px] text-amber-700">
+                لا تُغلّف الطقم قبل وصول باقي القطع.
+              </p>
+            </div>
+          )}
+
           {allDone && (
             <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-5 text-center">
               <p className="text-base font-bold text-emerald-700">أحسنت! اكتملت كل قطع هذا الطالب ✓</p>

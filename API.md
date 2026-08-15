@@ -52,6 +52,22 @@ Header: `Authorization: Bearer <jwt>`
 { "id": "uuid", "name": "...", "phone": "...", "email": "...", "role": "...", "phone_verified": true }
 ```
 
+### PATCH `/auth/me`
+Header: `Authorization: Bearer <jwt>`. Writes `students.gender` — the field `/auth/me` already
+returns but that, until now, nothing could set server-side (onboarding only ever wrote it to
+`localStorage`). Only succeeds for an account with a `students` row (retail); every other role
+gets 404.
+```json
+// req
+{ "gender": "male" }
+// res 200
+{ "data": { "gender": "male" } }
+// res 400 — missing/invalid value
+{ "error": "الجنس غير صالح", "code": "ERR_VALIDATION", "field": "gender" }
+// res 404 — no students row for this account
+{ "error": "لا يوجد ملف طالب مرتبط بهذا الحساب", "code": "ERR_NOT_FOUND" }
+```
+
 ### POST `/auth/verify-otp`
 Finishes **registration** only. Refuses (403) any account whose role isn't `retail`, so it
 can never hand back a privileged session.
@@ -240,6 +256,23 @@ Add a deduction transaction. Returns updated summary.
 { "data": { "user_id": "...", "base_salary": 500000, "balance": 525000, "transactions": [...] } }
 ```
 
+### GET `/admin/otp-gateway`
+Read-only status of the WhatsApp OTP sender device(s) — which one is currently active and
+whether one has been cooled down after a failed send (see `backend/lib/otp.js`'s failover
+design). Does not accept params; shape is owned by `lib/otp.js`'s `gatewayStatus()`.
+```json
+{
+  "data": {
+    "configured": 2,
+    "active": "abc123…",
+    "devices": [
+      { "device": "abc123…", "healthy": true, "cooled_until": null, "sent": 41, "failed": 0 },
+      { "device": "def456…", "healthy": true, "cooled_until": null, "sent": 0, "failed": 0 }
+    ]
+  }
+}
+```
+
 ### GET `/admin/staff/:id/activity`
 Returns up to 200 most recent activity log entries for the staff member.
 ```json
@@ -268,6 +301,42 @@ Staff member reads their own salary summary (same shape as admin endpoint above)
 
 ### GET `/payroll/me/activity`
 Staff member reads their own activity log (same shape as admin endpoint above).
+
+---
+
+## Staff (role=staff, `requireStaffType()`)
+
+### POST `/staff/counter-signup`
+A staff member creates a student's account in person at the shop counter, no WhatsApp OTP —
+the authenticated staff session is the authorisation (see `backend/controllers/counterSignupController.js`
+for the full rationale). `phone_confirm` is **required**: the staff member must type the phone
+twice and both must canonicalise to the same number (`7712345678` and `07712345678` match).
+This is the only guard against a mistyped phone silently creating the account on a stranger's
+number — a real risk here because `forgot-password-phone` later sends the reset OTP, the sole
+reset credential, to whoever owns that number. `phone_verified` stays `false`: the employee
+vouched for the person, not the phone.
+```json
+// req
+{
+  "name": "محمد علي حسين",
+  "phone": "07701234567",
+  "phone_confirm": "07701234567",
+  "password": "...",
+  "university_name": "جامعة ديالى",
+  "department": "هندسة",
+  "gender": "male",
+  "study_type": "morning",
+  "instagram_username": "optional"
+}
+// res 201
+{ "data": { "user_id": "uuid", "student_id": "uuid", "name": "...", "phone": "07701234567", "otp_required": false } }
+// res 400 — missing or mismatched confirm
+{ "error": "رقم الهاتف غير متطابق — يرجى التأكد من الرقم مع الطالب", "code": "ERR_PHONE_MISMATCH", "field": "phone_confirm" }
+// res 409 — phone already registered
+{ "error": "هذا الرقم مسجّل مسبقاً باسم «...» — سجّل دخوله بدل إنشاء حساب جديد", "code": "ERR_PHONE_TAKEN", "field": "phone", "student_id": "uuid|null" }
+```
+The resulting account then logs in via `POST /auth/login` with password alone — no OTP
+challenge — the same as a rep-linked student.
 
 ---
 
@@ -474,7 +543,7 @@ One submission → 3 linked orders (sash/robe/cap, shared `checkout_group_id`) +
   "event_date": "YYYY-MM-DD", "notes": ""
 }
 ```
-Validation: required option groups (via `priceSelections`), measurements 25–80 / 70–190 / 30–100 cm, phones `^07\d{9}$` (Arabic digits normalized), 18-governorate whitelist, `right_text` required. Pricing: package price + option deltas (sash order carries the package price; robe/cap their own deltas). Products resolved from `package_products`, falling back to first-active-by-type. Sash → `design_complete` (embroidery); robe/cap → `preparing` unless an option needs embroidery. Idempotent re-submission. → `201 { data: { checkout_group_id, total, items: [{type, order_id, price}], orders: {sash, robe, cap} } }`
+Validation: required option groups (via `priceSelections`), measurements 25–80 / 70–190 / 30–100 cm, phones `^07\d{9}$` (Arabic digits normalized), 18-governorate whitelist, `right_text` required. Pricing: package price + option deltas (sash order carries the package price; robe/cap their own deltas). Products resolved from `package_products`, falling back to first-active-by-type. Sash → `design_complete` (embroidery); robe/cap → `preparing` unless an option needs embroidery. Idempotent re-submission: rebuilds each piece's `order_items` in place (never loses a generator-produced `plate_image_url`, see `lib/platePreservation.js`) and only matches a live (non-cancelled) prior order, so a cancelled piece is never silently revived. → `201 { data: { checkout_group_id, total, items: [{type, order_id, price}], orders: {sash, robe, cap} } }`
 
 ### PATCH `/admin/checkout-groups/:id` (admin)
 Edit intake: `deposit` (واصل), `event_date`, phones, address, `customer_name`, `instagram_username`, `notes`. Audit-logged.

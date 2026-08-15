@@ -35,6 +35,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { matchesQueueSearch } from "@/lib/queue-search";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StudentSheet } from "@/components/staff/station/StudentSheet";
 import { isPieceOverdue, type AdvancedGhost, type StationPiece } from "@/components/staff/station/types";
@@ -43,7 +44,9 @@ import { getApiErrorMessage } from "@/lib/api";
 import { useProductionEvents } from "@/hooks/useProductionEvents";
 import { useScrollRestore } from "@/hooks/useScrollRestore";
 import { STUDY_TYPE_LABELS } from "@/lib/constants";
+import { toArabicDigits } from "@/lib/format";
 import type { ProductionQueueItem } from "@/lib/staff-types";
+import type { OrderStatus } from "@/lib/types";
 
 type View = "preparing" | "ready";
 type SourceFilter = "" | "retail" | "wholesaler";
@@ -84,6 +87,45 @@ interface StudentGroup {
   /** How many zone artworks this student's pieces carry — the "worth opening" signal. */
   photoCount: number;
   overdue: boolean;
+  /** The student's whole checkout set — see `summarizeSet` (bug 8, part 4). */
+  set: SetSummary;
+}
+
+/** Stages at which a piece is no longer awaited by التجهيز: it is here, or already gone. */
+const SET_ARRIVED = new Set<OrderStatus>(["preparing", "ready", "delivered"]);
+
+interface SetSummary {
+  /** Every distinct piece of every bundle this student has in view. */
+  total: number;
+  /** Pieces still upstream — the ones that make bagging this set premature. */
+  waiting: { productName: string; status: OrderStatus }[];
+}
+
+/**
+ * What is this student's SET, and is all of it here? (bug 8, part 4)
+ *
+ * The preparer bags a set, but the queue is one row per piece, so a set whose robe is still
+ * at التطريز is indistinguishable from a set of two. Bagging early is the expensive mistake:
+ * it surfaces at handover, in front of the student.
+ *
+ * ⚠️ Measured on the dev DB before this was built: 421 of 432 prep rows belong to a set with
+ * a piece still upstream. So «ناقص» as a WARNING would fire on 97% of the list and be
+ * trained away in a day. The rare, actionable state is the opposite one — a set that is
+ * complete and can be bagged now — so that is what gets the badge, and the absentees are
+ * listed quietly for the worker who wants to know what they are waiting on.
+ */
+function summarizeSet(pieces: StationPiece[]): SetSummary {
+  const seen = new Map<string, { productName: string; status: OrderStatus }>();
+  for (const p of pieces) {
+    // A piece bought alone has no bundle: it is its own complete set of one.
+    for (const s of p.setPieces ?? [{ id: p.id, status: "preparing" as OrderStatus, product_name: p.productName }]) {
+      seen.set(s.id, { productName: s.product_name, status: s.status });
+    }
+  }
+  return {
+    total: seen.size,
+    waiting: [...seen.values()].filter((s) => !SET_ARRIVED.has(s.status)),
+  };
 }
 
 /** جامعة · قسم · صباحي/مسائي — mirrors the station console's line, wholesaler students only. */
@@ -117,6 +159,7 @@ function queueToPiece(r: ProductionQueueItem): StationPiece {
     // rather than an assumption baked into the mapper.
     zones: r.zones ?? null,
     spec: r.spec ?? null,
+    setPieces: r.set_pieces ?? null,
     measurements: r.measurements ?? null,
     // Never derived client-side — the backend grants the advance on the queue row.
     canComplete: r.can_advance === true,
@@ -200,12 +243,14 @@ export function PrepConsole({ showSourceFilter }: { showSourceFilter: boolean })
     });
 
   const pieces = useMemo(() => {
-    const q = search.trim().toLowerCase();
     return rows
       .filter((r) => r.status === view)
       .filter((r) => !sourceFilter || r.source === sourceFilter)
       .filter((r) => !repFilter || r.wholesaler_name === repFilter)
-      .filter((r) => !q || (r.student_name ?? "").toLowerCase().includes(q))
+      // Was student_name alone. The preparer is holding the garment, so the words stitched
+      // ON it are the fastest handle they have — and the university/department/rep were
+      // searchable on /staff/queue but not here. One shared matcher, one behaviour.
+      .filter((r) => matchesQueueSearch(r, search))
       .map(queueToPiece);
   }, [rows, view, search, sourceFilter, repFilter]);
 
@@ -234,6 +279,7 @@ export function PrepConsole({ showSourceFilter }: { showSourceFilter: boolean })
           pieces: [],
           photoCount: 0,
           overdue: false,
+          set: { total: 0, waiting: [] },
         };
         m.set(key, g);
       }
@@ -241,7 +287,9 @@ export function PrepConsole({ showSourceFilter }: { showSourceFilter: boolean })
       g.photoCount += (p.zones ?? []).filter((z) => z.image_url).length;
       if (isPieceOverdue(p.deadline)) g.overdue = true;
     }
-    return [...m.values()];
+    const built = [...m.values()];
+    for (const g of built) g.set = summarizeSet(g.pieces);
+    return built;
   }, [pieces]);
 
   const pieceCount = pieces.length;
@@ -360,11 +408,11 @@ export function PrepConsole({ showSourceFilter }: { showSourceFilter: boolean })
       <div className="surface-card space-y-3 rounded-2xl p-3.5">
         <Input
           type="search"
-          placeholder="بحث باسم الطالب…"
+          placeholder="بحث بالاسم أو الجامعة أو التطريز…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="w-full"
-          aria-label="بحث باسم الطالب"
+          aria-label="بحث بالاسم أو الجامعة أو التطريز"
         />
         {showSourceFilter && (
           <div className="flex gap-2">
@@ -445,6 +493,19 @@ export function PrepConsole({ showSourceFilter }: { showSourceFilter: boolean })
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
+                  {/* The set (bug 8, part 4). «مكتمل» is the rare state and the one that
+                      authorises bagging, so it is the one that gets colour; a set still
+                      missing pieces just states the fraction. */}
+                  {g.set.total > 1 &&
+                    (g.set.waiting.length === 0 ? (
+                      <span className="rounded-full bg-green-600/10 px-2 py-0.5 text-[10px] font-bold text-green-700">
+                        الطقم مكتمل
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-ink/5 px-2 py-0.5 text-[10px] font-semibold tabular-nums text-ink-soft">
+                        {toArabicDigits(g.set.total - g.set.waiting.length)} من {toArabicDigits(g.set.total)}
+                      </span>
+                    ))}
                   {g.overdue && (
                     <span className="rounded-full bg-[var(--color-danger)]/10 px-2 py-0.5 text-[10px] font-bold text-[var(--color-danger)]">
                       متأخر
@@ -477,6 +538,7 @@ export function PrepConsole({ showSourceFilter }: { showSourceFilter: boolean })
           noActionHint={
             view === "ready" ? "أكّد التسليم من «التفاصيل»." : undefined
           }
+          waitingPieces={openGroup?.set.waiting}
           onClose={() => setOpenStudentKey(null)}
           // التجهيز zones are read-only, so this is never reached — the sheet renders no
           // tick targets for kind="preparing".

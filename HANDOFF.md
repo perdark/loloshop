@@ -21,7 +21,7 @@ browser this session. Store/push rows below were last verified 2026-08-10 and ar
 | | |
 |---|---|
 | `origin/main` | `6b62738` — **Tracks A, B and C all merged and DEPLOYED**; prod confirmed at this SHA over SSH |
-| Eleven-bug tracks | **C shipped** (2, 3) · **A shipped** (9, 10, 11) · **B shipped** (4, 5, 6) · **bugs 1, 7, 8 NOT started** |
+| Eleven-bug tracks | **ALL ELEVEN CLOSED IN CODE.** Deployed: 2·3 (C) · 9·10·11 (A) · 4·5·6 (B) · **7** · **8 part 1**. On `fix/admin-presence-panel`, **unmerged**: **bug 1** + **bug 8 parts 2·3·4**. *(This row said «1, 7, 8 NOT started» until 2026-08-15; 7 and 8-part-1 shipped on 2026-08-14.)* |
 | Migration 077 | ✅ applied to prod AND the dev DB — 3,311 prod rows retired to `skipped` |
 | Migration 080 | ✅ **applied to prod 2026-08-14** — 459 plates moved to their own column, **0** left in `customer_image_url`, 1,885 student photos intact |
 | Migration 078 | ⚠️ **applied to the DEV DB only** — the AI assistant's `ai_chat_messages`. It is in `db/schema.sql` too, so the next prod `npm run migrate` creates it. **Run it in the same deploy as the code:** until the table exists the cap check throws and both assistant endpoints 500 (the rest of the site is unaffected — nothing else reads that table). |
@@ -29,7 +29,7 @@ browser this session. Store/push rows below were last verified 2026-08-10 and ar
 | iOS | **1.0.4 (build 1786309948) SUBMITTED — «Waiting for Review»** (2026-08-10, ≤48h) |
 | Android push | ✅ working end to end |
 | iOS push | ✅ **APNs key installed and verified against Apple** — `push.configured()` → `{"android":true,"ios":true}` |
-| Backend tests | **228/228 pass** on merged `main` (185 baseline + 11 Track C + 15 Track A + 12 Track B + 5 verification) |
+| Backend tests | **266/266 on `main`** · **275/275 on `fix/admin-presence-panel`** (9 new). ⚠️ Run from `backend/`, `node --test test/` — from the repo root dotenv misses `.env` and 147 fail for nothing. |
 | Prod DB backup | ✅ `~/Desktop/_private/loloshop-db/loloshop-prod-2026-08-14.dump` — restore-tested, row counts match live |
 
 **Both platforms are now on the same version (1.0.4) carrying the same three features.**
@@ -161,12 +161,25 @@ press the button repeatedly. It costs letter height, not data, and converges rat
 away. **Not fixable without a new column**: `plate_path` is overwritten and `sheet_path` is the
 whole 10-name sheet, whose geometry is not the band's. Needs migration 081.
 
-⚠️ **Same shape, unclosed:** `orderController.configureOrder` (`:630`) and `configureFullSet`
-(`:1140`) DELETE and re-INSERT `order_items` with no status guard and never carry
-`plate_image_url` — the identical defect that was destroying plates via `persistFullSetOrder`. A
-review panel refuted these on *reachability* (`orderController.js:727` 403s rep-linked students,
-and plates live overwhelmingly on rep orders), which is an argument about who can reach the path,
-not about the path being safe. Close them the way `lib/fullSetOrder.js` was closed.
+✅ **CLOSED — `orderController.configureOrder` / `configureFullSet` no longer share this shape.**
+This entry described two stacked defects and both are now fixed:
+· The plate-loss half (DELETE + re-INSERT `order_items` never carrying `plate_image_url`) was
+  closed 2026-08-14 on commit `465b2ef`, deployed the same day (see the 2026-08-14 (d) PROGRESS
+  entry) — `lib/platePreservation.js` (`capturePlates`/`plateFor`) applies the same pattern
+  `lib/fullSetOrder.js` uses, and `plateSurvivesReconfigure.test.js` guards it structurally so a
+  future rebuild path can't reintroduce it silently. This HANDOFF entry was not updated when that
+  commit landed — it stayed stale for a day; if you find this warning quoted anywhere else, it is
+  equally stale.
+· The status-guard half was real and separate: `configurePackage`/`configureFullSet` already
+  filtered their "find the existing order" query with `AND status <> 'cancelled'` (matching
+  `uq_orders_student_product_nodesign`'s own partial-index definition), but `configureOrder`'s
+  equivalent query had no such filter and no `ORDER BY`/`LIMIT` — a cancelled order for the same
+  product could be the only match and get silently revived instead of a fresh order being created.
+  Fixed on `fix/plate-loss-guard` (branched 2026-08-15): added the identical `status <>
+  'cancelled'` guard to both branches of `configureOrder`'s existing-order lookup. Covered by
+  `test/orderControllerPlateAndStatusGuard.test.js`, which drives the real `configureOrder` /
+  `configureFullSet` functions against the DB (plate + customer-photo survival, plus a red/green
+  check that reverting the guard resurrects a cancelled order).
 
 ---
 
@@ -189,8 +202,8 @@ is what a session can still pick up without a phone or a store console.
   dompurify chain out of the `npm audit` deploy gate.
 - **Wire gender to the DB** — `students.gender` exists, onboarding only writes localStorage.
   Wiring, not a migration.
-- **Unit vocabulary pass 2** — rep + staff screens still say «طلب» for pieces.
 - **The «لبسوا تصاميمنا» caption** — a one-string change in `CohortProof.tsx`.
+  *(Dropped 2026-08-15: «Unit vocabulary pass 2» — bug 7 closed it on 2026-08-14.)*
 
 **2. Then: make the app phone-test-ready.** The remaining gates are a real device and the store
 consoles — neither can be done from a cloud sandbox.
@@ -467,8 +480,10 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   onboarding writes only to `localStorage` via `frontend/lib/profile.ts` — and `users` has no
   gender column at all. So a signed-in student gets the neutral register until they set it in
   «تفضيلاتي». The fix is **wiring, not a migration**.
-- **Unit vocabulary pass 2 is not done** — rep + staff screens still say «طلب» for pieces, so
-  `/admin` and `/staff/queue` disagree about the same rep (40 vs 118).
+- ~~**Unit vocabulary pass 2 is not done**~~ — **CLOSED 2026-08-14 (d) by bug 7**, both halves:
+  seven staff/rep labels stopped printing a PIECE count under «طلب», and `/admin/orders` now
+  flips the noun with the view mode. Two labels were deliberately left as «طلب» because they
+  really are bundles. The «40 vs 118» disagreement this line described is gone.
 - **`backend/` has no `npm test`** — verified in `backend/package.json`. The real command is
   **`node --test test/`**, and it **must be run from `backend/`** (246 tests on `main`).
   ⚠️ Run it from the repo root as `node --test backend/test/` and dotenv cannot find `.env`, so
@@ -511,6 +526,16 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   code defects were real; the urgency was not. The one that mattered is the accrual — it re-offers
   the full salary on every press and had not fired only because `manual_payouts` has 0 rows.
 
+- **⚠️ `fix/admin-presence-panel` IS READY AND UNMERGED — 2026-08-15.** Closes the last two
+  open bugs (**1**, and **8 parts 2·3·4**), so the eleven-bug board is finished in code.
+  Off `main`, no migration, no new dependency, 275/275 backend tests, `next build` clean.
+  ⚠️ **Every push to `main` auto-deploys, and this has NOT been opened in a browser** —
+  Chrome was not running on the laptop when it was written. Three UI surfaces need one pass
+  before merging: the «يعمل الآن» panel on `/admin`, «السابق»/«التالي» at the ENDS of a queue
+  list, and المجهز's set panel at phone width. Everything else is verified live against the
+  dev DB — see the 2026-08-15 PROGRESS entry for the evidence and the measurements.
+  · New endpoint `GET /production/presence` (same `requireStaffType()` guard as `/monitor`).
+  · New row fields `search_text` (+8.8% payload) and `set_pieces` (+8.9%, station mode only).
 - ✅ **ALL FOUR MONEY BRANCHES ARE MERGED AND DEPLOYED — 2026-08-14 (d), prod at `fde0cce`.**
   Three deploys, DB backed up first. Bug 7 is closed on both halves. Bug 8 shipped **part 1
   only** (garment-level chips for المجهز); parts 2-4 were never written — see the PROGRESS

@@ -410,6 +410,20 @@ async function getQueue(req, res) {
                            OR oi2.customer_image_url IS NOT NULL)) AS has_design_images,
             u.name AS student_name, s.university_name, s.department, s.study_type,
             p.name_ar AS product_name, p.type AS product_type,
+            -- Every word the STUDENT typed on this piece, flattened to one string for the
+            -- console's search box (bug 8). The headline case is the التطريز text — a preparer
+            -- holding a sash searches for what is WRITTEN on it, and the console cannot search
+            -- text it was never sent — but customer_text also carries free-text option answers
+            -- (colour, cap type), so this is deliberately «everything the student wrote», not
+            -- «the embroidery zones». Hence the plain name: it is a search index, not a field
+            -- to display. Not the zones array, which is station-mode only, carries image URLs
+            -- and per-zone progress, and is ~20× the bytes of the words themselves.
+            -- Measured on the dev DB: +121 KB across a 1,447-row manager queue (+8.8%).
+            (SELECT string_agg(DISTINCT oi3.customer_text, ' ')
+               FROM order_items oi3
+              WHERE oi3.order_id = o.id
+                AND oi3.customer_text IS NOT NULL
+                AND oi3.customer_text <> '') AS search_text,
             -- Robe tailoring measurements, for التجهيز only. Gated in SQL rather than sent
             -- to every station: the prep queue is ~480 rows and this JSON rides on each of
             -- them, which is dead weight on a workshop-wifi station that cannot use it.
@@ -481,19 +495,52 @@ async function getQueue(req, res) {
     const SPEC_STAGES = new Set(['preparing', 'ready']);
     const zoneIds = rows.filter((r) => ZONE_STAGES.has(r.status)).map((r) => r.id);
     const specIds = rows.filter((r) => SPEC_STAGES.has(r.status)).map((r) => r.id);
-    const [zonesById, specById] = await Promise.all([
+    // Bug 8 part 4 — «القطع الناقصة». The preparer bags a SET (وشاح + قبعة + روب), but the
+    // queue is one row per piece, so a set whose robe is still at التطريز looks exactly like
+    // a set of two. Bagging it early is the expensive mistake: it is found at handover, in
+    // front of the student. checkout_group_id already groups the bundle — this reads the
+    // whole group so the console can say which piece has not arrived yet, and where it is.
+    // Scoped to التجهيز's own stages: no other station packs a set.
+    const setGroupIds = [
+      ...new Set(
+        rows.filter((r) => SPEC_STAGES.has(r.status) && r.checkout_group_id).map((r) => r.checkout_group_id)
+      ),
+    ];
+    const [zonesById, specById, setPieces] = await Promise.all([
       detectZonesForOrders(
         zoneIds,
         new Map(rows.map((r) => [r.id, r.embroidery_zones || {}]))
       ),
       detectSpecForOrders(specIds),
+      setGroupIds.length
+        ? query(
+            `SELECT o.id, o.checkout_group_id, o.status, p.name_ar AS product_name
+               FROM orders o
+               JOIN products p ON p.id = o.product_id
+              WHERE o.checkout_group_id = ANY($1)
+                AND o.status::text <> 'cancelled'
+                AND o.returned_to_customer = FALSE
+              ORDER BY p.name_ar`,
+            [setGroupIds]
+          ).then((r) => r.rows)
+        : Promise.resolve([]),
     ]);
+    const setByGroup = new Map();
+    for (const piece of setPieces) {
+      const list = setByGroup.get(piece.checkout_group_id) || [];
+      list.push({ id: piece.id, status: piece.status, product_name: piece.product_name });
+      setByGroup.set(piece.checkout_group_id, list);
+    }
     for (const r of rows) {
       if (ZONE_STAGES.has(r.status)) {
         r.zones = zonesById.get(r.id) || [];
       }
       if (SPEC_STAGES.has(r.status)) {
         r.spec = specById.get(r.id) || [];
+        // The WHOLE bundle, this piece included — the console needs the denominator
+        // («٢ من ٣ قطع») as much as it needs the absentees. A piece with no
+        // checkout_group_id was bought alone and is a complete set of one.
+        if (r.checkout_group_id) r.set_pieces = setByGroup.get(r.checkout_group_id) || [];
       }
       if (r.status === 'pressing' || r.status === 'preparing') {
         const next = nextStageFor({
@@ -1571,9 +1618,52 @@ async function tailorSummary(req, res) {
   res.json({ data: { pending: r.pending, done: r.done, total: r.total } });
 }
 
+// ---------- «يعمل الآن» — who is on what, right now ----------
+// ONE definition, shared by monitor() (the manager console) and presence() (the admin
+// dashboard). They used to be the same query only by accident; two readers of the same
+// question must not be able to drift apart about what "working" means.
+//
+// The 30-minute window is the definition of "now": `working_staff_id` is cleared on
+// release, but a staff member who claims an order and walks away would otherwise sit in
+// the list forever. Rows are ORDERed newest-claim-first so the panel reads as a feed.
+async function workingNow(sourceFilter) {
+  const sc = sourceClause(sourceFilter);
+  const { rows } = await query(
+    `SELECT o.id, o.status,
+            u.name AS student_name,
+            p.name_ar AS product_name,
+            wk.name AS working_staff_name,
+            o.working_since
+     FROM orders o
+     JOIN students s ON s.id = o.student_id
+     JOIN users u ON u.id = s.user_id
+     JOIN products p ON p.id = o.product_id
+     JOIN users wk ON wk.id = o.working_staff_id
+     WHERE o.working_staff_id IS NOT NULL
+       AND o.working_since > NOW() - INTERVAL '30 minutes'
+       ${sc}
+     ORDER BY o.working_since DESC`
+  );
+  return rows;
+}
+
+/**
+ * GET /production/presence — «يعمل الآن» on its own.
+ *
+ * Same guard, same rows and the same source resolution as monitor(), but ONE query
+ * instead of five. The admin dashboard polls this every 30s AND on every production
+ * event, and monitor()'s 30-day audit_log aggregation has no business running at that
+ * rate just so the dashboard can print four names.
+ */
+async function presence(req, res) {
+  const working = await workingNow(resolveSourceFilter(req.user, req.query.source));
+  res.json({ data: { working } });
+}
+
 // ---------- Manager / admin: staff performance + pipeline health ----------
 async function monitor(req, res) {
-  const sc = sourceClause(resolveSourceFilter(req.user, req.query.source));
+  const sourceFilter = resolveSourceFilter(req.user, req.query.source);
+  const sc = sourceClause(sourceFilter);
   const wip = await query(
     `SELECT o.status AS status, COUNT(*)::int AS count
      FROM orders o JOIN students s ON s.id = o.student_id
@@ -1612,23 +1702,8 @@ async function monitor(req, res) {
      WHERE o.status IN ('design_complete', 'converting', 'embroidery', 'pressing', 'preparing') ${sc}
      ORDER BY o.updated_at ASC LIMIT 20`
   );
-  // Currently claimed orders (within last 30 min)
-  const working = await query(
-    `SELECT o.id, o.status,
-            u.name AS student_name,
-            p.name_ar AS product_name,
-            wk.name AS working_staff_name,
-            o.working_since
-     FROM orders o
-     JOIN students s ON s.id = o.student_id
-     JOIN users u ON u.id = s.user_id
-     JOIN products p ON p.id = o.product_id
-     JOIN users wk ON wk.id = o.working_staff_id
-     WHERE o.working_staff_id IS NOT NULL
-       AND o.working_since > NOW() - INTERVAL '30 minutes'
-       ${sc}
-     ORDER BY o.working_since DESC`
-  );
+  // Currently claimed orders (within last 30 min) — shared with GET /production/presence.
+  const working = await workingNow(sourceFilter);
   const byStage = {};
   wip.rows.forEach((r) => (byStage[r.status] = r.count));
   res.json({
@@ -1637,7 +1712,7 @@ async function monitor(req, res) {
       throughput: throughput.rows,
       overdue: overdue.rows,
       stale: stale.rows,
-      working: working.rows,
+      working,
     },
   });
 }
@@ -1713,7 +1788,7 @@ async function deleteOrder(req, res) {
 }
 
 module.exports = {
-  getQueue, getOrder, advance, advanceBulk, deliver, revert, returnToCustomer, claim, release, completed, uploadFinalDesign, monitor,
+  getQueue, getOrder, advance, advanceBulk, deliver, revert, returnToCustomer, claim, release, completed, uploadFinalDesign, monitor, presence,
   issueEventsTicket, streamEvents, nextStageFor, markEmbroideryZone, markEmbroideryZoneBulk,
   tailorQueue, tailorComplete, tailorReopen, tailorCompleteBulk, tailorSummary,
   deleteOrder,

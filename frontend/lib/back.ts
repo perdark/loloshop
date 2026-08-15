@@ -24,6 +24,8 @@ export function backHrefFromParam(
  */
 function orderBackLabel(path: string): string {
   if (path.startsWith("/admin/orders")) return "العودة للطلبات";
+  // The dashboard's «يعمل الآن» panel opens order pages with ?from=/admin.
+  if (path === "/admin") return "العودة للوحة التحكم";
   if (path.startsWith("/staff/queue")) return "العودة للطلبات";
   if (path.startsWith("/staff/tailor")) return "العودة للفصال";
   if (path.startsWith("/staff/wholesalers")) return "العودة للممثل";

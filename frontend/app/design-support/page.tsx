@@ -160,7 +160,6 @@ function SpecPhoto({ url, alt }: { url: string; alt: string }) {
         alt={alt}
         width={96}
         height={96}
-        unoptimized
         className="h-24 w-24 rounded-xl border border-line object-cover"
       />
     </a>
@@ -319,7 +318,6 @@ function JobDetail({
                 alt="التصميم النهائي"
                 width={480}
                 height={320}
-                unoptimized
                 className="max-h-64 w-full rounded-xl border border-line object-contain"
               />
             </a>
