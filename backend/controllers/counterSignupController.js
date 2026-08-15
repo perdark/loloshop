@@ -32,7 +32,7 @@
 
 const bcrypt = require('bcrypt');
 const { query, tx } = require('../lib/db');
-const { isValidIqMobile } = require('../lib/otp');
+const { isValidIqMobile, normalizeIqPhone } = require('../lib/otp');
 const { assertPasswordOk } = require('../lib/password');
 
 const SALT_ROUNDS = 10;
@@ -62,6 +62,23 @@ async function counterSignup(req, res) {
   if (!phone) return badField(res, 'phone', 'رقم الهاتف مطلوب');
   if (!isValidIqMobile(phone)) {
     return badField(res, 'phone', 'رقم هاتف غير صحيح — يجب أن يبدأ بـ 07 ويتكوّن من 11 رقماً', 'ERR_INVALID_PHONE');
+  }
+  // SECURITY — phone double-entry. Nothing else here checks that the number typed is the
+  // number the student in front of the counter actually owns: `normalizePhoneBody` only
+  // canonicalises whatever was typed, it doesn't verify it. OTP registration can't produce
+  // this failure — a mistyped number simply never receives the code, so the mistake is
+  // visible immediately. Counter signup skips the OTP entirely, so a typo here silently
+  // succeeds onto a STRANGER's phone number, and `forgot-password-phone` later sends the
+  // reset OTP — the sole reset credential for this account — to whoever actually owns that
+  // number: an account-takeover path with no other guard in this flow. Require the staff
+  // member to type the phone a second time and compare, canonicalising phone_confirm the
+  // SAME way normalizePhoneBody canonicalised phone (so '7712345678' matches '07712345678').
+  const phoneConfirmRaw = trimmed(b.phone_confirm);
+  if (!phoneConfirmRaw) {
+    return badField(res, 'phone_confirm', 'يرجى إدخال رقم الهاتف مرة أخرى للتأكيد', 'ERR_PHONE_MISMATCH');
+  }
+  if (normalizeIqPhone(phoneConfirmRaw) !== phone) {
+    return badField(res, 'phone_confirm', 'رقم الهاتف غير متطابق — يرجى التأكد من الرقم مع الطالب', 'ERR_PHONE_MISMATCH');
   }
   if (!password) return badField(res, 'password', 'كلمة المرور مطلوبة');
   // Same policy as self-signup. The account is the student's to keep — a staff member

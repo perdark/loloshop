@@ -346,6 +346,29 @@ async function me(req, res) {
   res.json(req.user);
 }
 
+// PATCH /auth/me — the write side of the field `me` already reads. `students.gender` has
+// existed in the schema since the start, but onboarding only ever wrote it to localStorage
+// (see HANDOFF's "Gender never reaches the DB"), so a signed-in student on a second device
+// never sees their own choice. This is wiring, not a new model: only students.gender moves.
+async function updateMe(req, res) {
+  const { gender } = req.body || {};
+  if (gender !== 'male' && gender !== 'female') {
+    return badField(res, 'gender', 'الجنس غير صالح');
+  }
+  // Scoped by req.user.id (the DB-backed identity from authRequired, never a client claim),
+  // and by definition only ever matches a row for a retail account — students is populated
+  // exclusively by registration and counter signup, both role='retail'. Any other role
+  // (admin/staff/wholesaler) has no students row and falls through to 404 below.
+  const { rows } = await query(
+    `UPDATE students SET gender = $1::gender WHERE user_id = $2 RETURNING gender`,
+    [gender, req.user.id]
+  );
+  if (!rows.length) {
+    return res.status(404).json({ error: 'لا يوجد ملف طالب مرتبط بهذا الحساب', code: 'ERR_NOT_FOUND' });
+  }
+  res.json({ data: { gender: rows[0].gender } });
+}
+
 async function postVerifyOtp(req, res) {
   const { challenge_id, code } = req.body;
   if (!challenge_id || !code) {
@@ -458,4 +481,4 @@ async function resetPasswordPhone(req, res) {
 // nodemailer dependency (2 of the audit's high-severity advisories) for nothing. Phone-OTP
 // reset covers retail + wholesaler; privileged accounts are reset by an admin, or on the
 // server with `npm run set-password`.
-module.exports = { register, login, loginVerifyOtp, me, postVerifyOtp, resendOtp, forgotPasswordPhone, resetPasswordPhone, staffPortalMembers, staffPortalLogin };
+module.exports = { register, login, loginVerifyOtp, me, updateMe, postVerifyOtp, resendOtp, forgotPasswordPhone, resetPasswordPhone, staffPortalMembers, staffPortalLogin };

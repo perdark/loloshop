@@ -45,6 +45,7 @@ router.post('/register', otpLimit, c.register);
 router.post('/login', loginLimit, accountLoginLimit, c.login);
 router.post('/login-verify', verifyLimit, c.loginVerifyOtp);
 router.get('/me', authRequired, c.me);
+router.patch('/me', authRequired, c.updateMe);
 router.post('/verify-otp', verifyLimit, c.postVerifyOtp);
 router.post('/resend-otp', otpLimit, c.resendOtp);
 router.post('/forgot-password-phone', otpLimit, c.forgotPasswordPhone);

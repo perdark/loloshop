@@ -63,7 +63,7 @@ async function makeStaff() {
 }
 
 function validBody(overrides = {}) {
-  return {
+  const base = {
     name: `${TAG} طالب`,
     phone: freshPhone(),
     password: PASSWORD,
@@ -71,6 +71,11 @@ function validBody(overrides = {}) {
     department: 'هندسة',
     ...overrides,
   };
+  // Default phone_confirm to match phone (including a caller-supplied phone override) so every
+  // pre-existing test — none of which cares about the confirm field — keeps passing unchanged.
+  // Tests that DO care pass phone_confirm explicitly and win over this default.
+  if (base.phone_confirm === undefined) base.phone_confirm = base.phone;
+  return base;
 }
 
 let STAFF_ID;
@@ -207,4 +212,39 @@ test('an invalid gender or study_type is refused rather than coerced', async () 
     assert.strictEqual(res.statusCode, 400, `${field} must be validated`);
     assert.strictEqual(res.body.field, field);
   }
+});
+
+// ── 4. Phone double-entry — the account-takeover guard ──────────────────────────
+//
+// A typo'd phone here silently creates the account on a stranger's number, and
+// `forgot-password-phone` later sends the reset OTP — the SOLE reset credential — to
+// whoever owns it. OTP registration cannot produce this (a mistyped number never receives
+// a code); counter signup skips the OTP entirely, so this is its only guard.
+
+test('missing phone_confirm is refused', async () => {
+  const body = validBody();
+  delete body.phone_confirm;
+  const res = mockRes();
+  await counter.counterSignup(staffReq(body, STAFF_ID), res);
+  assert.strictEqual(res.statusCode, 400);
+  assert.strictEqual(res.body.code, 'ERR_PHONE_MISMATCH');
+  assert.strictEqual(res.body.field, 'phone_confirm');
+});
+
+test('a mismatched phone_confirm is refused', async () => {
+  const body = validBody({ phone_confirm: freshPhone() });
+  const res = mockRes();
+  await counter.counterSignup(staffReq(body, STAFF_ID), res);
+  assert.strictEqual(res.statusCode, 400);
+  assert.strictEqual(res.body.code, 'ERR_PHONE_MISMATCH');
+  assert.strictEqual(res.body.field, 'phone_confirm');
+});
+
+test('phone_confirm typed without the leading zero still matches (same canonicalisation as phone)', async () => {
+  const phone = freshPhone(); // canonical 07XXXXXXXXX
+  const body = validBody({ phone, phone_confirm: phone.slice(1) }); // '7XXXXXXXXX'
+  const res = mockRes();
+  await counter.counterSignup(staffReq(body, STAFF_ID), res);
+  assert.strictEqual(res.statusCode, 201, JSON.stringify(res.body));
+  created.push(res.body.data.user_id);
 });

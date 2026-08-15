@@ -9,6 +9,7 @@ const attendanceBreaks = require('../controllers/attendanceBreakController');
 const customOrders = require('../controllers/adminCustomOrderController');
 const payouts = require('../controllers/payoutController');
 const { imageUpload, imageUploadLimit, validateUploadedImage } = require('../lib/upload');
+const { gatewayStatus } = require('../lib/otp');
 
 router.use(authRequired, requireRole('admin'));
 
@@ -93,5 +94,10 @@ router.post('/orders/:checkoutGroupId/reject', c.rejectOrderAdmin);
 
 // Dashboard pending-approval count (T7).
 router.get('/orders-pending-count', c.pendingApprovalCount);
+
+// WhatsApp OTP sender-device status (which device is active, has one been cooled down after
+// a ban) — read-only, admin-only, so an outage is visible from the dashboard instead of only
+// from `pm2 logs` on the box. Does not change lib/otp.js's return shape — see its own comment.
+router.get('/otp-gateway', (req, res) => res.json({ data: gatewayStatus() }));
 
 module.exports = router;

@@ -335,7 +335,16 @@ function configuredDevices() {
 // Health is per device uuid and lives for the life of the process. `cooledUntil` is only
 // ever set when ANOTHER device succeeded with the same message — see sendViaZentramsg.
 const deviceHealth = new Map();
-const DEVICE_COOLDOWN_MS = 12 * 60 * 60 * 1000;
+// Env-tunable per the spec rule (see routes/auth.js's envInt): every new limit must be
+// changeable with `pm2 restart loloshop-api --update-env` alone, no deploy, so the owner can
+// shorten/lengthen the cooldown live during a gateway ban without a developer. Guarded against
+// NaN/≤0 so a typo'd env value can't zero out the cooldown — that would let a proven-banned
+// device be retried on literally the next send instead of staying parked for the window.
+function envIntMs(key, fallback) {
+  const n = parseInt(process.env[key] || '', 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+const DEVICE_COOLDOWN_MS = envIntMs('OTP_DEVICE_COOLDOWN_MS', 12 * 60 * 60 * 1000);
 let activeDevice = null;
 
 function healthOf(uuid) {
