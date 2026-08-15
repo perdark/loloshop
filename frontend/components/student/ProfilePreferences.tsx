@@ -3,6 +3,9 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { copyFor } from "@/lib/copy-ar";
+import { getApiErrorMessage } from "@/lib/api";
+import { getToken } from "@/lib/auth";
+import { fetchMe, updateMyGender } from "@/lib/auth-api";
 import { getProfile, saveProfile, type Gender } from "@/lib/profile";
 import { GraduateFemaleIcon, GraduateMaleIcon } from "./GraduateIcons";
 import { GenderRow } from "./Onboarding";
@@ -45,6 +48,24 @@ export function ProfilePreferences() {
     // Unanswered → open the picker; answered → show it settled.
     setEditingGender(p.gender === null);
     setLoaded(true);
+
+    // Signed-in students: the DB is the source of truth across devices — a phone that
+    // never ran onboarding on THIS device otherwise stays stuck asking a question the
+    // account already answered. Fold the server's answer into the local copy once on
+    // load; best-effort, and the local value above stays authoritative on failure.
+    if (!getToken()) return;
+    fetchMe()
+      .then((user) => {
+        const dbGender = user.student?.gender;
+        if (dbGender === "male" || dbGender === "female") {
+          setGender(dbGender);
+          setEditingGender(false);
+          saveProfile({ gender: dbGender, seen: true });
+        }
+      })
+      .catch(() => {
+        // Offline / expired session — nothing to reconcile with, keep the local answer.
+      });
   }, []);
 
   if (!loaded) return null;
@@ -54,6 +75,15 @@ export function ProfilePreferences() {
     setDirty(false);
     setEditingGender(gender === null);
     toast.success("تم الحفظ");
+
+    // Mirror to the account so a second device sees the same answer instead of asking
+    // again. Fire-and-forget: localStorage above already IS this device's source of
+    // truth, so a failed sync is surfaced but never blocks the save that just happened.
+    if (gender && getToken()) {
+      updateMyGender(gender).catch((err) => {
+        toast.error(getApiErrorMessage(err, "تعذر مزامنة الجنس مع حسابك"));
+      });
+    }
   }
 
   const genderLabel = gender === "female" ? "طالبة" : gender === "male" ? "طالب" : null;

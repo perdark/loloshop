@@ -92,6 +92,21 @@ export async function fetchMe(): Promise<User> {
   }
 }
 
+// PATCH /auth/me { gender } — the DB write side of the gender question, which used to live
+// in localStorage only (see lib/profile.ts's header note on why that existed at all, and
+// components/student/ProfilePreferences.tsx for where this is called). Retail accounts only;
+// the backend 404s any role with no `students` row.
+export async function updateMyGender(gender: "male" | "female"): Promise<"male" | "female"> {
+  try {
+    const { data } = await api.patch<{ data: { gender: "male" | "female" } }>("/auth/me", {
+      gender,
+    });
+    return data.data.gender;
+  } catch (e) {
+    throw new Error(extractMessage(e, "تعذر حفظ الجنس"));
+  }
+}
+
 // Phone-based reset: send a WhatsApp OTP, then reset with the challenge + code + new
 // password. An id comes back even for an unregistered number (a decoy that matches no
 // row), so the response can't be used to test whether a phone has an account.

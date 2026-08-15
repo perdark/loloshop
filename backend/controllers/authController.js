@@ -146,6 +146,7 @@ async function login(req, res) {
     `SELECT u.id, u.name, u.phone, u.email, u.role, u.password_hash, u.phone_verified,
             u.token_version,
             (s.wholesaler_id IS NOT NULL) AS is_wholesaler_student,
+            (u.created_by_user_id IS NOT NULL) AS vouched_at_counter,
             s.status AS student_status
      FROM users u
      LEFT JOIN students s ON s.user_id = u.id
@@ -166,7 +167,16 @@ async function login(req, res) {
   // the rep's referral link and were approved by the rep, so the phone-ownership check
   // an OTP provides is redundant here. (Self-registered retail still OTPs — see register.)
   // Checked before the trusted-device branch so it covers first-ever logins too.
-  if (user.role === 'retail' && user.is_wholesaler_student) {
+  //
+  // `vouched_at_counter` (migration 081) joins them on the SAME reasoning: an employee
+  // created that account with the student standing in front of them, which is at least as
+  // strong an identity check as a rep approving one remotely. Without this the counter
+  // signup would only MOVE the OTP from signup to first login and save nothing.
+  //
+  // ⚠️ Both flags mean "a person we can name vouched for this account" — NOT "the phone was
+  // proven". That is why neither branch sets phone_verified: only an OTP-backed login earns
+  // it, and these accounts honestly never had one.
+  if (user.role === 'retail' && (user.is_wholesaler_student || user.vouched_at_counter)) {
     const token = signToken(user);
     return res.json({
       token,
@@ -336,6 +346,29 @@ async function me(req, res) {
   res.json(req.user);
 }
 
+// PATCH /auth/me — the write side of the field `me` already reads. `students.gender` has
+// existed in the schema since the start, but onboarding only ever wrote it to localStorage
+// (see HANDOFF's "Gender never reaches the DB"), so a signed-in student on a second device
+// never sees their own choice. This is wiring, not a new model: only students.gender moves.
+async function updateMe(req, res) {
+  const { gender } = req.body || {};
+  if (gender !== 'male' && gender !== 'female') {
+    return badField(res, 'gender', 'الجنس غير صالح');
+  }
+  // Scoped by req.user.id (the DB-backed identity from authRequired, never a client claim),
+  // and by definition only ever matches a row for a retail account — students is populated
+  // exclusively by registration and counter signup, both role='retail'. Any other role
+  // (admin/staff/wholesaler) has no students row and falls through to 404 below.
+  const { rows } = await query(
+    `UPDATE students SET gender = $1::gender WHERE user_id = $2 RETURNING gender`,
+    [gender, req.user.id]
+  );
+  if (!rows.length) {
+    return res.status(404).json({ error: 'لا يوجد ملف طالب مرتبط بهذا الحساب', code: 'ERR_NOT_FOUND' });
+  }
+  res.json({ data: { gender: rows[0].gender } });
+}
+
 async function postVerifyOtp(req, res) {
   const { challenge_id, code } = req.body;
   if (!challenge_id || !code) {
@@ -448,4 +481,4 @@ async function resetPasswordPhone(req, res) {
 // nodemailer dependency (2 of the audit's high-severity advisories) for nothing. Phone-OTP
 // reset covers retail + wholesaler; privileged accounts are reset by an admin, or on the
 // server with `npm run set-password`.
-module.exports = { register, login, loginVerifyOtp, me, postVerifyOtp, resendOtp, forgotPasswordPhone, resetPasswordPhone, staffPortalMembers, staffPortalLogin };
+module.exports = { register, login, loginVerifyOtp, me, updateMe, postVerifyOtp, resendOtp, forgotPasswordPhone, resetPasswordPhone, staffPortalMembers, staffPortalLogin };

@@ -1,5 +1,86 @@
 # Progress
 
+## 2026-08-15 — counter-signup phone double-entry, OTP gateway status, env-tunable cooldown, gender write
+
+Four independent backend changes on `fix/otp-failover-and-surge`. 283 → 292/292 backend tests pass.
+
+- **SECURITY — counter signup now requires `phone_confirm`.** A typo'd phone at the counter
+  silently creates the account on a stranger's number (OTP registration can't produce this — a
+  mistyped number just never gets the code, so it fails loudly instead of succeeding onto the
+  wrong owner). `forgot-password-phone` later sends the reset OTP — the SOLE reset credential —
+  to whoever owns that number: an account-takeover path. `counterSignupController.js` now
+  requires `phone_confirm`, canonicalised with the same `normalizeIqPhone` `normalizePhoneBody`
+  already applies to `phone` (so `7712345678` matches `07712345678`); missing or mismatched →
+  400 `ERR_PHONE_MISMATCH` on field `phone_confirm`. `backend/test/counterSignup.test.js`
+  updated (existing cases now send a matching `phone_confirm`) plus three new cases: missing,
+  mismatched, and same-number-different-spelling.
+- **`GET /admin/otp-gateway`** exposes `lib/otp.js`'s already-existing `gatewayStatus()` (which
+  sender device is active, whether one has been cooled down) to admins, behind the same
+  `authRequired` + `requireRole('admin')` gate as the rest of `routes/admin.js`. Did NOT touch
+  `gatewayStatus()`'s return shape — a frontend agent is coding against it in parallel. New
+  `backend/test/otpGatewayAdminRoute.test.js` drives the route over real HTTP (not a direct
+  controller call) so the admin gate itself is actually exercised: no token → 401, admin → 200
+  with `{ data: { configured, active, devices[] } }`.
+- **`OTP_DEVICE_COOLDOWN_MS` is now env-tunable**, following the `envInt` pattern in
+  `routes/auth.js` — the spec rule that every new limit must be changeable with
+  `pm2 restart --update-env` alone, no deploy. Guarded against NaN/≤0 so a bad env value can't
+  zero out the cooldown. Falls back to the existing 12h default.
+- **`PATCH /auth/me`** writes `students.gender` — `GET /auth/me` has returned this field since
+  the start, but onboarding only ever wrote it to `localStorage` (the HANDOFF landmine "Gender
+  never reaches the DB"). Accepts `{ gender: 'male'|'female' }`; anything else → 400
+  `ERR_VALIDATION` on field `gender`. Only succeeds for an account with a `students` row
+  (retail) — everyone else gets 404 `ERR_NOT_FOUND`. New `backend/test/authUpdateMe.test.js`:
+  happy path, invalid value, missing value, no-students-row.
+
+Files touched: `backend/controllers/counterSignupController.js`,
+`backend/test/counterSignup.test.js`, `backend/routes/admin.js`, `backend/lib/otp.js`,
+`backend/routes/auth.js`, `backend/controllers/authController.js`,
+`backend/test/otpGatewayAdminRoute.test.js` (new), `backend/test/authUpdateMe.test.js` (new).
+`API.md` gained `PATCH /auth/me`, `GET /admin/otp-gateway`, and a first-ever `## Staff` section
+documenting `POST /staff/counter-signup` (was undocumented before this session).
+
+**Frontend, same branch, built against the three contracts above (in parallel with the
+backend work landing them — the phone_confirm mismatch check in particular was added to
+`counterSignupController.js` mid-session; the screen already sent + validated the field, so
+no frontend change was needed once it landed):**
+
+- **«تسجيل طالب في المحل»** (`app/staff/counter-signup/page.tsx`, new) — the counter-signup
+  screen. Manager-staff only (`isAdmin || !isManager` → «غير مصرح», matching the backend's
+  `requireStaffType()` gate — there is no `/admin` mirror for this one, unlike «طلب مخصص»).
+  Phone entered twice (own `PhoneField` used for both `phone` and `phone_confirm`, client-side
+  equality check before submit); 409 `ERR_PHONE_TAKEN` renders as a prominent amber callout
+  with the server's message plus a link into «طلب مخصص» to attach an order to the existing
+  student, rather than a field error; 201 shows a success card with «أنشئ الطلب من شاشة
+  الطلبات» (→ `/staff/custom-order`) and «تسجيل طالب آخر» (resets the form) — plus a note that
+  the password belongs to the student. Linked from `StaffSidebar` (manager/admin block, hidden
+  for `isAdmin` since the backend 403s them). New `lib/staff.ts` wrapper
+  `counterSignupStudent()` + `CounterSignupError` (carries `field` AND the 409's `student_id`,
+  mirroring `FieldError` in `auth-api.ts`).
+- **`GET /admin/otp-gateway` chip** — `components/admin/OtpGatewayStatus.tsx` (new), mounted
+  on `/admin` right under the masthead. Fetches once on load, manual «تحديث» only (no polling,
+  per spec). Three states derived client-side from `gatewayStatus()`'s shape: NORMAL (primary
+  device sending, green), FAILOVER (a non-primary device is active — amber, primary likely
+  banned), DEGRADED (every configured device currently marked unhealthy — red). Documented
+  in the component's own header: DEGRADED can't see a *simultaneous* all-device failure,
+  because `sendViaZentramsg` only marks a device unhealthy when ANOTHER device's success
+  proves the failure was the device's fault — see its "cool down NOTHING" branch. New
+  `lib/admin.ts` wrapper `getOtpGatewayStatus()`.
+- **Gender reaches the DB from the client side too** — `components/student/
+  ProfilePreferences.tsx` now calls `PATCH /auth/me` (fire-and-forget, error toast) whenever a
+  signed-in student saves a gender change, and hydrates its local `gender` state from
+  `GET /auth/me`'s `student.gender` on mount for a signed-in visitor (best-effort; a failed
+  fetch just keeps the localStorage value). `lib/types.ts`'s `User` gained `student?: {
+  gender }`; `lib/auth-api.ts` gained `updateMyGender()`. Scoped deliberately to «تفضيلاتي» —
+  `components/student/Onboarding.tsx` never renders for a signed-in visitor at all (`if
+  (getToken()) return;`), so there is no second call site for this in the current app.
+
+Frontend files touched: `frontend/app/staff/counter-signup/page.tsx` (new),
+`frontend/components/admin/OtpGatewayStatus.tsx` (new), `frontend/lib/staff.ts`,
+`frontend/lib/admin.ts`, `frontend/lib/auth-api.ts`, `frontend/lib/types.ts`,
+`frontend/components/staff/StaffSidebar.tsx`, `frontend/components/student/
+ProfilePreferences.tsx`, `frontend/app/admin/page.tsx`. Zero new npm dependencies.
+`npx tsc --noEmit` and `npm run lint` both clean (frontend/).
+
 ## 2026-08-14 (e) — the shop is in ديالى, and /login has a way out
 
 Two owner-reported defects, both on screens a student sees first.

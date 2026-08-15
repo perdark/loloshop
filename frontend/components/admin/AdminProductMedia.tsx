@@ -88,7 +88,7 @@ export function AdminProductMedia({
       <div className="flex flex-wrap gap-4">
         <div className="relative h-28 w-28 overflow-hidden rounded-xl bg-beige ring-1 ring-ink/10">
           {mainSrc ? (
-            <Image src={mainSrc} alt="" fill className="object-cover" unoptimized />
+            <Image src={mainSrc} alt="" fill className="object-cover" />
           ) : (
             <span className="flex h-full items-center justify-center text-xs text-[var(--shop-muted)]">
               لا صورة
@@ -161,7 +161,6 @@ export function AdminProductMedia({
                   alt=""
                   fill
                   className="object-cover"
-                  unoptimized
                 />
               </div>
               <Button

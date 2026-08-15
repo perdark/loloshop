@@ -66,6 +66,14 @@ export interface User {
    * student who joined through a rep's link has one. Drives `postLoginPath`.
    */
   student_status?: StudentApprovalStatus | null;
+  /**
+   * The student profile row GET /auth/me attaches for retail accounts (never for
+   * staff/admin/wholesaler, which have no `students` row). `gender` here is the DB source of
+   * truth behind the localStorage-only visitor profile in lib/profile.ts — used to hydrate a
+   * fresh device's local copy so gender-restricted option groups filter correctly even before
+   * the student visits «تفضيلاتي» on that device.
+   */
+  student?: { gender?: "male" | "female" | null } | null;
 }
 
 export interface LoginResponse {
