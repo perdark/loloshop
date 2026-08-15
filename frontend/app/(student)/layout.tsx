@@ -5,6 +5,8 @@ import { DiscountPopup } from "@/components/DiscountPopup";
 import { VisitBeacon } from "@/components/VisitBeacon";
 import { Onboarding } from "@/components/student/Onboarding";
 import { FooterSignature } from "@/components/shop/FooterSignature";
+import { SupportChat } from "@/components/shop/SupportChat";
+import { SupportChatProvider } from "@/components/shop/SupportChatProvider";
 
 export default function StudentLayout({
   children,
@@ -19,12 +21,20 @@ export default function StudentLayout({
       <Onboarding />
       <DiscountPopup />
       <VisitBeacon />
-      <StudentNav />
-      {/* Phone-first but no longer caged at 512px — editorial grids engage on
-          tablet/desktop while mobile stays a single calm column. */}
-      <main className="mx-auto w-full max-w-lg px-4 py-6 animate-page-in md:max-w-3xl lg:max-w-6xl md:px-6 lg:px-8">
-        {children}
-      </main>
+      {/* One assistant conversation for the whole storefront. The provider renders no DOM of
+          its own; it has to sit above BOTH the floating panel and <main> because the home
+          page's «عندك سؤال؟» section is a second view of the same thread. */}
+      <SupportChatProvider>
+        {/* Fixed overlay — belongs beside the other fixed children, outside <main>, whose
+            animate-page-in transform would otherwise become its containing block. */}
+        <SupportChat />
+        <StudentNav />
+        {/* Phone-first but no longer caged at 512px — editorial grids engage on
+            tablet/desktop while mobile stays a single calm column. */}
+        <main className="mx-auto w-full max-w-lg px-4 py-6 animate-page-in md:max-w-3xl lg:max-w-6xl md:px-6 lg:px-8">
+          {children}
+        </main>
+      </SupportChatProvider>
       {/* Clears the fixed bottom tab bar (56px + safe area) so the footer and
           any page's last row are never trapped underneath it. */}
       <footer

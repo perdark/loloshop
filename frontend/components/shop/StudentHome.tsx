@@ -23,6 +23,7 @@ import { WhyLoloShop } from "@/components/shop/WhyLoloShop";
 import { VipPackageCard } from "@/components/shop/VipPackageCard";
 import { CohortProof } from "@/components/shop/CohortProof";
 import { StoreLocation } from "@/components/shop/StoreLocation";
+import { AskLoloSection } from "@/components/shop/AskLoloSection";
 import { MaintenanceScreen } from "@/components/MaintenanceScreen";
 
 /**
@@ -322,6 +323,10 @@ export function StudentHome({ initialFeed, initialMaintenance }: StudentHomeProp
         </svg>
         {copy.promise}
       </p>
+
+      {/* «اسأل لولو» — directly under the hero (owner, 2026-08-12). It used to sit last, above
+          the map; a student who has not scrolled the whole catalogue never saw it. */}
+      <AskLoloSection />
 
       {families.map((family, i) => (
         <div key={family.type}>

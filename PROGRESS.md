@@ -1,5 +1,67 @@
 # Progress
 
+## 2026-08-15 — «لولو» assistant: location fix, product/university knowledge, mood, reactions — on `fix/ai-assistant-money` (UNMERGED)
+
+Five owner-driven fixes to the storefront assistant, all on the already-parked
+`fix/ai-assistant-money` branch (that branch's own money-metric fix is untouched by this work).
+
+**1 — Location was actively wrong.** `SHOP_FACTS` and RULES item 9 in
+`backend/controllers/supportChatController.js` said the shop was «ببغداد» in two bullets; the
+storefront copy was corrected to ديالى back in `3d1cce8` but the AI prompt never was. Now reads
+«محل حقيقي بمحافظة ديالى (بعقوبة)», matches `frontend/lib/copy-ar.ts` and the map coords in
+`StoreLocation.tsx`. Also fixed the same wrong city in `lib/supportFallback.js` (the
+model-unreachable canned answers) and a stale comment in `lib/answerGuard.js`; updated the manual
+`scripts/ai-scenarios.js` harness's location regex to accept ديالى.
+
+**2 — Product knowledge.** New `supportContext.productDigest(role)`: real ACTIVE leaf product
+names grouped by type («- <type>: <name> (يبدأ من X دينار), …»), same audience-filter +
+parent-exclusion shape as `priceBook`, capped at 20 names total and ordered by real sales via the
+same `billableOrderSql` join `bestSellers` uses. Cached 5 min/role. New RULES line 13: naming or
+recommending a product must come only from this list.
+
+**3 — University knowledge (the «idk» complaint).** New `supportContext.universitiesDigest()`:
+top ~15 university/college names (from `students` where `status='approved'`) by count + total
+distinct count, cached 30 min. New RULES line 14: any «تسوون لجامعتي؟» question is ALWAYS a warm
+yes — the shop serves every Iraqi university/college, the student uploads their own logo — never
+«ما أعرف». Both digests wired into `buildSystem()`; the answer cache key already hashes the whole
+prompt, so staleness handles itself.
+
+**4 — Mood field.** New pure `classifyMood(question, answerText)` in `backend/lib/mood.js`:
+`wink` (compliment/playful) → `caring` (sadness/tiredness, outranks a compliment in the same
+message) → `neutral` (a guard fallback or an honest «مو متوفرة» answer — detected by reusing
+`supportActions`' own `DUNNO_RE`, so the two files can't disagree) → `happy` (default). Included
+as `mood` in every `POST /assistant/support` response that carries an answer.
+
+**5 — Reactions.** Migration `082_ai_chat_reactions.sql` (mirrored in `db/schema.sql`, applied to
+the dev DB): nullable `ai_chat_messages.reaction TEXT` with a CHECK limiting it to
+`like|love|happy|sad|good|excellent`. `/support` responses now carry `message_id` (the ledger row
+id — `lib/aiChat.js` `logCached()` now `RETURNING id`, and the model-unreachable fallback path now
+settles the reserved row with the actual served text instead of leaving it NULL, so its
+`message_id` points somewhere real). New `POST /assistant/react { message_id, reaction }`
+(`supportChatController.react`, routed with its own `reactLimit`): reaction must be in the list
+(else `400 ERR_AI_REACT_INVALID`) and the caller must OWN the row — own `user_id`, or the same
+signed anon `sessionKey` `/support` uses (`lib/anonSession.js`) — else `403 ERR_AI_REACT_FORBIDDEN`
+(no identity at all) or `404 ERR_AI_REACT_NOT_FOUND` (real id, wrong owner, or no such id — the
+three are deliberately indistinguishable). Setting overwrites; `reaction: null` clears.
+
+Full response contract for `/support` and `/react`, and every new error code, are in `API.md`
+under "Assistant («لولو»)".
+
+Verified: `node --test test/` from `backend/` — **397/397 pass** (baseline was 378; +19: 5 pure
+`formatProductDigest` tests, 4 pure `classifyMood` tests, 10 live-DB tests in new
+`test/aiChatReactions.test.js` covering the happy path, overwrite, clear, anon-session ownership,
+wrong-owner 404 ×2, missing-message 404, no-identity 403, invalid-reaction 400, bad-id 400).
+Smoke-tested `productDigest`/`universitiesDigest` directly against the dev DB (57 active products,
+1,011 approved students across 70 distinct universities/colleges) before writing tests. Zero new
+npm dependencies. `frontend/` untouched.
+
+Files touched: `backend/controllers/supportChatController.js`, `backend/lib/supportContext.js`,
+`backend/lib/supportFallback.js`, `backend/lib/answerGuard.js` (comment only),
+`backend/lib/aiChat.js`, `backend/lib/mood.js` (new), `backend/routes/assistant.js`,
+`backend/scripts/ai-scenarios.js`, `db/migrations/082_ai_chat_reactions.sql` (new),
+`db/schema.sql`, `backend/test/aiChat.test.js`, `backend/test/aiChatReactions.test.js` (new),
+`API.md`.
+
 ## 2026-08-15 — the last two of the eleven bugs, on `fix/admin-presence-panel` (UNMERGED)
 
 Bug 1 and the three unwritten parts of bug 8. **All eleven bugs are now closed in code.**
@@ -618,6 +680,201 @@ nothing — the timestamps are a hint, not an identification, and the owner conf
 **Verified:** `node --test test/` **197/197** (185 baseline + 12 new), `tsc --noEmit` clean,
 `eslint` clean, `next build` completes. Migration 080 applied to the dev DB and re-run to prove
 idempotency (61 rows moved, identical on the second pass).
+## 2026-08-12 (b) — the assistant becomes the marketing surface: quotas out, guard in
+
+Owner reframe: «لولو» is the shop's **main marketing content**, and individual users should not
+be limited — attackers should. Both changes point the same way, because the quota that existed
+was never protecting anything.
+
+- **The per-person daily quota is gone, and that is a security improvement.** It was keyed on a
+  `sessionKey` the CLIENT generated — measured, 25 requests with 25 fresh keys were all granted.
+  It bounded honest students and nobody else. Replaced by: a **server-signed identity**
+  (`lib/anonSession.js`, HMAC on `JWT_SECRET`, zero new deps — the CI `npm audit` gate stays
+  clean), a **burst throttle** (10/min · 40/5min) that asks "are you a person" instead of "how
+  much have you had today", free repetition through the response cache, and the daily USD
+  ceiling. **Verified live: the 11th message in a minute is refused, with a countdown.**
+- **That signed identity closed a real read, not just a bypass.** `recentTurns` keys anonymous
+  history on the session id, so supplying somebody else's loaded THEIR last two hours into your
+  prompt — «شنو سألتك قبل شوية؟» read it back out. Unguessable in practice, but it was an
+  unauthenticated read keyed on an unauthenticated identifier.
+- **Ceiling $1 → $3, with a warning at $1** that writes an admin `notifications` row — the push
+  outbox turns it into a phone push with no new plumbing. Measured cost is **$0.0001/message**,
+  so $3 is ~30,000 messages/day: an abuse backstop, never a budget.
+- **`lib/answerGuard.js` — the real answer to prompt injection.** It screens the ANSWER, not the
+  question: no IQD figure absent from the price book we handed the model, no delivery promise, no
+  English, negation-aware. It cannot be phrased around the way an inbound filter can. Four live
+  injection attempts held.
+  **It found a real defect on its first harness run — one the harness was scoring as PASSING:**
+  «آخر موعد لتقديم الطلبات هو 2026-05-26، **وهذا موعد تسليم الطلب**», the model stating flatly
+  that the order cutoff IS the delivery date. Every pattern in the guard and the harness expected
+  a future-tense promise; this was a present-tense equation. Now `DEADLINE_AS_DELIVERY`, and
+  **the harness calls the runtime guard** so they can never disagree again.
+- **Never dark** (`lib/supportFallback.js`): prices, delivery, payment, location and how-to-order
+  are answered from the price book with **no model at all** when it is unreachable or the budget
+  is spent. Verified by pointing `AI_CHAT_MODEL` at a bogus model — 4 of 5 questions still
+  answered, the 5th got a WhatsApp escalation instead of a dead end.
+- **Attribution** (migration 079): a **salted** hash of the caller's address per ledger row.
+  Removing the quota is only safe if a flood is visible afterwards; a raw IP is personal data and
+  an unsalted hash of one is trivially reversible.
+- **UX:** 7 expressions cut from the owner's brand sheet and **registered on the face** so the
+  head does not resize between them · a server-chosen emotion per answer · server-chosen action
+  chips from a closed list (the model never emits a URL) · word-by-word reveal, deliberately not
+  streaming, because streaming publishes text before the guard can veto it · thread persists 2h,
+  matching the server's window · **the dead retry button is fixed** (a throttle counts down
+  instead of offering a retry that cannot work) · the input no longer disables while busy, which
+  was dismissing the Android keyboard on every message.
+- Also: the `wa.me/964` button on `/sizes` was a country code with no number — a dead button,
+  now the real one. Admin-written product and package names now go through `safeField` before
+  entering the system prompt, like customer-written ones already did.
+- **243/243 unit tests** (was 215) · 44/44 scenarios · tsc + lint + `next build` clean.
+  ⚠️ **A real phone-viewport pass is still outstanding** — Chrome refused to resize the maximized
+  ultrawide window, so every browser check ran at 3440px.
+
+## 2026-08-12 — AI assistant hardened: caps made atomic, spend guard fail-safe, history un-forgeable
+
+Three defects found by re-reading the 2026-08-10 (b) code before shipping it. All were silent
+failures pointing at either the bill or a student's trust. **Backend suite now 202/202** (was
+185 — the assistant had zero tests in a repo with 185).
+
+- **The caps could be walked straight past.** The old order was: count → model call (~700ms) →
+  insert. N concurrent requests all read the same count and all passed. Now `reserve()` counts
+  and writes the ledger row inside **one transaction holding a per-caller advisory lock**, and
+  `settle()` fills in the answer and cost afterwards. **Measured against the dev DB: 40
+  simultaneous requests, exactly 10 granted for an anon session (cap 10) and exactly 30 for a
+  signed-in user (cap 30).** Side effect: a crashed call still leaves its row, so a retry storm
+  is no longer free, and a failed ledger write can no longer make every cap under-count.
+- **The $1/day ceiling could switch itself off silently.** `Number(usage.cost || 0)` recorded
+  $0.00 whenever OpenRouter reported no cost — every row zero, `SUM(cost_usd)` flat forever, the
+  backstop dead with nothing in any log. A missing cost now falls back to a token estimate, and
+  an **unrecognised model is priced as expensive on purpose**: over-counting trips the ceiling
+  early (recoverable), under-counting is a bill.
+- **A student could forge what the bot said.** The client sent its own transcript back with its
+  own role labels, so a caller could POST a fabricated `assistant` turn («وشاحك مجاني»), ask the
+  bot to confirm it, and screenshot the shop's assistant promising a free robe. History is now
+  rebuilt server-side from `ai_chat_messages` (2-hour window); `req.body.history` is ignored.
+- **17 tests** covering the cap boundaries (incl. pg returning counts as **strings** — `'9' > '10'`
+  lexicographically would have blocked callers 21 questions early), the cost fallback, the
+  bundle `price = 0` rule that nearly told a student their robe was free, and `clampDays`, which
+  is the entire defence on the one model-supplied value interpolated into SQL.
+- `sessionKey()` no longer crashes the widget when `localStorage` throws (privacy modes) — it is
+  now the only link between an anon visitor and their history, so it had to stop being fragile.
+
+**Then, from testing it in a browser:**
+
+- **«عندك سؤال؟» is now a real home-page section**, last before «موقعنا», with the shop's four
+  actual FAQs as tappable chips. The floating bubble stays; both share **one** conversation via
+  `SupportChatProvider`, because the server rebuilds history from its own ledger and two
+  independent threads would have shown an empty panel while the model still had the context.
+- **The bot can finally answer «شكد سعر الروب؟»** — the most common question in the shop, which
+  it previously answered *"ما عندي علم"* while the price sat on the page above it. It had no
+  catalogue at all. `supportContext.priceBook()` now feeds it per-type **starting-price ranges**
+  (not a product list — that would dominate the prompt and go stale), mirroring `buildShopFeed`
+  on both the audience filter and `product_price_roles`, so **a rep-linked student is quoted the
+  wholesaler book and never the retail one**. Cached 5 min per role. Verified: robe answered
+  correctly, «سعر الحذاء» still refused.
+- Accessibility gaps closed while the panel was being rewritten: `role="dialog"`, Escape-to-close
+  with focus returned, `aria-live` on both threads, and a «أعد المحاولة» button.
+
+**Then a 38-scenario adversarial pass — `npm run ai:scenarios` — which found 4 more real bugs
+that both the unit tests and the browser pass had missed.** All of them were fluent, confident,
+wrong Arabic; none was a crash. This is the failure mode of this feature and neither a unit test
+nor a happy-path click can see it.
+
+1. **«وين موقعكم؟» → «موقعنا مو محدد».** It denied the shop had a location — turning away a
+   walk-in — while a Google map of the real shop sat at the bottom of the same page. It had no
+   address fact at all.
+2. **«عندكم توصيل؟» → «نكدر نوصل داخل بغداد».** Pure invention — there was no delivery policy
+   anywhere in this codebase. **Owner confirmed 2026-08-12: the shop does NOT deliver at all**,
+   pickup only, which is what the `ready` status («جاهز للاستلام») has meant all along. That is
+   now a stated fact, so the answer is a clear «ماكو توصيل، الاستلام من المحل ببغداد» rather than
+   a vague "I don't know" — which would have left the customer still expecting delivery.
+   University students are pointed at their rep to arrange pickup.
+3. **It quoted the وشاح price (15,000) for a شال (25,000)** — near-synonyms in Arabic, two
+   different products at two different prices. Now stated as a fact it must not conflate them.
+4. **Self-inflicted, caught by re-running:** fixing 1 and 2 made rule 5 read as "never state an
+   order status", so a signed-in student asking «وين وصل طلبي؟» started getting «ما عندي علم»
+   while their three statuses sat in the prompt. Telling a student where their order is **is**
+   the feature; a refusal there is a failure, not caution. Rule 5 now distinguishes "not in the
+   context" from "don't invent".
+
+5. **«شنو أكثر قطعة تنباع عدكم؟» → «وشاح التخرج، لأن الطلاب يحبون يصممونها بنفسهم».** It had no
+   sales data at all — it guessed, then invented a motive to justify the guess. It landed
+   near-right *by type* that day (sash leads on 468 pieces), which is the worst kind of wrong:
+   confident, unfounded, and fine right up until the ranking moves. `supportContext.bestSellers()`
+   now feeds the real top 3 **by name only** — the ranking is shop-front marketing, the volumes
+   are the shop's business — using `billableOrderSql` so it agrees with `/admin`, cached 30 min.
+   It answers قبعة → روب → وشاح, matching the DB, and a new rule forbids inventing a *reason*,
+   an opinion, or a claim about what customers like.
+
+**Location, checked:** the claim it makes is true — `StoreLocation` really is the last section of
+the home page under «موقعنا». It now also names the shop as it appears on Google Maps,
+**«مطبعة لولو شوب»**, taken from the map embed already in `StoreLocation.tsx`, so a customer can
+search it directly. ⚠️ There is **no street address in text anywhere in the repo** (the embed is
+an iframe and Maps is JS-rendered, so it can't be read out). If the owner wants the bot to say a
+street or district, it has to be supplied.
+
+All of these are now permanent scenarios, so they cannot regress silently. A run costs ~$0.005.
+
+**The response cache — the other half of the owner's «tight — cache + hard caps» stance — is now
+in.** Measured on a repeat scenario run: **$0.0059 → $0.0013, a 77% cut**, and a hit answers in
+**4ms** against ~700ms for a model call.
+
+- **Cacheable only when ANONYMOUS and there is no history.** Both conditions are load-bearing: a
+  signed-in answer is built from that student's own orders and rep, so sharing one would hand a
+  stranger another student's order status; and once there is history the answer depends on it
+  («وهو الوشاح؟» means nothing alone). Under those two conditions every anonymous caller gets a
+  byte-identical prompt, so the answer is genuinely reusable. Proven in the harness: a signed-in
+  caller asking the identical words is **not** served the anonymous entry.
+- **The key is a hash of the WHOLE system prompt + the normalised question**, so a price change,
+  a rule change or a new best-seller ranking invalidates every entry automatically. There is no
+  invalidation call to forget — which is the usual way this kind of cache goes stale.
+- **Question normalisation folds spelling, never meaning:** tashkeel, أإآ→ا, ى→ي, ة→ه,
+  punctuation and emoji. Tests pin both directions — variants of one question must collapse, and
+  «سعر الروب» vs «سعر الوشاح» must never collapse.
+- **Cache hits are logged (`model = 'cache'`, cost 0) but excluded from the caps.** The caps bound
+  spend, and a free answer must not eat a student's 10/day. Logging them keeps the ledger a
+  complete record of what customers ask — which is the backlog of missing facts.
+
+**Also:** the harness now aborts with an explanation when the per-IP limiter (100/15 min) is
+tripped by running it repeatedly, instead of reporting ~40 scenarios as failures. And three
+delivery assertions were widened to match Arabic **stems** — they demanded «المحل»/«الاستلام» and
+failed correct answers that said «محلنا»/«تستلم». That is the third time an over-literal assertion
+failed right behaviour; a check that cries wolf is worse than no check.
+
+**Still open:** analytics spends 2 model calls per question; the assistant cannot link to a
+product page; nobody reads the `intent IS NULL` deflection log; there is no alert when the
+provider fails.
+
+## 2026-08-10 (b) — AI assistant: Arabic support chatbot + admin analytics
+
+Owner asked for both surfaces on a **cheap** model, explicitly not the Claude API. Reuses the
+existing `OPENROUTER_API_KEY` (already live for calligraphy) and adds **zero npm packages**, so
+the `npm audit` deploy gate is untouched.
+
+**Shipped:**
+- **`google/gemini-2.5-flash-lite`, chosen by live Arabic test** — 4 candidates run against real
+  Iraqi-Arabic questions with real order context. Winner: sub-second, **$0.04/1,000 messages**,
+  no hallucinations. `openai/gpt-oss-120b` was rejected for **inventing a delivery promise**;
+  `qwen/qwen3.7-flash` returned empty content. Re-run that test before changing the model.
+- **Support chatbot** (`/api/assistant/support`, widget on every storefront page) — public, anon
+  allowed. The server pre-fetches the asker's own orders/rep/deadline and the model only phrases
+  them. **No tool-calling and no model-written SQL anywhere** — a cheap model is unreliable at
+  both, and free SQL on this DB (no RLS) is a security hole.
+- **Admin analytics** (`/api/assistant/analytics`, box on `/admin`) — the model picks one key
+  from a **closed set of 8 typed metrics**; our SQL runs; the model phrases it. The raw figures
+  render under the prose so the owner can audit the arithmetic.
+- **`billableOrderSql` moved to `lib/counts.js`** (re-exported at its old name) so the assistant
+  and the dashboard define revenue identically. 185/185 backend tests still pass.
+- **Cost caps live in the DB** (`ai_chat_messages`, migration 078), not memory: 30/user/day,
+  10/anon-session/day, **$1/day shop ceiling**. Anon callers keyed on a session id, not IP
+  (CGNAT). With the key unset both endpoints 503 and the widget removes itself.
+
+**Bugs the real data caught:** `products.name` doesn't exist (it's `name_ar`); bundle lines have
+`price = 0`, so the bot nearly told a student their robe was free; and the analytics phrasing
+invented a containment relationship between two independent counts. All three fixed.
+
+**Verified in a browser at phone width** — anon + signed-in student + admin, including that the
+bot refuses to promise a delivery date. ⚠️ **Migration 078 still needs applying to prod.**
 
 ## 2026-08-10 — iOS 1.0.4 uploaded, APNs verified against Apple, both platforms at parity
 

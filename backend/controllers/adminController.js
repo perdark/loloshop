@@ -45,8 +45,10 @@ function pricingOrderIsValid(adminPrice, sellingPrice, addons) {
 }
 
 // The settlement filter + the money vocabulary it feeds now live in lib/counts.js, so the
-// dashboard and every other reader compute revenue the SAME way. See the block comments
-// there before changing what «دخل المحل» or «ربح الممثلين» mean.
+// dashboard and every other reader compute revenue the SAME way. The AI analytics assistant
+// reads the identical definitions from there — two "revenue" definitions that disagree would
+// be worse than no assistant. See the block comments there before changing what «دخل المحل»
+// or «ربح الممثلين» mean.
 const { billableOrderSql, shopIncomeExpr, repMarginExpr } = counts;
 
 const STAFF_TYPES = ['designer', 'embroiderer', 'presser', 'preparer', 'manager', 'digitizer', 'tailor'];

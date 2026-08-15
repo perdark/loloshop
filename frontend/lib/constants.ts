@@ -150,3 +150,14 @@ export const ORDER_STATUS_OPTIONS: OrderStatus[] = [
 // backend file for the reasoning.
 export const PASSWORD_MIN_CUSTOMER = 8;
 export const PASSWORD_MIN_PRIVILEGED = 8;
+
+/** The shop's public contact channels.
+ *
+ *  Plain constants, not env vars: both are printed on the shop's own Instagram and belong in
+ *  the client bundle anyway, and a NEXT_PUBLIC_* var would be inlined at build time — so a
+ *  change would need a rebuild rather than an edit. Kept here so there is ONE place to change
+ *  the number; the sizes page previously carried `https://wa.me/964`, a country code with no
+ *  number behind it, which rendered a button that opened WhatsApp at nothing. */
+export const SHOP_WHATSAPP = "9647723078729";
+export const SHOP_WHATSAPP_URL = `https://wa.me/${SHOP_WHATSAPP}`;
+export const SHOP_INSTAGRAM_URL = "https://instagram.com/lolo_shop96";

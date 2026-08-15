@@ -115,6 +115,7 @@ app.use('/api/tv', require('./routes/tv'));
 app.use('/api/track', require('./routes/track'));
 app.use('/api/workshop', require('./routes/workshop'));
 app.use('/api/design-team', require('./routes/designTeam'));
+app.use('/api/assistant', require('./routes/assistant'));
 
 // Push delivery. The drain reads COMMITTED `notifications` rows and sends them to registered
 // phones (backend/lib/pushOutbox.js). Started here rather than in worker.js because the worker

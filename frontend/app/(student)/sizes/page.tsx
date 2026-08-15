@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { SHOP_WHATSAPP_URL } from "@/lib/constants";
 
 export default function SizesPage() {
   return (
@@ -133,7 +134,7 @@ export default function SizesPage() {
           تواصل معنا عبر واتساب وسنساعدك في اختيار المقاس المناسب.
         </p>
         <a
-          href="https://wa.me/964"
+          href={`${SHOP_WHATSAPP_URL}?text=${encodeURIComponent("مرحباً، أحتاج مساعدة باختيار المقاس")}`}
           className="btn-shine mt-4 inline-flex min-h-11 items-center gap-2 rounded-pill bg-brand-gradient px-6 text-sm font-bold text-white shadow-[var(--shadow-pop)] transition-transform hover:scale-[1.02] active:scale-100"
         >
           تواصل عبر واتساب
