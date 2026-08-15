@@ -127,6 +127,9 @@ function validView(kind: StationKind, v: View | undefined): View {
 
 function queueToPiece(r: ProductionQueueItem, kind: StationKind): StationPiece {
   return {
+    // The set view belongs to التجهيز, which packs; التطريز/الكوي work one piece at a time
+    // and are never asked whether the طقم is whole.
+    setPieces: null,
     id: r.id,
     studentId: r.student_id ?? r.student_name,
     studentName: r.student_name,
@@ -154,6 +157,7 @@ function queueToPiece(r: ProductionQueueItem, kind: StationKind): StationPiece {
 
 function tailorToPiece(r: TailorOrderRow): StationPiece {
   return {
+    setPieces: null, // الفصال sews one garment; it never packs a set.
     id: r.id,
     studentId: r.studentId ?? r.studentName,
     studentName: r.studentName,

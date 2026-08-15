@@ -10,6 +10,8 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { deleteProductionOrder, getQueue } from "@/lib/staff";
 import { getUser } from "@/lib/auth";
 import { getApiErrorMessage } from "@/lib/api";
+import { matchesQueueSearch } from "@/lib/queue-search";
+import { rememberQueueOrder } from "@/lib/queue-neighbors";
 import {
   ORDER_STATUS_LABELS,
   ORDER_SOURCE_LABELS,
@@ -940,16 +942,20 @@ function ConsoleContent() {
       if ((i.wholesaler_name ?? "—") !== repParam) return false;
       if (selectedBatch && i.batch_name !== selectedBatch) return false;
     }
-    if (q) {
-      const hit =
-        i.student_name.toLowerCase().includes(q) ||
-        (i.university_name ?? "").toLowerCase().includes(q) ||
-        (i.department ?? "").toLowerCase().includes(q) ||
-        (i.wholesaler_name ?? "").toLowerCase().includes(q);
-      if (!hit) return false;
-    }
+    // Student / university / department / rep AND the التطريز text, Arabic-normalised —
+    // shared with المجهز's console so the two screens cannot disagree about what "search"
+    // means. See lib/queue-search.ts.
+    if (!matchesQueueSearch(i, q)) return false;
     return true;
   });
+
+  // Hand the order page its «السابق»/«التالي» (bug 8, part 3). The FILTERED list, not the
+  // visible page, so stepping past the bottom of page 1 continues instead of dead-ending.
+  // In an effect, not during render: this writes to sessionStorage.
+  const filteredIds = filtered.map((i) => i.id).join(",");
+  useEffect(() => {
+    rememberQueueOrder(filteredIds ? filteredIds.split(",") : []);
+  }, [filteredIds]);
 
   // ── Source counts (for tab badges) ────────────────────────────────────────
   const stageItems   = stage ? items.filter((i) => i.status === stage) : items;
@@ -1129,9 +1135,10 @@ function ConsoleContent() {
               {/* Search */}
               <input
                 type="search"
-                placeholder="بحث باسم الطالب…"
+                placeholder="بحث بالاسم أو الجامعة أو التطريز…"
                 value={search}
                 onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                aria-label="بحث بالاسم أو الجامعة أو التطريز"
                 dir="rtl"
                 className="min-h-11 w-full min-w-0 rounded-full border border-line bg-surface px-3 py-1 text-sm text-ink placeholder:text-muted focus:border-orange-ink focus:outline-none sm:w-52"
               />

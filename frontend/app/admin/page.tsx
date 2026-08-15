@@ -7,9 +7,11 @@ import { getAdminAnalytics, getAdminAccounting, getPendingApprovalCount, getVisi
 import { PromoControl } from "@/components/admin/PromoControl";
 import { MaintenanceControl } from "@/components/admin/MaintenanceControl";
 import { OtpGatewayStatus } from "@/components/admin/OtpGatewayStatus";
-import { getTailorSummary, type TailorSummary } from "@/lib/staff";
+import { getTailorSummary, getPresence, type TailorSummary } from "@/lib/staff";
+import { PresencePanel } from "@/components/admin/PresencePanel";
+import type { MonitorData } from "@/lib/staff-types";
 import Link from "next/link";
-import { formatIQD } from "@/lib/format";
+import { formatIQD, toArabicDigits } from "@/lib/format";
 import type { AdminAccounting, AdminAnalytics } from "@/lib/types";
 import { usePolling } from "@/lib/hooks/usePolling";
 import { useProductionEvents } from "@/hooks/useProductionEvents";
@@ -34,9 +36,6 @@ const DashboardCharts = dynamic(
   }
 );
 
-/* Latin → Arabic-Indic digits, for counts rendered outside formatIQD. */
-const toArabicDigits = (n: number | string) =>
-  String(n).replace(/\d/g, (d) => "٠١٢٣٤٥٦٧٨٩"[Number(d)]);
 
 /* ── Editorial money: big numeral, quiet unit ──
    formatIQD returns "<number> د.ع"; we split the unit so the figure reads as
@@ -232,6 +231,9 @@ export default function AdminDashboardPage() {
   const gate = useMoneyGate();
   const [configuredLocal, setConfiguredLocal] = useState(false);
   const [visitors, setVisitors] = useState<VisitorStats | null>(null);
+  // «يعمل الآن» — null until the first fetch answers, so the panel never claims an empty
+  // shop while it is still loading.
+  const [working, setWorking] = useState<MonitorData["working"] | null>(null);
   const moneyConfigured = gate.configured || configuredLocal;
   const showMoney = gate.revealed;
   const onGateSaved = useCallback(
@@ -269,6 +271,13 @@ export default function AdminDashboardPage() {
     }
     try {
       setVisitors(await getVisitorStats());
+    } catch {
+      /* leave previous value */
+    }
+    // Staff presence — same non-critical treatment: a manager-only endpoint that a future
+    // non-admin viewer would 403 on must never take the dashboard down with it.
+    try {
+      setWorking(await getPresence());
     } catch {
       /* leave previous value */
     }
@@ -569,6 +578,10 @@ export default function AdminDashboardPage() {
           <p className="mt-1 text-2xl font-bold tabular-nums text-ink">{toArabicDigits(visitors?.total ?? 0)}</p>
         </div>
       </section>
+
+      {/* Who on the team is at work right now — the shop side of the two «الآن» panels,
+          next to the customer side above it. Never money → always visible. */}
+      <PresencePanel rows={working} />
 
       {/* First-run nudge to set the gate secret (only when none configured). */}
       {!moneyConfigured && <MoneyGateSetup onSaved={onGateSaved} />}

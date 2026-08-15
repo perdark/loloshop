@@ -83,6 +83,14 @@ export interface ProductionQueueItem {
   source: "retail" | "wholesaler";
   /** Populated only when source === "wholesaler". */
   wholesaler_name: string | null;
+  /**
+   * SEARCH INDEX, not a display field — every word the student typed on this piece, joined
+   * into one string. Mostly the التطريز text (what is stitched on the garment), plus
+   * free-text option answers like colour. `lib/queue-search.ts` is its only reader; render
+   * `zones[].text` instead, which is per-zone and carries the artwork with it.
+   * Null when the student typed nothing.
+   */
+  search_text?: string | null;
   /** Non-null when this order belongs to a multi-item checkout bundle. */
   checkout_group_id: string | null;
   /** Staff presence — who is actively working on this order (admin monitor). */
@@ -97,6 +105,12 @@ export interface ProductionQueueItem {
   has_design_images?: boolean;
   /** Grouping key for the station console («عرض بالطلب»). */
   student_id?: string;
+  /**
+   * Station mode, التجهيز stages only — every piece of this order's checkout bundle (this
+   * one included) with the stage each is at, so the preparer can tell a complete set from
+   * one whose robe has not arrived yet. Absent for a piece bought on its own.
+   */
+  set_pieces?: { id: string; status: OrderStatus; product_name: string }[];
   needs_pressing?: boolean;
   /**
    * Station console only (?station=1). The piece's embroidery zones with the stitch

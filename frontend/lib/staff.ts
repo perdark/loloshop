@@ -1102,6 +1102,23 @@ export async function getMonitor(
   return data.data;
 }
 
+/**
+ * GET /production/presence — «يعمل الآن» on its own.
+ *
+ * Same rows and the same manager/admin guard as `getMonitor`, but one query instead of
+ * five. Use THIS on anything that polls (the admin dashboard refreshes every 30s and on
+ * every production event); `getMonitor` drags a 30-day audit_log aggregation behind it.
+ */
+export async function getPresence(
+  source?: "retail" | "wholesaler"
+): Promise<MonitorData["working"]> {
+  const { data } = await api.get<{ data: { working: MonitorData["working"] } }>(
+    "/production/presence",
+    { params: source ? { source } : undefined }
+  );
+  return data.data?.working ?? [];
+}
+
 // ─── Staff self-service payroll + activity (GET /payroll/me/*) ─────────────────
 
 /** An activity row enriched with product/student names for the staff self view. */
