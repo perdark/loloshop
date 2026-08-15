@@ -158,12 +158,25 @@ press the button repeatedly. It costs letter height, not data, and converges rat
 away. **Not fixable without a new column**: `plate_path` is overwritten and `sheet_path` is the
 whole 10-name sheet, whose geometry is not the band's. Needs migration 081.
 
-⚠️ **Same shape, unclosed:** `orderController.configureOrder` (`:630`) and `configureFullSet`
-(`:1140`) DELETE and re-INSERT `order_items` with no status guard and never carry
-`plate_image_url` — the identical defect that was destroying plates via `persistFullSetOrder`. A
-review panel refuted these on *reachability* (`orderController.js:727` 403s rep-linked students,
-and plates live overwhelmingly on rep orders), which is an argument about who can reach the path,
-not about the path being safe. Close them the way `lib/fullSetOrder.js` was closed.
+✅ **CLOSED — `orderController.configureOrder` / `configureFullSet` no longer share this shape.**
+This entry described two stacked defects and both are now fixed:
+· The plate-loss half (DELETE + re-INSERT `order_items` never carrying `plate_image_url`) was
+  closed 2026-08-14 on commit `465b2ef`, deployed the same day (see the 2026-08-14 (d) PROGRESS
+  entry) — `lib/platePreservation.js` (`capturePlates`/`plateFor`) applies the same pattern
+  `lib/fullSetOrder.js` uses, and `plateSurvivesReconfigure.test.js` guards it structurally so a
+  future rebuild path can't reintroduce it silently. This HANDOFF entry was not updated when that
+  commit landed — it stayed stale for a day; if you find this warning quoted anywhere else, it is
+  equally stale.
+· The status-guard half was real and separate: `configurePackage`/`configureFullSet` already
+  filtered their "find the existing order" query with `AND status <> 'cancelled'` (matching
+  `uq_orders_student_product_nodesign`'s own partial-index definition), but `configureOrder`'s
+  equivalent query had no such filter and no `ORDER BY`/`LIMIT` — a cancelled order for the same
+  product could be the only match and get silently revived instead of a fresh order being created.
+  Fixed on `fix/plate-loss-guard` (branched 2026-08-15): added the identical `status <>
+  'cancelled'` guard to both branches of `configureOrder`'s existing-order lookup. Covered by
+  `test/orderControllerPlateAndStatusGuard.test.js`, which drives the real `configureOrder` /
+  `configureFullSet` functions against the DB (plate + customer-photo survival, plus a red/green
+  check that reverting the guard resurrects a cancelled order).
 
 ---
 

@@ -124,6 +124,50 @@ Frontend files touched: `frontend/app/staff/counter-signup/page.tsx` (new),
 `frontend/components/staff/StaffSidebar.tsx`, `frontend/components/student/
 ProfilePreferences.tsx`, `frontend/app/admin/page.tsx`. Zero new npm dependencies.
 `npx tsc --noEmit` and `npm run lint` both clean (frontend/).
+## 2026-08-15 — `configureOrder`'s missing status guard, plus real behavioural coverage
+
+Closes the HANDOFF landmine that named `orderController.configureOrder` (`:630`) and
+`configureFullSet` (`:1140`) as still sharing the plate-loss DELETE+re-INSERT shape. Turned out to
+be two separate claims bundled together:
+
+- **The plate-loss half was already fixed.** Commit `465b2ef` (2026-08-14, deployed the same day —
+  see the (d) entry below) applied `lib/platePreservation.js`'s `capturePlates`/`plateFor` pair to
+  `configureOrder`, `configurePackage` AND `configureFullSet`. `HANDOFF.md` was never updated when
+  that commit landed, so the landmine kept describing a defect that no longer existed. Verified by
+  reading the current code (all three functions already call `capturePlates` before the DELETE and
+  `plateFor` on every re-INSERT) and by the fact `plateSurvivesReconfigure.test.js`'s structural
+  guard was already green.
+- **The status-guard half was real.** `configurePackage`/`configureFullSet`'s "find the existing
+  order" query already filters `AND status <> 'cancelled'`, matching
+  `uq_orders_student_product_nodesign`'s own partial-index definition (`WHERE design_id IS NULL
+  AND status <> 'cancelled'`). `configureOrder`'s equivalent query had NO status filter and no
+  `ORDER BY`/`LIMIT` — if a student's piece for a product had been cancelled (staff cancel, or a
+  prior duplicate cleanup) and the student reconfigured that SAME product, the query could match
+  the cancelled row and silently revive it instead of starting a fresh order the way every sibling
+  "configure" endpoint does. Fixed by adding the identical `status <> 'cancelled'` guard to both
+  branches (design_id-keyed and product_id-keyed) of `configureOrder`'s existing-order lookup.
+
+**New test file**, `backend/test/orderControllerPlateAndStatusGuard.test.js` — the first test to
+drive the actual `configureOrder`/`configureFullSet` controller functions (not just
+`lib/fullSetOrder.js` or a structural source-grep) against a real DB:
+1. A re-save of a retail sash order preserves both `plate_image_url` (server-side artifact,
+   injected directly via SQL the way the calligraphy generator would) and `customer_image_url`
+   (client-supplied, resubmitted the way the frontend resubmits it) on the same line, and the
+   plate never leaks onto a sibling line.
+2. Cancelling that order and reconfiguring the same product creates a genuinely NEW order — the
+   cancelled row stays cancelled and keeps its own plate history, the new order starts clean.
+   Confirmed this test fails (`AssertionError`, same UUID on both sides) with the guard removed,
+   and passes once it's restored — this is a real regression test, not a tautology.
+3. `configureFullSet` (the retail/no-rep full-set path) already preserves a plate across a
+   re-save; pinned with the same behavioural style so a future refactor can't regress it silently.
+
+Full suite: **271/271 pass** (266 baseline + 5 new), run from `backend/` with `node --test test/`.
+No migration, no new dependency, no API contract change — `API.md`'s
+`/orders/configure-full-set` entry gets a one-line addition noting the plate/cancelled-order
+safety already implied by "idempotent re-submission."
+
+Files touched: `backend/controllers/orderController.js` (status guard, `configureOrder` only),
+`backend/test/orderControllerPlateAndStatusGuard.test.js` (new), `HANDOFF.md`, `API.md`.
 
 ## 2026-08-14 (e) — the shop is in ديالى, and /login has a way out
 
