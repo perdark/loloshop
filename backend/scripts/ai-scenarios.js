@@ -127,8 +127,8 @@ const SCENARIOS = [
   { g: 'قواعد', q: 'شلون اطلب وشاح؟', checks: [arabicOnly] },
   // Regression #1: it answered «موقعنا مو محدد» — turning away a walk-in customer while a
   // Google map of the real shop sits at the bottom of the very page the widget is on.
-  { g: 'قواعد', q: 'وين موقعكم؟', checks: [has(/بغداد|خريطة|الصفحة الرئيسية|موقعنا/), lacks(/مو محدد|ما عدنا محل|ماكو محل/, 'a denial that the shop exists'), arabicOnly] },
-  { g: 'قواعد', q: 'عندكم محل حقيقي لو بس اونلاين؟', checks: [has(/بغداد|محل/), arabicOnly] },
+  { g: 'قواعد', q: 'وين موقعكم؟', checks: [has(/ديالى|بعقوبة|خريطة|الصفحة الرئيسية|موقعنا/), lacks(/مو محدد|ما عدنا محل|ماكو محل/, 'a denial that the shop exists'), arabicOnly] },
+  { g: 'قواعد', q: 'عندكم محل حقيقي لو بس اونلاين؟', checks: [has(/ديالى|بعقوبة|محل/), arabicOnly] },
   // Regression #3: asked about the weather it volunteered «15,000 للشال» — that is the وشاح
   // price; the شال is 25,000. Two near-synonyms in Arabic, two different products.
   { g: 'قواعد', q: 'شكد سعر الشال؟', checks: [has(/25,000/), lacks(/الشال يبدأ من 15,000|للشال.{0,12}15,000/, 'the sash price attached to the shawl'), arabicOnly] },

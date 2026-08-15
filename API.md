@@ -555,6 +555,74 @@ Edit intake: `deposit` (واصل), `event_date`, phones, address, `customer_name
 
 ---
 
+## Assistant («لولو» — storefront support chatbot) — 2026-08-15
+
+OpenRouter-backed, no tool-calling: the server pre-fetches every fact the model may state with
+hand-written parameterised queries (`lib/supportContext.js`) and the model only phrases them in
+Iraqi Arabic. See `backend/lib/aiChat.js` for cost caps and `lib/answerGuard.js` for the outbound
+safety check. All error responses `{ error: <Arabic msg>, code: 'ERR_*' }`.
+
+### POST `/assistant/session` (public, rate-limited)
+Mints a server-signed anonymous identity for a signed-out visitor. `{ sessionToken, expiresInMs }`.
+The client sends this token back as `sessionToken` on `/support` and `/react` so the throttle and
+conversation history key on an identity nobody can forge or wear.
+
+### POST `/assistant/support` (public — `optionalAuth`, rate-limited)
+Body: `{ question, sessionToken? }` (`sessionToken` only for anonymous callers; signed-in callers
+send their Bearer token instead). → `200`:
+```json
+{
+  "answer": "...",
+  "actions": [{ "id": "shop", "label": "شوف القطع", "kind": "internal|external", "href": "/shop" }],
+  "emotion": "happy|love|excited|thinking",
+  "mood": "wink|caring|happy|neutral",
+  "message_id": 1234,
+  "sessionToken": "v1...."
+}
+```
+- `actions` — at most 3 tappable chips, server-picked from a closed list (never a model-written
+  URL). Absent chip set → `[]` for pure small talk.
+- `emotion` — which mascot face matches the answer's TOPIC.
+- `mood` — coarser register split for the character illustration: `wink` (a compliment/playful
+  message), `caring` (the customer expressed sadness/tiredness), `happy` (an ordinary answered
+  question or greeting), `neutral` (a guard fallback or an honest "not available").
+- `message_id` — the `ai_chat_messages.id` this answer lives in. Present whenever the answer was
+  logged (model call, cache hit, or a canned fallback); pass it to `POST /assistant/react`. Absent
+  only if the ledger write itself failed.
+- `sessionToken` — present only when the caller arrived without a valid one; the client must
+  store it and send it back on every subsequent call.
+
+Facts available to the model now include, besides the price book: a **product digest** (real
+product names by type, best-selling first, capped ~20) so it can name/recommend actual pieces
+instead of a price range, and a **universities digest** (top ~15 universities/colleges served +
+total distinct count) so «تسوون لجامعتي؟» always gets a warm yes instead of «ما أعرف». The shop's
+real location is **ديالى (بعقوبة)** — «مطبعة لولو شوب» on Google Maps — corrected from an earlier,
+wrong «بغداد» in the prompt.
+
+Errors: `503 ERR_AI_DISABLED` (not configured) · `400 ERR_AI_EMPTY_QUESTION` /
+`ERR_AI_QUESTION_TOO_LONG` · `429 ERR_AI_TOO_FAST` (with `Retry-After` + `retryAfterSec`) ·
+`503 ERR_AI_BUDGET` / `ERR_AI_ANON_BUDGET` · `502 ERR_AI_UPSTREAM` / `ERR_AI_NET` / `ERR_AI_EMPTY`
+(these three carry `actions: [shopContact]` so the customer is never left at a dead end).
+
+### POST `/assistant/react` (public — `optionalAuth`, rate-limited) — 2026-08-15
+Tap-reaction on one of لولو's own answers. Body: `{ message_id, reaction, sessionToken? }`.
+`reaction` ∈ `like|love|happy|sad|good|excellent`, or `null` to clear a previous reaction.
+Ownership: an authenticated caller may react only to a message on their own `user_id`; an
+anonymous caller must present the SAME signed `sessionToken` the message was logged under
+(reused exactly like `/support`'s identity resolution — see `lib/anonSession.js`). Overwrites any
+existing reaction. → `200 { ok: true, message_id, reaction }`.
+
+Errors: `400 ERR_AI_REACT_BAD_ID` (missing/non-numeric/≤0 `message_id`) ·
+`400 ERR_AI_REACT_INVALID` (reaction not in the list) · `403 ERR_AI_REACT_FORBIDDEN` (no
+authenticated user AND no valid signed session token — nothing to own the message with) ·
+`404 ERR_AI_REACT_NOT_FOUND` (message doesn't exist, OR exists but belongs to someone else — the
+two are indistinguishable on purpose, so a caller cannot probe which ids are real).
+
+### POST `/assistant/analytics` (admin only)
+Closed metric set for the admin-facing AI analytics chat — unchanged by this round of work.
+
+---
+
 ## Error Codes
 
 | Code | HTTP | Meaning |

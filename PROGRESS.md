@@ -1,5 +1,67 @@
 # Progress
 
+## 2026-08-15 — «لولو» assistant: location fix, product/university knowledge, mood, reactions — on `fix/ai-assistant-money` (UNMERGED)
+
+Five owner-driven fixes to the storefront assistant, all on the already-parked
+`fix/ai-assistant-money` branch (that branch's own money-metric fix is untouched by this work).
+
+**1 — Location was actively wrong.** `SHOP_FACTS` and RULES item 9 in
+`backend/controllers/supportChatController.js` said the shop was «ببغداد» in two bullets; the
+storefront copy was corrected to ديالى back in `3d1cce8` but the AI prompt never was. Now reads
+«محل حقيقي بمحافظة ديالى (بعقوبة)», matches `frontend/lib/copy-ar.ts` and the map coords in
+`StoreLocation.tsx`. Also fixed the same wrong city in `lib/supportFallback.js` (the
+model-unreachable canned answers) and a stale comment in `lib/answerGuard.js`; updated the manual
+`scripts/ai-scenarios.js` harness's location regex to accept ديالى.
+
+**2 — Product knowledge.** New `supportContext.productDigest(role)`: real ACTIVE leaf product
+names grouped by type («- <type>: <name> (يبدأ من X دينار), …»), same audience-filter +
+parent-exclusion shape as `priceBook`, capped at 20 names total and ordered by real sales via the
+same `billableOrderSql` join `bestSellers` uses. Cached 5 min/role. New RULES line 13: naming or
+recommending a product must come only from this list.
+
+**3 — University knowledge (the «idk» complaint).** New `supportContext.universitiesDigest()`:
+top ~15 university/college names (from `students` where `status='approved'`) by count + total
+distinct count, cached 30 min. New RULES line 14: any «تسوون لجامعتي؟» question is ALWAYS a warm
+yes — the shop serves every Iraqi university/college, the student uploads their own logo — never
+«ما أعرف». Both digests wired into `buildSystem()`; the answer cache key already hashes the whole
+prompt, so staleness handles itself.
+
+**4 — Mood field.** New pure `classifyMood(question, answerText)` in `backend/lib/mood.js`:
+`wink` (compliment/playful) → `caring` (sadness/tiredness, outranks a compliment in the same
+message) → `neutral` (a guard fallback or an honest «مو متوفرة» answer — detected by reusing
+`supportActions`' own `DUNNO_RE`, so the two files can't disagree) → `happy` (default). Included
+as `mood` in every `POST /assistant/support` response that carries an answer.
+
+**5 — Reactions.** Migration `082_ai_chat_reactions.sql` (mirrored in `db/schema.sql`, applied to
+the dev DB): nullable `ai_chat_messages.reaction TEXT` with a CHECK limiting it to
+`like|love|happy|sad|good|excellent`. `/support` responses now carry `message_id` (the ledger row
+id — `lib/aiChat.js` `logCached()` now `RETURNING id`, and the model-unreachable fallback path now
+settles the reserved row with the actual served text instead of leaving it NULL, so its
+`message_id` points somewhere real). New `POST /assistant/react { message_id, reaction }`
+(`supportChatController.react`, routed with its own `reactLimit`): reaction must be in the list
+(else `400 ERR_AI_REACT_INVALID`) and the caller must OWN the row — own `user_id`, or the same
+signed anon `sessionKey` `/support` uses (`lib/anonSession.js`) — else `403 ERR_AI_REACT_FORBIDDEN`
+(no identity at all) or `404 ERR_AI_REACT_NOT_FOUND` (real id, wrong owner, or no such id — the
+three are deliberately indistinguishable). Setting overwrites; `reaction: null` clears.
+
+Full response contract for `/support` and `/react`, and every new error code, are in `API.md`
+under "Assistant («لولو»)".
+
+Verified: `node --test test/` from `backend/` — **397/397 pass** (baseline was 378; +19: 5 pure
+`formatProductDigest` tests, 4 pure `classifyMood` tests, 10 live-DB tests in new
+`test/aiChatReactions.test.js` covering the happy path, overwrite, clear, anon-session ownership,
+wrong-owner 404 ×2, missing-message 404, no-identity 403, invalid-reaction 400, bad-id 400).
+Smoke-tested `productDigest`/`universitiesDigest` directly against the dev DB (57 active products,
+1,011 approved students across 70 distinct universities/colleges) before writing tests. Zero new
+npm dependencies. `frontend/` untouched.
+
+Files touched: `backend/controllers/supportChatController.js`, `backend/lib/supportContext.js`,
+`backend/lib/supportFallback.js`, `backend/lib/answerGuard.js` (comment only),
+`backend/lib/aiChat.js`, `backend/lib/mood.js` (new), `backend/routes/assistant.js`,
+`backend/scripts/ai-scenarios.js`, `db/migrations/082_ai_chat_reactions.sql` (new),
+`db/schema.sql`, `backend/test/aiChat.test.js`, `backend/test/aiChatReactions.test.js` (new),
+`API.md`.
+
 ## 2026-08-15 — the last two of the eleven bugs, on `fix/admin-presence-panel` (UNMERGED)
 
 Bug 1 and the three unwritten parts of bug 8. **All eleven bugs are now closed in code.**

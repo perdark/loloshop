@@ -11,6 +11,7 @@
  * and the home-page stage are two views of one thread. See that file for why.
  */
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { GREETING, SUGGESTIONS, useCountdown, useSupportChat } from "./SupportChatProvider";
 import { ChatBubble, TypingDots } from "./ChatBubble";
@@ -102,6 +103,25 @@ export function SupportChat() {
             {busy ? "يكتب الآن…" : "يجاوبك عن طلبك وعن المتجر"}
           </p>
         </div>
+        {/* The dedicated screen — same conversation, more room. A student mid-question on a
+            small sheet can jump there without losing anything: both surfaces read the same
+            thread from the same provider. */}
+        <Link
+          href="/lolo"
+          aria-label="افتح الصفحة الكاملة لمحادثة لولو"
+          title="الصفحة الكاملة"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-muted transition hover:bg-surface-sink hover:text-ink"
+        >
+          <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
+            <path
+              d="M9 15 4 20m0 0h5m-5 0v-5M15 9l5-5m0 0h-5m5 0v5"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </Link>
         {turns.length > 0 && (
           <button
             type="button"
@@ -144,6 +164,9 @@ export function SupportChat() {
             actions={t.actions}
             animate={Boolean(t.fresh) && i === lastAssistant}
             showFace={i === lastAssistant}
+            mood={t.mood}
+            messageId={t.messageId}
+            reaction={t.reaction}
           />
         ))}
         {busy && <TypingDots />}

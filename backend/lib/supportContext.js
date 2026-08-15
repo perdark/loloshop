@@ -144,6 +144,73 @@ async function priceBook(role = 'retail') {
 }
 
 /**
+ * Format the product digest rows into «- type: name (يبدأ من X دينار), name2 (…), …» lines,
+ * one line per type. Pure, mirrors formatPriceBook's shape — see productDigest for the query.
+ */
+function formatProductDigest(rows) {
+  if (!rows.length) return null;
+  const byType = new Map();
+  for (const r of rows) {
+    if (!TYPE_AR[r.type]) continue;
+    const label = `${safeField(r.name_ar, 60)} (يبدأ من ${fmtIQD(r.price)})`;
+    if (!byType.has(r.type)) byType.set(r.type, []);
+    byType.get(r.type).push(label);
+  }
+  if (!byType.size) return null;
+
+  const lines = [...byType.entries()].map(
+    ([type, names]) => `- ${TYPE_AR[type]}: ${names.join('، ')}`
+  );
+  return ['قائمة القطع المتوفرة بالاسم (الأكثر مبيعاً أولاً):', ...lines].join('\n');
+}
+
+/**
+ * The real products this audience can order, by NAME — the owner complaint this exists for is
+ * «الذكاء الاصطناعي ما يعرف المنتجات»: asked to recommend or name a piece, the bot had nothing
+ * but the price-range summary in priceBook, so it either stayed generic or invented a name.
+ *
+ * Same audience filter + parent-exclusion shape as priceBook (a rep-linked student must not be
+ * shown wholesaler-only names, and a parent row is a CATEGORY, not an orderable model) — copied
+ * rather than shared because the two queries select different columns and diverging later must
+ * not silently break one by editing the other.
+ *
+ * Capped at 20 names total (not per type) and ordered by real sales via the same
+ * `billableOrderSql` LEFT JOIN pattern `bestSellers` uses, so a shop with more than 20 active
+ * models still leads with what actually sells rather than an arbitrary DB order.
+ *
+ * Cached 5 minutes per role, same TTL as priceBook — the catalogue does not change between two
+ * messages of one conversation.
+ */
+async function productDigest(role = 'retail') {
+  const audienceFilter =
+    role === 'wholesaler' ? 'AND p.retail_only = FALSE' : 'AND p.wholesaler_only = FALSE';
+
+  return memoCache.wrap(`ai:productdigest:${role}`, 5 * 60 * 1000, async () => {
+    const { rows } = await query(
+      `SELECT p.type::text AS type,
+              p.name_ar,
+              COALESCE(ppr.base_price, p.base_price)::bigint AS price,
+              COUNT(o.id) AS sales
+         FROM products p
+         LEFT JOIN product_price_roles ppr ON ppr.product_id = p.id AND ppr.role = $1
+         LEFT JOIN orders o ON o.product_id = p.id AND ${billableOrderSql('o')}
+        WHERE p.active = TRUE
+          ${audienceFilter}
+          -- Same exclusion as priceBook/bestSellers: a parent whose children are active is a
+          -- category row, not a model a customer can actually order.
+          AND NOT EXISTS (SELECT 1 FROM products c WHERE c.parent_id = p.id AND c.active = TRUE)
+          AND COALESCE(ppr.base_price, p.base_price) > 0
+        GROUP BY p.id, p.type, p.name_ar, ppr.base_price, p.base_price
+        ORDER BY sales DESC, p.sort ASC, p.name_ar ASC
+        LIMIT 20`,
+      [role]
+    );
+
+    return formatProductDigest(rows);
+  });
+}
+
+/**
  * What actually sells, by name, most-sold first.
  *
  * Asked «شنو أكثر قطعة تنباع عدكم؟» the bot used to GUESS — and once guessed «وشاح التخرج»
@@ -186,6 +253,48 @@ async function bestSellers(role = 'retail') {
     // safeField for the same reason as the package names above — admin-written is not the same
     // as safe to interpolate into a system prompt.
     return `الأكثر مبيعاً عدنا (بالترتيب): ${rows.map((r) => safeField(r.name_ar, 60)).join('، ')}.`;
+  });
+}
+
+/**
+ * The universities/colleges the shop has already served — the fact behind the owner complaint
+ * «سألوا عن جامعة، الذكاء الاصطناعي كال ما اعرف». Without this the model had no way to answer
+ * «تسوون لجامعة X؟» except a guess, and RULES tells it to never guess — so it degraded to
+ * «ما أعرف» on a question whose true answer is always yes (every college is welcome; the
+ * student uploads their own logo).
+ *
+ * Built from APPROVED students only — a pending or rejected row is not a served customer, and
+ * counting it would let a single unapproved signup make an unserved college look served.
+ * `safeField` because `university_name` is customer-typed, exactly like `formatContext` above.
+ *
+ * Top 15 by count plus the total distinct count, not the whole list: dozens of one-off spellings
+ * of the same college would dominate the prompt for no benefit — the model only needs "have we
+ * done this one before" and "roughly how many", never the full roster.
+ *
+ * Cached 30 minutes: this is a shop-wide historical fact, not something that moves within a
+ * conversation, same reasoning as bestSellers.
+ */
+async function universitiesDigest() {
+  return memoCache.wrap('ai:universities', 30 * 60 * 1000, async () => {
+    const { rows } = await query(
+      `SELECT university_name, COUNT(*)::int AS cnt
+         FROM students
+        WHERE status = 'approved' AND university_name IS NOT NULL AND university_name <> ''
+        GROUP BY university_name
+        ORDER BY cnt DESC
+        LIMIT 15`
+    );
+    if (!rows.length) return null;
+
+    const { rows: totalRows } = await query(
+      `SELECT COUNT(DISTINCT university_name)::int AS total
+         FROM students
+        WHERE status = 'approved' AND university_name IS NOT NULL AND university_name <> ''`
+    );
+    const total = totalRows[0]?.total || rows.length;
+
+    const names = rows.map((r) => safeField(r.university_name, 60));
+    return `الجامعات اللي خدمناها: خدمنا طلبة من أكثر من ${total} جامعة وكلية بالعراق، منها: ${names.join('، ')}.`;
   });
 }
 
@@ -297,5 +406,6 @@ async function forUser(userId) {
 }
 
 module.exports = {
-  forUser, priceBook, bestSellers, STATUS_AR, formatContext, formatPriceBook, TYPE_AR, safeField,
+  forUser, priceBook, bestSellers, productDigest, universitiesDigest,
+  STATUS_AR, formatContext, formatPriceBook, formatProductDigest, TYPE_AR, safeField,
 };

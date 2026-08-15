@@ -325,14 +325,20 @@ async function settle(id, { answer, intent, result, error } = {}) {
  * common questions if cache hits were invisible. `model = 'cache'` and cost 0 are what mark
  * it, and what `reserve()` excludes from the caps.
  *
- * Fire-and-forget: a logging failure must never fail an answer we already have in hand.
+ * Returns `{ id }` — the row this answer actually lives in, which is what the caller returns as
+ * `message_id` for the reactions feature (POST /api/assistant/react). `id` is null on a logging
+ * failure so the response simply omits `message_id` rather than reacting against nothing.
+ *
+ * Fire-and-forget in spirit: a logging failure must never fail an answer we already have in
+ * hand, only the reaction affordance on it.
  */
 async function logCached({ userId, sessionKey, surface, question, answer, ipHash = null }) {
   try {
-    await query(
+    const { rows } = await query(
       `INSERT INTO ai_chat_messages
          (user_id, session_key, surface, question, answer, model, cost_usd, ip_hash)
-       VALUES ($1, $2, $3, $4, $5, 'cache', 0, $6)`,
+       VALUES ($1, $2, $3, $4, $5, 'cache', 0, $6)
+       RETURNING id`,
       [
         userId || null,
         sessionKey || null,
@@ -342,8 +348,10 @@ async function logCached({ userId, sessionKey, surface, question, answer, ipHash
         ipHash,
       ]
     );
+    return { id: rows[0]?.id ?? null };
   } catch (e) {
     console.error('aiChat cache-hit log FAILED (answer still served):', e.message);
+    return { id: null };
   }
 }
 

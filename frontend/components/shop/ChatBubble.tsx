@@ -1,12 +1,14 @@
 "use client";
 
-/** One message, plus the chips under it. Shared by the floating panel and the home-page stage
- *  so the assistant reads identically in both — same radius, same colours, same wrapping. */
+/** One message, plus the chips and reactions under it. Shared by the floating panel and the
+ *  dedicated /lolo page so the assistant reads identically in both — same radius, same
+ *  colours, same wrapping, same reaction strip. A component used in only one place would let
+ *  the two surfaces quietly drift apart; this is the one thing keeping them in sync. */
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import type { ChatAction, Turn } from "./SupportChatProvider";
-import { LoloFace } from "./LoloFace";
+import { type ChatAction, type Mood, type Reaction, type Turn, useSupportChat } from "./SupportChatProvider";
+import { LoloFace, type LoloEmotion } from "./LoloFace";
 
 /**
  * Reveal an answer word by word.
@@ -50,6 +52,68 @@ function useRevealedWords(text: string, animate: boolean) {
   return text.split(/\s+/).slice(0, shown).join(" ");
 }
 
+/** The mascot face beside a reply reflects its `mood`, reusing the existing seven-expression
+ *  art rather than adding new assets: a witty/playful reply gets the wink, a warm one gets
+ *  the same face used for the "someone said something sweet" case elsewhere in the app.
+ *  happy/neutral — the common case — keep the default smile. */
+function faceForMood(mood?: Mood): LoloEmotion {
+  if (mood === "wink") return "wink";
+  if (mood === "caring") return "love";
+  return "happy";
+}
+
+const REACTIONS: { key: Reaction; emoji: string; label: string }[] = [
+  { key: "like", emoji: "👍", label: "إعجاب" },
+  { key: "love", emoji: "❤️", label: "حب" },
+  { key: "happy", emoji: "😄", label: "سعيد" },
+  { key: "sad", emoji: "😢", label: "حزين" },
+  { key: "good", emoji: "👌", label: "جيد" },
+  { key: "excellent", emoji: "🌟", label: "ممتاز" },
+];
+
+/**
+ * The reaction strip under a لولو reply. One tap selects (optimistic highlight, POST
+ * /assistant/react); tapping the same emoji again clears it; tapping a different one
+ * overwrites — never more than one selected reaction per message, matching the backend's
+ * own "null clears, a new value overwrites" contract.
+ *
+ * Labels are aria-label + title, not visible text on every chip — six spelled-out Arabic
+ * words under every single reply would be louder than the reply itself. min-h/min-w-11 keeps
+ * each tap target at the project's 44px floor even though the row reads as compact.
+ */
+function ReactionRow({
+  messageId,
+  selected,
+  onReact,
+}: {
+  messageId: string;
+  selected: Reaction | null | undefined;
+  onReact: (messageId: string, reaction: Reaction | null) => void;
+}) {
+  return (
+    <div role="group" aria-label="تفاعل مع رد لولو" className="mt-1.5 flex flex-wrap gap-1">
+      {REACTIONS.map((r) => {
+        const active = selected === r.key;
+        return (
+          <button
+            key={r.key}
+            type="button"
+            title={r.label}
+            aria-label={r.label}
+            aria-pressed={active}
+            onClick={() => onReact(messageId, active ? null : r.key)}
+            className={`flex min-h-11 min-w-11 items-center justify-center rounded-full text-base transition active:scale-90 ${
+              active ? "bg-orange/15 ring-1 ring-orange" : "hover:bg-surface-sink"
+            }`}
+          >
+            <span aria-hidden="true">{r.emoji}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function ActionChip({ action }: { action: ChatAction }) {
   const className =
     "inline-flex min-h-10 items-center gap-1.5 rounded-pill border border-orange/35 bg-surface px-3.5 py-2 " +
@@ -77,13 +141,25 @@ export function ChatBubble({
   actions,
   animate = false,
   showFace = false,
+  mood,
+  messageId,
+  reaction,
 }: {
   role: Turn["role"];
   text: string;
   actions?: ChatAction[];
   animate?: boolean;
   showFace?: boolean;
+  /** Only ever set on assistant turns — reflected in the face beside the bubble and, for
+   *  "caring", in the bubble's own tone. */
+  mood?: Mood;
+  /** Present only on turns the server actually logged. Its presence, not `role`, is what
+   *  gates the reaction row — a turn without one (the static GREETING, anything from before
+   *  this shipped) has nothing to attach a reaction to. */
+  messageId?: string;
+  reaction?: Reaction | null;
 }) {
+  const { react } = useSupportChat();
   const mine = role === "user";
   const revealed = useRevealedWords(text, !mine && animate);
   // Chips wait for the sentence to finish — arriving mid-reveal they read as the answer being
@@ -100,11 +176,20 @@ export function ChatBubble({
     );
   }
 
+  const caring = mood === "caring";
+
   return (
     <div className="flex items-end gap-2">
-      {showFace && <LoloFace emotion="happy" size={30} className="mb-0.5 shrink-0" />}
+      {showFace && <LoloFace emotion={faceForMood(mood)} size={30} className="mb-0.5 shrink-0" />}
       <div className="min-w-0 max-w-[85%]">
-        <p className="whitespace-pre-wrap rounded-2xl rounded-es-md bg-surface-sink px-4 py-2.5 text-sm leading-relaxed text-ink-soft">
+        {/* "caring" mood: a softer bubble tone + a gentle line above it, not a new bubble
+            shape — the reveal animation and action chips below still work unchanged. */}
+        {caring && <p className="mb-1 text-[11px] font-semibold text-orange-ink">🧡 بكل محبة</p>}
+        <p
+          className={`whitespace-pre-wrap rounded-2xl rounded-es-md px-4 py-2.5 text-sm leading-relaxed text-ink-soft ${
+            caring ? "bg-blush" : "bg-surface-sink"
+          }`}
+        >
           {revealed}
         </p>
         {done && actions && actions.length > 0 && (
@@ -114,6 +199,7 @@ export function ChatBubble({
             ))}
           </div>
         )}
+        {done && messageId && <ReactionRow messageId={messageId} selected={reaction} onReact={react} />}
       </div>
     </div>
   );

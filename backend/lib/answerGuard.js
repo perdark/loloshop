@@ -29,7 +29,7 @@ const MONEY_RE = /[\d٠-٩]{1,3}(?:[,،.٬][\d٠-٩]{3})+/g;
 
 // A promise that an order will ARRIVE. The deadline may be mentioned — it is a real fact in the
 // prompt — but never as the date the order lands, and no delivery may be offered at all: the
-// shop does not deliver (owner, 2026-08-12) and pickup from the Baghdad shop is the only option.
+// shop does not deliver (owner, 2026-08-12) and pickup from the Diyala shop is the only option.
 // Regression #2: the bot invented «نكدر نوصل داخل بغداد» out of nothing.
 const DELIVERY_RE =
   /راح\s*(يوصل|توصل|نوصل|أوصل)|رح\s*(يوصل|توصل|نوصل)|يوصلك\s*(يوم|بتاريخ|ب\s*تاريخ)|نوصّل|نوصلّ|التوصيل\s*(مجاني|يكلف|سعره)|أجور\s*التوصيل/;

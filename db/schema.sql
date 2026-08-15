@@ -1427,4 +1427,10 @@ ALTER TABLE ai_chat_messages ADD COLUMN IF NOT EXISTS ip_hash TEXT;
 CREATE INDEX IF NOT EXISTS idx_ai_chat_ip_created
   ON ai_chat_messages(ip_hash, created_at DESC) WHERE ip_hash IS NOT NULL;
 
+-- 082: a closed-vocabulary tap-reaction on the assistant's own answer, nullable — see
+-- db/migrations/082_ai_chat_reactions.sql for why a CHECK constraint and not just the
+-- application-layer list in supportChatController.js.
+ALTER TABLE ai_chat_messages ADD COLUMN IF NOT EXISTS reaction TEXT
+  CHECK (reaction IS NULL OR reaction IN ('like', 'love', 'happy', 'sad', 'good', 'excellent'));
+
 COMMIT;
