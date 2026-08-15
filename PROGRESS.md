@@ -1,5 +1,80 @@
 # Progress
 
+## 2026-08-16 — 🚚 MIGRATED TO THE 8 GB BOX. LoloShop now lives on `169.58.114.255`.
+
+**Prod is `169.58.114.255`, not `142.93.110.202`.** The old 2 GB droplet measured
+**1.9 GiB total / 422 Mi available / 541 Mi swap in use**, shared with khatuna, teacher AND
+Grand Layan (`grand-layan.com` resolves to it and runs on `127.0.0.1:3002`). The owner could not
+resize it, so the shop moved onto the box that was already running **RevoArt** — 7.8 GiB, 4 vCPU,
+96 G disk, 4 GB swap.
+
+**The runbook's new-box plan was not what shipped.** `docs/migration-8gb-runbook.md` assumed a
+blank droplet: install nginx, copy `/etc/letsencrypt`, run certbot. The target turned out to be
+occupied, and **`supabase-caddy` owns :80 and :443** (compose in `/opt/revoart/supabase`). Rather
+than fight for the ports, LoloShop was added as a **site block inside RevoArt's existing Caddy**,
+which already routes by Host and terminates TLS. Net effect: **no nginx, no certbot, no cert
+migration, and RevoArt took a graceful config reload instead of downtime.**
+
+| | |
+|---|---|
+| Stack | Node 20.20.2 · PM2 7.0.1 · **PostgreSQL 17.11** (host PG16 was `inactive`, so 5432 was free) |
+| Data | users **1744** · orders **3307** · order_items **14303** · products **60** — matched old box exactly; 8 pgboss tables / 7 jobs / 56 public tables identical on both |
+| Uploads | **5.0 G, 7,415 files**, rsynced box-to-box over a dedicated migration key |
+| TLS | the live cert was **copied**, not re-issued — pinned via `tls` in the Caddy block, so the cutover had **zero cert gap**. ⚠️ That also disables auto-renew for this site: before **2026-10-23**, either re-copy the renewed files or delete the two `tls` lines and let Caddy take the domain over |
+| Speed | home page **80 ms** on the new box vs **900 ms** on the old |
+
+### Three defects this caught, all of which would have fired under tomorrow's traffic
+
+1. **`trust proxy` was `loopback`** (`server.js:40`). Behind Caddy the proxy is `172.18.0.1`, so
+   `req.ip` would have been **the same value for every visitor on earth** — every per-IP limiter
+   (assistant 100/15 min, `joinLimit` 10 signups/hr, OTP caps) would have throttled the entire
+   launch within minutes. Fixed via `TRUST_PROXY` in the new box's `.env`.
+2. **Timezone.** The old box was deliberately `Asia/Baghdad (+03)`; the new one is
+   `Europe/Berlin (+02)`, RevoArt's default. The deadline, the بصمة window and the assistant's
+   daily budget reset all read server-local time. Fixed **per process** in `ecosystem.config.js`
+   (`TZ = 'Asia/Baghdad'`) — changing the HOST timezone would have moved RevoArt's clock instead.
+3. **The CI deploy key was not on the new box.** `SERVER_HOST` alone is not enough; the
+   `github-deploy` key had to be copied into `/root/.ssh/authorized_keys` or every deploy would
+   have failed at the SSH step.
+
+### The bridge — why the old box is not simply off
+
+DNS was flipped at the registrar, but resolvers cache. With the old box's API stopped (one
+authoritative DB, deliberately), stale-DNS visitors were getting **502 on every `/api/` call**.
+So `lolo-shop96.com` on the OLD box was rewritten as a **pure forwarder to the new box** over
+HTTPS (`proxy_ssl_server_name on` so Caddy picks the right site; original client IP preserved in
+`X-Forwarded-For`, and `142.93.110.202` added to `TRUST_PROXY` so bridged visitors do not all
+collapse into one rate-limit bucket). Both DNS paths now answer **200 on `/`, `/shop`, `/lolo`,
+`/api/health`, `/api/catalog/shop`**.
+⚠️ **Do NOT restore the old box's `proxy_pass 127.0.0.1` lines and restart its API.** That is
+what creates two live databases at once; orders written to the losing one cannot be merged back.
+The old nginx site is backed up at `/root/lolo-shop96.com.bak-premigration`, and the Caddyfile at
+`/opt/revoart/supabase/volumes/proxy/caddy/Caddyfile.bak-preloloshop`.
+
+### Verified live on the new box after the auto-deploy (`f021152`)
+
+CI green on all three jobs (frontend · backend · **Deploy to VPS**) · migrations 078/079 applied
+(`ai_chat_messages` + `ip_hash` present, reverted 082 `reaction` column correctly absent) ·
+`TZ: Asia/Baghdad` inside the running API · both deep-link manifests **200 `application/json`,
+0 redirects on apex AND www** · uploads serve with `no-store` + `attachment` + `nosniff` ·
+**«لولو» answered a real price question end-to-end** («روب التخرج يبدأ سعره من 25,000 دينار»)
+with `reaction: "none"`, which is the designed answer for an ordinary question ·
+`grand-layan.com` and `khatuna.beauty` still 200 on the old box.
+
+**WhatsApp OTP was measured, not assumed:** 251 sends in 7 days, and **194 of 228 codes issued
+were actually used (85%)** — that is delivery, not just attempts. The new
+`backend/lib/whatsappCloud.js` is **inert** until its three env vars exist.
+
+**Monitoring:** Uptime Kuma runs in Docker on the new box, bound to **127.0.0.1:3001** (not
+public). Reach it with `ssh -L 3001:127.0.0.1:3001 root@169.58.114.255`, then
+`http://localhost:3001`. It still needs its admin account, its monitors and a notification
+channel — that is a UI task nobody has done yet.
+
+**Still open:** the old box is the rollback and must stay untouched until a full quiet day has
+passed · Caddy's `/uploads` block duplicates three headers Express already sets (identical
+values, harmless, worth tidying) · `docs/migration-8gb-runbook.md` still describes the
+blank-droplet plan and should be rewritten to match what actually happened.
+
 ## 2026-08-15 (b) — reactions REPLACED: the visitor no longer taps them, «لولو» sends one
 
 **Owner ruling: the tap-reactions were the wrong feature.** «I meant the AI itself does a

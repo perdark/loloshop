@@ -13,14 +13,15 @@ this file if something on the board opened, closed, or changed.
 
 ---
 
-## 📍 WHERE THE TREE IS — 2026-08-14
+## 📍 WHERE THE TREE IS — 2026-08-16
 
-Verified against git, against the running box over SSH, and (for the admin dashboard) in a real
-browser this session. Store/push rows below were last verified 2026-08-10 and are unchanged.
+Verified against git and against BOTH boxes over SSH this session. Store/push rows below were
+last verified 2026-08-10 and are unchanged.
 
 | | |
 |---|---|
-| `origin/main` | `6b62738` — **Tracks A, B and C all merged and DEPLOYED**; prod confirmed at this SHA over SSH |
+| **Server** | 🚚 **MOVED to `169.58.114.255` (8 GB, shared with RevoArt) on 2026-08-16.** Fronted by RevoArt's `supabase-caddy`, not nginx. Old 2 GB box `142.93.110.202` is stopped-API + forwarder = the rollback. Full detail in the 2026-08-16 PROGRESS entry. |
+| `origin/main` | `f021152` — pushed 2026-08-16, CI green on all three jobs, **auto-deployed to the NEW box** and verified live (assistant answered end-to-end) |
 | Eleven-bug tracks | **ALL ELEVEN CLOSED IN CODE.** Deployed: 2·3 (C) · 9·10·11 (A) · 4·5·6 (B) · **7** · **8 part 1**. On `fix/admin-presence-panel`, **unmerged**: **bug 1** + **bug 8 parts 2·3·4**. *(This row said «1, 7, 8 NOT started» until 2026-08-15; 7 and 8-part-1 shipped on 2026-08-14.)* |
 | Migration 077 | ✅ applied to prod AND the dev DB — 3,311 prod rows retired to `skipped` |
 | Migration 080 | ✅ **applied to prod 2026-08-14** — 459 plates moved to their own column, **0** left in `customer_image_url`, 1,885 student photos intact |
@@ -39,8 +40,14 @@ iOS 1.0.4 is installable from TestFlight *now* (internal group «Testers1», no 
 Until someone installs it and grants the notification prompt there are **zero iOS device
 tokens**, so iOS push is proven only at the credential layer, not end to end.
 
-**Prod VPS is `142.93.110.202`.** ⚠️ The `revo` host in `~/.ssh/config` is a DIFFERENT project
-(RevoArt). ⚠️ The prod frontend has **no `.env`** — it reads **`.env.local`**; server-only vars
+**Prod VPS is `169.58.114.255` since 2026-08-16** — the 8 GB box, which LoloShop now SHARES
+with **RevoArt**. ⚠️ That means the `revo` host in `~/.ssh/config` is the same machine, not a
+different project as this file said for months; RevoArt's Supabase stack and its `supabase-caddy`
+(which owns :80/:443 and fronts LoloShop) live there too, so a careless `docker`, `ufw` or
+Caddyfile change hits a second production site. **`142.93.110.202` is the OLD box**: its API and
+worker are stopped and its nginx now only FORWARDS to the new box for stale DNS. It is the
+rollback — leave it alone.
+⚠️ The prod frontend has **no `.env`** — it reads **`.env.local`**; server-only vars
 there are read at request time, so `pm2 restart loloshop-web --update-env` is enough, **no
 rebuild** (unlike `NEXT_PUBLIC_*`, which is inlined at build time).
 
@@ -57,8 +64,14 @@ identical (both EC private keys) and are told apart only by which console issued
 `72D98R3MFC` is **APNs** (developer.apple.com → Keys); `WLABBTJQT2` is the **App Store Connect
 API key** (App Store Connect → Users and Access → Integrations) and has nothing to do with push.
 
-**Prod VPS is `142.93.110.202`.** ⚠️ The `revo` host in `~/.ssh/config` is a DIFFERENT project
-(RevoArt). ⚠️ The prod frontend has **no `.env`** — it reads **`.env.local`**; server-only vars
+**Prod VPS is `169.58.114.255` since 2026-08-16** — the 8 GB box, which LoloShop now SHARES
+with **RevoArt**. ⚠️ That means the `revo` host in `~/.ssh/config` is the same machine, not a
+different project as this file said for months; RevoArt's Supabase stack and its `supabase-caddy`
+(which owns :80/:443 and fronts LoloShop) live there too, so a careless `docker`, `ufw` or
+Caddyfile change hits a second production site. **`142.93.110.202` is the OLD box**: its API and
+worker are stopped and its nginx now only FORWARDS to the new box for stale DNS. It is the
+rollback — leave it alone.
+⚠️ The prod frontend has **no `.env`** — it reads **`.env.local`**; server-only vars
 there are read at request time, so `pm2 restart loloshop-web --update-env` is enough, **no
 rebuild** (unlike `NEXT_PUBLIC_*`, which is inlined at build time).
 
@@ -288,7 +301,9 @@ longer stranded on a branch · the laptop's loose credentials are filed in
 
 0. **🛡️ PUT CLOUDFLARE IN FRONT OF THE VPS — ~20 min in a browser, free tier.** Decided
    2026-08-12. Nothing in the app is DDoS protection: `express-rate-limit` runs *after* traffic
-   has already reached `142.93.110.202` and consumed its bandwidth and event loop. The assistant
+   has already reached the origin and consumed its bandwidth and event loop. ⚠️ Re-scope this:
+   the origin is now `169.58.114.255`, which also serves RevoArt — an unmitigated flood there
+   takes down two products, not one. The assistant
    raised the stakes because it is now the home page's headline feature. Proxy `lolo-shop96.com`
    and `www` through Cloudflare (orange cloud), keep the origin cert, and leave the app limits
    exactly as they are — they bound COST, Cloudflare bounds VOLUME. ⚠️ Check
