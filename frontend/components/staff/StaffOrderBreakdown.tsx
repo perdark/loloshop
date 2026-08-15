@@ -39,7 +39,6 @@ export function StaffOrderBreakdown({ detail }: StaffOrderBreakdownProps) {
                     alt=""
                     fill
                     className="object-contain"
-                    unoptimized
                   />
                 </div>
                 {/* Download the original upload file — use raw /uploads URL, not next/image re-encode */}

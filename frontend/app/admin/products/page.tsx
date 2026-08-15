@@ -1207,7 +1207,6 @@ function ProductRailItem({
               alt=""
               fill
               className="object-cover"
-              unoptimized
             />
           )}
         </span>

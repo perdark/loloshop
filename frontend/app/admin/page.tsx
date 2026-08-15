@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { getAdminAnalytics, getAdminAccounting, getPendingApprovalCount, getVisitorStats, type VisitorStats } from "@/lib/admin";
 import { PromoControl } from "@/components/admin/PromoControl";
 import { MaintenanceControl } from "@/components/admin/MaintenanceControl";
+import { OtpGatewayStatus } from "@/components/admin/OtpGatewayStatus";
 import { getTailorSummary, getPresence, type TailorSummary } from "@/lib/staff";
 import { PresencePanel } from "@/components/admin/PresencePanel";
 import type { MonitorData } from "@/lib/staff-types";
@@ -378,6 +379,12 @@ export default function AdminDashboardPage() {
           تحديث
         </button>
       </header>
+
+      {/* WhatsApp OTP gateway — glance-sized during a surge (see the component's own header
+          for what each state means and its one known blind spot). */}
+      <div className="mb-8">
+        <OtpGatewayStatus />
+      </div>
 
       {/* Hero — what is still ON you, not what you have ever sold. «قيد التنفيذ»
           = طلب with at least one piece not yet «جاهز»: a student cannot collect his

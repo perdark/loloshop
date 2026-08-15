@@ -103,6 +103,13 @@ CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
 -- token_version bumped so every issued JWT dies at once); the order survives on the
 -- checkout_groups delivery snapshot so an in-flight sash still ships.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+
+-- Migration 081 — who created this account at the shop counter (NULL for self-signup).
+-- Repeated here because `npm run migrate` applies THIS file, and it must reach databases
+-- that already exist. ON DELETE SET NULL so an employee leaving never deletes their
+-- customers. Full reasoning in db/migrations/081_counter_signup.sql.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS created_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_users_created_by ON users(created_by_user_id) WHERE created_by_user_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_users_deleted_at
   ON users(deleted_at) WHERE deleted_at IS NOT NULL;
 

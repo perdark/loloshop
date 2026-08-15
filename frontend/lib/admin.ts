@@ -1629,3 +1629,55 @@ export async function setStaffGoal(
   });
   return data.data ? mapStaffGoal(data.data) : null;
 }
+
+// ─── OTP gateway status — GET /admin/otp-gateway ───────────────────────────────
+// Read-only mirror of backend/lib/otp.js's gatewayStatus(): which WhatsApp sender device is
+// currently active, and whether any device is presently cooled down (i.e. failed a send that
+// another device then succeeded on — see the file's own header for why devices are NEVER
+// load-balanced and why a cooldown is the only signal a ban leaves behind). Device ids arrive
+// already masked by the backend (`maskDevice`) — never a raw credential.
+
+export interface OtpGatewayDevice {
+  /** Masked device id, e.g. "a1b2c3…" — never the raw Zentramsg device uuid. */
+  device: string;
+  healthy: boolean;
+  cooledUntil: string | null;
+  sent: number;
+  failed: number;
+}
+
+export interface OtpGatewayStatus {
+  configured: number;
+  /** Masked id of the device currently sending, or null if none are configured. */
+  active: string | null;
+  /** Index 0 is always the PRIMARY device (ZENTRAMSG_DEVICE_UUID) — configuredDevices()
+   *  preserves DEVICE_ENV_KEYS order, so this ordering is load-bearing for telling
+   *  "still on the primary" apart from "failed over to a backup". */
+  devices: OtpGatewayDevice[];
+}
+
+interface ApiOtpGatewayDevice {
+  device: string;
+  healthy: boolean;
+  cooled_until: string | null;
+  sent: number;
+  failed: number;
+}
+
+export async function getOtpGatewayStatus(): Promise<OtpGatewayStatus> {
+  const { data } = await api.get<{
+    data: { configured: number; active: string | null; devices: ApiOtpGatewayDevice[] };
+  }>("/admin/otp-gateway");
+  const raw = data.data;
+  return {
+    configured: Number(raw?.configured ?? 0),
+    active: raw?.active ?? null,
+    devices: (raw?.devices || []).map((d) => ({
+      device: d.device,
+      healthy: !!d.healthy,
+      cooledUntil: d.cooled_until ?? null,
+      sent: Number(d.sent ?? 0),
+      failed: Number(d.failed ?? 0),
+    })),
+  };
+}

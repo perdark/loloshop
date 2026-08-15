@@ -91,6 +91,17 @@ const HOME_LABELS: Partial<Record<StaffType, string>> = {
   preparer: "قائمة التجهيز",
 };
 
+function iconUserPlus() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+      <circle cx="8.5" cy="7" r="4" />
+      <line x1="20" y1="8" x2="20" y2="14" />
+      <line x1="17" y1="11" x2="23" y2="11" />
+    </svg>
+  );
+}
+
 function getNavLinks(staffTypes: StaffType[], isAdmin: boolean): NavLink[] {
   // Admin gets full manager view over the production area.
   if (isAdmin || staffTypes.includes("manager")) {
@@ -107,6 +118,20 @@ function getNavLinks(staffTypes: StaffType[], isAdmin: boolean): NavLink[] {
         icon: iconClipboard(),
         prefix: true,
       },
+      // «تسجيل طالب في المحل» has NO admin mount — the endpoint sits behind the same
+      // requireRole('staff') router as custom-order, and admin is blocked there by design.
+      // Shown only to manager staff, never to admin (see the isAdmin/isManager gate on the
+      // page itself for the reasoning).
+      ...(isAdmin
+        ? []
+        : [
+            {
+              href: "/staff/counter-signup",
+              label: "تسجيل طالب في المحل",
+              icon: iconUserPlus(),
+              prefix: true,
+            },
+          ]),
       { href: "/staff/tailor", label: "الفصال", icon: iconScissors(), prefix: true },
       { href: "/staff/shelf", label: "رف التجهيز", icon: iconClipboard(), prefix: true },
     ];
