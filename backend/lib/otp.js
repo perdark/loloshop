@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const { query, tx } = require('./db');
 const { secretMatches } = require('./secretCompare');
+const cloud = require('./whatsappCloud');
 
 // Normalise a typed phone to the canonical local Iraqi form `07XXXXXXXXX`.
 // Users sometimes omit the leading 0 (e.g. type `7713644460` instead of
@@ -164,7 +165,7 @@ async function createOtp(phone, purpose = 'verify', opts = {}) {
     await client.query(`INSERT INTO otp_send_events (phone) VALUES ($1)`, [phone]);
     return inserted.rows[0].challenge_id;
   });
-  await sendViaZentramsg(phone, code);
+  await sendOtpMessage(phone, code);
   return { expires_in: TTL, challenge_id: challengeId };
 }
 
@@ -263,7 +264,7 @@ async function refreshOtp(challengeId) {
     return locked.rows[0].phone;
   });
   if (!phone) return null;
-  await sendViaZentramsg(phone, code);
+  await sendOtpMessage(phone, code);
   return { expires_in: TTL, challenge_id: challengeId };
 }
 
@@ -457,11 +458,51 @@ async function sendViaZentramsg(phone, code) {
   return firstFailure;
 }
 
+// ── The dispatcher: official Cloud API first, Zentramsg as the fallback ─────────────────────
+// Every application send goes through here. The ordering is the whole migration: while
+// WHATSAPP_TOKEN / WHATSAPP_PHONE_NUMBER_ID / WHATSAPP_OTP_TEMPLATE are set, Meta's first-party
+// API carries the traffic and the device fleet below is dead weight we keep only as insurance.
+// With those vars unset this function is a pass-through to the old behaviour, so deploying it
+// changes nothing until the credentials exist — that is deliberate, so the code can ship and sit
+// dormant while Meta business verification is still pending.
+//
+// ⚠️ Do NOT "improve" this by trying Zentramsg when the Cloud API says the RECIPIENT is
+// unreachable (131026 — the number has no WhatsApp). Both senders deliver over the same WhatsApp
+// network, so the fallback cannot succeed where the official API just failed for that reason; all
+// it would do is spend a Zentramsg send, and sending to numbers that cannot receive WhatsApp is
+// precisely the behaviour that gets a Zentramsg device banned. Bailing out here is what protects
+// the fallback for the failures it CAN actually help with.
+async function sendOtpMessage(phone, code) {
+  // Same hard guard the Zentramsg sender applies, repeated here because the cloud path does not
+  // pass through it. Never POST an OTP for a number that is not a real Iraqi mobile.
+  if (!isValidIqMobile(phone)) {
+    console.error(`[OTP] refusing to send to invalid recipient: ${phone}`);
+    return { success: false, error: 'رقم هاتف غير صالح للإرسال' };
+  }
+
+  if (cloud.isConfigured()) {
+    const result = await cloud.send(toIntlDigits(phone), code);
+    if (result.success) return result;
+    if (result.recipientPermanent) {
+      // Terminal for this recipient on BOTH senders — see the warning above.
+      console.error(`[OTP] recipient cannot receive WhatsApp (code ${result.code}) — not falling back`);
+      return result;
+    }
+    console.error('[OTP] Cloud API send failed — falling back to the Zentramsg device fleet');
+  }
+
+  return sendViaZentramsg(phone, code);
+}
+
 // Read-only view for operators: which number is sending, and has one been cooled down.
 // Device ids are masked — this is surfaced to an admin, not kept to ourselves.
 function gatewayStatus() {
   const devices = configuredDevices();
   return {
+    // `primary` tells an admin which sender is actually carrying traffic. Once it reads 'cloud',
+    // a cooled-down device below is informational, not an incident.
+    primary: cloud.isConfigured() ? 'cloud' : 'zentramsg',
+    cloud: cloud.status(),
     configured: devices.length,
     active: activeDevice ? maskDevice(activeDevice) : (devices[0] ? maskDevice(devices[0]) : null),
     devices: devices.map((uuid) => {
@@ -487,8 +528,10 @@ function __resetGatewayState() {
 // NB: the old phone-addressed `verifyOtp(phone, code, purpose)` is deliberately GONE.
 // Re-adding it re-opens LS-01 — any caller that can name a phone could mint that
 // account's session. Verification must stay addressed by challenge.
-// ⚠️ `__sendViaZentramsg` is a TEST SEAM, not an entry point. Application code must always
-// go through createOtp/refreshOtp: the per-phone hourly cap and the user/phone binding live
-// THERE, not in the sender. Calling this directly sends a WhatsApp message with no budget
-// check at all, which is the behaviour that gets the sender device banned.
-module.exports = { createOtp, verifyOtpByChallenge, refreshOtp, toIntlDigits, normalizeIqPhone, normalizePhoneBody, isValidIqMobile, isDemoLoginPhone, isOtpDegraded, gatewayStatus, __resetGatewayState, __sendViaZentramsg: sendViaZentramsg };
+// ⚠️ `__sendViaZentramsg` and `__sendOtpMessage` are TEST SEAMS, not entry points. Application
+// code must always go through createOtp/refreshOtp: the per-phone hourly cap and the user/phone
+// binding live THERE, not in the sender. Calling either directly sends a WhatsApp message with no
+// budget check at all, which is the behaviour that gets the sender device banned.
+// `__sendViaZentramsg` stays pinned to the Zentramsg-only sender so the failover suite keeps
+// testing the device fleet in isolation; `__sendOtpMessage` is the real dispatcher (cloud first).
+module.exports = { createOtp, verifyOtpByChallenge, refreshOtp, toIntlDigits, normalizeIqPhone, normalizePhoneBody, isValidIqMobile, isDemoLoginPhone, isOtpDegraded, gatewayStatus, __resetGatewayState, __sendViaZentramsg: sendViaZentramsg, __sendOtpMessage: sendOtpMessage };

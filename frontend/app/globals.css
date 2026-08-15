@@ -1352,8 +1352,49 @@ html {
     lolo-float 3.6s ease-in-out 420ms infinite;
 }
 
+/* ── لولو SENDS A STICKER ────────────────────────────────────────────────
+   Her reaction to what the student wrote arrives as a message of its own —
+   see components/shop/LoloFace.tsx → LoloSticker and backend/lib/reaction.js.
+
+   ENTRANCE ONLY. The sticker is a message and it STAYS; these animations run
+   once as it lands and are never re-applied, so a restored thread shows every
+   sticker it received sitting still. `both` holds the final frame, which is
+   plain scale(1) — the resting state, not a pose.
+
+   One entrance for all four reactions, on purpose: the picture already says
+   which reaction it is, and four different arrivals would be motion for its
+   own sake. */
+.lolo-sticker-in {
+  animation: lolo-sticker-in 620ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  transform-origin: bottom center;
+}
+@keyframes lolo-sticker-in {
+  0%   { transform: scale(0.35) translateY(18px) rotate(-10deg); opacity: 0; }
+  62%  { transform: scale(1.09) translateY(0) rotate(3deg);      opacity: 1; }
+  100% { transform: scale(1) rotate(0deg);                       opacity: 1; }
+}
+
+/* The emoji that floats off the sticker as it arrives. Entrance-only too —
+   LoloSticker does not even render it on a restored turn, because a dozen
+   frozen emoji down an old thread would be litter. */
+.lolo-sticker-spark {
+  animation: lolo-sticker-spark 1500ms ease-out 200ms both;
+}
+@keyframes lolo-sticker-spark {
+  0%   { opacity: 0; transform: translateY(10px) scale(0.5); }
+  30%  { opacity: 1; transform: translateY(-8px) scale(1.15); }
+  75%  { opacity: 1; transform: translateY(-18px) scale(1); }
+  100% { opacity: 0; transform: translateY(-30px) scale(0.9); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .lolo-float,
   .lolo-pop,
   .lolo-float.lolo-pop { animation: none; }
+
+  /* The sticker still ARRIVES with motion off — it is a message, and removing
+     the message rather than the movement would take the feature away from the
+     people this setting exists to protect. Only the travel goes. */
+  .lolo-sticker-in { animation: none; }
+  .lolo-sticker-spark { animation: none; opacity: 1; }
 }

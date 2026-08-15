@@ -325,12 +325,10 @@ async function settle(id, { answer, intent, result, error } = {}) {
  * common questions if cache hits were invisible. `model = 'cache'` and cost 0 are what mark
  * it, and what `reserve()` excludes from the caps.
  *
- * Returns `{ id }` — the row this answer actually lives in, which is what the caller returns as
- * `message_id` for the reactions feature (POST /api/assistant/react). `id` is null on a logging
- * failure so the response simply omits `message_id` rather than reacting against nothing.
+ * Returns `{ id }` — the row this answer actually lives in — and `null` on a logging failure.
  *
  * Fire-and-forget in spirit: a logging failure must never fail an answer we already have in
- * hand, only the reaction affordance on it.
+ * hand. Nothing in the response depends on this id; it exists for the ledger and the caps.
  */
 async function logCached({ userId, sessionKey, surface, question, answer, ipHash = null }) {
   try {

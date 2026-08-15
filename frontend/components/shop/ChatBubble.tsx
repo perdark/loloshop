@@ -1,14 +1,24 @@
 "use client";
 
-/** One message, plus the chips and reactions under it. Shared by the floating panel and the
- *  dedicated /lolo page so the assistant reads identically in both — same radius, same
- *  colours, same wrapping, same reaction strip. A component used in only one place would let
- *  the two surfaces quietly drift apart; this is the one thing keeping them in sync. */
+/** One message, plus the chips under it and the face beside it. Shared by the floating panel
+ *  and the dedicated /lolo page so the assistant reads identically in both — same radius, same
+ *  colours, same wrapping, same reaction. A component used in only one place would let the two
+ *  surfaces quietly drift apart; this is the one thing keeping them in sync. */
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { type ChatAction, type Mood, type Reaction, type Turn, useSupportChat } from "./SupportChatProvider";
-import { LoloFace, type LoloEmotion } from "./LoloFace";
+import type { ChatAction, Mood, Turn } from "./SupportChatProvider";
+import { LoloFace, LoloSticker, type LoloEmotion, type Reaction } from "./LoloFace";
+
+/**
+ * How long لولو's sticker sits alone before her words arrive.
+ *
+ * A person sends the sticker first and *then* types — that gap is the entire reason the sticker
+ * reads as a reaction rather than as decoration attached to the answer. The server sends both in
+ * one response, so the gap is made here, and only on a fresh turn: a restored thread shows the
+ * sticker and the reply together, because that conversation already happened.
+ */
+const STICKER_LEAD_MS = 700;
 
 /**
  * Reveal an answer word by word.
@@ -62,58 +72,6 @@ function faceForMood(mood?: Mood): LoloEmotion {
   return "happy";
 }
 
-const REACTIONS: { key: Reaction; emoji: string; label: string }[] = [
-  { key: "like", emoji: "👍", label: "إعجاب" },
-  { key: "love", emoji: "❤️", label: "حب" },
-  { key: "happy", emoji: "😄", label: "سعيد" },
-  { key: "sad", emoji: "😢", label: "حزين" },
-  { key: "good", emoji: "👌", label: "جيد" },
-  { key: "excellent", emoji: "🌟", label: "ممتاز" },
-];
-
-/**
- * The reaction strip under a لولو reply. One tap selects (optimistic highlight, POST
- * /assistant/react); tapping the same emoji again clears it; tapping a different one
- * overwrites — never more than one selected reaction per message, matching the backend's
- * own "null clears, a new value overwrites" contract.
- *
- * Labels are aria-label + title, not visible text on every chip — six spelled-out Arabic
- * words under every single reply would be louder than the reply itself. min-h/min-w-11 keeps
- * each tap target at the project's 44px floor even though the row reads as compact.
- */
-function ReactionRow({
-  messageId,
-  selected,
-  onReact,
-}: {
-  messageId: string;
-  selected: Reaction | null | undefined;
-  onReact: (messageId: string, reaction: Reaction | null) => void;
-}) {
-  return (
-    <div role="group" aria-label="تفاعل مع رد لولو" className="mt-1.5 flex flex-wrap gap-1">
-      {REACTIONS.map((r) => {
-        const active = selected === r.key;
-        return (
-          <button
-            key={r.key}
-            type="button"
-            title={r.label}
-            aria-label={r.label}
-            aria-pressed={active}
-            onClick={() => onReact(messageId, active ? null : r.key)}
-            className={`flex min-h-11 min-w-11 items-center justify-center rounded-full text-base transition active:scale-90 ${
-              active ? "bg-orange/15 ring-1 ring-orange" : "hover:bg-surface-sink"
-            }`}
-          >
-            <span aria-hidden="true">{r.emoji}</span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 function ActionChip({ action }: { action: ChatAction }) {
   const className =
     "inline-flex min-h-10 items-center gap-1.5 rounded-pill border border-orange/35 bg-surface px-3.5 py-2 " +
@@ -142,7 +100,6 @@ export function ChatBubble({
   animate = false,
   showFace = false,
   mood,
-  messageId,
   reaction,
 }: {
   role: Turn["role"];
@@ -153,15 +110,31 @@ export function ChatBubble({
   /** Only ever set on assistant turns — reflected in the face beside the bubble and, for
    *  "caring", in the bubble's own tone. */
   mood?: Mood;
-  /** Present only on turns the server actually logged. Its presence, not `role`, is what
-   *  gates the reaction row — a turn without one (the static GREETING, anything from before
-   *  this shipped) has nothing to attach a reaction to. */
-  messageId?: string;
-  reaction?: Reaction | null;
+  /** لولو's reaction to the message this reply answers. It plays only while `animate` is on,
+   *  i.e. on the newest answer — a thread restored from storage must not replay every
+   *  reaction it ever had the moment the page loads. */
+  reaction?: Reaction;
 }) {
-  const { react } = useSupportChat();
   const mine = role === "user";
-  const revealed = useRevealedWords(text, !mine && animate);
+  const hasSticker = !mine && Boolean(reaction) && reaction !== "none";
+
+  // Hold the words back while the sticker stands alone. Gated on `animate`, so this only ever
+  // delays a reply the student is watching arrive — never one being restored from storage.
+  const [held, setHeld] = useState(hasSticker && animate);
+  useEffect(() => {
+    if (!(hasSticker && animate)) {
+      setHeld(false);
+      return;
+    }
+    setHeld(true);
+    const id = window.setTimeout(() => setHeld(false), STICKER_LEAD_MS);
+    return () => window.clearTimeout(id);
+  }, [hasSticker, animate]);
+
+  // `!held` is load-bearing, not tidiness: the reveal must START when the bubble appears. Left
+  // running during the hold it would burn through its ~22ms-per-word budget behind a hidden
+  // element, and the answer would pop out fully revealed instead of being spoken.
+  const revealed = useRevealedWords(text, !mine && animate && !held);
   // Chips wait for the sentence to finish — arriving mid-reveal they read as the answer being
   // interrupted, and a customer taps them before they have read why.
   const done = revealed.length >= text.length;
@@ -179,8 +152,17 @@ export function ChatBubble({
   const caring = mood === "caring";
 
   return (
+    <>
+      {/* Her sticker is a message of its own and sits ABOVE the words, the way a person sends
+          one and then starts typing. It is a sibling of the bubble, not a decoration inside it,
+          which is what lets it stay in the thread after the reply lands. */}
+      {hasSticker && <LoloSticker reaction={reaction!} animate={animate} />}
+
+      {!held && (
     <div className="flex items-end gap-2">
-      {showFace && <LoloFace emotion={faceForMood(mood)} size={30} className="mb-0.5 shrink-0" />}
+      {showFace && (
+        <LoloFace emotion={faceForMood(mood)} size={30} className="mb-0.5 shrink-0" />
+      )}
       <div className="min-w-0 max-w-[85%]">
         {/* "caring" mood: a softer bubble tone + a gentle line above it, not a new bubble
             shape — the reveal animation and action chips below still work unchanged. */}
@@ -199,9 +181,10 @@ export function ChatBubble({
             ))}
           </div>
         )}
-        {done && messageId && <ReactionRow messageId={messageId} selected={reaction} onReact={react} />}
       </div>
     </div>
+      )}
+    </>
   );
 }
 

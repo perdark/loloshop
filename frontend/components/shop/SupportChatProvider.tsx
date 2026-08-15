@@ -20,7 +20,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import axios from "axios";
 import { api, getApiErrorMessage } from "@/lib/api";
 import type { ApiError } from "@/lib/types";
-import type { LoloEmotion } from "./LoloFace";
+import type { LoloEmotion, Reaction } from "./LoloFace";
 
 /** A tappable next step under an answer. The server picks these from a closed list of the
  *  shop's own destinations — the model never emits a URL. See backend/lib/supportActions.js. */
@@ -38,9 +38,17 @@ export type ChatAction = {
  *  questions ("how does the whole widget feel" vs "how does THIS reply read"). */
 export type Mood = "happy" | "caring" | "wink" | "neutral";
 
-/** A visitor's reaction to one لولو reply. Mirrors backend/routes/assistant.js →
- *  POST /assistant/react. `null` clears a reaction; picking a new one overwrites the old. */
-export type Reaction = "like" | "love" | "happy" | "sad" | "good" | "excellent";
+/**
+ * The third and last of the three feelings fields the server attaches to a reply, and the only
+ * one about the STUDENT's message rather than about the answer: `emotion` is what the reply is
+ * ABOUT, `mood` is the register it is written IN, and `reaction` is what لولو DOES the moment
+ * she reads you — the face beside the reply plays it once, big, then settles back.
+ *
+ * Defined with the mascot (LoloFace.tsx) because that is what plays it, and re-exported here so
+ * a consumer reading `Turn` does not have to go looking. The judgement itself is the server's:
+ * backend/lib/reaction.js → pickReaction.
+ */
+export type { Reaction };
 
 export type Turn = {
   role: "user" | "assistant";
@@ -48,14 +56,8 @@ export type Turn = {
   actions?: ChatAction[];
   emotion?: LoloEmotion;
   mood?: Mood;
-  /** The ledger id for this reply (backend/lib/aiChat.js). Only assistant turns carry one,
-   *  and only a turn with one can take a reaction — the GREETING bubble and any turn from
-   *  before this shipped are reaction-less by construction, not by a bug. */
-  messageId?: string;
-  /** This visitor's own reaction to an assistant turn, if any. Persisted with the thread
-   *  (see writeThread below) so it survives a reload — a reaction already sent to the
-   *  server should not appear to un-pick itself on refresh. */
-  reaction?: Reaction | null;
+  /** لولو's own reaction to the message this reply answers. Only assistant turns carry one. */
+  reaction?: Reaction;
   /** Set on the newest answer only, so exactly one bubble runs the reveal animation. */
   fresh?: boolean;
 };
@@ -175,11 +177,6 @@ type SupportChatValue = {
   retry: () => Promise<void>;
   /** Start over. Only clears what this browser shows — the server's 2-hour window is its own. */
   reset: () => void;
-  /** Set or clear this visitor's reaction on one لولو reply. `null` clears; picking a
-   *  different reaction overwrites the old one — never more than one per message.
-   *  Optimistic and fire-and-forget: a tapped heart is a nice-to-have, not the conversation
-   *  itself, so a failed POST does not roll back what the visitor already saw land. */
-  react: (messageId: string, reaction: Reaction | null) => void;
 };
 
 const SupportChatContext = createContext<SupportChatValue | null>(null);
@@ -225,7 +222,7 @@ export function SupportChatProvider({ children }: { children: React.ReactNode })
             actions: data.actions,
             emotion: data.emotion,
             mood: data.mood,
-            messageId: data.message_id,
+            reaction: data.reaction,
             fresh: true,
           },
         ]);
@@ -272,25 +269,6 @@ export function SupportChatProvider({ children }: { children: React.ReactNode })
     setLastQuestion(null);
   }, []);
 
-  const react = useCallback((messageId: string, reaction: Reaction | null) => {
-    // Optimistic first: the tap has to feel instant, and turns is already the persisted
-    // source of truth (writeThread below), so this is also what survives a reload.
-    setTurns((t) => t.map((turn) => (turn.messageId === messageId ? { ...turn, reaction } : turn)));
-    // Unlike /support, /react never mints a fresh session token — it requires an already-valid
-    // one and 403s outright otherwise (backend/controllers/supportChatController.js → react:
-    // "unlike /support, which self-heals a caller who is about to ASK something; here there is
-    // nothing to attach a self-healed identity to"). By the time a reply exists to react to,
-    // the visitor already has a valid token from the /support call that produced it, so this
-    // is expected to succeed; the catch below is only for the rare case it does not.
-    api
-      .post("/assistant/react", { message_id: messageId, reaction, sessionToken: readToken() })
-      .catch(() => {
-        // Best-effort. Rolling the highlight back on a failed reaction would be a worse
-        // experience than a reaction that silently didn't reach the server this once —
-        // unlike `send`, nothing downstream depends on this having actually landed.
-      });
-  }, []);
-
   // The face. Request state wins because it is happening now; otherwise the server's hint for
   // the newest answer stands, and a fresh visitor gets the default smile.
   const emotion: LoloEmotion = useMemo(() => {
@@ -302,8 +280,8 @@ export function SupportChatProvider({ children }: { children: React.ReactNode })
   }, [unavailable, busy, error, turns]);
 
   const value = useMemo<SupportChatValue>(
-    () => ({ turns, busy, error, unavailable, emotion, send, retry, reset, react }),
-    [turns, busy, error, unavailable, emotion, send, retry, reset, react]
+    () => ({ turns, busy, error, unavailable, emotion, send, retry, reset }),
+    [turns, busy, error, unavailable, emotion, send, retry, reset]
   );
 
   return <SupportChatContext.Provider value={value}>{children}</SupportChatContext.Provider>;

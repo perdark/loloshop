@@ -176,7 +176,6 @@ export function LoloChatPage() {
                 animate={Boolean(t.fresh) && i === lastAssistant}
                 showFace={t.role === "assistant"}
                 mood={t.mood}
-                messageId={t.messageId}
                 reaction={t.reaction}
               />
             ))}

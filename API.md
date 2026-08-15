@@ -564,8 +564,8 @@ safety check. All error responses `{ error: <Arabic msg>, code: 'ERR_*' }`.
 
 ### POST `/assistant/session` (public, rate-limited)
 Mints a server-signed anonymous identity for a signed-out visitor. `{ sessionToken, expiresInMs }`.
-The client sends this token back as `sessionToken` on `/support` and `/react` so the throttle and
-conversation history key on an identity nobody can forge or wear.
+The client sends this token back as `sessionToken` on `/support` so the throttle and conversation
+history key on an identity nobody can forge or wear.
 
 ### POST `/assistant/support` (public — `optionalAuth`, rate-limited)
 Body: `{ question, sessionToken? }` (`sessionToken` only for anonymous callers; signed-in callers
@@ -576,7 +576,7 @@ send their Bearer token instead). → `200`:
   "actions": [{ "id": "shop", "label": "شوف القطع", "kind": "internal|external", "href": "/shop" }],
   "emotion": "happy|love|excited|thinking",
   "mood": "wink|caring|happy|neutral",
-  "message_id": 1234,
+  "reaction": "love|care|laugh|cheer|none",
   "sessionToken": "v1...."
 }
 ```
@@ -586,9 +586,12 @@ send their Bearer token instead). → `200`:
 - `mood` — coarser register split for the character illustration: `wink` (a compliment/playful
   message), `caring` (the customer expressed sadness/tiredness), `happy` (an ordinary answered
   question or greeting), `neutral` (a guard fallback or an honest "not available").
-- `message_id` — the `ai_chat_messages.id` this answer lives in. Present whenever the answer was
-  logged (model call, cache hit, or a canned fallback); pass it to `POST /assistant/react`. Absent
-  only if the ledger write itself failed.
+- `reaction` — what «لولو» does on READING the customer, as opposed to what her answer is about
+  (`emotion`) or the register it is written in (`mood`). Read from the customer's own words by
+  `lib/reaction.js`; the client renders it as a sticker message sent just before the reply.
+  `none` is the expected value for an ordinary question and is deliberately the common case — a
+  reaction that fires on every turn is an animation, not a reaction. A blocked answer
+  (`guardTripped`) always yields `none`.
 - `sessionToken` — present only when the caller arrived without a valid one; the client must
   store it and send it back on every subsequent call.
 
@@ -604,19 +607,9 @@ Errors: `503 ERR_AI_DISABLED` (not configured) · `400 ERR_AI_EMPTY_QUESTION` /
 `503 ERR_AI_BUDGET` / `ERR_AI_ANON_BUDGET` · `502 ERR_AI_UPSTREAM` / `ERR_AI_NET` / `ERR_AI_EMPTY`
 (these three carry `actions: [shopContact]` so the customer is never left at a dead end).
 
-### POST `/assistant/react` (public — `optionalAuth`, rate-limited) — 2026-08-15
-Tap-reaction on one of لولو's own answers. Body: `{ message_id, reaction, sessionToken? }`.
-`reaction` ∈ `like|love|happy|sad|good|excellent`, or `null` to clear a previous reaction.
-Ownership: an authenticated caller may react only to a message on their own `user_id`; an
-anonymous caller must present the SAME signed `sessionToken` the message was logged under
-(reused exactly like `/support`'s identity resolution — see `lib/anonSession.js`). Overwrites any
-existing reaction. → `200 { ok: true, message_id, reaction }`.
-
-Errors: `400 ERR_AI_REACT_BAD_ID` (missing/non-numeric/≤0 `message_id`) ·
-`400 ERR_AI_REACT_INVALID` (reaction not in the list) · `403 ERR_AI_REACT_FORBIDDEN` (no
-authenticated user AND no valid signed session token — nothing to own the message with) ·
-`404 ERR_AI_REACT_NOT_FOUND` (message doesn't exist, OR exists but belongs to someone else — the
-two are indistinguishable on purpose, so a caller cannot probe which ids are real).
+*(`POST /assistant/react` — the visitor tap-reaction and its `message_id` target — was removed
+2026-08-15 (b). It was the wrong feature: reactions belong to «لولو», not to the visitor. It
+never reached production, so nothing depends on it. See PROGRESS.md.)*
 
 ### POST `/assistant/analytics` (admin only)
 Closed metric set for the admin-facing AI analytics chat — unchanged by this round of work.

@@ -1,7 +1,6 @@
 // backend/routes/assistant.js — AI assistant surfaces.
 //   POST /api/assistant/session   — mint a signed anonymous identity (public, tightly limited)
 //   POST /api/assistant/support   — public storefront chatbot (anon allowed)
-//   POST /api/assistant/react     — tap-react to one of لولو's own answers (anon allowed)
 //   POST /api/assistant/analytics — admin-only, closed metric set
 //
 // ── THE DEFENCE, IN LAYERS ─────────────────────────────────────────────────────────────────
@@ -47,11 +46,6 @@ const limitHandler = (req, res) =>
 // is the throttle in aiChat.js (keyed on the signed identity, not on IP).
 const supportLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 100, handler: limitHandler });
 
-// Reacting costs no model call and no ledger write of its own, but shares supportLimit's shape:
-// same CGNAT reasoning, and there is no per-person cost cap to lean on here the way /support
-// leans on aiChat.js's throttle, so the per-IP limit is the whole defence.
-const reactLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 100, handler: limitHandler });
-
 // Minting bounds identity HARVESTING, and nothing else — which is why it is generous.
 //
 // The instinct is to make this tight, and that instinct is wrong here twice over. First, it
@@ -88,10 +82,6 @@ router.post('/session', sessionLimit, (req, res) => {
 });
 
 router.post('/support', supportLimit, optionalAuth, support.ask);
-// optionalAuth so an authenticated caller's user_id is available for ownership — but signing in
-// is not required, since an anonymous visitor's own signed session_key is just as valid an
-// identity for reacting to their own answer. See supportChatController.react.
-router.post('/react', reactLimit, optionalAuth, support.react);
 router.post('/analytics', analyticsLimit, authRequired, requireRole('admin'), analytics.ask);
 
 module.exports = router;

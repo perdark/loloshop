@@ -1,5 +1,67 @@
 # Progress
 
+## 2026-08-15 (b) — reactions REPLACED: the visitor no longer taps them, «لولو» sends one
+
+**Owner ruling: the tap-reactions were the wrong feature.** «I meant the AI itself does a
+reaction with the user.» The six-emoji strip under every reply was the visitor rating لولو; what
+was wanted is لولو reacting to the STUDENT, the way a person does before they answer.
+
+**Deleted, all of it** — it had never reached prod (`main` was unpushed), so there is no
+drop-migration and no compatibility shim: `POST /api/assistant/react` + `reactLimit` ·
+`supportChatController.react` + the `REACTIONS` vocabulary · `db/migrations/082_*.sql` and its
+`schema.sql` block · `test/aiChatReactions.test.js` (9 tests) · `ReactionRow` and the client
+`react()` · the API.md section. The dev DB's now-orphaned `ai_chat_messages.reaction` column was
+dropped too (1 of 118 rows held a value), so dev matches a fresh `npm run migrate`.
+`message_id` went with it: it existed ONLY as the reaction target, and leaving a ledger row id in
+a public response that the docs describe as "pass this to /react" would be worse than dead code.
+
+**New `backend/lib/reaction.js` — WHICH reaction, decided server-side.** `pickReaction(question)`
+→ `love` · `care` · `laugh` · `cheer` · `none`, read from the STUDENT's own words, not from the
+answer. It imports `SAD_RE`/`COMPLIMENT_RE` from `lib/mood.js` rather than copying them, so
+«لولو looks caring» and «the bubble goes soft» cannot drift apart, and it keeps mood.js's own
+precedence: sadness outranks a compliment paid in the same breath. `guardTripped` forces `none` —
+a face cheering over «اسأل ممثلك» reads as not having listened.
+⚠️ **`none` is the common case and the tests pin it there.** «شكد سعر الروب؟» earns nothing. A
+reaction that fires on every reply is an animation, not a reaction; every regex is written to
+MISS an ordinary question. Laughter needs `ه{3,}` for the same reason — «هه» sits inside real words.
+6 new tests in `test/aiChat.test.js`, beside the existing MOOD ones. **393/393 backend.**
+
+**Three fields now, three different questions** — the distinction is written into reaction.js's
+header because it is the thing a future reader will get wrong: `emotion` = what the ANSWER is
+about (header face) · `mood` = the REGISTER it is written in (bubble tone) · `reaction` = what
+لولو DOES on reading you (a message of its own).
+
+**Presentation: chosen from three mockups, not guessed.** The first attempt — the 30px thread
+face scaling up for 1.2s — was rejected on sight: too small, gone too fast, and it needs the
+student to be looking at the right spot at the right moment. Three alternatives were built as a
+working artifact (badge on the student's own bubble · header avatar reacts · sticker message) and
+the owner picked **the sticker**: `LoloSticker` renders a 104px bubble-less mascot as its own turn
+in the thread, `STICKER_LEAD_MS = 700` holds her words back so it lands FIRST, and it **persists**
+— `animate` gates only the entrance, so a restored thread shows every sticker it received without
+replaying them all on load. That is the difference between a message and an effect, and it is why
+the sticker is a sibling of the bubble in `ChatBubble` rather than something drawn on it.
+⚠️ `useRevealedWords` is now passed `animate && !held`: left running behind the held bubble it
+would spend its 22ms-per-word budget invisibly and the answer would pop out fully revealed.
+
+⚠️ **`care` is the one reaction with no art yet — `LoloFace.CARE_STICKER` is a PLACEHOLDER.**
+The brand sheet has nothing right for it: `love` is heart-eyes, which reads as being smitten AT
+someone having a bad day, and `thinking` (currently holding the slot) ships with a floating «؟»
+that reads as confusion. Owner is having a caring sticker drawn. **To land it: drop
+`frontend/public/lolo/lolo-care.webp` (256×256, alpha, sibling scale/lighting) and change that one
+constant.** Nothing else in the app needs to know.
+
+**Verified in a real browser against the dev DB**, not just built: all four reactions fire
+end-to-end (server value → correct sticker src/alt → entrance class), the sticker leads the reply
+by ~700ms measured, and an ordinary price question adds **no** sticker. tsc + lint (0 errors) +
+`next build` clean.
+
+**Unrelated repair, same session:** `frontend/.env.local` still pointed at `192.168.0.125`; this
+laptop is `192.168.0.129`. Every assistant call from the browser timed out and لولو answered «ما
+كدرت أوصل للمساعد» — a stale IP there fails silently and looks exactly like a broken feature.
+Fixed, with that warning written into the file.
+
+---
+
 ## 2026-08-15 — «لولو» assistant: location fix, product/university knowledge, mood, reactions — on `fix/ai-assistant-money` (UNMERGED)
 
 Five owner-driven fixes to the storefront assistant, all on the already-parked

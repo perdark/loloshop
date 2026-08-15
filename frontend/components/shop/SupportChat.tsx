@@ -165,7 +165,6 @@ export function SupportChat() {
             animate={Boolean(t.fresh) && i === lastAssistant}
             showFace={i === lastAssistant}
             mood={t.mood}
-            messageId={t.messageId}
             reaction={t.reaction}
           />
         ))}

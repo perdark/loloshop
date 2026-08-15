@@ -15,6 +15,7 @@ const assert = require('node:assert');
 const { evaluateCaps, estimateCostUsd } = require('../lib/aiChat')._internals;
 const { formatContext, formatPriceBook, formatProductDigest } = require('../lib/supportContext');
 const { classifyMood } = require('../lib/mood');
+const { pickReaction } = require('../lib/reaction');
 const { clampDays } = require('../lib/adminMetrics')._internals;
 const { parseRoute } = require('../controllers/adminAnalyticsChatController')._internals;
 
@@ -779,6 +780,67 @@ test('MOOD: a guard fallback or an honest "مو متوفرة" is neutral, not ha
   // The guard's own SAFE_ANSWER — same text a real tripped answer serves.
   assert.strictEqual(classifyMood('اي سؤال', guard.SAFE_ANSWER), 'neutral');
   assert.strictEqual(classifyMood('سؤال بلا جواب', ''), 'neutral');
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════
+// REACTION — what لولو DOES the moment she reads the student, as opposed to the face she
+// then settles into (`mood` above) or what the answer is about (`emotion`)
+// ════════════════════════════════════════════════════════════════════════════════════════
+
+test('REACTION: affection gets the heart — in words or in the emoji a student sends instead', () => {
+  assert.strictEqual(pickReaction('اني معجبة بشغلكم كلش'), 'love');
+  assert.strictEqual(pickReaction('عاشت ايدك، شغلكم روعة'), 'love');
+  assert.strictEqual(pickReaction('احبك لولو'), 'love');
+  // A student who answers with nothing but a heart is the whole reason HEART_RE exists.
+  assert.strictEqual(pickReaction('🧡'), 'love');
+  assert.strictEqual(pickReaction('😍😍'), 'love');
+});
+
+test('REACTION: sadness outranks everything, including a compliment in the same breath', () => {
+  assert.strictEqual(pickReaction('اني تعبانة اليوم'), 'care');
+  assert.strictEqual(pickReaction('احسك ماتحبني'), 'care');
+  // Same precedence classifyMood already enforces — the two must never disagree, which is
+  // why reaction.js imports mood.js's own regexes instead of copying them.
+  assert.strictEqual(pickReaction('تسلم ايدك بس اني تعبانة هسه'), 'care');
+});
+
+test('REACTION: laughter needs THREE letters, so ordinary words cannot trip it', () => {
+  assert.strictEqual(pickReaction('ههههه شنو هذا'), 'laugh');
+  assert.strictEqual(pickReaction('خخخخ'), 'laugh');
+  assert.strictEqual(pickReaction('😂'), 'laugh');
+  // «هه» appears inside real words; the whole point of ه{3,} is that these stay silent.
+  assert.strictEqual(pickReaction('شكد سعر القبعة'), 'none');
+  assert.strictEqual(pickReaction('هاي وشاح'), 'none');
+});
+
+test('REACTION: thanks and graduation news cheer', () => {
+  assert.strictEqual(pickReaction('شكرا جزيلا'), 'cheer');
+  assert.strictEqual(pickReaction('يعطيك العافية'), 'cheer');
+  // On a graduation shop this is the most cheerful sentence in the inbox.
+  assert.strictEqual(pickReaction('تخرجت اخيرا 🎉'), 'cheer');
+});
+
+test('REACTION: `none` is the COMMON case — an ordinary question earns no beat', () => {
+  // This is the test that keeps the feature a reaction instead of an animation: a face that
+  // jumps on every single reply is noise, and these are what most students actually send.
+  for (const q of [
+    'شكد سعر الروب؟',
+    'وين وصل طلبي؟',
+    'منو ممثل جامعتي؟',
+    'عندكم توصيل لبغداد؟',
+    'شلون أطلب وشاح تخرج؟',
+    'وين مكانكم؟',
+    '',
+  ]) {
+    assert.strictEqual(pickReaction(q), 'none', `unexpected reaction for: ${q}`);
+  }
+});
+
+test('REACTION: a blocked answer suppresses the beat entirely', () => {
+  // The guard tripped, so لولو is about to say «اسأل ممثلك». A face cheering over that reads
+  // as not having listened — worse than no reaction at all.
+  assert.strictEqual(pickReaction('شكرا الك', { guardTripped: true }), 'none');
+  assert.strictEqual(pickReaction('احبك لولو', { guardTripped: true }), 'none');
 });
 
 // ════════════════════════════════════════════════════════════════════════════════════════
