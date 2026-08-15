@@ -381,7 +381,6 @@ export default function AdminPackagesPage() {
                         alt=""
                         fill
                         className="object-cover"
-                        unoptimized
                       />
                     )}
                   </span>
@@ -743,7 +742,6 @@ function ImagePicker({
               alt=""
               fill
               className="object-cover"
-              unoptimized
             />
           )}
         </span>
@@ -811,7 +809,6 @@ function GalleryManager({
               alt=""
               fill
               className="object-cover"
-              unoptimized
             />
             <button
               type="button"

@@ -146,6 +146,7 @@ async function login(req, res) {
     `SELECT u.id, u.name, u.phone, u.email, u.role, u.password_hash, u.phone_verified,
             u.token_version,
             (s.wholesaler_id IS NOT NULL) AS is_wholesaler_student,
+            (u.created_by_user_id IS NOT NULL) AS vouched_at_counter,
             s.status AS student_status
      FROM users u
      LEFT JOIN students s ON s.user_id = u.id
@@ -166,7 +167,16 @@ async function login(req, res) {
   // the rep's referral link and were approved by the rep, so the phone-ownership check
   // an OTP provides is redundant here. (Self-registered retail still OTPs — see register.)
   // Checked before the trusted-device branch so it covers first-ever logins too.
-  if (user.role === 'retail' && user.is_wholesaler_student) {
+  //
+  // `vouched_at_counter` (migration 081) joins them on the SAME reasoning: an employee
+  // created that account with the student standing in front of them, which is at least as
+  // strong an identity check as a rep approving one remotely. Without this the counter
+  // signup would only MOVE the OTP from signup to first login and save nothing.
+  //
+  // ⚠️ Both flags mean "a person we can name vouched for this account" — NOT "the phone was
+  // proven". That is why neither branch sets phone_verified: only an OTP-backed login earns
+  // it, and these accounts honestly never had one.
+  if (user.role === 'retail' && (user.is_wholesaler_student || user.vouched_at_counter)) {
     const token = signToken(user);
     return res.json({
       token,

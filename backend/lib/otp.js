@@ -298,26 +298,67 @@ function toIntlDigits(phone) {
   return d;
 }
 
-async function sendViaZentramsg(phone, code) {
-  // Final hard guard (belt & suspenders behind createOtp): never POST to WhatsApp for a
-  // non-Iraqi-mobile recipient. Sending to invalid numbers is what gets the sender banned.
-  const ids = toIntlDigits(phone);
-  if (!isValidIqMobile(phone) || !/^964\d{10}$/.test(ids)) {
-    console.error(`[OTP] refusing to send to invalid recipient: ${phone} (${ids})`);
-    return { success: false, error: 'رقم هاتف غير صالح للإرسال' };
-  }
+// ── Sender devices: one primary, the rest standing by ───────────────────────────
+// Zentramsg sends from a real WhatsApp *device* (an account driven by automation), which
+// Meta bans periodically. A second device is insurance against that ban.
+//
+// ⚠️ IT IS DELIBERATELY NOT LOAD-BALANCED, and that is the whole design. Alternating
+// between devices would halve each one's volume — and volume is what attracts the ban —
+// so round-robin looks strictly better. It is not. Students routinely receive 2–3 codes
+// (the first send plus resends), so alternating means code 1 arrives from number A and
+// code 2 from number B. Two different unknown senders asking for the same login is
+// indistinguishable from a phishing attempt, at the exact moment we need the student to
+// trust a number they have never seen. Owner ruling, 2026-08-15.
+//
+// So: ONE number sends everything until it stops working; then the next takes over and
+// KEEPS it. We never drift back to a recovered device on a timer, because drifting back
+// shows the student two numbers anyway — just more slowly.
+const DEVICE_ENV_KEYS = [
+  'ZENTRAMSG_DEVICE_UUID',    // the original — stays the primary, so adding a backup changes nothing
+  'ZENTRAMSG_DEVICE_UUID_2',
+  'ZENTRAMSG_DEVICE_UUID_3',
+  'ZENTRAMSG_DEVICE_UUID_4',
+];
 
-  const token = process.env.ZENTRAMSG_API_KEY;       // x-api-token
-  const device = process.env.ZENTRAMSG_DEVICE_UUID;  // device_uuid (the WhatsApp sender device)
-  if (!token || !device) {
-    // Never print live codes to logs in production. If the WhatsApp creds are
-    // missing in prod, OTP can't be delivered — surface it loudly rather than
-    // leaking codes to the logs.
-    if (process.env.NODE_ENV === 'production') {
-      console.error('ZENTRAMSG_API_KEY / ZENTRAMSG_DEVICE_UUID missing — OTP cannot be sent in production.');
-    }
-    return { success: false, error: 'إعدادات API الواتساب غير موجودة. يرجى التحقق من متغيرات البيئة.' };
+// Read per call, not at module load: the OTP suites delete these vars after requiring
+// lib/db but before exercising a send, and a module-load snapshot would ignore that.
+function configuredDevices() {
+  const seen = new Set();
+  const out = [];
+  for (const key of DEVICE_ENV_KEYS) {
+    const uuid = (process.env[key] || '').trim();
+    if (uuid && !seen.has(uuid)) { seen.add(uuid); out.push(uuid); }
   }
+  return out;
+}
+
+// Health is per device uuid and lives for the life of the process. `cooledUntil` is only
+// ever set when ANOTHER device succeeded with the same message — see sendViaZentramsg.
+const deviceHealth = new Map();
+const DEVICE_COOLDOWN_MS = 12 * 60 * 60 * 1000;
+let activeDevice = null;
+
+function healthOf(uuid) {
+  if (!deviceHealth.has(uuid)) deviceHealth.set(uuid, { cooledUntil: 0, sent: 0, failed: 0 });
+  return deviceHealth.get(uuid);
+}
+function isCooled(uuid) { return healthOf(uuid).cooledUntil > Date.now(); }
+
+// Order to try: the device already doing the sending stays first (stickiness is the point),
+// then any device not currently cooled down, then the cooled ones as a last resort — a
+// cooled device is still better than not sending at all.
+function sendOrder(devices) {
+  const head = activeDevice && devices.includes(activeDevice) && !isCooled(activeDevice)
+    ? [activeDevice] : [];
+  const rest = devices.filter((d) => !head.includes(d));
+  return [...head, ...rest.filter((d) => !isCooled(d)), ...rest.filter((d) => isCooled(d))];
+}
+
+// Masked for logs/status: a device uuid is a credential, and this string reaches the admin.
+function maskDevice(uuid) { return `${String(uuid).slice(0, 6)}…`; }
+
+// One POST to one device. Returns the same shape the single-device version always returned.
+async function postToDevice(device, token, ids, code) {
   try {
     const form = new FormData();
     form.append('device_uuid', device);
@@ -341,17 +382,104 @@ async function sendViaZentramsg(phone, code) {
     // log loudly so a silent ban is visible instead of looking like a successful send.
     const accepted = res.ok && body && body.success === true && body.msg === 'MESSAGE_CREATED';
     if (!accepted) {
-      console.error('WhatsApp API rejected:', res.status, body?.msg ?? text, body?.errors ?? '');
+      console.error(`WhatsApp API rejected [device ${maskDevice(device)}]:`, res.status, body?.msg ?? text, body?.errors ?? '');
       return { success: false, status: res.status, msg: body?.msg, errors: body?.errors, details: text };
     }
     return { success: true, msg: body.msg, sentTo: ids };
   } catch (e) {
-    console.error('WhatsApp API error:', e.message);
+    console.error(`WhatsApp API error [device ${maskDevice(device)}]:`, e.message);
     return { success: false, error: e.message, details: e.stack };
   }
+}
+
+async function sendViaZentramsg(phone, code) {
+  // Final hard guard (belt & suspenders behind createOtp): never POST to WhatsApp for a
+  // non-Iraqi-mobile recipient. Sending to invalid numbers is what gets the sender banned.
+  const ids = toIntlDigits(phone);
+  if (!isValidIqMobile(phone) || !/^964\d{10}$/.test(ids)) {
+    console.error(`[OTP] refusing to send to invalid recipient: ${phone} (${ids})`);
+    return { success: false, error: 'رقم هاتف غير صالح للإرسال' };
+  }
+
+  const token = process.env.ZENTRAMSG_API_KEY;   // x-api-token — one account, so one token
+  const devices = configuredDevices();
+  if (!token || !devices.length) {
+    // Never print live codes to logs in production. If the WhatsApp creds are
+    // missing in prod, OTP can't be delivered — surface it loudly rather than
+    // leaking codes to the logs.
+    if (process.env.NODE_ENV === 'production') {
+      console.error('ZENTRAMSG_API_KEY / ZENTRAMSG_DEVICE_UUID missing — OTP cannot be sent in production.');
+    }
+    return { success: false, error: 'إعدادات API الواتساب غير موجودة. يرجى التحقق من متغيرات البيئة.' };
+  }
+
+  const order = sendOrder(devices);
+  let firstFailure = null;
+  const failedThisSend = [];
+
+  for (const device of order) {
+    const result = await postToDevice(device, token, ids, code);
+    if (result.success) {
+      healthOf(device).sent += 1;
+      // A success PROVES the earlier failures in this loop were the device's fault and not
+      // the recipient's number — that is the only evidence we ever act on, because we
+      // cannot tell a banned device from a bad number by reading Zentramsg's error alone.
+      for (const bad of failedThisSend) {
+        const h = healthOf(bad);
+        h.failed += 1;
+        h.cooledUntil = Date.now() + DEVICE_COOLDOWN_MS;
+        console.error(`[OTP] device ${maskDevice(bad)} failed but ${maskDevice(device)} succeeded — cooling it down for 12h`);
+      }
+      // Promote the winner and STAY on it. No timer moves us back; only its own failure will.
+      if (activeDevice !== device) {
+        console.error(`[OTP] sender is now device ${maskDevice(device)}`);
+        activeDevice = device;
+      }
+      return result;
+    }
+    failedThisSend.push(device);
+    if (!firstFailure) firstFailure = result;
+  }
+
+  // Every device refused. Cool down NOTHING: with no successful send to compare against,
+  // the likeliest explanation is this recipient, not all of our senders at once. Marking
+  // them all unhealthy here would take the whole gateway down over one bad number.
+  console.error(`[OTP] all ${order.length} sender device(s) failed for this message`);
+  return firstFailure;
+}
+
+// Read-only view for operators: which number is sending, and has one been cooled down.
+// Device ids are masked — this is surfaced to an admin, not kept to ourselves.
+function gatewayStatus() {
+  const devices = configuredDevices();
+  return {
+    configured: devices.length,
+    active: activeDevice ? maskDevice(activeDevice) : (devices[0] ? maskDevice(devices[0]) : null),
+    devices: devices.map((uuid) => {
+      const h = healthOf(uuid);
+      return {
+        device: maskDevice(uuid),
+        healthy: !isCooled(uuid),
+        cooled_until: h.cooledUntil > Date.now() ? new Date(h.cooledUntil).toISOString() : null,
+        sent: h.sent,
+        failed: h.failed,
+      };
+    }),
+  };
+}
+
+// Test seam only — lets a suite start from a known state instead of inheriting the
+// previous test's failover. Never called by application code.
+function __resetGatewayState() {
+  deviceHealth.clear();
+  activeDevice = null;
 }
 
 // NB: the old phone-addressed `verifyOtp(phone, code, purpose)` is deliberately GONE.
 // Re-adding it re-opens LS-01 — any caller that can name a phone could mint that
 // account's session. Verification must stay addressed by challenge.
-module.exports = { createOtp, verifyOtpByChallenge, refreshOtp, toIntlDigits, normalizeIqPhone, normalizePhoneBody, isValidIqMobile, isDemoLoginPhone, isOtpDegraded };
+// ⚠️ `__sendViaZentramsg` is a TEST SEAM, not an entry point. Application code must always
+// go through createOtp/refreshOtp: the per-phone hourly cap and the user/phone binding live
+// THERE, not in the sender. Calling this directly sends a WhatsApp message with no budget
+// check at all, which is the behaviour that gets the sender device banned.
+module.exports = { createOtp, verifyOtpByChallenge, refreshOtp, toIntlDigits, normalizeIqPhone, normalizePhoneBody, isValidIqMobile, isDemoLoginPhone, isOtpDegraded, gatewayStatus, __resetGatewayState, __sendViaZentramsg: sendViaZentramsg };

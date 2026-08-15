@@ -69,7 +69,7 @@ export function CohortProof({
                 {graduates.toLocaleString("en-US")}
               </span>
               <span className="max-w-[14ch] text-sm font-bold leading-snug text-ink-soft">
-                طالب وطالبة لبسوا تصاميمنا
+                طالب وطالبة سجّلوا معنا
               </span>
             </p>
           )}
