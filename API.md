@@ -474,7 +474,7 @@ One submission → 3 linked orders (sash/robe/cap, shared `checkout_group_id`) +
   "event_date": "YYYY-MM-DD", "notes": ""
 }
 ```
-Validation: required option groups (via `priceSelections`), measurements 25–80 / 70–190 / 30–100 cm, phones `^07\d{9}$` (Arabic digits normalized), 18-governorate whitelist, `right_text` required. Pricing: package price + option deltas (sash order carries the package price; robe/cap their own deltas). Products resolved from `package_products`, falling back to first-active-by-type. Sash → `design_complete` (embroidery); robe/cap → `preparing` unless an option needs embroidery. Idempotent re-submission. → `201 { data: { checkout_group_id, total, items: [{type, order_id, price}], orders: {sash, robe, cap} } }`
+Validation: required option groups (via `priceSelections`), measurements 25–80 / 70–190 / 30–100 cm, phones `^07\d{9}$` (Arabic digits normalized), 18-governorate whitelist, `right_text` required. Pricing: package price + option deltas (sash order carries the package price; robe/cap their own deltas). Products resolved from `package_products`, falling back to first-active-by-type. Sash → `design_complete` (embroidery); robe/cap → `preparing` unless an option needs embroidery. Idempotent re-submission: rebuilds each piece's `order_items` in place (never loses a generator-produced `plate_image_url`, see `lib/platePreservation.js`) and only matches a live (non-cancelled) prior order, so a cancelled piece is never silently revived. → `201 { data: { checkout_group_id, total, items: [{type, order_id, price}], orders: {sash, robe, cap} } }`
 
 ### PATCH `/admin/checkout-groups/:id` (admin)
 Edit intake: `deposit` (واصل), `event_date`, phones, address, `customer_name`, `instagram_username`, `notes`. Audit-logged.

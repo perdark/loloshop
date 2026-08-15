@@ -631,9 +631,14 @@ async function configureOrder(req, res) {
   // Reconcile with an existing order to avoid duplicates:
   //  - sash: the designer auto-creates a 'designing' order keyed by design_id → update it
   //  - other products: one order per (student, product) without a design → update on re-config
+  // `status <> 'cancelled'` matches configurePackage/configureFullSet and
+  // uq_orders_student_product_nodesign's own partial-index definition (WHERE design_id IS
+  // NULL AND status <> 'cancelled') — without it, a cancelled row for the same product could
+  // be the ONLY match (no ORDER BY/LIMIT), silently reviving a piece staff already cancelled
+  // instead of starting a fresh order the way every sibling "configure" endpoint does.
   const existing = design_id
-    ? await query(`SELECT id FROM orders WHERE student_id = $1 AND design_id = $2`, [student.id, design_id])
-    : await query(`SELECT id FROM orders WHERE student_id = $1 AND product_id = $2 AND design_id IS NULL`, [student.id, product_id]);
+    ? await query(`SELECT id FROM orders WHERE student_id = $1 AND design_id = $2 AND status <> 'cancelled'`, [student.id, design_id])
+    : await query(`SELECT id FROM orders WHERE student_id = $1 AND product_id = $2 AND design_id IS NULL AND status <> 'cancelled'`, [student.id, product_id]);
 
   const orderId = await tx(async (client) => {
     let oid;
