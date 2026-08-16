@@ -94,8 +94,16 @@ export function SupportChat() {
       // launcher clears, otherwise the composer row lands on top of the nav.
       className="fixed inset-0 z-50 flex flex-col bg-surface sm:inset-auto sm:bottom-24 sm:end-4 sm:h-[34rem] sm:w-[23rem] sm:rounded-3xl sm:border sm:border-line sm:shadow-2xl"
     >
-      {/* Header */}
-      <div className="flex items-center gap-3 border-b border-line bg-[linear-gradient(180deg,#fff6ea_0%,#ffe7cf_100%)] px-4 py-3 sm:rounded-t-3xl">
+      {/* Header.
+          `safe-top safe-x`: on mobile this sheet is `fixed inset-0`, so this row starts at
+          y=0 — underneath the status bar / notch on Android 15+ and notched iPhones, which
+          put the close button somewhere the thumb cannot reach. Every other top bar in the
+          app (StudentNav, the staff/wholesaler/admin layouts) already carries this pair; the
+          sheet was the one surface that missed it, which is why /lolo was fine and the popup
+          was not. The padding goes INSIDE the row so this header's own gradient fills the
+          status-bar strip rather than leaving a bare gap above it, and both utilities are
+          no-ops with no inset — so the sm+ floating card keeps its designed padding. */}
+      <div className="safe-top safe-x flex items-center gap-3 border-b border-line bg-[linear-gradient(180deg,#fff6ea_0%,#ffe7cf_100%)] px-4 py-3 sm:rounded-t-3xl">
         <LoloFace emotion={emotion} size={42} float />
         <div className="min-w-0 flex-1">
           <p className="font-semibold text-ink">لولو</p>
