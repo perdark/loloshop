@@ -97,7 +97,11 @@ export function LoloChatPage() {
   return (
     <div
       dir="rtl"
-      className="flex h-[calc(100dvh-11rem)] min-h-[26rem] flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-[var(--shadow-card)] sm:h-[calc(100dvh-11.5rem)]"
+      // `lolo-page-h` (globals.css), not an inline calc: the old inline value forgot
+      // `env(safe-area-inset-top)`, which StudentNav's own `.safe-top` adds to the top bar on
+      // notched phones — so this column claimed more height than it had and pushed the composer
+      // off the bottom of the screen. See that rule's comment for the full reasoning.
+      className="lolo-page-h flex min-h-[26rem] flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-[var(--shadow-card)]"
     >
       {/* Header */}
       <div className="flex shrink-0 items-center gap-3 border-b border-line bg-[linear-gradient(180deg,#fff6ea_0%,#ffe7cf_100%)] px-3 py-3">

@@ -820,9 +820,11 @@ test('REACTION: thanks and graduation news cheer', () => {
   assert.strictEqual(pickReaction('تخرجت اخيرا 🎉'), 'cheer');
 });
 
-test('REACTION: `none` is the COMMON case — an ordinary question earns no beat', () => {
+test('REACTION: a bare question earns no beat — the line that keeps this a reaction', () => {
   // This is the test that keeps the feature a reaction instead of an animation: a face that
   // jumps on every single reply is noise, and these are what most students actually send.
+  // `none` stopped being the MAJORITY case when `greet` landed (2026-08-16) — but a message
+  // with no feeling in it must still earn nothing, and that is what this pins.
   for (const q of [
     'شكد سعر الروب؟',
     'وين وصل طلبي؟',
@@ -834,6 +836,48 @@ test('REACTION: `none` is the COMMON case — an ordinary question earns no beat
   ]) {
     assert.strictEqual(pickReaction(q), 'none', `unexpected reaction for: ${q}`);
   }
+});
+
+test('REACTION: a greeting is met, not ignored — but it loses to anything else in the message', () => {
+  // Nearly every conversation opens with one of these and they all used to score `none`, which
+  // is what made لولو feel flat: she met «السلام عليكم» with a blank face.
+  assert.strictEqual(pickReaction('السلام عليكم'), 'greet');
+  assert.strictEqual(pickReaction('هلا'), 'greet');
+  assert.strictEqual(pickReaction('مرحبا، شكد سعر الوشاح؟'), 'greet');
+  assert.strictEqual(pickReaction('صباح الخير'), 'greet');
+  assert.strictEqual(pickReaction('شلونكم'), 'greet');
+
+  // Lowest precedence: a greeting is what someone says on the way to their real point.
+  assert.strictEqual(pickReaction('هلا، شكرا الك'), 'cheer');
+  assert.strictEqual(pickReaction('هلا، احبكم هواي'), 'love');
+  assert.strictEqual(pickReaction('هلا، اني تعبانة'), 'care');
+
+  // Anchored to the START, so a greeting quoted mid-sentence does not fire.
+  assert.strictEqual(pickReaction('شنو يعني اهلا وسهلا بالطلاب؟'), 'none');
+
+  // ⛔ «هاي» is the Iraqi demonstrative, not «hi» — «هاي وشاح» is «this is a sash». It was in
+  // the first draft of GREET_RE and would have made لولو wave at people pointing at products.
+  assert.strictEqual(pickReaction('هاي وشاح'), 'none');
+  assert.strictEqual(pickReaction('هاي القبعة شكد سعرها؟'), 'none');
+});
+
+test('REACTION: everyday Iraqi approval cheers — the words students actually use', () => {
+  for (const q of ['زين هيچي', 'حلو هواي', 'عجبني التصميم', 'خرافي', 'جميل جدا', 'ولا اروع']) {
+    assert.strictEqual(pickReaction(q), 'cheer', `expected cheer for: ${q}`);
+  }
+});
+
+test('REACTION: short words must not match INSIDE longer ones', () => {
+  // Arabic has no casing and these lists run against free text, so every short word is a
+  // substring waiting to happen. Each of these is a real collision that `word()` exists to
+  // stop — and «تمام» inside «اهتمام» was live before the 2026-08-16 widening, not new.
+  assert.strictEqual(pickReaction('شنو الحلول المتاحة؟'), 'none'); // حلو ⊂ حلول
+  assert.strictEqual(pickReaction('عندكم خزين من الروب؟'), 'none'); // زين ⊂ خزين
+  assert.strictEqual(pickReaction('عندي اهتمام بالوشاح'), 'none'); // تمام ⊂ اهتمام
+  assert.strictEqual(pickReaction('تسوون تجميل للقبعة؟'), 'none'); // جميل ⊂ تجميل
+  // And the same words DO fire when they stand on their own.
+  assert.strictEqual(pickReaction('حلو'), 'cheer');
+  assert.strictEqual(pickReaction('تمام'), 'cheer');
 });
 
 test('REACTION: a blocked answer suppresses the beat entirely', () => {

@@ -27,10 +27,12 @@ import { useEffect, useRef, useState } from "react";
  * PRESENTATION — which of the seven faces, which motion, which spark — is decided here, the
  * same split `mood` already uses.
  *
- * `none` is the common case on purpose: an ordinary «شكد سعر الروب؟» earns no beat, because a
- * face that jumps on every reply is noise rather than a reaction.
+ * A bare «شكد سعر الروب؟» still earns no beat, because a face that jumps on every reply is noise
+ * rather than a reaction. `none` stopped being the MAJORITY case on 2026-08-16 (the owner asked
+ * for livelier, and `greet` alone covers most conversation openings) — but the line it draws did
+ * not move: a message with no feeling in it gets nothing. backend/lib/reaction.js owns the call.
  */
-export type Reaction = "love" | "care" | "laugh" | "cheer" | "none";
+export type Reaction = "love" | "care" | "laugh" | "cheer" | "greet" | "none";
 
 export type LoloEmotion =
   | "happy"
@@ -161,6 +163,11 @@ const STICKER: Record<Exclude<Reaction, "none">, { src: string; spark: string; a
   care: { src: CARE_STICKER, spark: "🤍", alt: "لولو دزّت ستيكر — وياك" },
   laugh: { src: "/lolo/lolo-wink.webp", spark: "😄", alt: "لولو دزّت ستيكر — تضحك" },
   cheer: { src: "/lolo/lolo-excited.webp", spark: "✨", alt: "لولو دزّت ستيكر — تفرحلك" },
+  // Added 2026-08-16 with the `greet` beat. `lolo-happy` was the one face on the brand sheet
+  // no sticker used, and it is the right one: a greeting deserves a plain warm hello, not the
+  // heart-eyes of `love` or the party energy of `cheer`, both of which would read as too much
+  // for someone who has only said «هلا» so far.
+  greet: { src: "/lolo/lolo-happy.webp", spark: "👋", alt: "لولو دزّت ستيكر — ترحّب بيك" },
 };
 
 /**

@@ -275,6 +275,32 @@
   padding-right: env(safe-area-inset-right, 0px);
 }
 
+/* Height of the /lolo chat column (components/shop/LoloChatPage.tsx).
+
+   That file is one bounded flex column — header and composer are flex-shrink-0,
+   only the message list scrolls — so this height is the whole layout. It was
+   `h-[calc(100dvh-11rem)]` inline, and the 11rem was WRONG on exactly the devices
+   this shop is built for: it accounts for StudentNav's top bar, the bottom tab bar
+   and <main>'s padding, but NOT for `env(safe-area-inset-top)`, which StudentNav
+   adds to its own height via `.safe-top` on notched phones and Android 15+. The
+   column therefore claimed more room than existed and pushed the composer — the
+   input the whole page is for — below the fold.
+
+   LoloChatPage's own header comment already called hardcoding that bar's height
+   "too fragile"; this lives here instead of in an arbitrary Tailwind value because
+   `env()` with a comma-defaulted fallback inside `calc()` inside `h-[...]` is
+   exactly the kind of thing that silently fails to compile, and because the
+   breakpoint variant needs a media query anyway. */
+.lolo-page-h {
+  height: calc(100dvh - 11rem - env(safe-area-inset-top, 0px));
+}
+
+@media (min-width: 40rem) {
+  .lolo-page-h {
+    height: calc(100dvh - 11.5rem - env(safe-area-inset-top, 0px));
+  }
+}
+
 /* Skeleton shimmer for loading states */
 @keyframes skeleton-shimmer {
   0% { background-position: 200% 0; }
