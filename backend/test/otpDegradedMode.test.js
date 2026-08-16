@@ -8,10 +8,14 @@
 //   1. It EXPIRES and is CAPPED — unset / past / typo'd-far-future all read as OFF.
 //   2. bcrypt STILL RUNS. Degraded mode skips the OTP, never the password.
 //   3. Privileged roles (admin/staff/worker/design_helper) never bypass.
-//   4. Password RESET is never degraded — there the OTP is the sole credential.
+//   4. Password RESET is DECOUPLED from this flag (owner decision 2026-08-16): the retail
+//      login bypass stays ON while reset stays USABLE. Reset is still safe because it never
+//      SKIPS the OTP — the code is generated, sent, and verified, so it remains the sole
+//      credential. A separate kill-switch (`FORGOT_PW_OTP_BLOCK=1`) refuses reset only when
+//      the gateway genuinely cannot deliver.
 //
-// Property 2 and property 4 are the ones that turn this from "a day of reduced 2FA" into
-// "anyone can take any account", so they are tested per-role and negatively.
+// Property 2 is the one that turns this from "a day of reduced 2FA" into "anyone can take
+// any account", so it is tested per-role and negatively.
 //
 // Runs against the real database and cleans up after itself.
 
@@ -78,10 +82,12 @@ test.before(async () => {
 
 test.afterEach(() => {
   delete process.env.OTP_DEGRADED_UNTIL;
+  delete process.env.FORGOT_PW_OTP_BLOCK;
 });
 
 test.after(async () => {
   delete process.env.OTP_DEGRADED_UNTIL;
+  delete process.env.FORGOT_PW_OTP_BLOCK;
   if (!created.length) return;
   await query(`DELETE FROM otp_codes WHERE user_id = ANY($1::uuid[])`, [created]);
   await query(`DELETE FROM users WHERE id = ANY($1::uuid[])`, [created]);
@@ -187,32 +193,24 @@ test('with the flag OFF, a retail login still demands the OTP', async () => {
   assert.strictEqual(res.body.token, undefined);
 });
 
-// ── 4. Password reset is NEVER degraded ─────────────────────────────────────────
+// ── 4. Password reset is DECOUPLED from the degrade flag ────────────────────────
 
-test('forgot-password REFUSES during degraded mode instead of bypassing', async () => {
+test('forgot-password STILL WORKS during degraded mode (decoupled from the flag)', async () => {
   const user = await makeUser('retail');
   process.env.OTP_DEGRADED_UNTIL = hoursFromNow(12);
   const res = mockRes();
   await auth.forgotPasswordPhone(mockReq({ phone: user.phone }), res);
 
-  // The whole point: here the OTP is the ONLY credential, so skipping it would mean
-  // "reset any account whose phone number you can guess".
-  assert.strictEqual(res.statusCode, 503, 'reset must fail closed, not fall through');
-  assert.strictEqual(res.body.code, 'ERR_OTP_UNAVAILABLE');
-  assert.strictEqual(res.body.challenge_id, undefined, 'no challenge may be handed out');
-  // The customer is told ONE thing — talk to shop support — and nothing else. No channel,
-  // no handle, and above all no hint that something is broken: publishing "the second
-  // factor is unavailable right now" would tell anyone probing the login when to come back.
-  assert.match(res.body.error, /دعم المتجر/, 'must point the user at shop support');
-  assert.doesNotMatch(res.body.error, /واتساب|إنستقرام|@/,
-    'must not name WhatsApp, Instagram, or any handle');
-  assert.doesNotMatch(res.body.error, /متوقف|معطل|خطأ|فشل|مؤقت/,
-    'must not disclose that anything is down — that publishes the outage window');
-  assert.strictEqual(await countOtpRows(user.phone), 0, 'no reset OTP row may be created');
+  // Owner decision 2026-08-16: the retail LOGIN bypass stays on, but reset must remain
+  // usable. Safe because reset never SKIPS the OTP — it is created, sent, and verified.
+  assert.strictEqual(res.statusCode, 200, 'reset must proceed, not fail closed');
+  assert.strictEqual(res.body.sent, true);
+  assert.ok(res.body.challenge_id, 'an eligible account gets a real challenge');
+  assert.strictEqual(await countOtpRows(user.phone), 1, 'a reset OTP row IS created');
 });
 
-test('forgot-password refusal leaks nothing about whether the number exists', async () => {
-  process.env.OTP_DEGRADED_UNTIL = hoursFromNow(12);
+test('FORGOT_PW_OTP_BLOCK still refuses reset and leaks nothing about the number', async () => {
+  process.env.FORGOT_PW_OTP_BLOCK = '1';
   const known = await makeUser('retail');
 
   const a = mockRes();
@@ -220,8 +218,16 @@ test('forgot-password refusal leaks nothing about whether the number exists', as
   const b = mockRes();
   await auth.forgotPasswordPhone(mockReq({ phone: freshPhone() }), b);
 
-  assert.strictEqual(a.statusCode, b.statusCode, 'registered and unregistered must look alike');
-  assert.deepStrictEqual(a.body, b.body, 'and must return byte-identical bodies');
+  // The kill-switch fails closed and is returned BEFORE the user lookup, so a registered
+  // and an unregistered number must be byte-identical.
+  assert.strictEqual(a.statusCode, 503, 'the kill-switch fails closed');
+  assert.strictEqual(a.body.code, 'ERR_OTP_UNAVAILABLE');
+  assert.strictEqual(a.body.challenge_id, undefined, 'no challenge may be handed out');
+  assert.match(a.body.error, /دعم المتجر/, 'must point the user at shop support');
+  assert.doesNotMatch(a.body.error, /واتساب|إنستقرام|@/,
+    'must not name WhatsApp, Instagram, or any handle');
+  assert.deepStrictEqual(a.body, b.body, 'registered and unregistered must look alike');
+  assert.strictEqual(await countOtpRows(known.phone), 0, 'no reset OTP row may be created');
 });
 
 // ── 5. Registration completes without a code it can never receive ───────────────

@@ -419,13 +419,15 @@ async function forgotPasswordPhone(req, res) {
   if (!isValidIqMobile(phone)) {
     return res.status(400).json({ error: 'رقم هاتف غير صحيح', code: 'ERR_INVALID_PHONE' });
   }
-  // This flow is NOT degraded, and that asymmetry with login/register is the whole point.
-  // Login degrades safely because bcrypt already ran; here the OTP is the ONLY credential,
-  // so "skip the OTP during the outage" reads as "reset any account whose phone number you
-  // can guess" — 1,660 of them, from a phone-number format that is trivially enumerable.
-  // Refuse and hand the user to a human who can identify them out of band.
-  // Returned BEFORE the user lookup so it leaks nothing about whether the number exists.
-  if (isOtpDegraded()) {
+  // Forgot-password is DECOUPLED from the login/register OTP-degrade switch on purpose
+  // (owner decision 2026-08-16): the retail login bypass (`OTP_DEGRADED_UNTIL`) must stay
+  // ON while password reset stays USABLE. That is safe here because this flow never SKIPS
+  // the OTP — the code is still generated, sent, and verified in resetPasswordPhone, so it
+  // remains the sole credential and cannot be bypassed by guessing a phone number.
+  // A separate kill-switch (`FORGOT_PW_OTP_BLOCK=1`) still refuses the flow if the WhatsApp
+  // gateway is genuinely unable to deliver, and is returned BEFORE the user lookup so it
+  // leaks nothing about whether the number exists.
+  if (process.env.FORGOT_PW_OTP_BLOCK === '1') {
     return res.status(503).json({ error: SUPPORT_CONTACT_AR, code: 'ERR_OTP_UNAVAILABLE' });
   }
   const { rows } = await query(`SELECT id, role FROM users WHERE phone = $1`, [phone]);
