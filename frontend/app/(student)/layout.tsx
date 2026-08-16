@@ -14,7 +14,11 @@ export default function StudentLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div dir="rtl" lang="ar" className="shop-paper min-h-screen bg-cream pb-8">
+    /* `app-chrome` (globals.css): no text selection, no iOS long-press callout — the
+       storefront is shipped as a WebView app and selectable text is the loudest "this is a
+       website" tell. Scoped here, NOT on <body>, so /admin, /staff and /wholesaler keep
+       selection: copying an order id or a phone number there is real work. */
+    <div dir="rtl" lang="ar" className="app-chrome shop-paper min-h-screen bg-cream pb-8">
       {/* Rendered outside <main> so fixed overlays anchor to the viewport,
           not to <main>'s transformed (animate-page-in) box. */}
       <SplashIntro />

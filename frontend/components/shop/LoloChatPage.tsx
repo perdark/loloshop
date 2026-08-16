@@ -27,10 +27,12 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { GREETING, LOLO_PAGE_SUGGESTIONS, useCountdown, useSupportChat } from "./SupportChatProvider";
 import { ChatBubble, TypingDots } from "./ChatBubble";
 import { LoloFace } from "./LoloFace";
+import { useKeyboardInsetHeight } from "./useKeyboardInsetHeight";
 
 export function LoloChatPage() {
   const router = useRouter();
@@ -40,6 +42,12 @@ export function LoloChatPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const waitLeft = useCountdown(error?.retryAfterSec);
+  const viewportHeight = useKeyboardInsetHeight();
+  // A portal needs a DOM target, which does not exist during SSR. Rendering the same tree
+  // through `createPortal` only after mount keeps the server output and the first client
+  // render identical, so there is no hydration mismatch.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
   // Guards the ?q= auto-send to exactly once per page load — a re-render (or the
   // router.replace below re-triggering navigation state) must not resend the same question.
   const autoSentRef = useRef(false);
@@ -94,17 +102,35 @@ export function LoloChatPage() {
   const lastAssistant = turns.map((t) => t.role).lastIndexOf("assistant");
   const started = turns.length > 0;
 
-  return (
+  const screen = (
     <div
       dir="rtl"
-      // `lolo-page-h` (globals.css), not an inline calc: the old inline value forgot
-      // `env(safe-area-inset-top)`, which StudentNav's own `.safe-top` adds to the top bar on
-      // notched phones — so this column claimed more height than it had and pushed the composer
-      // off the bottom of the screen. See that rule's comment for the full reasoning.
-      className="lolo-page-h flex min-h-[26rem] flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-[var(--shadow-card)]"
+      // ── FULL-SCREEN, AND PORTALLED OUT OF <main> ─────────────────────────────────────────
+      // Owner call 2026-08-16: «the floating one is the right path, the second is wrong» —
+      // so this screen now IS the floating sheet, just routed. No card, no StudentNav, no
+      // footer, no tab bar showing through: it covers all of them.
+      //
+      // The portal is not decoration. `(student)/layout.tsx` runs `animate-page-in` on
+      // <main>, and a transformed ancestor becomes the containing block for any `fixed`
+      // descendant — so `fixed inset-0` written inside the page would anchor to <main>'s box,
+      // not the viewport. That is the exact landmine this file's header has always warned
+      // about, and it is why the old version did viewport arithmetic instead. Rendering into
+      // document.body sidesteps it completely: no transformed ancestor, no arithmetic, and
+      // nothing left to get wrong when a nav bar changes height.
+      //
+      // ⚠️ The height is `viewportHeight` (visualViewport) with `100dvh` as the fallback, NOT
+      // `100dvh` alone: on iOS the keyboard does not shrink the layout viewport, so `100dvh`
+      // keeps the composer underneath the keys. See useKeyboardInsetHeight.ts.
+      // `app-chrome` is repeated here and not inherited: this tree is portalled to
+      // <body>, so it is NOT a descendant of the student layout's `.app-chrome` div the way
+      // the floating sheet is. Without it, /lolo would be the one screen where long-press
+      // still raises the iOS copy bar.
+      className="app-chrome shop-paper fixed inset-0 z-[60] flex flex-col overflow-hidden bg-surface"
+      style={viewportHeight ? { height: `${viewportHeight}px` } : { height: "100dvh" }}
     >
-      {/* Header */}
-      <div className="flex shrink-0 items-center gap-3 border-b border-line bg-[linear-gradient(180deg,#fff6ea_0%,#ffe7cf_100%)] px-3 py-3">
+      {/* Header — `safe-top safe-x` because this row now starts at y=0, exactly like the
+          floating sheet's header, so it sits under the status bar without them. */}
+      <div className="safe-top safe-x flex shrink-0 items-center gap-3 border-b border-line bg-[linear-gradient(180deg,#fff6ea_0%,#ffe7cf_100%)] px-3 py-3">
         <button
           type="button"
           onClick={goBack}
@@ -243,7 +269,9 @@ export function LoloChatPage() {
           aria-label="سؤالك للولو"
           maxLength={600}
           enterKeyHint="send"
-          className="h-11 min-w-0 flex-1 rounded-full border border-line bg-cream px-4 text-sm text-ink outline-none transition placeholder:text-muted focus:border-orange"
+          // ⚠️ `text-base` (16px) IS THE iOS ZOOM FIX — see the identical note in
+          // SupportChat.tsx. Under 16px, Safari zooms the page on focus and stays zoomed.
+          className="h-11 min-w-0 flex-1 rounded-full border border-line bg-cream px-4 text-base text-ink outline-none transition placeholder:text-muted focus:border-orange"
         />
         <button
           type="submit"
@@ -258,4 +286,9 @@ export function LoloChatPage() {
       </form>
     </div>
   );
+
+  // Before mount there is no document.body to portal into, so the same tree renders in place
+  // for that one pass — it is `fixed` either way, and <main>'s transform only misplaces it
+  // for the frame before hydration.
+  return mounted ? createPortal(screen, document.body) : screen;
 }

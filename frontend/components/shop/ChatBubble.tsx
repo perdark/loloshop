@@ -1,11 +1,11 @@
 "use client";
 
-/** One message, plus the chips under it and the face beside it. Shared by the floating panel
- *  and the dedicated /lolo page so the assistant reads identically in both — same radius, same
- *  colours, same wrapping, same reaction. A component used in only one place would let the two
- *  surfaces quietly drift apart; this is the one thing keeping them in sync. */
+/** One message, plus the face beside it. Shared by the floating panel and the dedicated /lolo
+ *  page so the assistant reads identically in both — same radius, same colours, same wrapping,
+ *  same reaction. A component used in only one place would let the two surfaces quietly drift
+ *  apart; this is the one thing keeping them in sync.
+ *  (It used to render action chips under each answer too — removed 2026-08-16, see below.) */
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { ChatAction, Mood, Turn } from "./SupportChatProvider";
 import { LoloFace, LoloSticker, type LoloEmotion, type Reaction } from "./LoloFace";
@@ -72,31 +72,19 @@ function faceForMood(mood?: Mood): LoloEmotion {
   return "happy";
 }
 
-function ActionChip({ action }: { action: ChatAction }) {
-  const className =
-    "inline-flex min-h-10 items-center gap-1.5 rounded-pill border border-orange/35 bg-surface px-3.5 py-2 " +
-    "text-[13px] font-bold text-orange-ink transition hover:border-orange hover:bg-orange/5 active:scale-95";
+/* ⛔ `ActionChip` was deleted 2026-08-16 with the per-answer CTA row — see the comment where
+   it used to render, below. Restoring the chips means restoring this component too; it was a
+   plain <a>/<Link> pair switching on `action.kind`, and `git show` has it.
 
-  // External destinations (WhatsApp, Google Maps) leave the app, so they get a real anchor with
-  // the safety rel; internal ones go through next/link and stay a client navigation.
-  if (action.kind === "external") {
-    return (
-      <a href={action.href} target="_blank" rel="noopener noreferrer" className={className}>
-        {action.label}
-      </a>
-    );
-  }
-  return (
-    <Link href={action.href} className={className}>
-      {action.label}
-    </Link>
-  );
-}
+   ⚠️ This did NOT remove the ESCALATION actions. When لولو fails — throttled, over budget, or
+   the guard blocked her answer — LoloChatPage and SupportChat render `error.actions`
+   separately (the WhatsApp/Instagram escape hatch). Those are the opposite of a CTA: they are
+   how a stuck customer reaches a human, and deleting them would strand people. Only the
+   chips that hung under a SUCCESSFUL answer are gone. */
 
 export function ChatBubble({
   role,
   text,
-  actions,
   animate = false,
   showFace = false,
   mood,
@@ -104,6 +92,10 @@ export function ChatBubble({
 }: {
   role: Turn["role"];
   text: string;
+  /** Still accepted and still sent by the server, deliberately UNREAD since 2026-08-16 —
+   *  both call sites pass `t.actions` and the prop stays so they keep compiling and so the
+   *  chips are one render away if the owner wants them back. See the note at the render
+   *  site. Not destructured, because an unused binding is a lint warning. */
   actions?: ChatAction[];
   animate?: boolean;
   showFace?: boolean;
@@ -135,9 +127,8 @@ export function ChatBubble({
   // running during the hold it would burn through its ~22ms-per-word budget behind a hidden
   // element, and the answer would pop out fully revealed instead of being spoken.
   const revealed = useRevealedWords(text, !mine && animate && !held);
-  // Chips wait for the sentence to finish — arriving mid-reveal they read as the answer being
-  // interrupted, and a customer taps them before they have read why.
-  const done = revealed.length >= text.length;
+  // (A `done` flag lived here to hold the action chips back until the sentence finished
+  // revealing. The chips are gone — 2026-08-16 — and nothing else waited on it.)
 
   if (mine) {
     return (
@@ -174,13 +165,13 @@ export function ChatBubble({
         >
           {revealed}
         </p>
-        {done && actions && actions.length > 0 && (
-          <div className="mt-2 flex flex-wrap gap-2">
-            {actions.map((a) => (
-              <ActionChip key={a.id} action={a} />
-            ))}
-          </div>
-        )}
+        {/* ⛔ ACTION CHIPS REMOVED — owner call 2026-08-16. The «شوف القطع» / «شوف الأسعار»
+            buttons under every answer read as an advert bolted onto a conversation: لولو
+            answers you and then sells at you. The server still CHOOSES actions (they are in
+            the /support response and `lib/supportActions.js` still picks them from a closed
+            list) — only the rendering is gone, so nothing about the answer guard, the tests
+            or the API shape changed, and putting them back is deleting this comment.
+            The `actions` prop is kept on purpose for the same reason. */}
       </div>
     </div>
       )}

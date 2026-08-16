@@ -250,7 +250,13 @@ export function SupportChat() {
           placeholder="اكتب سؤالك هنا…"
           maxLength={600}
           enterKeyHint="send"
-          className="h-11 min-w-0 flex-1 rounded-full border border-line bg-cream px-4 text-sm text-ink outline-none transition placeholder:text-muted focus:border-orange"
+          // ⚠️ `text-base` (16px) IS THE iOS ZOOM FIX — do not "tidy" it back to text-sm.
+          // Safari on iOS force-zooms the page whenever a focused input has a font-size under
+          // 16px, and never zooms back out. Owner report 2026-08-16: «on iphone it zooms in».
+          // The other way to stop it is `maximum-scale=1` in the viewport meta, which also
+          // disables pinch-zoom for everyone — an accessibility regression traded for a
+          // typography preference. 16px on the input is the honest fix.
+          className="h-11 min-w-0 flex-1 rounded-full border border-line bg-cream px-4 text-base text-ink outline-none transition placeholder:text-muted focus:border-orange"
         />
         <button
           type="submit"

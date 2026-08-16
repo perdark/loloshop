@@ -275,31 +275,47 @@
   padding-right: env(safe-area-inset-right, 0px);
 }
 
-/* Height of the /lolo chat column (components/shop/LoloChatPage.tsx).
+/* ── APP FEEL: no text selection, no iOS long-press callout ────────────────────
+   Owner call 2026-08-16: «block the selecting because we can copy text like web,
+   so that's wrong for an app». Long-pressing anything in a WebView raises the
+   iOS selection magnifier and the Copy / Look Up / Share bar, and dragging over
+   a price highlights it in blue — both are the loudest "this is a website in a
+   box" tells the shells have.
 
-   That file is one bounded flex column — header and composer are flex-shrink-0,
-   only the message list scrolls — so this height is the whole layout. It was
-   `h-[calc(100dvh-11rem)]` inline, and the 11rem was WRONG on exactly the devices
-   this shop is built for: it accounts for StudentNav's top bar, the bottom tab bar
-   and <main>'s padding, but NOT for `env(safe-area-inset-top)`, which StudentNav
-   adds to its own height via `.safe-top` on notched phones and Android 15+. The
-   column therefore claimed more room than existed and pushed the composer — the
-   input the whole page is for — below the fold.
+   SCOPE IS DELIBERATE. This is applied by class, not to `body`, and it is put on
+   the STUDENT-facing surfaces only: the storefront shell plus the two chat
+   surfaces, which portal to <body> and so would escape a layout-scoped rule.
+   /admin, /staff and /wholesaler are left alone on purpose — those are laptop and
+   iPad tools where copying an order id, a phone number or an address is real
+   work, and taking selection away there would be a downgrade, not a polish.
 
-   LoloChatPage's own header comment already called hardcoding that bar's height
-   "too fragile"; this lives here instead of in an arbitrary Tailwind value because
-   `env()` with a comma-defaulted fallback inside `calc()` inside `h-[...]` is
-   exactly the kind of thing that silently fails to compile, and because the
-   breakpoint variant needs a media query anyway. */
-.lolo-page-h {
-  height: calc(100dvh - 11rem - env(safe-area-inset-top, 0px));
+   ⚠️ THE INPUT EXEMPTION IS NOT OPTIONAL. `user-select: none` on a text field
+   breaks editing inside it on iOS — no caret placement, no select-to-replace — so
+   every input, textarea and contenteditable is handed selection straight back.
+   Removing that block makes the composer feel broken in a way that looks like a
+   different bug entirely. */
+.app-chrome {
+  -webkit-user-select: none;
+  user-select: none;
+  /* Stops the iOS long-press callout bar. Separate property from user-select and
+     not implied by it — WebKit needs both. */
+  -webkit-touch-callout: none;
 }
 
-@media (min-width: 40rem) {
-  .lolo-page-h {
-    height: calc(100dvh - 11.5rem - env(safe-area-inset-top, 0px));
-  }
+.app-chrome input,
+.app-chrome textarea,
+.app-chrome [contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
 }
+
+/* (`.lolo-page-h` lived here until 2026-08-16. It sized the /lolo chat as a card
+   inside the student layout by subtracting a guess at the nav bars from 100dvh.
+   That whole approach is gone: /lolo is now a full-screen portal on <body>, so
+   there is no surrounding chrome left to measure. Deleted rather than kept dead —
+   a stale height rule is exactly the thing someone reapplies by accident.) */
+
 
 /* Skeleton shimmer for loading states */
 @keyframes skeleton-shimmer {
