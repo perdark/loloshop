@@ -66,6 +66,38 @@
   --shop-muted: var(--color-muted);
 }
 
+/* ── iOS auto-zoom guard (owner report 2026-08-17: «zoom in automatic» on phones) ──
+   Safari on iOS — and every in-app browser wrapping WKWebView (Instagram is most
+   of our traffic) — force-zooms the page whenever a FOCUSED form control has a
+   font-size under 16px, and never zooms back out. The zoomed page is then wider
+   than the viewport, which is also where «the site scrolls left and right» comes
+   from. Most retail inputs already use text-base, but any single sub-16px input,
+   select or textarea anywhere (wholesaler orders search, admin tables, future
+   code) re-triggers it. This guard makes the whole class of bug impossible on
+   touch devices while leaving desktop typography alone. `max(16px, 1em)` keeps
+   intentionally LARGER inputs larger. The alternative — `maximum-scale=1` in the
+   viewport meta — kills pinch-zoom for everyone (accessibility regression), so
+   don't switch to it. */
+@media (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea {
+    font-size: max(16px, 1em);
+  }
+}
+
+/* ── Horizontal-scroll safety net ──
+   Nothing on any page should ever widen the viewport; when something does (a
+   100vw full-bleed, an unbroken string, a zoomed-in in-app browser), the page
+   pans left-right and «feels like a website». `.shop-paper` already clips the
+   storefront — this covers every other route (login, admin, wholesaler, staff).
+   `clip` adds no scroll container so position: sticky is unaffected; the
+   `hidden` line above it is the fallback for engines without clip support. */
+html {
+  overflow-x: hidden;
+  overflow-x: clip;
+}
+
 /* ── Student storefront: "The Graduation Lookbook" palette ──
    The locked target system from DESIGN.md (warm paper + ink + earned burnt
    orange), scoped to the student area so admin/staff/wholesaler keep the
