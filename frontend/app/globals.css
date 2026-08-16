@@ -302,6 +302,29 @@
   -webkit-touch-callout: none;
 }
 
+/* ⚠️ THE LINK/IMAGE RULE IS NOT REDUNDANT WITH THE ONE ABOVE — it is the fix for
+   the thing the owner actually saw: «i can holding on the ai and see a screen of
+   lolo-shop96.com!!! like a website not an app! even the products».
+
+   That is the iOS link PREVIEW ("peek"): long-press an <a href> and Safari/WKWebView
+   renders a floating screenshot of the destination page with a Copy/Share sheet.
+   Nothing gives it away faster that a WebView app is a website. It is suppressed by
+   `-webkit-touch-callout: none` ON THE ANCHOR — and although the property inherits,
+   WebKit's UA stylesheet sets its own value on <a> and <img>, which wins over an
+   inherited one. So the ancestor rule above genuinely does not reach them and they
+   have to be named. Same for the drag-out-an-image gesture.
+
+   Every product tile and the «اسأل لولو» banner is a <Link>, i.e. an <a>, which is
+   why it reproduced on "the ai" and on "the products" alike. */
+.app-chrome a,
+.app-chrome img,
+.app-chrome button {
+  -webkit-touch-callout: none;
+  -webkit-user-drag: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 .app-chrome input,
 .app-chrome textarea,
 .app-chrome [contenteditable="true"] {

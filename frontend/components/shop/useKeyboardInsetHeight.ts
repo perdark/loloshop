@@ -1,44 +1,51 @@
 "use client";
 
 /**
- * The height a full-screen chat may actually occupy, in px — keyboard included.
+ * Where a full-screen chat must actually sit, with the iOS keyboard open.
  *
- * ── WHY `100dvh` IS NOT ENOUGH, AND THIS EXISTS ──────────────────────────────────────────
- * Owner report (2026-08-16, iPhone): «it zooms in and keyboard broke the view».
+ * ── WHY `100dvh` IS NOT ENOUGH ───────────────────────────────────────────────────────────
+ * Owner report (2026-08-16, iPhone): «it zooms in and keyboard broke the view», then after
+ * the first attempt: «keyboard make the chat disappear up or make it zoom down».
  *
  * On iOS Safari the software keyboard does NOT shrink the layout viewport. `100vh` and
  * `100dvh` both keep reporting the FULL screen height while the keyboard covers the bottom
- * ~40% of it, so a `fixed inset-0` chat column keeps its composer somewhere underneath the
- * keys. The page then scrolls under the fixed element and everything looks broken — which is
- * exactly the symptom described. Android/Chrome mostly resizes the layout viewport, so the
- * same code looks fine there; this is an iOS-shaped bug and it needs an iOS-shaped answer.
+ * ~40%, so a `fixed inset-0` column keeps its composer underneath the keys. Android/Chrome
+ * mostly resizes the layout viewport, so identical code looks fine there — this is an
+ * iOS-shaped bug.
  *
- * `window.visualViewport` is that answer: it reports the region actually VISIBLE to the user,
- * so it shrinks when the keyboard opens on both platforms. We track it and hand back a pixel
- * height the caller can put straight on a container.
+ * ── TWO NUMBERS, AND THE FIRST FIX GOT THEM WRONG ────────────────────────────────────────
+ * `visualViewport` reports the region actually visible, and it changes in TWO ways when the
+ * keyboard opens: it gets SHORTER (`height`) and iOS SCROLLS it down to keep the focused
+ * input in view (`offsetTop`). A `position: fixed` element is anchored to the LAYOUT
+ * viewport, which does not move — so it must be told about both.
+ *
+ * The first version returned `height + offsetTop` as a single height. That keeps the BOTTOM
+ * edge in the right place and pushes the TOP edge off the top of the screen — which is
+ * precisely «the chat disappear up». Size and position are different questions:
+ *
+ *     top:    offsetTop      ← follow the visual viewport down
+ *     height: height         ← and be exactly as tall as the visible part
  *
  * ── WHY IT RETURNS null BEFORE MOUNT ─────────────────────────────────────────────────────
- * There is no viewport on the server, and guessing one would render a wrong-height chat for
- * one frame. `null` means "use the CSS fallback" (`100dvh`), which is correct everywhere the
- * keyboard is closed — so the only thing this hook actually changes is the keyboard-open
- * case. Browsers without `visualViewport` (none we support, but still) stay on that fallback
- * forever rather than breaking.
+ * There is no viewport on the server. `null` means "use the CSS fallback" (`inset-0` +
+ * `100dvh`), which is correct everywhere the keyboard is closed — so the only thing this
+ * hook changes is the keyboard-open case. Browsers without `visualViewport` stay on that
+ * fallback forever rather than breaking.
  */
 
 import { useEffect, useState } from "react";
 
-export function useKeyboardInsetHeight(): number | null {
-  const [height, setHeight] = useState<number | null>(null);
+export type ViewportBox = { top: number; height: number };
+
+export function useVisualViewportBox(): ViewportBox | null {
+  const [box, setBox] = useState<ViewportBox | null>(null);
 
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
 
     const sync = () => {
-      // `offsetTop` matters as much as `height`: iOS scrolls the visual viewport up to keep a
-      // focused input above the keyboard, and without subtracting that shift the column is the
-      // right SIZE but in the wrong PLACE — the header slides off the top of the screen.
-      setHeight(Math.round(vv.height + vv.offsetTop));
+      setBox({ top: Math.round(vv.offsetTop), height: Math.round(vv.height) });
     };
 
     sync();
@@ -50,5 +57,41 @@ export function useKeyboardInsetHeight(): number | null {
     };
   }, []);
 
-  return height;
+  return box;
+}
+
+/**
+ * True while the viewport is narrower than Tailwind's `sm` (40rem / 640px).
+ *
+ * The floating panel is only full-screen on phones — at `sm+` it is a 23rem × 34rem card
+ * pinned above the tab bar. An inline `height`/`top` beats a class every time, so applying
+ * the keyboard style unconditionally would flatten that card into a full-height column on
+ * every laptop. This is the guard that keeps the fix phone-only, where the bug is.
+ */
+export function useCompactViewport(maxWidthPx = 640): boolean {
+  const [compact, setCompact] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${maxWidthPx - 0.02}px)`);
+    const sync = () => setCompact(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, [maxWidthPx]);
+
+  return compact;
+}
+
+/**
+ * The inline style a `fixed inset-0` chat surface should carry. Kept here rather than at each
+ * call site so the floating sheet and the /lolo screen cannot drift apart again — they did
+ * once already: /lolo got the fix and the floating panel did not, which is why the owner saw
+ * one of them zoom and the other behave.
+ *
+ * `bottom: auto` matters: with `inset-0` still setting `bottom: 0`, an explicit `height`
+ * would fight the bottom anchor and the element would not move at all.
+ */
+export function viewportBoxStyle(box: ViewportBox | null): React.CSSProperties {
+  if (!box) return { height: "100dvh" };
+  return { top: `${box.top}px`, height: `${box.height}px`, bottom: "auto" };
 }

@@ -16,6 +16,7 @@ import { useEffect, useRef, useState } from "react";
 import { GREETING, SUGGESTIONS, useCountdown, useSupportChat } from "./SupportChatProvider";
 import { ChatBubble, TypingDots } from "./ChatBubble";
 import { LoloFace } from "./LoloFace";
+import { useCompactViewport, useVisualViewportBox, viewportBoxStyle } from "./useKeyboardInsetHeight";
 
 export function SupportChat() {
   const { turns, busy, error, unavailable, emotion, send, retry, reset } = useSupportChat();
@@ -25,6 +26,12 @@ export function SupportChat() {
   const inputRef = useRef<HTMLInputElement>(null);
   const launcherRef = useRef<HTMLButtonElement>(null);
   const waitLeft = useCountdown(error?.retryAfterSec);
+  // Same keyboard handling as the /lolo screen. This panel was left out of the first fix,
+  // which is exactly what the owner then reported: «when click floating ai it is zoom in,
+  // but when click on the homepage ai no». Both surfaces share the hook now so they cannot
+  // drift apart again.
+  const viewportBox = useVisualViewportBox();
+  const compact = useCompactViewport();
 
   // Pin to the newest message whenever the thread grows or the typing indicator toggles.
   useEffect(() => {
@@ -93,6 +100,9 @@ export function SupportChat() {
       // sm+: floating card — bottom-24 (6rem) clears the same fixed 56px tab bar the
       // launcher clears, otherwise the composer row lands on top of the nav.
       className="fixed inset-0 z-50 flex flex-col bg-surface sm:inset-auto sm:bottom-24 sm:end-4 sm:h-[34rem] sm:w-[23rem] sm:rounded-3xl sm:border sm:border-line sm:shadow-2xl"
+      // Phone only — see useCompactViewport. An inline top/height beats the `sm:` classes,
+      // so applying this on a laptop would flatten the floating card into a full-height column.
+      style={compact ? viewportBoxStyle(viewportBox) : undefined}
     >
       {/* Header.
           `safe-top safe-x`: on mobile this sheet is `fixed inset-0`, so this row starts at

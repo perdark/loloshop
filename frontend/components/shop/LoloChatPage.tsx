@@ -32,7 +32,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { GREETING, LOLO_PAGE_SUGGESTIONS, useCountdown, useSupportChat } from "./SupportChatProvider";
 import { ChatBubble, TypingDots } from "./ChatBubble";
 import { LoloFace } from "./LoloFace";
-import { useKeyboardInsetHeight } from "./useKeyboardInsetHeight";
+import { useVisualViewportBox, viewportBoxStyle } from "./useKeyboardInsetHeight";
 
 export function LoloChatPage() {
   const router = useRouter();
@@ -42,7 +42,7 @@ export function LoloChatPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const waitLeft = useCountdown(error?.retryAfterSec);
-  const viewportHeight = useKeyboardInsetHeight();
+  const viewportBox = useVisualViewportBox();
   // A portal needs a DOM target, which does not exist during SSR. Rendering the same tree
   // through `createPortal` only after mount keeps the server output and the first client
   // render identical, so there is no hydration mismatch.
@@ -126,7 +126,7 @@ export function LoloChatPage() {
       // the floating sheet is. Without it, /lolo would be the one screen where long-press
       // still raises the iOS copy bar.
       className="app-chrome shop-paper fixed inset-0 z-[60] flex flex-col overflow-hidden bg-surface"
-      style={viewportHeight ? { height: `${viewportHeight}px` } : { height: "100dvh" }}
+      style={viewportBoxStyle(viewportBox)}
     >
       {/* Header — `safe-top safe-x` because this row now starts at y=0, exactly like the
           floating sheet's header, so it sits under the status bar without them. */}
