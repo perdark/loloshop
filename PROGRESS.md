@@ -1,5 +1,33 @@
 # Progress
 
+## 2026-08-17 — 📱 Mobile UI wave-readiness: /shop shipped EMPTY HTML; iOS zoom + h-scroll guards
+
+Owner report on live traffic: auto-zoom on some phones, page pans left-right, products sometimes
+not shown at all, «feels like a website not an app». Investigated with real evidence, not guesses:
+
+- **User-agents from the prod caddy log falsified the old-browser theory.** All traffic is
+  Chrome 150/151 and iOS 17–26 — even the Android 10/12 phones. The dominant environment is the
+  **Instagram in-app browser** (biggest single share of hits). No 429/5xx in the log window, so
+  rate limiting was not the products bug either.
+- **`/shop` (القطع) served zero product tiles in its HTML** — the route was statically
+  prerendered, so `useSearchParams` inside `<Suspense fallback={null}>` reduced the whole built
+  page to the fallback. Users saw «جارٍ التحميل» until full JS hydration; on weak phones /
+  in-app browsers / slow networks that reads as "products not shown". Fixed with
+  `export const dynamic = "force-dynamic"` (feed fetch is revalidate-cached, so no backend load).
+  The home page was NOT affected (ISR, tiles verified present in prod HTML).
+- **iOS auto-zoom root cause:** any focused form control under 16px makes Safari/WKWebView zoom
+  in and never zoom back — the zoomed page is then wider than the viewport, which is ALSO the
+  left-right scrolling and the "zoomed-in website" feel. Retail inputs were already 16px, but
+  wholesaler orders search + admin inputs were `text-sm`. Fixed as a class, not per file:
+  `@media (pointer: coarse)` guard in globals.css raises every input/select/textarea to
+  `max(16px, 1em)` on touch devices only.
+- **Horizontal-overflow safety net:** `html { overflow-x: hidden; overflow-x: clip; }` —
+  `.shop-paper` already clipped the storefront, every other route (login, admin, wholesaler,
+  staff) had no guard.
+
+Shipped as `df654b0` on `main` (lint 0 errors, `next build` clean, `/shop` now ƒ dynamic in the
+build output). Deploy is automatic on merge.
+
 ## 2026-08-16 — 🚚 MIGRATED TO THE 8 GB BOX. LoloShop now lives on `169.58.114.255`.
 
 **Prod is `169.58.114.255`, not `142.93.110.202`.** The old 2 GB droplet measured

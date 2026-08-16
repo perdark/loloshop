@@ -16,6 +16,21 @@ written against an uncommitted tree; **(d)** committed it, so that caveat is dis
 
 ---
 
+## 2026-08-17 — 📱 Mobile wave-readiness: /shop shipped empty HTML; iOS zoom + h-scroll guards
+
+Owner reported live-user issues (auto-zoom, left-right panning, products not showing, «feels like
+a website»). Prod caddy UAs falsified the old-browser theory — all traffic is Chrome 150/151 and
+iOS 17–26, dominated by the Instagram in-app browser; no 429/5xx in the log window. Real causes:
+① `/shop` was statically prerendered, so `useSearchParams` inside `Suspense fallback={null}`
+built the القطع page as EMPTY HTML (measured: 0 tiles) — fixed with `force-dynamic` (54 tiles in
+live HTML after deploy, TTFB ~0.4–0.7s, feed fetch stays revalidate-cached). ② Sub-16px focused
+form controls make iOS/WKWebView zoom in and never zoom back — the zoomed page is also what pans
+left-right; fixed as a class with a `pointer: coarse` `max(16px, 1em)` guard in globals.css.
+③ `html { overflow-x: clip }` safety net for routes outside `.shop-paper` (minifier dropped the
+`hidden` fallback — acceptable given the measured browser floor). Shipped `df654b0`, CI green,
+auto-deployed, verified live via curl. Not done: real-phone pass, and Chrome was closed so no
+browser-driven overflow measurement.
+
 ## 2026-08-13 — 🧵 Track B: the calligraphy plate stops eating the student's photo
 
 Branch `fix/calligraphy-photo-loss`, cut from `main`. Bugs 4·5·6 of
