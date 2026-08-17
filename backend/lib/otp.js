@@ -67,11 +67,27 @@ function isDemoLoginPhone(phone) {
 //     skipping it would hand any account to anyone who knows its phone number. That
 //     flow is redirected to human support instead.
 //
+// ── The one indefinite setting: OTP_DEGRADED_UNTIL=always ───────────────────────
+// Owner decision 2026-08-17. The gateway device now drops its WhatsApp session often
+// enough ("Device is not connected. Please scan QR code first") that a 48h clock means
+// re-setting the flag every other day, and every lapse strands students mid-signup with
+// no way to finish. `always` holds the bypass open until a human edits this env var back.
+//
+// It is a LITERAL WORD on purpose, and the date cap above is untouched. The cap exists to
+// catch a *mistake* — a typo'd year that silently becomes a multi-year bypass. Nobody
+// types `always` by accident, so the sentinel cannot be reached by fat-fingering a date,
+// and every fuzzy truthy value ('yes', 'true', '1', …) still reads as OFF. What is given
+// up is the automatic clock: with `always` set, OTP stays off for retail + wholesaler
+// logins until someone turns it back on. That is the trade the owner asked for; password
+// reset is still never degraded, so it costs the second factor, not the account.
+//
 // This answers "is the gateway presumed down", NOT "may this user skip" — callers must
 // also check the role against OTP_DEGRADED_ROLES in authController.
 const MAX_DEGRADED_WINDOW_MS = 48 * 60 * 60 * 1000;
 function isOtpDegraded() {
-  const until = Date.parse(process.env.OTP_DEGRADED_UNTIL || '');
+  const raw = (process.env.OTP_DEGRADED_UNTIL || '').trim();
+  if (raw.toLowerCase() === 'always') return true;
+  const until = Date.parse(raw);
   const remaining = until - Date.now();
   return Number.isFinite(until) && remaining > 0 && remaining <= MAX_DEGRADED_WINDOW_MS;
 }

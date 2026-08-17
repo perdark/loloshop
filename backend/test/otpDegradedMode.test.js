@@ -121,6 +121,34 @@ test('an unparseable value means OTP is ON', () => {
   }
 });
 
+// ── 1b. The one indefinite setting (owner decision 2026-08-17) ───────────────────
+// `always` is the deliberate escape hatch from the clock, for a gateway device that
+// drops its session every couple of days. It must be reachable ONLY by typing the
+// word — never by mistyping a date, which is what the 48h cap above is for.
+
+test('OTP_DEGRADED_UNTIL=always enables the bypass with no expiry', () => {
+  process.env.OTP_DEGRADED_UNTIL = 'always';
+  assert.strictEqual(otp.isOtpDegraded(), true, 'the literal sentinel must hold the bypass open');
+});
+
+test('the always sentinel is case- and whitespace-insensitive', () => {
+  for (const v of ['ALWAYS', 'Always', '  always  ', 'always\n']) {
+    process.env.OTP_DEGRADED_UNTIL = v;
+    assert.strictEqual(otp.isOtpDegraded(), true, `"${JSON.stringify(v)}" must be honoured`);
+  }
+});
+
+test('the sentinel does not loosen the date cap', () => {
+  // The cap catches mistakes; `always` is a decision. Adding the second must not weaken
+  // the first — a typo'd far-future date is still OFF, not "close enough to always".
+  process.env.OTP_DEGRADED_UNTIL = hoursFromNow(49);
+  assert.strictEqual(otp.isOtpDegraded(), false, '>48h must still be rejected');
+  for (const nearly of ['alway', 'always-on', 'forever', 'never']) {
+    process.env.OTP_DEGRADED_UNTIL = nearly;
+    assert.strictEqual(otp.isOtpDegraded(), false, `"${nearly}" must not enable the bypass`);
+  }
+});
+
 test('a valid near-term window enables the bypass', () => {
   process.env.OTP_DEGRADED_UNTIL = hoursFromNow(12);
   assert.strictEqual(otp.isOtpDegraded(), true);
