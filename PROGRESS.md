@@ -1,5 +1,39 @@
 # Progress
 
+## 2026-08-17 (b) — 🤖 «لولو» upgraded: knows the app, smarter model, no more parrot — DEPLOYED
+
+Owner: «تحس ما تعرف التطبيق، تكرر، وأجوبتها ضعيفة». Shipped as `41176eb` + `bc88c13`, live on prod.
+
+- **SITE_GUIDE**: a fact block in the system prompt covering how the site is actually used —
+  register/login/OTP, forgot-password (WhatsApp OTP, no email), the rep join flow and its
+  approval gates, how "designing" really works (option form + embroidery text + logo upload —
+  there is NO drawing canvas for students), robe measurements + the S–XXL size chart, cart/cash,
+  packages + VIP upgrade, order tracking, returned orders, the Google Play app, account prefs,
+  deletion ≠ order cancellation. Extracted from the real frontend pages by a subagent sweep, not
+  guessed. Rule 3 now tells her to teach these steps.
+- **Model**: `google/gemini-2.5-flash-lite` → `google/gemini-2.5-flash`, owner-approved at
+  ~$1.0 per 1,000 messages. Chosen by running the 44-scenario harness on four candidates against
+  the new prompt (full table at `DEFAULT_MODEL` in `lib/aiChat.js`): Haiku 4.5 invented a
+  best-seller rationale + wrote markdown + Levantine «كتير» at ~$6/1k; gpt-5-mini returned empty
+  content on every call. The $3/day ceiling and $1 warning are unchanged.
+- **Repeats**: the anonymous answer cache now stores `lastSession` and regenerates instead of
+  echoing the same bytes to the same person; support temperature 0.3→0.7; persona told to vary
+  openings; length rule loosened to 5 short sentences for how-to answers.
+- **Guard false positives — found in the prod ledger minutes after deploy** (`bc88c13`): the old
+  DELIVERY_RE blocked «راح يوصلك رمز تحقق على الواتساب» (an OTP is a message, not a delivery)
+  AND «ما نوصّل ولا نشحن» (the denial!); bare «lolo» was flagged as English. Promise patterns
+  are now negation- and object-aware; brand nouns allowlisted; fee patterns extended to catch
+  «التوصيل مو مجاني». New rule: prices in digits only («20,000», never «20 ألف») — worded
+  prices were invisible to the invented-price check, so this closes a guard bypass.
+- **Prod env** (`/var/www/loloshop/backend/.env`, backup `.env.bak-2026-08-17`): added
+  `AI_CHAT_MODEL`, the three `AI_CHAT_*_USD_*` values and `SHOP_WHATSAPP` per the HANDOFF
+  owner decisions — the WhatsApp escalation now actually goes to WhatsApp.
+
+Gates: 397/397 unit tests (3 new prod-verbatim guard regressions) · 44/44 scenarios twice
+consecutively on the final prompt+model · live prod spot-checks of the previously-blocked
+answers. Known imperfection: the model sometimes guesses feminine forms for a gender-unknown
+asker despite the persona rule — cosmetic, revisit if customers complain.
+
 ## 2026-08-17 — 📱 Mobile UI wave-readiness: /shop shipped EMPTY HTML; iOS zoom + h-scroll guards
 
 Owner report on live traffic: auto-zoom on some phones, page pans left-right, products sometimes

@@ -31,6 +31,17 @@ left-right; fixed as a class with a `pointer: coarse` `max(16px, 1em)` guard in 
 auto-deployed, verified live via curl. Not done: real-phone pass, and Chrome was closed so no
 browser-driven overflow measurement.
 
+## 2026-08-17 (b) — 🤖 «لولو» upgraded: SITE_GUIDE + gemini-2.5-flash + guard false-positive fixes
+
+Owner asked for «تعرف كل شي بالتطبيق وأكثر حيوية». Shipped `41176eb`+`bc88c13`, deployed, verified
+live. SITE_GUIDE (how the site is used, extracted from real pages) · model → gemini-2.5-flash
+(~$1/1k msgs, owner approved; Haiku hallucinated a rationale at ~$6/1k, gpt-5-mini returned empty)
+· same-session cache regenerate + temp 0.7 + varied openings against repeats · three guard false
+positives found in the prod ledger and fixed with prod-verbatim regression tests (OTP «يوصلك رمز»,
+the delivery DENIAL, bare «lolo») · digit-only price rule closes a guard bypass · prod .env gained
+AI_CHAT_MODEL, budget values and SHOP_WHATSAPP (backup .env.bak-2026-08-17). Full detail in the
+2026-08-17 (b) PROGRESS entry.
+
 ## 2026-08-13 — 🧵 Track B: the calligraphy plate stops eating the student's photo
 
 Branch `fix/calligraphy-photo-loss`, cut from `main`. Bugs 4·5·6 of
