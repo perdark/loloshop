@@ -517,6 +517,25 @@ test('GUARD: a delivery promise is blocked — the shop does not deliver at all'
   );
 });
 
+test('GUARD: three real prod answers wrongly blocked on 2026-08-17 must pass', () => {
+  // All three were correct answers eaten by the old DELIVERY_RE / LATIN rules the same hour
+  // the SITE_GUIDE shipped — each is verbatim from the prod ledger's GUARD_* rows.
+  for (const good of [
+    // An OTP arriving over WhatsApp is a message, not an order delivery.
+    'تدخل على صفحة نسيت كلمة المرور، وبعدها راح يوصلك رمز تحقق على الواتساب.',
+    // DENYING delivery is the correct answer and must never be blocked.
+    'والله ما نوصّل ولا نشحن لأي محافظة ثانية، الاستلام من المحل بديالى.',
+    // The shop's own name in Latin is in-character, not English leaking.
+    'حسابنا على الانستغرام هو lolo shop 96، وتلكينا باسم lolo.',
+  ]) {
+    assert.strictEqual(guard.inspect(good, FACTS).ok, true, `wrongly blocked: ${good}`);
+  }
+  // …while the promises those rules exist for still block:
+  assert.strictEqual(guard.inspect('راح يوصل طلبك خلال يومين.', FACTS).reason, 'DELIVERY_PROMISE');
+  assert.strictEqual(guard.inspect('نوصّل لبغداد وكل المحافظات.', FACTS).reason, 'DELIVERY_PROMISE');
+  assert.strictEqual(guard.inspect('التوصيل مو مجاني بس متوفر.', FACTS).reason, 'DELIVERY_PROMISE');
+});
+
 test('GUARD: THE DEADLINE IS NOT THE DELIVERY DATE — caught live, scored as a PASS', () => {
   // Real answer, produced 2026-08-12 during a harness run that reported 44/44 passing:
   // «آخر موعد لتقديم الطلبات هو 2026-05-26، وهذا موعد تسليم الطلب».

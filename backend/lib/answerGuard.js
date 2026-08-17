@@ -31,8 +31,26 @@ const MONEY_RE = /[\d٠-٩]{1,3}(?:[,،.٬][\d٠-٩]{3})+/g;
 // prompt — but never as the date the order lands, and no delivery may be offered at all: the
 // shop does not deliver (owner, 2026-08-12) and pickup from the Diyala shop is the only option.
 // Regression #2: the bot invented «نكدر نوصل داخل بغداد» out of nothing.
-const DELIVERY_RE =
-  /راح\s*(يوصل|توصل|نوصل|أوصل)|رح\s*(يوصل|توصل|نوصل)|يوصلك\s*(يوم|بتاريخ|ب\s*تاريخ)|نوصّل|نوصلّ|التوصيل\s*(مجاني|يكلف|سعره)|أجور\s*التوصيل/;
+// Two halves with different strictness (split 2026-08-17 after three prod false positives):
+// the PROMISE half must be negation- and object-aware — «ما نوصّل ولا نشحن» is the CORRECT
+// denial and «راح يوصلك رمز تحقق على الواتساب» is an OTP arriving, not an order — while the
+// FEE half stays a hard block, because even a negated delivery fee («التوصيل مو مجاني»)
+// presumes a delivery service the shop does not have.
+const DELIVERY_PROMISE_RE = /راح\s*(?:يوصل|توصل|نوصل|أوصل)|رح\s*(?:يوصل|توصل|نوصل)|يوصلك\s*(?:يوم|بتاريخ|ب\s*تاريخ)|نوصّل|نوصلّ/g;
+const DELIVERY_FEE_RE = /التوصيل\s*(?:مو\s*|غير\s*)?(?:مجاني|يكلف|سعره)|أجور\s*التوصيل/;
+// What arrives in these clauses is a MESSAGE, not an order: OTP codes, WhatsApp texts and
+// notifications all «توصل» in ordinary Arabic. Checked in the ~30 chars after the verb so
+// «راح يوصلك رمز تحقق» passes while «راح يوصل طلبك» still blocks.
+const MESSENGER_OBJECT_RE = /رمز|كود|رساله|رسالة|إشعار|اشعار|تنبيه/;
+
+function promisesDelivery(text) {
+  for (const m of text.matchAll(DELIVERY_PROMISE_RE)) {
+    if (isNegated(text, m.index)) continue;
+    if (MESSENGER_OBJECT_RE.test(text.slice(m.index, m.index + m[0].length + 30))) continue;
+    return m[0];
+  }
+  return null;
+}
 
 // ── THE DEADLINE-AS-DELIVERY CLAIM, WHICH NEEDS ITS OWN CHECK ──────────────────────────────
 // Caught live 2026-08-12, by this guard's own harness run, in a scenario the harness scored as
@@ -113,7 +131,12 @@ function offersSomethingFree(text) {
 // Latin text. Rule 1 of the system prompt is Arabic only; English leaking in is the model
 // falling out of character, and on the shop's main marketing surface that reads as broken.
 // The brand's own handle is allowed, and so are short tokens — a stray "OK" is not a failure.
-const BRAND_RE = /@?lolo[\s_-]?shop\s*9?6?/gi;
+// Bare «lolo» included: the model writes the shop's own name in Latin («lolo shop», or just
+// «lolo») and that is in-character, not English leaking — a prod answer was blocked for exactly
+// this on 2026-08-17. whatsapp/instagram/google/play are proper nouns the SITE_GUIDE makes
+// legitimate (the app is on Google Play; resets arrive over WhatsApp); they say nothing about
+// whether the model has fallen out of Arabic.
+const BRAND_RE = /@?lolo[\s_-]?shop\s*9?6?|\blolo\b|\bwhatsapp\b|\binstagram\b|\bgoogle\b|\bplay\b/gi;
 const LATIN_RUN_RE = /[A-Za-z]{4,}/g;
 
 /** Arabic-Indic digits to Western, so «١٥,٠٠٠» and «15,000» compare equal. */
@@ -168,8 +191,10 @@ function inspect(answer, factsText) {
 
   // 2. DELIVERY PROMISE. The shop does not deliver at all, and the one date in the prompt is
   //    the order DEADLINE, which every model tested tried to reuse as an arrival date.
-  const delivery = text.match(DELIVERY_RE);
-  if (delivery) return { ok: false, reason: 'DELIVERY_PROMISE', detail: delivery[0] };
+  const delivery = promisesDelivery(text);
+  if (delivery) return { ok: false, reason: 'DELIVERY_PROMISE', detail: delivery };
+  const fee = text.match(DELIVERY_FEE_RE);
+  if (fee) return { ok: false, reason: 'DELIVERY_PROMISE', detail: fee[0] };
 
   //    ...and the flat present-tense version of the same claim, which reads as a fact rather
   //    than a promise and therefore matched none of the patterns above.
@@ -203,5 +228,5 @@ const SAFE_ANSWER =
 module.exports = {
   inspect,
   SAFE_ANSWER,
-  _internals: { allowedAmounts, moneyDigits, foldDigits, MONEY_RE, DELIVERY_RE },
+  _internals: { allowedAmounts, moneyDigits, foldDigits, MONEY_RE, DELIVERY_PROMISE_RE, DELIVERY_FEE_RE },
 };
