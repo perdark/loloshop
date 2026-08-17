@@ -341,6 +341,23 @@ longer stranded on a branch · the laptop's loose credentials are filed in
 
 **Standing:**
 
+- **🔓 THE OTP BYPASS IS ON INDEFINITELY — `OTP_DEGRADED_UNTIL=always` (set 2026-08-17).**
+  Owner asked for a bypass with no clock. Retail + wholesaler now log in on **password alone**;
+  bcrypt still runs, no trusted-device token is issued, `phone_verified` stays false, and
+  **password reset is unaffected** (it never used this flag). Nothing expires it — turning it
+  back on is editing that one line in the prod backend `.env` + `pm2 restart loloshop-api
+  --update-env`. **Two things to fix so it can be turned off:**
+  1. **Reconnect the Zentramsg device** — the live error is `201 Device is not connected. Please
+     scan QR code first`, i.e. the WhatsApp Web session dropped, *not* a Meta ban. It needs a QR
+     rescan in the Zentramsg dashboard. It flaps: delivery was 43% (9/21) on 2026-08-17 vs 90%+
+     earlier in the month.
+  2. **Configure the official WhatsApp Cloud API** — `lib/whatsappCloud.js` is deployed and
+     **dormant on prod**, because `WHATSAPP_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID` /
+     `WHATSAPP_OTP_TEMPLATE` are all unset there. Setting them makes Meta's first-party sender
+     primary and drops the flapping device to a fallback — it is the actual end of this whole
+     class of incident. Needs Meta business verification + an approved auth template.
+  · Cheap interim: only `ZENTRAMSG_DEVICE_UUID` is set, so the 4-device failover fleet has
+  nothing to fail over to. Adding `ZENTRAMSG_DEVICE_UUID_2` would give it a spare.
 - **⚠️ The App Review demo-login bypass DIES 2026-08-21.** `DEMO_LOGIN_EXPIRES_AT` in the prod
   `.env`; past that date `07700000000` hits the WhatsApp OTP wall and the submission fails. Push
   the date forward + `pm2 restart loloshop-api --update-env`. Setting only `DEMO_LOGIN_PHONES`

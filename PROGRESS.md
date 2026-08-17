@@ -1,5 +1,44 @@
 # Progress
 
+## 2026-08-17 (c) — 🔓 OTP bypass made indefinite (`OTP_DEGRADED_UNTIL=always`) — DEPLOYED
+
+Owner report: "otp bypass expired". It had — `OTP_DEGRADED_UNTIL=2026-08-17T10:00:00Z` lapsed at
+10:00 UTC, ~2.5h before the report, and the flag is read per request so students started being
+asked for a WhatsApp OTP again the moment it passed.
+
+**Measured before changing anything** (prod logs + prod DB; DB session TZ is `Europe/Berlin`, so
+psql timestamps are UTC+2 — the buckets only line up once you correct for that):
+- `otp_codes` shows `login`/`verify` rows reappearing *exactly* at 12:00 local = 10:00 UTC, the
+  lapse minute. Before that only `purpose='reset'` rows existed, because reset is the one flow
+  the bypass never covered.
+- The gateway is **flapping, not banned**: `WhatsApp API rejected [device 4156d2…]: 201 Device is
+  not connected. Please scan QR code first` ×4, but sends succeeded afterwards. Delivery today
+  ran 43% (9/21) against 90%+ earlier in the month; four students requested 2–3 codes each and
+  never used one.
+- **The official WhatsApp Cloud API is NOT configured on prod** — no `WHATSAPP_TOKEN` /
+  `WHATSAPP_PHONE_NUMBER_ID` / `WHATSAPP_OTP_TEMPLATE`. `lib/whatsappCloud.js` is deployed but
+  dormant, so the flapping Zentramsg device is the *only* sender. Only one device UUID is set;
+  `ZENTRAMSG_DEVICE_UUID_2..4` are unused, so the fleet failover has nothing to fail over to.
+
+**Why the env alone could not do it.** Owner asked for "no expiry until I change it".
+`isOtpDegraded()` caps date values at `MAX_DEGRADED_WINDOW_MS` (48h), so a far-future date reads
+as **OFF**, not on — putting `2027-…` in the env would have silently re-enabled OTP. Needed code.
+
+**`5d00679` — `OTP_DEGRADED_UNTIL` now also accepts the literal `always`.** A word, not a raised
+cap: the 48h limit on dates is untouched, because it guards a *different* failure (a typo'd year
+becoming a multi-year bypass). Nobody fat-fingers `always`, and `'yes'/'true'/'1'/'forever'` all
+still read as OFF. 400/400 backend tests; 5 new assertions in `test/otpDegradedMode.test.js`
+covering the sentinel, its case/whitespace handling, and that it did not loosen the date cap.
+
+Deployed via CI auto-deploy, then `.env` set to `always` (backup at `.env.bak-20260817-142633`)
+and `pm2 restart loloshop-api --update-env`. Verified on the box against the deployed code:
+`isOtpDegraded() === true`, `FORGOT_PW_OTP_BLOCK` unset so **password reset still works** — which
+is the property the owner specifically asked to keep.
+
+⚠️ **This is now ON until a human turns it off.** Retail + wholesaler log in on password alone
+(bcrypt still runs; no trusted-device token is issued; `phone_verified` stays false). The real
+fix is upstream and is an owner action — see HANDOFF.
+
 ## 2026-08-17 (b) — 🤖 «لولو» upgraded: knows the app, smarter model, no more parrot — DEPLOYED
 
 Owner: «تحس ما تعرف التطبيق، تكرر، وأجوبتها ضعيفة». Shipped as `41176eb` + `bc88c13`, live on prod.
