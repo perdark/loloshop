@@ -34,7 +34,18 @@ const { query, tx } = require('./db');
 const memoCache = require('./memoCache');
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const DEFAULT_MODEL = 'google/gemini-2.5-flash-lite';
+// Upgraded from gemini-2.5-flash-lite on 2026-08-17 (owner approved ~$1/1,000 msgs): re-ran
+// the 44-scenario harness against the new SITE_GUIDE prompt on four models —
+//   google/gemini-2.5-flash      ✅ 44/44, ~$1.0/1k msgs, best Iraqi register of the four,
+//                                   matched the customer's gender from their own phrasing. CHOSEN.
+//   google/gemini-2.5-flash-lite ✅ 44/44, ~$0.3/1k — the old model; correct but flat, and it
+//                                   guessed feminine forms for unknown-gender customers.
+//   anthropic/claude-haiku-4.5   ❌ invented a reason for the best-seller ranking (rule 10),
+//                                   markdown bold in a plain-text bubble, «كتير» (Levantine),
+//                                   ~$6.2/1k.
+//   openai/gpt-5-mini            ❌ empty content on every call under our max_tokens shape
+//                                   (reasoning burn) — same failure class as qwen3.7-flash.
+const DEFAULT_MODEL = 'google/gemini-2.5-flash';
 
 // Cost caps. Owner decision 2026-08-12, revising the 2026-08-10 "tight" stance against the
 // measured price: 16 real conversations cost $0.00164, i.e. ~$0.0001 per message. The old
@@ -92,6 +103,7 @@ const CAPS = {
 // See estimateCostUsd for why storing a 0 there would be dangerous. These do not need to be
 // exact — they are a floor under the spend ceiling, not an invoice.
 const FALLBACK_PRICE_PER_MTOK = {
+  'google/gemini-2.5-flash': { in: 0.3, out: 2.5 },
   'google/gemini-2.5-flash-lite': { in: 0.1, out: 0.4 },
   'google/gemini-3.1-flash-lite': { in: 0.4, out: 1.6 },
 };

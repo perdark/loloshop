@@ -72,6 +72,29 @@ const SHOP_FACTS = `حقائق ثابتة عن المتجر:
 - «الوشاح» و«الشال» منتجان مختلفان بأسعار مختلفة — لا تخلط بينهما أبداً.
 - ماكو توصيل ولا شحن نهائياً — لا لديالى ولا لأي محافظة ثانية. الطلب يُستلم من المحل بديالى (وهذا معنى حالة «جاهز للاستلام»). طالب الجامعة يسأل ممثل جامعته عن ترتيب الاستلام.`;
 
+// ── HOW THE SITE WORKS ─────────────────────────────────────────────────────────────────────
+// Owner report 2026-08-17: «تحس ما تعرف التطبيق» — she knew prices and shop facts but nothing
+// about USING the site, so «شلون أصمم؟» got «ما أعرف». Every line below was extracted from the
+// actual frontend pages (app/(student)/*, login, join, forgot-password, get-app) on 2026-08-17
+// — none of it is guessed. Two deliberate omissions: VIP contents/prices (admin-configured
+// data, quoted only from the price book) and the shop's phone number (rule 12 — the chips add
+// WhatsApp buttons; text stays text).
+const SITE_GUIDE = `دليل استخدام الموقع (حتى تشرح للزبون شلون يسوي أي شي):
+- إنشاء حساب: من صفحة «أنشئ حساباً» — الاسم، رقم الهاتف، كلمة سر، الجامعة والقسم ونوع الدراسة، ويتأكد الحساب برمز يوصل على الواتساب.
+- تسجيل الدخول: رقم الهاتف + كلمة السر، وبعدها رمز تحقق على الواتساب (إذا نفس الجهاز مسجّل من قبل، ما يحتاج رمز).
+- نسيت كلمة السر: من صفحة «نسيت كلمة المرور» — يكتب رقمه، يوصله رمز واتساب، ويختار كلمة سر جديدة. ماكو استرجاع بالإيميل.
+- طالب الجامعة (عن طريق الممثل): يدخل من رابط ممثله، أو من «ادخل مع ممثلك» ويختار جامعته وقسمه واسم الممثل. يسجّل اسمه الثلاثي ورقمه، وحسابه يظل «بانتظار موافقة الممثل». بعد الموافقة يعبّي استمارة طلبه (الطقم) من صفحة «طلبي».
+- طالب الممثل يكدر يعدّل طلبه لحد ما يوافق الممثل عليه؛ بعد الموافقة الطلب ينقفل وما ينعدل. إذا الممثل رجّع الطلب، يشوف السبب ويعدّل ويعيد الإرسال.
+- التصميم: ما يحتاج يرسم شي — يفتح المنتج، يختار الخيارات (اللون والشكل وغيرها)، يكتب نص التطريز (اسمه وكليته) بالخانات المخصصة، ويرفع شعار جامعته أو صورة مرجعية إذا يريد. ورشتنا تنفّذ التطريز حسب اللي كتبه.
+- الروب: يحتاج قياسات بالسنتيمتر (عرض الكتف، طول الروب، طول الردن — ومحيط الصدر اختياري). صفحة «المقاسات» بالموقع بيها جدول كامل من S إلى XXL حسب الطول والوزن، وإذا محتار بين قياسين ياخذ الأكبر. القبعة قياس واحد يناسب أغلب الرؤوس (54–60 سم) وقابلة للتعديل.
+- الطلب والدفع: بعض المنتجات تنضاف للسلة وبعضها يتأكد مباشرة من صفحة المنتج. لازم يكون مسجّل دخول حتى يطلب. الدفع نقداً عند الاستلام فقط.
+- الباقات: الباقة = روب + وشاح + قبعة بسعر واحد، وباقة VIP نسخة فاخرة — تفاصيلها بصفحة VIP بالموقع. اللي عنده باقة عادية يكدر يرقّيها لـVIP من نفس الصفحة أو من السلة.
+- متابعة الطلب: يشوف حالة طلباته من حسابه (صفحة السلة أو «طلبي»). ماكو تتبّع برقم طلب بدون تسجيل دخول.
+- «الطلبات المُعادة»: إذا الفريق رجّع طلب للتعديل، يظهر هناك ويكدر يصلّح النص أو الصور أو القياسات ويعيد الإرسال.
+- التطبيق: تطبيق لولو شوب موجود على متجر كوكل بلاي، وصفحة «حمّل التطبيق» بالموقع توديه للمتجر مباشرة.
+- حسابي: يكدر يغيّر اسمه المعروض وجنسه (طالب/طالبة) من «تفضيلاتي». تغيير رقم الهاتف أو الجامعة يحتاج تواصل ويّه المحل.
+- حذف الحساب: موجود بصفحة الحساب، بس حذف الحساب ما يلغي أي طلب فعّال — الطلب يكمل وينتج.`;
+
 // ── WHO لولو IS ────────────────────────────────────────────────────────────────────────────
 // Split out of RULES and put FIRST after the shop facts, because a phone test on 2026-08-12
 // showed the old single line («بلهجة عراقية بسيطة ومهذبة») losing to the model's default
@@ -93,6 +116,8 @@ const PERSONA = `شخصيتك:
 - خاطب الزبون بنفس صيغته: إذا حچى بصيغة المؤنث ردّ بالمؤنث، وإذا بالمذكر ردّ بالمذكر.
 - إذا ما تعرف هو ولا هي، لا تخمّن وممنوع تكتب الصيغتين سوا مثل «حبيبي/حبيبتي» أو «تدلل/تدللين» — هذا يطلع مثل نموذج مو مثل بني آدم. بهذي الحالة استخدم كلام محايد («هلا بيك» · «تدلل» · «أهلاً») بدون ألقاب.
 
+- نوّع أسلوبك: لا تبدي كل جواب بنفس العبارة (مثل «هلا بيك عيني» بكل مرة) — غيّر افتتاحياتك وكلماتك بين جواب وجواب حتى تحس طبيعية. وإذا الزبون سأل نفس السؤال مرتين، جاوبه بصياغة مختلفة عن المرة الأولى.
+
 الحچي العادي (مهم):
 - إذا سألك «شلونك» جاوب مثل إنسانة: «تمام الحمدلله، شلونك إنت؟» — لا تعرّف بنفسك من جديد كل مرة.
 - إذا مدحك أو مدح شغلكم، افرح وردّ بدفا بجملة وحدة، وخلص. لا تدفع المتجر بالعافية بنفس الجملة.
@@ -106,8 +131,8 @@ const PERSONA = `شخصيتك:
 
 const RULES = `التعليمات:
 1. تكلّم بالعربية فقط، وباللهجة العراقية (مو فصحى). لا تستخدم الإنجليزية أبداً.
-2. جاوب بجملتين أو ثلاث كحد أقصى. لا تستخدم قوائم ولا عناوين.
-3. اعتمد فقط على "معلومات الزبون" و"حقائق ثابتة" و"قائمة الأسعار" أدناه. إذا المعلومة مو موجودة، قول بصراحة إنها مو متوفرة عندك ووجّه الزبون لممثل جامعته أو صفحة الإنستغرام.
+2. جاوب بجملتين أو ثلاث للأسئلة البسيطة (سعر، حالة طلب، موقع). إذا السؤال يحتاج شرح خطوات (شلون أصمم، شلون أطلب، شلون أسجّل) تكدر توصل لخمس جمل قصيرة، بس لا تطوّل أكثر. لا تستخدم قوائم ولا عناوين.
+3. اعتمد فقط على "معلومات الزبون" و"حقائق ثابتة" و"دليل استخدام الموقع" و"قائمة الأسعار" أدناه. إذا سألك الزبون شلون يسوي شي بالموقع (يسجل، يصمم، يطلب، يغير كلمة السر…)، اشرح له الخطوات من "دليل استخدام الموقع". إذا المعلومة مو موجودة، قول بصراحة إنها مو متوفرة عندك ووجّه الزبون لممثل جامعته أو صفحة الإنستغرام.
 4. الأسعار: استخدم أرقام "قائمة الأسعار" أدناه فقط، وقول دائماً إنها أسعار بداية («يبدأ من»). ممنوع تخترع سعر مو موجود بالقائمة، وممنوع تحسب مجموع أو خصم بنفسك. إذا المنتج مو بالقائمة، قول ما عندك سعره.
 5. حالة الطلب: إذا حالات طلبات الزبون موجودة بـ"معلومات الزبون" أدناه، فهي معلومات مؤكدة عندك — اذكرها له بوضوح ولا تقول "ما أعرف". أما إذا ماكو طلبات بالمعلومات، فقول إنها مو متوفرة عندك. وبكل الأحوال ممنوع تخترع حالة أو موعد تسليم.
 6. "آخر موعد لتقديم الطلبات" هو آخر يوم يكدر الطالب يطلب بيه — وهو مو موعد تسليم الطلب. لا تقول أبداً إن الطلب راح يوصل بهذا التاريخ ولا تعد الزبون بأي تاريخ تسليم.
@@ -128,7 +153,7 @@ const NO_CONTEXT = `معلومات الزبون:
 // call is made — see the CACHE block above.
 function buildSystem(contextBlock, priceBlock, bestSellerBlock, productBlock, universityBlock) {
   return [
-    SHOP_FACTS, PERSONA, RULES, priceBlock, productBlock, bestSellerBlock, universityBlock,
+    SHOP_FACTS, SITE_GUIDE, PERSONA, RULES, priceBlock, productBlock, bestSellerBlock, universityBlock,
     contextBlock || NO_CONTEXT,
   ]
     .filter(Boolean)
@@ -282,15 +307,21 @@ exports.ask = async (req, res, next) => {
 
     if (cacheKey) {
       const hit = memoCache.get(cacheKey);
-      if (hit) {
+      // `hit.lastSession === sessionKey` means THIS caller is the one who last received this
+      // exact text — serving it again hands the same person the same bytes twice in a row,
+      // which is the single most visible «it's a bot» tell (owner report 2026-08-17: «repeats»).
+      // Strangers never compare answers, so the cache stays shared across sessions; only the
+      // re-asker falls through to a fresh generation, which then replaces the cached text.
+      if (hit && hit.lastSession !== sessionKey) {
+        hit.lastSession = sessionKey;
         // Logged so the ledger stays a complete record of what customers ask, but marked
         // `model = 'cache'` so it costs nothing and is invisible to the throttle. This is also
         // what makes repetition free rather than throttled — and what keeps the assistant
         // answering the shop's most common questions when the budget is gone (see below).
         await ai.logCached({
-          userId, sessionKey, surface: 'support', question, answer: hit, ipHash: callerHash,
+          userId, sessionKey, surface: 'support', question, answer: hit.text, ipHash: callerHash,
         });
-        return res.json(dress(hit));
+        return res.json(dress(hit.text));
       }
     }
 
@@ -335,7 +366,11 @@ exports.ask = async (req, res, next) => {
 
     let result;
     try {
-      result = await ai.complete({ messages: buildMessages(system, history, question) });
+      // temperature 0.7, not the 0.3 default: at 0.3 the model regenerates the same sentence
+      // byte-for-byte for a repeated question (measured 2026-08-17), which defeats the cache's
+      // same-session regenerate and reads as canned. Facts can't drift with it — every number
+      // comes from the prompt and answerGuard vetoes anything that isn't there.
+      result = await ai.complete({ messages: buildMessages(system, history, question), temperature: 0.7 });
     } catch (err) {
       // NEVER DARK, second attempt — and the likelier one. The model is a third-party API
       // reached over an Iraqi network, so it will time out or 502 sometimes; that is a far
@@ -386,7 +421,9 @@ exports.ask = async (req, res, next) => {
     }
 
     await ai.settle(logId, { answer: result.text, result });
-    if (cacheKey) memoCache.set(cacheKey, result.text, CACHE_TTL_MS);
+    // `lastSession` starts as the caller who generated it, so their own immediate re-ask
+    // regenerates instead of echoing — see the cache-hit branch above.
+    if (cacheKey) memoCache.set(cacheKey, { text: result.text, lastSession: sessionKey }, CACHE_TTL_MS);
 
     return res.json(dress(result.text));
   } catch (err) {
