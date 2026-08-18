@@ -559,16 +559,15 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   code defects were real; the urgency was not. The one that mattered is the accrual — it re-offers
   the full salary on every press and had not fired only because `manual_payouts` has 0 rows.
 
-- **⚠️ `fix/calligraphy-cost` IS READY AND UNMERGED — 2026-08-18.** The four calligraphy cost
-  fixes (audit: **92.5% of the whole OpenRouter bill was the calligraphy generator**, $40.53 in
-  August's first 17 days): rerolls at 1K 1:1 · the geometry ratchet closed (migration **082**,
+- ✅ **`fix/calligraphy-cost` MERGED & DEPLOYED 2026-08-18, verified on prod** (migration 082
+  applied, 1,892 plates backfilled, API + site 200). The four calligraphy cost fixes (audit:
+  **92.5% of the whole OpenRouter bill was the calligraphy generator**, $40.53 in August's
+  first 17 days): rerolls at 1K 1:1 · the geometry ratchet closed (migration **082**,
   `original_plate_path`) · sheets top up with pending plates from other jobs before buying a
   near-empty image · a daily USD ceiling + admin push warning (`lib/calligraphySpend.js`,
-  `calligraphy_spend_log`, `CALLIG_DAILY_USD_MAX`/`_WARN`, defaults $10/$5 in code). 407/407
-  backend tests, no new dependency, no frontend change. Migration 082 is in `db/schema.sql`, so
-  the auto-deploy's `npm run migrate` covers it — same ordering rule as 078/079. Expected:
-  **~$53 → ~$25-30/month at August volume, same quality.** Full detail in the 2026-08-18 (b)
-  PROGRESS entry.
+  `calligraphy_spend_log`, `CALLIG_DAILY_USD_MAX`/`_WARN`, defaults $10/$5 in code). Expected:
+  **~$53 → ~$25-30/month at August volume, same quality** — re-check the OpenRouter activity
+  page after a week to confirm. Full detail in the 2026-08-18 (b) PROGRESS entry.
 - **⚠️ `fix/admin-presence-panel` IS READY AND UNMERGED — 2026-08-15.** Closes the last two
   open bugs (**1**, and **8 parts 2·3·4**), so the eleven-bug board is finished in code.
   Off `main`, no migration, no new dependency, 275/275 backend tests, `next build` clean.

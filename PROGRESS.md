@@ -1,11 +1,15 @@
 # Progress
 
-## 2026-08-18 (b) — 💸 The four calligraphy cost fixes — ON `fix/calligraphy-cost`, UNMERGED
+## 2026-08-18 (b) — 💸 The four calligraphy cost fixes — MERGED & DEPLOYED, verified on prod
 
-Same session as the audit below; the owner approved «50% cost less? ok go work». All four
-levers from the audit are implemented, TDD (each test watched failing first), **407/407
-backend tests** (400 on main + 7 new in `test/calligraphyCost.test.js`), driven against the
-dev DB with `global.fetch` stubbed — the tests spend nothing.
+Same session as the audit below; the owner approved «50% cost less? ok go work», then «go
+live». Merged to `main` (`a105064`), CI green on all three jobs, auto-deployed. **Verified on
+the prod box after the deploy:** migration 082 applied (`original_plate_path` column + 
+`calligraphy_spend_log` table exist, **1,892 plates backfilled** with their geometry anchor),
+all three PM2 processes online, site 200 and `/api/catalog/shop` 200 from outside. All four
+levers implemented TDD (each test watched failing first), **407/407 backend tests** (400 on
+main + 7 new in `test/calligraphyCost.test.js`), driven against the dev DB with
+`global.fetch` stubbed — the tests spend nothing.
 
 1. **Rerolls buy 1K 1:1, not 2K 9:16** (`calligraphyController.reroll`). ~$0.067 vs ~$0.101
    per press, and the 1:1 canvas is ~1024px wide so long teacher names don't cramp the way a
