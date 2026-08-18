@@ -163,16 +163,17 @@ nothing) proposes which upload file was each deleted reference photo, by mtime. 
 mtimes on a copied tree are the copy date and match nothing. It cannot prove a match; the owner
 confirms each one, and lines whose own text names a photo (★) are the ones worth the time.
 
-⚠️ **STILL OPEN on the merged code — the reroll geometry ratchet.**
-`calligraphyController.js:472` hands `matchPlateGeometry` the plate it is about to overwrite
-(`:481`), so reroll N+1 anchors on reroll N's output; `imageFx.js:71-77` resizes with
-`fit:'inside'`, which never upscales. Ink height is therefore **monotone non-increasing and cannot
-recover**: reproduced with sharp at 700×140 → 1024×**73** → 365×**73** → **73**. The plate ends up
-pinned at the scale demanded by the widest generation it ever had — the exact sibling-scale
-mismatch `matchPlateGeometry` exists to close — and `REROLL_LIMIT=10` exists because designers
-press the button repeatedly. It costs letter height, not data, and converges rather than running
-away. **Not fixable without a new column**: `plate_path` is overwritten and `sheet_path` is the
-whole 10-name sheet, whose geometry is not the band's. Needs migration 081.
+✅ **CLOSED 2026-08-18 on `fix/calligraphy-cost` (unmerged) — the reroll geometry ratchet.**
+The column this entry asked for exists (**migration 082** — 081 was taken by counter_signup):
+`calligraphy_plates.original_plate_path` pins the FIRST generated plate as the permanent
+geometry anchor, the engine stamps it on first generation, and `reroll` matches against it
+instead of the plate it is overwriting, so ink height no longer shrinks across presses.
+Covered behaviourally in `test/calligraphyCost.test.js` (a degraded 20px plate with a 40px
+original rerolls back to 40px). The description below stays because it explains the anchor:
+the OLD behaviour anchored reroll N+1 on reroll N's output (`fit:'inside'` never recovering
+height — 700×140 → 1024×**73** → 365×**73** → **73**), which is why the anchor must be the
+original and never the current artwork. The same branch carries the other three cost fixes —
+see the 2026-08-18 (b) PROGRESS entry.
 
 ✅ **CLOSED — `orderController.configureOrder` / `configureFullSet` no longer share this shape.**
 This entry described two stacked defects and both are now fixed:
@@ -558,6 +559,16 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   code defects were real; the urgency was not. The one that mattered is the accrual — it re-offers
   the full salary on every press and had not fired only because `manual_payouts` has 0 rows.
 
+- **⚠️ `fix/calligraphy-cost` IS READY AND UNMERGED — 2026-08-18.** The four calligraphy cost
+  fixes (audit: **92.5% of the whole OpenRouter bill was the calligraphy generator**, $40.53 in
+  August's first 17 days): rerolls at 1K 1:1 · the geometry ratchet closed (migration **082**,
+  `original_plate_path`) · sheets top up with pending plates from other jobs before buying a
+  near-empty image · a daily USD ceiling + admin push warning (`lib/calligraphySpend.js`,
+  `calligraphy_spend_log`, `CALLIG_DAILY_USD_MAX`/`_WARN`, defaults $10/$5 in code). 407/407
+  backend tests, no new dependency, no frontend change. Migration 082 is in `db/schema.sql`, so
+  the auto-deploy's `npm run migrate` covers it — same ordering rule as 078/079. Expected:
+  **~$53 → ~$25-30/month at August volume, same quality.** Full detail in the 2026-08-18 (b)
+  PROGRESS entry.
 - **⚠️ `fix/admin-presence-panel` IS READY AND UNMERGED — 2026-08-15.** Closes the last two
   open bugs (**1**, and **8 parts 2·3·4**), so the eleven-bug board is finished in code.
   Off `main`, no migration, no new dependency, 275/275 backend tests, `next build` clean.

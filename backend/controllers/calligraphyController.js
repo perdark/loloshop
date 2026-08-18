@@ -8,6 +8,7 @@ const { ZipArchive } = require('archiver');
 const sharp = require('sharp');
 const { query } = require('../lib/db');
 const { generateImage, MODELS } = require('../lib/openrouter');
+const { checkBudget, budgetError, logSpend } = require('../lib/calligraphySpend');
 const { cropSheet } = require('../lib/sheetCrop');
 const { buildSheetPrompt, buildSinglePrompt } = require('../lib/calligraphyPrompt');
 const { saveBufferToUploads } = require('../lib/upload');
@@ -458,18 +459,35 @@ async function reroll(req, res) {
     ? (body.element_text.trim() || null) : p.element_text;
   const variant = VARIANTS.includes(body.variant) ? body.variant : p.variant;
 
+  // Daily ceiling BEFORE the money leaves (lib/calligraphySpend.js, 2026-08-18 audit).
+  const budget = await checkBudget();
+  if (!budget.allowed) {
+    const be = budgetError(budget);
+    return res.status(be.status).json({ error: be.message, code: be.code });
+  }
+
   const model = p.model || MODELS.standard;
   let gen;
-  try { gen = await generateImage({ model, prompt: buildSinglePrompt(renderText, promptVariant(variant), elementText) }); }
+  // 1K 1:1, not the default 2K 9:16: this is ONE name, and the final band is normalized to the
+  // sibling geometry anyway (matchPlateGeometry targets ~100-200px of ink height), so 2K bought
+  // nothing but cost — measured $0.101 vs $0.067 per press, 47% of lifetime spend was solo
+  // images (2026-08-18 audit). 1:1 keeps the canvas ~1024px wide so long teacher names don't
+  // cramp or wrap the way they would on a 1K 9:16 portrait (~576px wide).
+  try { gen = await generateImage({ model, prompt: buildSinglePrompt(renderText, promptVariant(variant), elementText), resolution: '1K', aspectRatio: '1:1' }); }
   catch (err) { return res.status(err.status || 502).json({ error: err.message, code: err.code || 'ERR_OPENROUTER' }); }
+  await logSpend('reroll', gen.cost);
   // single-name image: trim to one band (expected 1); fall back to full image
   let plateBuf = gen.buffer;
   try { const { plates } = await cropSheet(gen.buffer, 1); if (plates[0]) plateBuf = plates[0]; } catch { /* keep full */ }
 
-  // Reframe onto the geometry of the plate this one replaces, so it drops into the same slot
-  // as the nine it was generated beside. No-op when the old file is gone.
+  // Reframe onto the geometry of the ORIGINAL plate (migration 082), never the one being
+  // replaced: anchoring on the previous reroll's output made ink height monotone
+  // non-increasing across presses (the ratchet — 700×140 → 1024×73 → 365×73 → 73), so
+  // designers paid per press chasing quality that could not recover. The original file is
+  // never pruned from /uploads; when no anchor is recorded (pre-082 rows) the current plate
+  // is pinned below so shrinking stops at today's size. No-op when the file is gone.
   const { absFromUrl } = require('../lib/upload');
-  const refAbs = absFromUrl(p.plate_path);
+  const refAbs = absFromUrl(p.original_plate_path || p.plate_path);
   if (refAbs) {
     try { plateBuf = await matchPlateGeometry(plateBuf, await fs.promises.readFile(refAbs)); }
     catch { /* reference unreadable — ship the new plate as generated */ }
@@ -479,9 +497,10 @@ async function reroll(req, res) {
   const { rows } = await query(
     `UPDATE calligraphy_plates
         SET status='done', plate_path=$2, cost_usd = cost_usd + $3, error=NULL, linked_at = NULL,
-            render_text=$4, element_text=$5, variant=$6, reroll_count = reroll_count + 1
+            render_text=$4, element_text=$5, variant=$6, reroll_count = reroll_count + 1,
+            original_plate_path = COALESCE(original_plate_path, $7)
       WHERE id=$1 RETURNING *`,
-    [id, plate.url, Number(gen.cost || 0), renderText, elementText, variant]);
+    [id, plate.url, Number(gen.cost || 0), renderText, elementText, variant, p.plate_path]);
   // Re-attach the fresh artwork onto the order line right away (auto-link, no manual step).
   const [withCtx] = await attachOrderContext([toPlate(await autoLinkPlate(rows[0]))]);
   res.json({ data: withCtx });
@@ -703,12 +722,20 @@ async function generateElement(req, res) {
   if (word.length > 60) return bad(res, 'اسم العنصر طويل جداً (الحد 60 حرفاً)');
   const { buildElementPrompt } = require('../lib/calligraphyPrompt');
   const { whiteToTransparent } = require('../lib/imageFx');
+  // Elements were the one paid path with NO ledger row at all — their cost only ever reached
+  // the browser. Same ceiling, same ledger as sheets and rerolls (2026-08-18 audit).
+  const budget = await checkBudget();
+  if (!budget.allowed) {
+    const be = budgetError(budget);
+    return res.status(be.status).json({ error: be.message, code: be.code });
+  }
   let gen;
   try {
     gen = await generateImage({ model: MODELS.standard, prompt: buildElementPrompt(word), resolution: '1K', aspectRatio: '1:1' });
   } catch (err) {
     return res.status(err.status || 502).json({ error: err.message || 'فشل التوليد', code: err.code || 'ERR_OPENROUTER' });
   }
+  await logSpend('element', gen.cost);
   const png = await whiteToTransparent(gen.buffer);
   const saved = saveBufferToUploads(req, 'calligraphy/elements', png, 'png');
   res.json({ data: { url: saved.url, cost: Number(gen.cost || 0) } });

@@ -1135,6 +1135,29 @@ CREATE INDEX IF NOT EXISTS idx_calligraphy_orderitem ON calligraphy_plates(order
 -- this counts the presses so calligraphyController.reroll can refuse the eleventh.
 ALTER TABLE calligraphy_plates ADD COLUMN IF NOT EXISTS reroll_count INTEGER NOT NULL DEFAULT 0;
 
+-- Migration 082: the reroll geometry anchor. Rerolls used to match the plate they were about
+-- to overwrite, so ink height was monotone non-increasing across presses (the "ratchet") —
+-- this pins the FIRST generated plate as the permanent reference. The backfill is repeated
+-- here on purpose, exactly like 077's and 080's: this is the file `npm run migrate` applies to
+-- a database that already holds rerolled plates. Do not tidy it out.
+ALTER TABLE calligraphy_plates ADD COLUMN IF NOT EXISTS original_plate_path TEXT;
+UPDATE calligraphy_plates
+   SET original_plate_path = plate_path
+ WHERE original_plate_path IS NULL AND plate_path IS NOT NULL;
+
+-- Migration 082: one row per paid calligraphy image ('sheet' | 'reroll' | 'element').
+-- cost_usd on the plates cannot serve as a daily ledger (rerolls add money to rows created
+-- weeks earlier; elements stored their cost nowhere), and the feature had no daily ceiling at
+-- all — lib/calligraphySpend.js reads the last 24h of this table and refuses the next
+-- generation past CALLIG_DAILY_USD_MAX.
+CREATE TABLE IF NOT EXISTS calligraphy_spend_log (
+  id         BIGSERIAL PRIMARY KEY,
+  kind       TEXT NOT NULL,
+  cost_usd   NUMERIC(10,5) NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_callig_spend_created ON calligraphy_spend_log(created_at);
+
 -- ---------------------------------------------------------------------------------------
 -- Migration 080: the calligraphy plate gets its OWN column on order_items.
 --

@@ -1,6 +1,87 @@
 # Progress
 
-## 2026-08-17 (c) — 🔓 OTP bypass made indefinite (`OTP_DEGRADED_UNTIL=always`) — DEPLOYED
+## 2026-08-18 (b) — 💸 The four calligraphy cost fixes — ON `fix/calligraphy-cost`, UNMERGED
+
+Same session as the audit below; the owner approved «50% cost less? ok go work». All four
+levers from the audit are implemented, TDD (each test watched failing first), **407/407
+backend tests** (400 on main + 7 new in `test/calligraphyCost.test.js`), driven against the
+dev DB with `global.fetch` stubbed — the tests spend nothing.
+
+1. **Rerolls buy 1K 1:1, not 2K 9:16** (`calligraphyController.reroll`). ~$0.067 vs ~$0.101
+   per press, and the 1:1 canvas is ~1024px wide so long teacher names don't cramp the way a
+   1K 9:16 portrait (~576px) would. Same quality: the band is normalized to sibling geometry
+   (~100-200px ink height) anyway, so 2K bought pixels that were thrown away.
+2. **The reroll geometry ratchet is dead** (migration **082**, `original_plate_path`). Rerolls
+   anchor on the FIRST generated plate forever, not the plate they replace — ink height can no
+   longer shrink monotonically across presses (this was HANDOFF's «needs migration 081»; 081
+   was taken by counter_signup, so it shipped as 082). Engine pins the anchor on first
+   generation; reroll pins the pre-reroll plate for pre-082 rows. Backfill pins existing rows
+   on their current artwork (best surviving anchor) and is repeated in `db/schema.sql` on
+   purpose, 077/080-style.
+3. **Sheets fill themselves before generating** (`calligraphyEngine.processNextBatch`). A job
+   with <10 same-variant pending plates tops the paid sheet up with the oldest pending plates
+   of the same variant+model from OTHER jobs («hitchhikers»). The response stays scoped to the
+   requested job (counts, `plates`) so the workbench and the worker's drain loop are
+   unchanged; hitchhikers just get done in the DB and their own jobs find less to do. Safe
+   because every pending plate has already passed createJob's guards (retail is reviewed
+   BEFORE its job exists) and the style prompt is per-variant, not per-job. On a generation
+   ERROR only the requesting job's plates fail — unpaid hitchhikers stay pending.
+4. **A daily USD ceiling exists now** (`lib/calligraphySpend.js` + `calligraphy_spend_log`,
+   migration 082). Every paid image — sheet attempt, reroll, element (whose cost was ledgered
+   NOWHERE before) — writes one ledger row at payment time; the 24h sum refuses the next
+   generation past `CALLIG_DAILY_USD_MAX` (default $10) with `ERR_CALLIG_BUDGET` 429, and
+   crossing `CALLIG_DAILY_USD_WARN` (default $5) writes the admins one notification per 24h
+   (→ phone push via the outbox), aiChat's exact pattern. Blocked batch plates stay PENDING:
+   pg-boss retries twice then the workbench press — or any later job's top-up — drains them.
+   Defaults live in code; the two env vars are documented in `backend/.env.example`.
+
+**Deploy notes:** merge deploys automatically; `scripts/deploy.sh` runs `npm run migrate`
+before the frontend build, and `db/schema.sql` carries 082 (column + backfill + spend table),
+so the ordering is already safe. No new dependency (nothing enters the `npm audit` gate). No
+frontend change. Prod env needs nothing — defaults apply until the owner tunes them.
+
+**Projection at August volume (~1,700 names + ~160 rerolls/month): ~$53 → ~$25-30.**
+Not done (needs owner/live test): Nano Banana 2 Lite ($30/M vs $60/M) must pass the 10/10
+Arabic spelling test before it can take the reroll/element traffic.
+
+## 2026-08-18 — 💸 OpenRouter spend audit: calligraphy is 92.5% of the bill — INVESTIGATION, no code
+
+Owner asked why OpenRouter is "spending a lot". Measured on the OpenRouter dashboard (past month,
+Jul 19 → Aug 18) + the `/api/v1/key` endpoint — not estimated:
+
+- **Account total $57.69 · LoloShop key $54.70 (94.8%) · Nano Banana 2 (calligraphy) $53.40 =
+  92.5% of everything.** The assistant («لولو», Gemini 2.5 Flash) cost **$3.72** — the thing with
+  five protection layers is 6% of the bill; the thing with almost none is 92%.
+- **527 image requests → $0.1013/image**, matching the ~$0.10 @2K estimate in `lib/openrouter.js`.
+- Steady burn ~$2–4/day Aug 6–17 (workbench-shaped, not batch-job-shaped). This calendar month
+  alone: $42.13. Credits: $66.54 used of $92.
+- Unit economics from code: batch sheet = 10 names / $0.10 = **$0.01/student**; a reroll
+  (`calligraphyController.reroll`) generates ONE name at the same 2K 9:16 → **$0.10/name, 10×
+  the batch rate**, up to `REROLL_LIMIT=10` = $1/plate.
+- **Prod ledger audited same session** (read-only, `calligraphy_plates`): 2,124 plates, 151
+  jobs, **$59.43 lifetime** (Jun 23 → Aug 17), 338 students, accelerating Jun $2.18 → Jul
+  $16.72 → **Aug $40.53 in 17 days** (week of Aug 10 alone: $25.84). Exactly three API callers
+  exist: batch sheets (`calligraphyEngine:146`), rerolls (`calligraphyController:463`), elements
+  (`:708`, 1K — cost NOT ledgered, reconciles the ~$0.5 gap vs OpenRouter). Decomposition of the
+  $59.30 done-plate spend: **1,334 plates rode full 10-name sheets for $13.46 (23%)** — the
+  efficient path; **$27.72 (47%) went to 279 plates that each cost ~a whole image** (solo/small
+  sheets: 34 sheets carried ONE name, only 130/236 were full); **counted rerolls $11.95** + ~$7-8
+  hidden pre-080 rerolls (reroll_count=0 plates costing up to $0.81); crop retries ≈ $1-3;
+  failures cost nothing ($0.14). Caps/backs are the worst per name (avg $0.044/$0.040 vs front
+  $0.0245) because they ride the smallest sheets. Wholesaler path: 337 students / $28.40 =
+  **$0.084/student, 8.4× the theoretical $0.01**. `typed` source (admin manual batches) is
+  $29.62 — half of everything. Premium model: never used in prod (25 old 2.5-flash-image rows
+  are the June Arabic test).
+- Pricing facts (OpenRouter models API): `gemini-3.1-flash-image` $60/M image tokens;
+  **`gemini-3.1-flash-lite-image` is HALF that ($30/M, 1K-only)** — untested on Arabic spelling
+  (the 10/10 live test is mandatory before any switch; 2.5-flash-image scored 0/10).
+- Cost levers identified, none applied: reroll at 1K instead of 2K (one line, ~30-40% off each
+  reroll) · live-test NB2 Lite for rerolls and possibly sheets (~50% off) · fix the reroll
+  geometry ratchet (migration 081 — designers re-press because output degrades monotonically,
+  every press $0.10) · calligraphy has **no daily USD ceiling** unlike the assistant — add one
+  with the same admin-notification warning.
+
+No code, no migration, no deploy. Marketing folder checked — QR generation only, not a spender.
 
 Owner report: "otp bypass expired". It had — `OTP_DEGRADED_UNTIL=2026-08-17T10:00:00Z` lapsed at
 10:00 UTC, ~2.5h before the report, and the flag is read per request so students started being

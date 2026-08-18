@@ -9,6 +9,7 @@ const { cropSheet } = require('./sheetCrop');
 const { buildSheetPrompt } = require('./calligraphyPrompt');
 const { saveBufferToUploads } = require('./upload');
 const { looksLikeInstruction } = require('./calligraphyText');
+const { checkBudget, budgetError, logSpend } = require('./calligraphySpend');
 
 const BATCH = 10;
 // The prompt library only knows front/back/cap styles — cap_side renders with the cap style.
@@ -125,7 +126,41 @@ async function processNextBatch(jobId, req = null) {
     return { data: { processed: 0, ...c, remaining: c.pending, job_cost: await jobCost(jobId), plates: [] } };
   }
   const model = batch[0].model || MODELS.standard;
-  const names = batch.map((b) => ({ text: b.render_text, element: b.element_text }));
+
+  // CROSS-JOB TOP-UP (2026-08-18 cost audit). A sheet costs the same $0.10 whether it carries
+  // 1 name or 10, and 47% of lifetime spend went to under-filled sheets (34 sheets carried a
+  // single name). When this job cannot fill the sheet, take the oldest pending plates of the
+  // SAME variant and model from other jobs — the style prompt is per-variant, not per-job, so
+  // the artwork is identical; every pending plate has already passed createJob's guards
+  // (retail rows are reviewed BEFORE their job exists). Hitchhikers are updated in the DB but
+  // NOT reported in this response: counts and `plates` stay scoped to the requested job so the
+  // workbench and the worker's drain loop see exactly what they always saw, and each
+  // hitchhiker's own job simply finds less to do.
+  let hitchhikers = [];
+  if (batch.length < BATCH) {
+    const { rows } = await query(
+      `SELECT * FROM calligraphy_plates
+        WHERE status='pending' AND variant=$1 AND job_id <> $2
+          AND COALESCE(model,'') = COALESCE($3,'')
+        ORDER BY created_at LIMIT $4`,
+      [variant, jobId, batch[0].model || null, BATCH - batch.length]);
+    hitchhikers = rows;
+  }
+  const sheetBatch = batch.concat(hitchhikers);
+  const names = sheetBatch.map((b) => ({ text: b.render_text, element: b.element_text }));
+
+  // Daily ceiling BEFORE any money leaves. Plates stay PENDING, never failed: the worker
+  // throws this and pg-boss retries twice (~90s) then gives the ticket up, after which the
+  // plates are drained by the workbench's «معالجة» press once the 24h window frees — or by
+  // ANY later job's batch, which picks them up as hitchhikers via the top-up above.
+  const budget = await checkBudget();
+  if (!budget.allowed) {
+    const c = await jobCounts(jobId);
+    return {
+      error: budgetError(budget),
+      data: { processed: 0, ...c, remaining: c.pending, job_cost: await jobCost(jobId), plates: [] },
+    };
+  }
 
   // Generate + crop with AUTO-RETRY. The model spaces lines randomly, so a sheet
   // that crops to the wrong band count usually slices cleanly on a fresh generation.
@@ -145,6 +180,8 @@ async function processNextBatch(jobId, req = null) {
     try {
       gen = await generateImage({ model, prompt: buildSheetPrompt(names, promptVariant(variant)) });
     } catch (err) {
+      // Only the requesting job's plates fail — nothing was paid for THIS attempt, and a
+      // hitchhiker left pending simply rides its own job's next batch instead.
       await query(`UPDATE calligraphy_plates SET status='failed', error=$2 WHERE id = ANY($1)`,
         [batch.map((b) => b.id), err.code || 'ERR_OPENROUTER']);
       const c = await jobCounts(jobId);
@@ -154,42 +191,47 @@ async function processNextBatch(jobId, req = null) {
       };
     }
     totalCost += Number(gen.cost || 0);
+    await logSpend('sheet', gen.cost); // ledger the image the moment it is paid — retries included
     sheet = saveBufferToUploads(req, 'calligraphy/sheets', gen.buffer, 'png'); // keep latest (review fallback)
     let cropped;
     try {
-      cropped = await cropSheet(gen.buffer, batch.length);
+      cropped = await cropSheet(gen.buffer, sheetBatch.length);
     } catch (err) {
       console.error('crop threw:', err.message);
       cropped = { plates: [], count: -1 };
     }
     lastCount = cropped.count;
-    if (cropped.count === batch.length) { plates = cropped.plates; break; }
-    console.warn(`crop mismatch attempt ${attempt}/${MAX_CROP_TRIES}: expected ${batch.length}, got ${cropped.count} — regenerating`);
+    if (cropped.count === sheetBatch.length) { plates = cropped.plates; break; }
+    console.warn(`crop mismatch attempt ${attempt}/${MAX_CROP_TRIES}: expected ${sheetBatch.length}, got ${cropped.count} — regenerating`);
   }
 
-  const perCost = batch.length ? totalCost / batch.length : 0;
+  const perCost = sheetBatch.length ? totalCost / sheetBatch.length : 0;
 
   if (!plates) {
-    // every attempt mismatched — flag for manual review rather than mis-slice (spec §11)
+    // every attempt mismatched — flag for manual review rather than mis-slice (spec §11).
+    // Hitchhikers fail too: their bands are on the paid sheet that needs the review.
     await query(
       `UPDATE calligraphy_plates SET status='failed', model=$2, cost_usd=$3, sheet_path=$4, error=$5 WHERE id = ANY($1)`,
-      [batch.map((b) => b.id), model, perCost, sheet ? sheet.url : null,
-       `crop mismatch after ${MAX_CROP_TRIES} tries: expected ${batch.length}, got ${lastCount}`]);
+      [sheetBatch.map((b) => b.id), model, perCost, sheet ? sheet.url : null,
+       `crop mismatch after ${MAX_CROP_TRIES} tries: expected ${sheetBatch.length}, got ${lastCount}`]);
     const c = await jobCounts(jobId);
     return { data: { processed: 0, ...c, remaining: c.pending, job_cost: await jobCost(jobId), review: true, attempts: attemptsUsed, plates: [] } };
   }
 
   const updated = [];
-  for (let i = 0; i < batch.length; i++) {
+  for (let i = 0; i < sheetBatch.length; i++) {
     const plate = saveBufferToUploads(req, 'calligraphy/plates', plates[i], 'png');
     const { rows } = await query(
-      `UPDATE calligraphy_plates SET status='done', model=$2, cost_usd=$3, sheet_path=$4, plate_path=$5, error=NULL
+      `UPDATE calligraphy_plates SET status='done', model=$2, cost_usd=$3, sheet_path=$4, plate_path=$5, error=NULL,
+              original_plate_path = COALESCE(original_plate_path, $5)
         WHERE id=$1 RETURNING *`,
-      [batch[i].id, model, perCost, sheet.url, plate.url]);
+      [sheetBatch[i].id, model, perCost, sheet.url, plate.url]);
     updated.push(toPlate(await autoLinkPlate(rows[0])));
   }
+  // Response stays scoped to the requested job (sheetBatch = batch ++ hitchhikers, order kept).
+  const own = updated.slice(0, batch.length);
   const c = await jobCounts(jobId);
-  return { data: { processed: updated.length, ...c, remaining: c.pending, job_cost: await jobCost(jobId), attempts: attemptsUsed, plates: await attachOrderContext(updated) } };
+  return { data: { processed: own.length, ...c, remaining: c.pending, job_cost: await jobCost(jobId), attempts: attemptsUsed, hitchhikers: hitchhikers.length, plates: await attachOrderContext(own) } };
 }
 
 module.exports = {
