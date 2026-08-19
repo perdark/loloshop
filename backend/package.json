@@ -15,7 +15,8 @@
     "set-password": "node scripts/set-password.js",
     "demo-account": "node scripts/demo-account.js",
     "ai:scenarios": "node scripts/ai-scenarios.js",
-    "photo-recovery": "node scripts/calligraphy-photo-recovery.js"
+    "photo-recovery": "node scripts/calligraphy-photo-recovery.js",
+    "blank-plates": "node scripts/calligraphy-blank-plates.js"
   },
   "keywords": [],
   "author": "",

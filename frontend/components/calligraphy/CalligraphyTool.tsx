@@ -941,7 +941,13 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
           if (r.review) {
             toast.error("تعذّر تقطيع إحدى الأوراق — راجِعها يدويًا");
           }
-          if (r.processed === 0 && r.remaining > 0) break; // batch failed; stop
+          if (r.blank) {
+            toast.error(`${r.blank} اسم خرج فارغاً — أعد توليده من بطاقته`);
+          }
+          // A batch of only-blank bands DID advance those rows (pending → failed), so it is
+          // not the "batch failed, stop" case — stopping there would strand the names behind
+          // them as pending with no visible reason.
+          if (r.processed === 0 && !r.blank && r.remaining > 0) break; // batch failed; stop
           remaining = r.remaining;
         }
         break;

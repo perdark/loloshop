@@ -1,5 +1,67 @@
 # Progress
 
+## 2026-08-19 — ⬜ The «white photo»: blank plates could pass every check and ship
+
+Owner report: «the calligraph plates when download it by أيادي التصميم on iPad it just a white
+photo». It is not a download bug and not an iPad bug — the plate files themselves are blank.
+**Reproduced in the repo before writing a line of fix**, by cropping synthetic sheets whose name
+count is known (`test/blankPlateGuard.test.js`), and closed on three paths.
+
+**THE MECHANISM.** `lib/sheetCrop.js` slices one N-name sheet into N bands, and
+`calligraphyEngine.processNextBatch` accepted any slice whose **band count** matched what it
+asked for — «never mis-slice, §11» was enforced as a counting rule. Counting is not enough. When
+the model draws FEWER names than the sheet asked for (routine: ask for 10, get 8), `gapSegment`
+bails (too few runs), `valleySegment` splits the ink span into `expected` even slabs anyway, and
+the slabs that land in the empty gaps trim down to **pure white slivers ~9px tall**. The count
+matched, so nothing was flagged: those bands were written to `/uploads`, saved `status='done'`,
+**auto-linked onto the order line**, and handed to the design team, who downloaded a white photo.
+Measured on synthetic sheets: 8-of-10 → 2 blanks, 9-of-10 → 1, 6-of-10 → 4, 5-of-6 → 1. A sheet
+with every name drawn reports **0**, so the guard costs no false regenerations.
+
+**THE FIX — one primitive, three call sites** (`lib/imageFx.hasInk`, contrast ≥ 8; sharp's `trim`
+cannot report emptiness, it hands a uniform image back unchanged, so contrast is the honest test.
+Undecodable bytes answer `true` — a decode quirk must never discard a paid plate):
+
+1. **`cropSheet` now reports `blank` / `blankIndexes`** alongside `count`. Callers must treat a
+   blank band exactly as seriously as a count mismatch.
+2. **`processNextBatch`** retries a sheet that came back with empty bands (a fresh generation
+   usually draws every name) and keeps the attempt with the FEWEST blanks, so a worse second
+   attempt cannot throw away a better first one — `sheet_path` follows the attempt that was
+   kept, not the last one bought. If blanks survive the retries, the good bands on that paid
+   sheet are still saved `done`; only the empty ones are marked `failed` with an Arabic reason
+   («خرجت اللوحة فارغة — أعد التوليد»), are never written to `/uploads`, and are **never linked
+   onto the order line**. They are not left `pending`: a name the model keeps skipping would
+   make the worker drain forever, buying a sheet each round. `processed` now excludes them and
+   the response carries `blank`.
+3. **`reroll`** refuses to overwrite a real plate with a blank generation — the money is still
+   ledgered (it was spent) but the press does **not** count against the designer's reroll limit,
+   because they got no plate for it. Cost is bounded by the daily ceiling, not by that counter.
+4. **`composePlate` — this is the iPad-specific path.** The compositor exports the Fabric canvas
+   with `canvas.toDataURL()`, and in a WebView under memory pressure WebKit drops the decoded
+   plate image, so the export comes back as the blank white canvas with no error anywhere. That
+   upload used to overwrite a good plate. It is now refused with «الصورة المحفوظة خرجت فارغة —
+   أعد فتح المحرر وحاول مرة أخرى» (the advice is accurate: reopening forces a fresh decode) and
+   the existing artwork is left exactly where it is. No frontend change was needed — the
+   compositor already surfaces API errors through `getApiErrorMessage`, and a plate marked
+   `failed` already renders as red «فشل» + its reason on the workbench card, with «إعادة
+   التوليد» live.
+
+**THE PLATES ALREADY WRITTEN ARE STILL BLANK.** The guard only protects new ones, so
+`npm run blank-plates` (`scripts/calligraphy-blank-plates.js`) reads every `done` plate off disk
+and reports the ones with no ink — read-only, like `photo-recovery`. `--mark` is the only writing
+mode: it sets them `failed` so the designer regenerates them and clears the blank artwork off
+`order_items.plate_image_url` (only where the line still points at that exact file). It never
+touches `customer_image_url` — that column is the student's own photo and this pipeline has
+destroyed it once already.
+
+**Verified:** 7 new tests in `test/blankPlateGuard.test.js` (each watched failing first — before
+the fix `cropSheet` had no `blank` field at all), plus `plateGeometry` + `calligraphyText` green
+(15). ⚠️ **`test/calligraphyCost.test.js` was NOT run — this sandbox has no database.** It is the
+closest guard to the engine change, so it must be run from `backend/` on a machine with `.env`
+before merging. Its fixtures were checked by hand against the new guard: `sheetPng(n)` draws
+exactly `n` bands and `bandPng` one, so both report `blank: 0` and neither test's expectations
+move.
+
 ## 2026-08-18 (b) — 💸 The four calligraphy cost fixes — MERGED & DEPLOYED, verified on prod
 
 Same session as the audit below; the owner approved «50% cost less? ok go work», then «go

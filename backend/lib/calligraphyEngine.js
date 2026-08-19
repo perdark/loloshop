@@ -169,8 +169,10 @@ async function processNextBatch(jobId, req = null) {
   // cost (each retry is a full paid image). Flag for manual review only if every
   // attempt mismatches (never mis-slice — §11).
   const MAX_CROP_TRIES = 2;
-  let plates = null;
-  let sheet = null;
+  let plates = null;      // bands of the BEST attempt so far (right count, fewest blanks)
+  let blankIdx = [];      // which of those bands came out with no ink on them
+  let sheet = null;       // the sheet `plates` was sliced from — what sheet_path must record
+  let latestSheet = null; // most recent sheet, the review fallback when no attempt was kept
   let totalCost = 0;
   let lastCount = null;
   let attemptsUsed = 0;
@@ -192,18 +194,32 @@ async function processNextBatch(jobId, req = null) {
     }
     totalCost += Number(gen.cost || 0);
     await logSpend('sheet', gen.cost); // ledger the image the moment it is paid — retries included
-    sheet = saveBufferToUploads(req, 'calligraphy/sheets', gen.buffer, 'png'); // keep latest (review fallback)
+    latestSheet = saveBufferToUploads(req, 'calligraphy/sheets', gen.buffer, 'png');
     let cropped;
     try {
       cropped = await cropSheet(gen.buffer, sheetBatch.length);
     } catch (err) {
       console.error('crop threw:', err.message);
-      cropped = { plates: [], count: -1 };
+      cropped = { plates: [], count: -1, blankIndexes: [] };
     }
     lastCount = cropped.count;
-    if (cropped.count === sheetBatch.length) { plates = cropped.plates; break; }
-    console.warn(`crop mismatch attempt ${attempt}/${MAX_CROP_TRIES}: expected ${sheetBatch.length}, got ${cropped.count} — regenerating`);
+    if (cropped.count !== sheetBatch.length) {
+      console.warn(`crop mismatch attempt ${attempt}/${MAX_CROP_TRIES}: expected ${sheetBatch.length}, got ${cropped.count} — regenerating`);
+      continue;
+    }
+    // The count matching is NOT the whole test. A sheet the model drew fewer names on still
+    // slices into exactly `expected` bands — the surplus ones are blank white slivers, and
+    // saving those as `done` is what handed the design team a white photo to download.
+    // Retry: a fresh generation usually draws every name. Keep the attempt with the fewest
+    // empty bands, so a worse second attempt can never throw away a better first one.
+    const blanks = cropped.blankIndexes || [];
+    if (!plates || blanks.length < blankIdx.length) {
+      plates = cropped.plates; blankIdx = blanks; sheet = latestSheet;
+    }
+    if (!blankIdx.length) break;
+    console.warn(`crop blank bands attempt ${attempt}/${MAX_CROP_TRIES}: ${blanks.length} of ${sheetBatch.length} bands have no ink — regenerating`);
   }
+  if (!sheet) sheet = latestSheet;
 
   const perCost = sheetBatch.length ? totalCost / sheetBatch.length : 0;
 
@@ -220,6 +236,19 @@ async function processNextBatch(jobId, req = null) {
 
   const updated = [];
   for (let i = 0; i < sheetBatch.length; i++) {
+    // A band with no ink is NOT a plate. It is marked failed with its own Arabic reason and
+    // is neither written to /uploads nor linked onto the order line: an empty plate on the
+    // line is worse than no plate at all, because every station downstream reads it as
+    // "the artwork is ready". The designer rerolls it from its card like any other failure —
+    // the other nine bands on the same paid sheet are kept, so this costs nothing extra.
+    if (blankIdx.includes(i)) {
+      const { rows } = await query(
+        `UPDATE calligraphy_plates SET status='failed', model=$2, cost_usd=$3, sheet_path=$4, error=$5
+          WHERE id=$1 RETURNING *`,
+        [sheetBatch[i].id, model, perCost, sheet.url, 'خرجت اللوحة فارغة — أعد التوليد']);
+      updated.push(toPlate(rows[0]));
+      continue;
+    }
     const plate = saveBufferToUploads(req, 'calligraphy/plates', plates[i], 'png');
     const { rows } = await query(
       `UPDATE calligraphy_plates SET status='done', model=$2, cost_usd=$3, sheet_path=$4, plate_path=$5, error=NULL,
@@ -231,7 +260,10 @@ async function processNextBatch(jobId, req = null) {
   // Response stays scoped to the requested job (sheetBatch = batch ++ hitchhikers, order kept).
   const own = updated.slice(0, batch.length);
   const c = await jobCounts(jobId);
-  return { data: { processed: own.length, ...c, remaining: c.pending, job_cost: await jobCost(jobId), attempts: attemptsUsed, hitchhikers: hitchhikers.length, plates: await attachOrderContext(own) } };
+  // `processed` counts plates that actually came out with a name on them — a blank band is
+  // reported as `blank`, not quietly folded into the success number.
+  const ownBlank = blankIdx.filter((i) => i < batch.length).length;
+  return { data: { processed: own.length - ownBlank, ...c, remaining: c.pending, job_cost: await jobCost(jobId), attempts: attemptsUsed, hitchhikers: hitchhikers.length, blank: ownBlank, plates: await attachOrderContext(own) } };
 }
 
 module.exports = {

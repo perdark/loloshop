@@ -13,9 +13,12 @@ async function handleGeneration(jobId) {
     const out = await processNextBatch(jobId, null);
     if (out.error) throw new Error(`${out.error.code}: ${out.error.message}`);
     const d = out.data;
-    console.log(`[worker] job ${jobId}: +${d.processed} done=${d.done} failed=${d.failed} remaining=${d.remaining}`);
+    console.log(`[worker] job ${jobId}: +${d.processed} blank=${d.blank || 0} done=${d.done} failed=${d.failed} remaining=${d.remaining}`);
     if (d.remaining <= 0) return;
-    if (d.processed === 0) throw new Error('batch made no progress — retrying later');
+    // A batch whose bands all came back EMPTY made progress even though `processed` is 0:
+    // those rows are `failed` now, not pending, so the loop cannot spin on them. Retrying
+    // here would just buy another sheet for names a designer has to reroll by hand anyway.
+    if (d.processed === 0 && !d.blank) throw new Error('batch made no progress — retrying later');
   }
 }
 

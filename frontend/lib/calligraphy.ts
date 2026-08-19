@@ -71,6 +71,13 @@ export interface CalProcess {
   review?: boolean;
   /** How many generation attempts this batch took (1 = clean first try). */
   attempts?: number;
+  /**
+   * Bands that came out of the sheet with NO ink on them, so they were marked failed instead
+   * of being saved as a blank white plate (the «white photo» the design team downloaded).
+   * They are progress — those rows are no longer pending — so a batch that produced only
+   * blanks must not be read as "the batch made no progress".
+   */
+  blank?: number;
   plates: CalPlate[];
 }
 

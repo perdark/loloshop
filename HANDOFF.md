@@ -335,10 +335,15 @@ longer stranded on a branch · the laptop's loose credentials are filed in
    worker on every platform.
 6. **Play Data Safety form + Apple privacy label:** declare location **and notifications** —
    both are in the binary now.
-7. **Clean the 12 wholesaler `university_name` rows** — one university is spelled three ways
+7. **⬜ Run `npm run blank-plates` on the prod box** (needs the database AND `/uploads`, so not
+   from a laptop copy). Read-only: it lists every plate marked «تم» whose image has no ink on it
+   — the white photos أيادي التصميم has been downloading. `--mark` then sends them back to the
+   workbench as failed and clears the blank artwork off the order lines, after which each one
+   costs a normal reroll. Ships with the fix branch above.
+8. **Clean the 12 wholesaler `university_name` rows** — one university is spelled three ways
    («بلاد الرافدين» · «بلاد الرفدين» · «كلية بلاد الرافدين»), same for ديالى. The picker was built
    to survive this, but the list reads badly.
-8. **Verify on a real phone before flipping either flag** — `adb shell pm get-app-links com.loloshop96.app`.
+9. **Verify on a real phone before flipping either flag** — `adb shell pm get-app-links com.loloshop96.app`.
 
 **Standing:**
 
@@ -437,6 +442,18 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   drop out of every SUM. `npm run migrate` applies `schema.sql` with `CREATE TABLE IF NOT EXISTS`,
   so it does not currently rewrite the column; **do not "fix" the drift by making the live table
   match the file.** Owned by Track B (`db/schema.sql`), so Track A left it alone.
+- **⚠️ A BAND COUNT THAT MATCHES IS NOT PROOF OF A CORRECT SLICE — that is how blank white
+  plates shipped.** `lib/sheetCrop.js` manufactures exactly `expected` bands even when the model
+  drew fewer names; the surplus bands are pure white slivers ~9px tall. Because the count
+  matched, the engine saved them `done`, linked them onto the order line, and أيادي التصميم
+  downloaded a white photo (owner report 2026-08-19). `cropSheet` now also reports
+  `blank`/`blankIndexes` and **every caller must treat a blank band as seriously as a count
+  mismatch** — `lib/imageFx.hasInk` is the shared test, used by the engine, `reroll` and
+  `composePlate`. Fixed on `claude/caligraph-white-images-install-8jd6wi`, **unmerged**.
+  ⚠️ The plates already written are still blank — `npm run blank-plates` finds them (owner
+  action below). ⚠️ The iPad half is `composePlate`: a WebView under memory pressure exports a
+  blank Fabric canvas, which used to overwrite a good plate.
+
 - **⚠️ The calligraphy plate writes `order_items.plate_image_url`, NEVER `customer_image_url`**
   (migration 080, on `fix/calligraphy-photo-loss`). The two columns are the generator's output and
   the student's own upload, and they shared one name until 2026-08-13 — so every generate / reroll

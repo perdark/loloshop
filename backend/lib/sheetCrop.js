@@ -1,6 +1,16 @@
 // backend/lib/sheetCrop.js — slice a vertical N-up calligraphy sheet into N plates
 // by horizontal ink-density valleys. Pure function of the image bytes.
+//
+// ⚠️ `count === expected` IS NOT PROOF OF A CORRECT SLICE, and treating it as one is what
+// shipped blank white plates to the design team. When the model draws FEWER names than the
+// sheet asked for (routine — ask for 10, get 8), gapSegment bails, valleySegment splits the
+// ink span into `expected` even slabs anyway, and the slabs that land in the empty gaps trim
+// down to pure white slivers ~9px tall. The count matched, so nothing was flagged: those
+// bands were saved `done`, auto-linked onto the order line, and downloaded as a white photo.
+// So every result also reports `blank` / `blankIndexes` — the bands with no ink in them.
+// The caller must treat blank > 0 exactly as seriously as a count mismatch.
 const sharp = require('sharp');
+const { hasInk } = require('./imageFx');
 
 // Per-row average darkness (0..255); ink is dark on white.
 function rowDarkness(data, width, height) {
@@ -116,7 +126,7 @@ function valleySegment(rowDark, height, expected, marginLo) {
 //   2) inside that segment, trim back to this band's own ink (drops the page margin /
 //      inter-line whitespace and any sub-threshold sliver of a neighbour near the valley),
 //      then add a small symmetric pad.
-async function extractBands(buffer, bands, width, height, rowDark, trimThr) {
+async function extractBands(buffer, bands, width, height, rowDark, trimThr, blankIndexes = []) {
   const sorted = bands.slice().sort((x, y) => x[0] - y[0]);
   const n = sorted.length;
   if (!n) return [];
@@ -144,6 +154,9 @@ async function extractBands(buffer, bands, width, height, rowDark, trimThr) {
     const h = bot - top + 1;
     if (h <= 0) continue;
     const out = await sharp(buffer).extract({ left: 0, top, width, height: h }).png().toBuffer();
+    // ⚠️ A band can be EMPTY even when the band COUNT is right — see cropSheet's header.
+    // Report it; never silently return a white rectangle as if it were a name.
+    if (!(await hasInk(out))) blankIndexes.push(plates.length);
     plates.push(out);
   }
   return plates;
@@ -186,8 +199,9 @@ async function cropSheet(buffer, expected) {
   }
   if (!bands) bands = primaryBands(rowDark, height, thr, expected); // mismatch → caller flags review
 
-  const plates = await extractBands(buffer, bands, width, height, rowDark, trimThr);
-  return { plates, count: plates.length, expected };
+  const blankIndexes = [];
+  const plates = await extractBands(buffer, bands, width, height, rowDark, trimThr, blankIndexes);
+  return { plates, count: plates.length, expected, blankIndexes, blank: blankIndexes.length };
 }
 
 module.exports = { cropSheet };

@@ -19,7 +19,7 @@ const {
 const {
   isRealName, looksLikeInstruction, checkRenderText,
 } = require('../lib/calligraphyText');
-const { matchPlateGeometry } = require('../lib/imageFx');
+const { matchPlateGeometry, hasInk } = require('../lib/imageFx');
 const { enqueueGeneration } = require('../lib/queue');
 
 const FRONT_LABEL    = 'تطريز الوشاح من الأمام';
@@ -493,6 +493,19 @@ async function reroll(req, res) {
     catch { /* reference unreadable — ship the new plate as generated */ }
   }
 
+  // A generation that produced nothing must NOT replace the plate that is already there.
+  // Overwriting a real name with a white rectangle is the worst outcome available here: the
+  // line still reads «تم» downstream and the embroiderer gets blank artwork. The money is
+  // still ledgered (it was spent), but the press does not count against the designer's reroll
+  // limit — they got no plate for it. Cost is bounded by the daily ceiling above, not by this.
+  if (!(await hasInk(plateBuf))) {
+    await query(`UPDATE calligraphy_plates SET cost_usd = cost_usd + $2 WHERE id=$1`,
+      [id, Number(gen.cost || 0)]);
+    return res.status(502).json({
+      error: 'خرجت اللوحة فارغة — أعد المحاولة', code: 'ERR_BLANK_PLATE',
+    });
+  }
+
   const plate = saveBufferToUploads(req, 'calligraphy/plates', plateBuf, 'png');
   const { rows } = await query(
     `UPDATE calligraphy_plates
@@ -637,6 +650,16 @@ async function composePlate(req, res) {
   }
   if (metadata.format !== 'png' || !metadata.width || !metadata.height) {
     return bad(res, 'يجب رفع صورة PNG صالحة', 'ERR_INVALID_IMAGE');
+  }
+  // ⚠️ THE iPad «WHITE PHOTO» PATH. The compositor exports the Fabric canvas with
+  // canvas.toDataURL(), and in a WebView under memory pressure WebKit drops the decoded
+  // plate image — the export then comes back as the blank white canvas, with no error
+  // anywhere. That upload used to overwrite a perfectly good plate, which is why a plate
+  // that looked right in the workbench downloaded as an empty white image on the iPad.
+  // A composite always contains the plate it was drawn on, so «no ink at all» can only mean
+  // the export failed: refuse it and leave the existing artwork exactly where it is.
+  if (!(await hasInk(req.file.buffer))) {
+    return bad(res, 'الصورة المحفوظة خرجت فارغة — أعد فتح المحرر وحاول مرة أخرى', 'ERR_BLANK_PLATE');
   }
   const saved = saveBufferToUploads(req, 'calligraphy/plates', req.file.buffer, 'png');
   const { rows } = await query(

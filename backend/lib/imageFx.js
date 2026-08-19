@@ -41,6 +41,37 @@ async function whiteToTransparent(buffer, whiteThresh = 232) {
 // behaviour only if it also silently fails, so it never throws.
 const WHITE = { r: 255, g: 255, b: 255, alpha: 1 };
 
+// Minimum per-channel contrast (max - min) for an image to count as carrying ink.
+// A blank band out of sheetCrop is literally uniform (contrast 0); a real name is 200+.
+// 8 leaves room for JPEG-ish noise without ever calling a white strip "a name".
+const INK_CONTRAST_MIN = 8;
+
+/**
+ * Does this image contain any ink at all, or is it a blank white rectangle?
+ *
+ * ⚠️ THIS IS THE «WHITE PHOTO» GUARD. Three separate paths can produce a plate with nothing
+ * on it, and every one of them used to save it as `status='done'` and auto-link it onto the
+ * order line, so the design team downloaded a blank white image and the embroiderer got no
+ * artwork at all:
+ *   1. sheetCrop forced `expected` bands out of a sheet the model drew fewer names on — the
+ *      surplus bands are pure white slivers (see lib/sheetCrop.js).
+ *   2. an iPad compositor export came back blank (WebKit drops decoded image buffers under
+ *      memory pressure, so canvas.toDataURL() returns the empty canvas).
+ *   3. a reroll whose generated image had no usable band.
+ * Contrast is the honest test — sharp's `trim` cannot report emptiness, it just hands a
+ * uniform image back unchanged, which reads as "the ink fills the whole frame".
+ */
+async function hasInk(buffer) {
+  try {
+    const stats = await sharp(buffer).stats();
+    return stats.channels.some((c) => c.max - c.min >= INK_CONTRAST_MIN);
+  } catch {
+    // Undecodable is not the question this function answers; the callers validate format
+    // separately. Say "has ink" so a decode quirk can never discard a paid plate.
+    return true;
+  }
+}
+
 /**
  * Ink bounding box of a white-background plate: the buffer trimmed, plus its size.
  * Returns null when there is no ink to measure. sharp's trim CANNOT report that itself — on a
@@ -49,9 +80,7 @@ const WHITE = { r: 255, g: 255, b: 255, alpha: 1 };
  * cover an entire band. Contrast is the honest test.
  */
 async function inkBox(buffer) {
-  const stats = await sharp(buffer).stats();
-  const hasInk = stats.channels.some((c) => c.max - c.min >= 8);
-  if (!hasInk) return null;
+  if (!(await hasInk(buffer))) return null;
   const { data, info } = await sharp(buffer)
     .trim({ background: '#ffffff', threshold: 10 })
     .toBuffer({ resolveWithObject: true });
@@ -84,4 +113,4 @@ async function matchPlateGeometry(newBuffer, referenceBuffer) {
   }
 }
 
-module.exports = { whiteToTransparent, matchPlateGeometry };
+module.exports = { whiteToTransparent, matchPlateGeometry, hasInk, INK_CONTRAST_MIN };
