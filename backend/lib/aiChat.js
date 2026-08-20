@@ -32,6 +32,8 @@
 
 const { query, tx } = require('./db');
 const memoCache = require('./memoCache');
+// Only for SAFE_ANSWER — see recentTurns. answerGuard requires nothing, so there is no cycle.
+const { SAFE_ANSWER } = require('./answerGuard');
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 // Upgraded from gemini-2.5-flash-lite on 2026-08-17 (owner approved ~$1/1,000 msgs): re-ran
@@ -376,12 +378,34 @@ async function logCached({ userId, sessionKey, surface, question, answer, ipHash
  *
  * The 2-hour window keeps a returning visitor from resuming yesterday's thread out of nowhere,
  * which is also what the widget's own ephemeral state does.
+ *
+ * ⚠️ A GUARD-BLOCKED TURN IS REPLAYED AS THE SAFE ANSWER, NOT AS WHAT THE MODEL WROTE.
+ *
+ * The rule this function follows is: history is WHAT THE CUSTOMER SAW. A blocked row keeps
+ * its `answer` column filled on purpose — the ledger is the only record of what the model
+ * actually tried to say, and it is what a prompt fix gets written from — but that text never
+ * reached the screen. answerGuard.SAFE_ANSWER did. Replaying the blocked text told the model
+ * it had said something nobody read, which cost two things (both measured 2026-08-20 by
+ * reading this function's own output after a live block):
+ *   · incoherence — «شنو كلتلي قبل شوية؟» describes an answer that was never on screen;
+ *   · a way out of the guard — a blocked claim sits in context as established fact, and the
+ *     model's next paraphrase of it may not match the pattern that caught the first one.
+ *
+ * DROPPING the row instead was tried first and is worse: it leaves a question with no answer
+ * beside it, and the model fills the hole. Measured on the same conversation — asked «شنو
+ * كتبتلي قبل شوية؟» after a dropped turn, she invented four paragraphs summarising her own
+ * system prompt as things she had told the customer. Substituting the safe answer keeps the
+ * turn, keeps it truthful, and leaks nothing.
+ *
+ * NOT `error IS NULL`: a fallback answer carries an error code AND was genuinely shown, so it
+ * belongs in history verbatim. Only the GUARD_ rows are the ones nobody read.
  */
 async function recentTurns({ userId, sessionKey, surface = 'support', limit = 3 }) {
   if (!userId && !sessionKey) return [];
 
   const { rows } = await query(
-    `SELECT question, answer
+    `SELECT question,
+            CASE WHEN error LIKE 'GUARD_%' THEN $5::text ELSE answer END AS answer
        FROM ai_chat_messages
       WHERE surface = $3
         AND answer IS NOT NULL
@@ -390,7 +414,7 @@ async function recentTurns({ userId, sessionKey, surface = 'support', limit = 3 
              OR $1::uuid IS NULL AND user_id IS NULL AND session_key = $2)
       ORDER BY created_at DESC
       LIMIT $4`,
-    [userId || null, sessionKey || null, surface, Math.min(Math.max(limit, 1), 6)]
+    [userId || null, sessionKey || null, surface, Math.min(Math.max(limit, 1), 6), SAFE_ANSWER]
   );
 
   // Newest-first from SQL (so LIMIT takes the latest), oldest-first in the prompt.

@@ -406,7 +406,10 @@ exports.ask = async (req, res, next) => {
     // a guard that checks a different string than the one served is not a guard.
     result.text = stripGenderHedge(result.text);
 
-    const verdict = answerGuard.inspect(result.text, system);
+    // `question` + `history` are passed so an answer may quote the customer's own words back —
+    // and only theirs — without tripping a rule. The history half matters: the quote and the
+    // thing being quoted are usually a turn apart. See customerQuoteSpans in lib/answerGuard.js.
+    const verdict = answerGuard.inspect(result.text, system, { question, history });
     if (!verdict.ok) {
       console.error(`answerGuard BLOCKED [${verdict.reason}] ${verdict.detail} — Q: ${question}`);
       // The blocked text is stored, not discarded: the ledger is the only record of what the
