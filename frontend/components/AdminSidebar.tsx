@@ -14,6 +14,7 @@ const navItems: {
   exact: boolean;
 }[] = [
   { href: "/admin", label: "لوحة التحكم", exact: true },
+  { href: "/admin/assistant", label: "لولو الإدارة", exact: false },
   { href: "/admin/orders", label: "الطلبات", exact: false },
   { href: "/design-support", label: "أيادي التصميم", exact: false },
   { href: "/admin/custom-order", label: "طلب مخصص", exact: false },

@@ -3,6 +3,7 @@
 require('dotenv').config();
 const { getBoss, QUEUE_GENERATION } = require('./lib/queue');
 const { processNextBatch } = require('./lib/calligraphyEngine');
+const staffReport = require('./lib/staffReportJob');
 
 // Drains one calligraphy job: batch after batch (≤10 names each) until nothing is
 // pending. A failed batch (OpenRouter error, or zero progress while work remains)
@@ -24,6 +25,17 @@ async function handleGeneration(jobId) {
   await boss.work(QUEUE_GENERATION, { batchSize: 1 }, async (jobs) => {
     for (const job of jobs) await handleGeneration(job.data.jobId);
   });
+
+  // The nightly «تقرير الموظفين» push (2026-08-21). Registered inside its own try/catch on
+  // purpose: a scheduling failure must never stop this worker consuming calligraphy jobs,
+  // which is what students are actually waiting on. A missed report is a missed report; a
+  // dead worker is a stalled shop.
+  try {
+    await staffReport.register(boss);
+  } catch (err) {
+    console.error('staff report schedule failed (calligraphy unaffected):', err.message);
+  }
+
   console.log('loloshop-worker up — consuming', QUEUE_GENERATION);
 })().catch((err) => {
   console.error('worker boot failed:', err);

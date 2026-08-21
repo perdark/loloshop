@@ -2,7 +2,7 @@ const net = require('net');
 const { query, tx } = require('../lib/db');
 const breaks = require('../lib/attendanceBreak');
 
-const DEFAULT_TZ = 'Asia/Baghdad';
+const { localParts, DEFAULT_TZ } = require('../lib/shopTime');
 const VALID_MODES = new Set(['none', 'network', 'location', 'both', 'network_or_location']);
 
 /**
@@ -44,26 +44,9 @@ function ipMatchesRange(ip, range) {
   return (ipInt & mask) === (baseInt & mask);
 }
 
-function localParts(date = new Date(), timeZone = DEFAULT_TZ) {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  })
-    .formatToParts(date)
-    .reduce((acc, p) => {
-      if (p.type !== 'literal') acc[p.type] = p.value;
-      return acc;
-    }, {});
-  return {
-    date: `${parts.year}-${parts.month}-${parts.day}`,
-    minutes: Number(parts.hour) * 60 + Number(parts.minute),
-  };
-}
+// localParts now lives in lib/shopTime.js — the staff app-open signal (migration 084) needs
+// the SAME answer, and a lib must not import a controller to get it. Re-exported below so
+// this module's public surface is unchanged.
 
 function timeToMinutes(value) {
   const [h, m] = String(value || '00:00').split(':').map(Number);

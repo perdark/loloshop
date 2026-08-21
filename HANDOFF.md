@@ -30,7 +30,7 @@ last verified 2026-08-10 and are unchanged.
 | iOS | **1.0.4 (build 1786309948) SUBMITTED — «Waiting for Review»** (2026-08-10, ≤48h) |
 | Android push | ✅ working end to end |
 | iOS push | ✅ **APNs key installed and verified against Apple** — `push.configured()` → `{"android":true,"ios":true}` |
-| Backend tests | **266/266 on `main`** · **275/275 on `fix/admin-presence-panel`** (9 new). ⚠️ Run from `backend/`, `node --test test/` — from the repo root dotenv misses `.env` and 147 fail for nothing. |
+| Backend tests | **466/466 on `feat/admin-ai-console`** (39 new, 2026-08-21). Older rows said 266/275; the suite has grown since. ⚠️ Run from `backend/` as `node --test test/*.test.js` — see the landmine below; the old `test/` and bare forms both misbehave on Node 26. |
 | Prod DB backup | ✅ `~/Desktop/_private/loloshop-db/loloshop-prod-2026-08-14.dump` — restore-tested, row counts match live |
 
 **Both platforms are now on the same version (1.0.4) carrying the same three features.**
@@ -447,6 +447,15 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   ⚠️ **080's backfill is repeated in `db/schema.sql` on purpose**, exactly like 077's — that is
   the file `npm run migrate` applies to a database that already holds the damaged rows. Do not
   tidy it out.
+- **⚠️ THE TWO ANSWER GUARDS ARE OPPOSITE AND MUST NEVER BE MERGED.** `lib/answerGuard.js`
+  (storefront) rejects any IQD figure not in the price book; `lib/adminAnswerGuard.js` (console)
+  rejects any number NOT in the facts we computed. Point the storefront guard at `/admin` and
+  every correct money answer trips; point the admin guard at the storefront and any price
+  passes. They look like duplicates — same shape, same `inspect(answer, …)` signature — which is
+  exactly why a future tidy-up will want to fold them together. Same for the surfaces' budgets:
+  `evaluateCaps` splits public spend from `adminUsdPerDay` so the two cannot switch each other
+  off, and **a caller that omits `surface` keeps the old whole-shop behaviour on purpose** —
+  do not "clean up" that branch, every pre-existing caller and test depends on it.
 - **⚠️ `AI_CHAT_SESSION_MINTS_PER_HOUR` IS THE ONE ASSISTANT LIMIT CGNAT CAN BREAK — do not
   "tighten" it.** It bounds identity *harvesting* only; the per-IP ask limiter already caps one
   address at 100 requests/15min however many identities it holds, so rotation buys an attacker
@@ -518,7 +527,11 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   flips the noun with the view mode. Two labels were deliberately left as «طلب» because they
   really are bundles. The «40 vs 118» disagreement this line described is gone.
 - **`backend/` has no `npm test`** — verified in `backend/package.json`. The real command is
-  **`node --test test/`**, and it **must be run from `backend/`** (246 tests on `main`).
+  **`node --test test/*.test.js`**, and it **must be run from `backend/`** (466 tests on
+  `feat/admin-ai-console`; the count in older entries is stale).
+  ⚠️ On Node 26 the bare `node --test test/` form this file used to give now fails to resolve
+  the directory, and `node --test` with no path sweeps in `test-full-set.js` / `test-zentramsg.js`
+  at the backend root — manual scripts, not tests — for **2 failures that mean nothing**.
   ⚠️ Run it from the repo root as `node --test backend/test/` and dotenv cannot find `.env`, so
   `DATABASE_URL` is undefined and **147 tests fail** for a reason that has nothing to do with the
   code under test. Cost real time on 2026-08-14 (c) — the failure looks like a broken change.
@@ -568,6 +581,22 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   `calligraphy_spend_log`, `CALLIG_DAILY_USD_MAX`/`_WARN`, defaults $10/$5 in code). Expected:
   **~$53 → ~$25-30/month at August volume, same quality** — re-check the OpenRouter activity
   page after a week to confirm. Full detail in the 2026-08-18 (b) PROGRESS entry.
+- **⚠️ `feat/admin-ai-console` IS READY AND UNMERGED — 2026-08-21.** «لولو الإدارة»: a full
+  admin page (`/admin/assistant`), the metric catalogue 8 → 22, an action registry the AI can
+  execute only after an explicit تأكيد, a deterministic suggestion feed, staff app-open
+  tracking (**migration 084**) and a nightly staff-report push. 466/466 backend tests (39 new),
+  `tsc`/lint/`next build` clean, every endpoint verified live by curl including a real
+  propose→confirm→execute round trip and a refused tampered token.
+  ⚠️ **NOT opened in a browser** — Chrome would not connect on this laptop. `/admin/assistant`
+  has three surfaces nobody has seen: the suggestion cards, the confirm card, and the report
+  table at phone width. **Every push to `main` auto-deploys**, so open it once first.
+  ⚠️ **Run the migration in the same deploy** — `npm run migrate` applies `db/schema.sql`, which
+  carries 084. Until `staff_app_opens` exists the beacon logs an error and 204s (harmless), but
+  `/admin/staff-daily-report` and four metrics 500.
+  ⚠️ **New env, all optional and safely defaulted in code:** `AI_CHAT_ADMIN_DAILY_USD_MAX` (2.0).
+  · The nightly push needs `loloshop-worker` running — it registers the 21:00 Asia/Baghdad
+  schedule at boot. A scheduling failure is caught and never stops calligraphy consumption.
+
 - **⚠️ `fix/admin-presence-panel` IS READY AND UNMERGED — 2026-08-15.** Closes the last two
   open bugs (**1**, and **8 parts 2·3·4**), so the eleven-bug board is finished in code.
   Off `main`, no migration, no new dependency, 275/275 backend tests, `next build` clean.

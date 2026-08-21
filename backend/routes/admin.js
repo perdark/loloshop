@@ -28,6 +28,10 @@ router.delete('/orders/:id', c.deleteOrder);
 router.patch('/checkout-groups/:id', c.updateCheckoutGroup);
 router.get('/reps-overview', c.repsOverview);
 router.get('/visitors', c.visitorsStats);
+// «تقرير الموظفين اليومي» — app-opens + بصمة + breaks + production actions, one row per
+// employee. The four signals stay SEPARATE columns on purpose; lib/staffPresence.js says why.
+router.get('/staff-daily-report', require('../controllers/adminConsoleController').staffDailyReport);
+
 router.get('/wholesalers', c.listWholesalers);
 router.post('/wholesalers', c.createWholesaler);
 router.patch('/wholesalers/:id', c.updateWholesaler);

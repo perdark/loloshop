@@ -10,6 +10,7 @@
  */
 
 import { useState } from "react";
+import Link from "next/link";
 import { api, getApiErrorMessage } from "@/lib/api";
 
 type Answer = { answer: string; intent: string | null; label?: string; facts: string[] };
@@ -45,7 +46,17 @@ export function AnalyticsAsk() {
 
   return (
     <section dir="rtl" className="rounded-2xl border border-line bg-surface p-5">
-      <h2 className="text-lg font-semibold text-ink">اسأل عن أرقامك</h2>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-lg font-semibold text-ink">اسأل عن أرقامك</h2>
+        {/* This widget answers questions. The full console also suggests, acts, and carries the
+            daily staff report — so it gets a door rather than being findable only in the nav. */}
+        <Link
+          href="/admin/assistant"
+          className="text-xs font-medium text-orange-ink underline-offset-4 hover:underline"
+        >
+          افتح لولو الإدارة ←
+        </Link>
+      </div>
       <p className="mt-1 text-sm text-muted">
         اكتب سؤالك بالعربي. الأرقام تنحسب من قاعدة البيانات — المساعد يصيغها بس.
       </p>

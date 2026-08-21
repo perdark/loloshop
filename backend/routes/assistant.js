@@ -30,6 +30,7 @@ const { authRequired, requireRole, optionalAuth } = require('../middleware/auth'
 const anonSession = require('../lib/anonSession');
 const support = require('../controllers/supportChatController');
 const analytics = require('../controllers/adminAnalyticsChatController');
+const adminConsole = require('../controllers/adminConsoleController');
 
 // A tripped limiter must still speak the API's language. express-rate-limit's default is the
 // plain-text «Too many requests», which reaches an Iraqi student as raw English through a
@@ -83,5 +84,21 @@ router.post('/session', sessionLimit, (req, res) => {
 
 router.post('/support', supportLimit, optionalAuth, support.ask);
 router.post('/analytics', analyticsLimit, authRequired, requireRole('admin'), analytics.ask);
+
+// ── «لولو الإدارة» — the full admin console (/admin/assistant), 2026-08-21 ─────────────────
+// A separate mount from /analytics above, not a replacement: the compact widget on /admin
+// keeps its endpoint and keeps working. Everything under /admin here is authRequired +
+// requireRole('admin'), so unlike /support there is no anonymous path to reason about at all.
+//
+// ⚠️ /act is the one endpoint in this file that WRITES. Its authorisation is the HMAC-signed
+// proposal in the body, not the request shape — see lib/adminActions.js. Rate-limited with the
+// same low admin ceiling as asking: a handful of known people on the shop's own devices.
+const adminRouter = require('express').Router();
+adminRouter.use(analyticsLimit, authRequired, requireRole('admin'));
+adminRouter.post('/ask', adminConsole.ask);
+adminRouter.post('/act', adminConsole.act);
+adminRouter.get('/suggestions', adminConsole.suggestions);
+adminRouter.get('/history', adminConsole.history);
+router.use('/admin', adminRouter);
 
 module.exports = router;

@@ -1461,4 +1461,30 @@ ALTER TABLE ai_chat_messages ADD COLUMN IF NOT EXISTS ip_hash TEXT;
 CREATE INDEX IF NOT EXISTS idx_ai_chat_ip_created
   ON ai_chat_messages(ip_hash, created_at DESC) WHERE ip_hash IS NOT NULL;
 
+-- =====================================================
+-- Migration 084 — «هل فتح الموظف التطبيق اليوم؟»
+-- A FOURTH signal, independent of بصمة and of production actions: presence of the PERSON in
+-- the APP. staff_attendance_records says "they stamped once"; staff_activity_log only fires
+-- when a piece MOVES (so a designer reading briefs is invisible); site_visits has no user_id
+-- at all. Full reasoning in db/migrations/084_staff_app_opens.sql.
+--
+-- ⚠️ NEVER folded into payroll. Opening the app is not attendance and not opening it is not a
+-- deduction — the report shows both columns so the owner can see where they DISAGREE.
+--
+-- `opens` counts SESSIONS: the endpoint increments only when last_seen_at is >30 min old.
+-- `work_date` is passed in from attendanceController.localParts(now,'Asia/Baghdad'), never
+-- CURRENT_DATE — the server clock is UTC, so a 23:30 Baghdad ping would file under tomorrow
+-- while the same evening's بصمة sits under today.
+-- =====================================================
+CREATE TABLE IF NOT EXISTS staff_app_opens (
+  user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  work_date     DATE NOT NULL,
+  first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  opens         INTEGER NOT NULL DEFAULT 1 CHECK (opens >= 0),
+  platform      TEXT,
+  PRIMARY KEY (user_id, work_date)
+);
+CREATE INDEX IF NOT EXISTS idx_staff_app_opens_date ON staff_app_opens(work_date DESC);
+
 COMMIT;

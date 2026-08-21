@@ -94,6 +94,17 @@ const CAPS = {
   // answers are served before any of this (see supportChatController), so the shop's most
   // common questions keep answering even if it ever does run out.
   anonUsdPerDay: Number(process.env.AI_CHAT_ANON_DAILY_USD_MAX || 1.2),
+  // ── THE ADMIN CONSOLE'S OWN SLICE (2026-08-21). /admin/assistant bills to the same ledger
+  // as the storefront, and without this the two surfaces could switch each other off — which
+  // is an AVAILABILITY bug in both directions, not a cost one:
+  //   · a flood of student questions draining globalUsdPerDay would take down the owner's own
+  //     instrument on the day he most needs it;
+  //   · a chatty console would eat the budget the shop's main marketing surface depends on.
+  // So the public ceiling above now bounds PUBLIC spend and this bounds the console, giving a
+  // worst case of $5/day — still nothing against a measured ~$0.0001 per message. The console
+  // is a handful of authenticated known people on the shop's own devices; the ceiling is an
+  // abuse backstop for it too, never a budget.
+  adminUsdPerDay: Number(process.env.AI_CHAT_ADMIN_DAILY_USD_MAX || 2.0),
   // Longest question we will forward. Input is the cheap half, but an unbounded prompt is
   // an unbounded bill — and no genuine support question is 2,000 characters.
   maxQuestionChars: Number(process.env.AI_CHAT_MAX_QUESTION_CHARS || 600),
@@ -154,8 +165,29 @@ function estimateCostUsd({ reportedCost, model, promptTokens, completionTokens }
  * Split out from the SQL so the boundaries are testable without a database.
  * Returns a tagged error to throw/return, or null when the call is allowed.
  */
-function evaluateCaps({ burstMinute, burstWindow, spendToday, anonSpendToday }, { userId, caps = CAPS } = {}) {
-  if (Number(spendToday) >= caps.globalUsdPerDay) {
+function evaluateCaps(
+  { burstMinute, burstWindow, spendToday, anonSpendToday, adminSpendToday },
+  { userId, surface, caps = CAPS } = {}
+) {
+  // ⚠️ `surface` is OPTIONAL and its absence must keep the old behaviour exactly: spendToday is
+  // then read as one whole-shop total, which is what every existing caller and test expects.
+  // Only a caller that names its surface gets the split below.
+  const admin = surface === 'admin_analytics';
+  const adminSpend = Number(adminSpendToday || 0);
+
+  if (admin) {
+    // The console is bounded by its OWN slice and deliberately not by the public ceiling —
+    // that is the entire point of the split. See CAPS.adminUsdPerDay.
+    if (adminSpend >= caps.adminUsdPerDay) {
+      // The owner IS the person who can fix this, so unlike the customer-facing message below
+      // this one says what actually happened and which knob moves it.
+      return tagged(
+        `وصلت الحد اليومي لكلفة مساعد الإدارة (${caps.adminUsdPerDay}$). ارفع AI_CHAT_ADMIN_DAILY_USD_MAX إذا تحتاج أكثر.`,
+        503,
+        'ERR_AI_ADMIN_BUDGET'
+      );
+    }
+  } else if (Number(surface ? Number(spendToday) - adminSpend : spendToday) >= caps.globalUsdPerDay) {
     // Deliberately vague to the user — the shop's daily AI budget is not their business.
     return tagged('المساعد مشغول حالياً، جرّب بعد شوية', 503, 'ERR_AI_BUDGET');
   }
@@ -261,7 +293,8 @@ async function reserve({ userId, sessionKey, surface, question, ipHash = null })
                             AND COALESCE(model, '') <> 'cache'
                             AND created_at > NOW() - INTERVAL '5 minutes')  AS burst_window,
          COALESCE(SUM(cost_usd), 0)                                         AS spend_today,
-         COALESCE(SUM(cost_usd) FILTER (WHERE user_id IS NULL), 0)          AS anon_spend_today
+         COALESCE(SUM(cost_usd) FILTER (WHERE user_id IS NULL), 0)          AS anon_spend_today,
+         COALESCE(SUM(cost_usd) FILTER (WHERE surface = 'admin_analytics'), 0) AS admin_spend_today
        FROM ai_chat_messages
        WHERE created_at > NOW() - INTERVAL '24 hours'`,
       [userId || null, sessionKey || null]
@@ -275,8 +308,9 @@ async function reserve({ userId, sessionKey, surface, question, ipHash = null })
         burstWindow: r.burst_window,
         spendToday: r.spend_today,
         anonSpendToday: r.anon_spend_today,
+        adminSpendToday: r.admin_spend_today,
       },
-      { userId }
+      { userId, surface }
     );
     if (capError) return { error: capError };
 

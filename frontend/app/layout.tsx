@@ -3,6 +3,7 @@ import { Amiri, Cairo, Great_Vibes, Playfair_Display } from "next/font/google";
 import { DeepLinkHandler } from "@/components/DeepLinkHandler";
 import { PwaRegistrar } from "@/components/PwaRegistrar";
 import { PushRegistrar } from "@/components/PushRegistrar";
+import { StaffAppBeacon } from "@/components/StaffAppBeacon";
 import { ToasterProvider } from "@/components/providers/ToasterProvider";
 import { APP_ONLY, buildGateScript } from "@/lib/app-gate";
 import "./globals.css";
@@ -143,6 +144,13 @@ export default function RootLayout({
           attached, whatever route the shell happens to boot on.
         */}
         <PushRegistrar />
+        {/*
+          «هل فتح الموظف التطبيق اليوم؟» (migration 084). Renders nothing and is inert for
+          everyone except role === 'staff'. Root layout because a staff member who opens the
+          app and lands ANYWHERE has opened the app — gating it to /staff would under-count
+          exactly the casual opens the daily report is asking about.
+        */}
+        <StaffAppBeacon />
         {children}
         <ToasterProvider />
       </body>

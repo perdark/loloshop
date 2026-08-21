@@ -3,6 +3,7 @@ const { staffScopeAllows, staffTypesOf } = require('../middleware/auth');
 const { canStaffTransition, STATUS_LABEL_AR, orderZoneClause } = require('./orderController');
 const { nextStageFor } = require('./productionController');
 const { moneyCalculations, calculationFor } = require('../lib/moneyCalculation');
+const staffPresence = require('../lib/staffPresence');
 
 const COMPLETED_STATUSES = ['design_complete', 'staff_review', 'printing', 'embroidery', 'pressing', 'preparing', 'ready', 'delivered'];
 // "Done" for the orders console = handed over or ready to hand over.
@@ -272,6 +273,30 @@ async function wholesalerOrders(req, res) {
   res.json({ data, summary, my_stages: viewerStages(req.user) });
 }
 
+/**
+ * POST /api/staff/app-open — «الموظف فاتح التطبيق هسه».
+ *
+ * The fourth presence signal (migration 084), independent of بصمة and of production actions.
+ * See lib/staffPresence.js for why none of the three existing tables could answer this.
+ *
+ * ALWAYS 204, success or failure. This is a fire-and-forget beacon on the ROOT layout: a
+ * staff member with a queue open must never see an error, a spinner, or a retry because a
+ * presence write failed. A tracking endpoint that can break a page is worse than no tracking.
+ *
+ * ⚠️ Writes NOTHING to payroll. Opening the app is not attendance.
+ */
+async function appOpen(req, res) {
+  try {
+    await staffPresence.recordAppOpen({
+      userId: req.user.id,
+      platform: req.body && req.body.platform,
+    });
+  } catch (err) {
+    console.error('staff app-open track failed:', err.message);
+  }
+  return res.status(204).end();
+}
+
 module.exports = {
   listWholesalers,
   wholesalerStudents,
@@ -282,4 +307,5 @@ module.exports = {
   // Exported for tests: the viewer→station mapping is pure, so it is asserted directly
   // against productionController's QUEUE_STAGES rather than through an HTTP round trip.
   viewerStages,
+  appOpen,
 };

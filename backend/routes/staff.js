@@ -1,4 +1,5 @@
 const router = require('express').Router();
+const rateLimit = require('express-rate-limit');
 const { authRequired, requireRole, requireStaffType } = require('../middleware/auth');
 const c = require('../controllers/staffController');
 const attendance = require('../controllers/attendanceController');
@@ -10,6 +11,16 @@ const { normalizePhoneBody } = require('../lib/otp');
 const { imageUpload, imageUploadLimit, validateUploadedImage } = require('../lib/upload');
 
 router.use(authRequired, requireRole('staff'));
+
+// «هل فتح التطبيق اليوم؟» — the presence beacon (migration 084). Rate-limited because it is
+// called from the ROOT layout on every mount and every return-to-foreground, and answers 204
+// unconditionally so a tripped limit is invisible to the employee using the app.
+const appOpenLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  handler: (req, res) => res.status(204).end(),
+});
+router.post('/app-open', appOpenLimit, c.appOpen);
 
 router.get('/attendance/today', attendance.getToday);
 router.post('/attendance/check-in', attendance.checkIn);

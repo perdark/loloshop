@@ -1,5 +1,106 @@
 # Progress
 
+## 2026-08-21 (d) — 🧠 «لولو الإدارة»: a console that reads the whole shop, acts under confirmation, and finally answers «هل الموظفين يشتغلون»
+
+Owner ask, four parts: a full page for the admin · it should know the whole dashboard, **kept
+carefully separate from the storefront assistant** · it should suggest actions and be able to
+perform them when asked · it should say whether staff are opening the app, with a daily report
+of opens, hours worked, and who did not work. Decisions taken before building: **execute a
+closed whitelist of REVERSIBLE actions, each behind an explicit تأكيد** · **nightly push plus
+the page** · **`role = 'staff'` only** (not workshop workers, not reps, not students).
+
+Spec: `docs/superpowers/specs/2026-08-21-admin-ai-console.md`. Branch `feat/admin-ai-console`.
+
+**The half that did not exist: whether an employee opened the app.** Three tables each answer a
+piece of «هل يشتغل» and none answers it. `staff_attendance_records` is بصمة — one deliberate act
+at the start of a shift, which cannot tell a preparer who stamped and worked from one who
+stamped and left. `staff_activity_log` only fires when a PIECE MOVES, so a designer reading
+briefs all morning is invisible in it and an empty station makes its whole staff look idle.
+`site_visits` has no `user_id` at all, by design. So **migration 084** adds a fourth signal,
+`staff_app_opens`: one row per employee per work-date, `opens` counting SESSIONS (the endpoint
+increments only across a >30-minute gap, so a three-hour queue session is one open and coming
+back after lunch is two). ⚠️ **It is never folded into payroll** — opening the app is not
+attendance and not opening it is not a deduction. The report prints the two columns side by
+side precisely because the interesting row is the one where they DISAGREE: **stamped بصمة, zero
+opens** is the row the owner acts on, and merging the signals would erase exactly that row.
+
+**`work_date` comes from `localParts(now, 'Asia/Baghdad')`, never `CURRENT_DATE`.** The server
+clock is UTC and the shop is UTC+3, so between 21:00 and midnight Baghdad the two are different
+days — an app-open filed under one and a بصمة under the other join to nothing and the report
+silently shows an empty evening. The helper was extracted out of `attendanceController` into
+`lib/shopTime.js` so both callers share one definition (a lib importing a controller was the
+alternative, and worse). Asserted in `test/adminConsole.test.js` against a 21:30Z instant.
+
+**The separation from «لولو» the storefront mascot, which the owner flagged.** They share only
+the OpenRouter transport and the ledger table. Everything that decides what may be said is
+separate, and in two places the two surfaces need OPPOSITE behaviour:
+· **Guard.** `lib/answerGuard.js` rejects any IQD figure not in the price book. This surface's
+  whole job is IQD figures. New `lib/adminAnswerGuard.js` asserts the mirror property — every
+  number in the answer must be one WE computed — plus two rules the number check cannot reach:
+  a **derived percentage** (≤100, so the small-integer exemption would wave it straight
+  through) and **invented containment**. The second is the defect this guard exists for: the
+  model wrote «٨٠ طلبًا بانتظار الموافقة، ومن بينها ١٢٣ طالبًا», where both figures are ours and
+  correct and the sentence joining them is false. The rule is not «never say منها» —
+  `revenue_summary`'s own facts say it — but that the model may only assert a containment we
+  asserted.
+· **Budget.** The daily USD ceiling was whole-shop, so the two surfaces could switch each other
+  off — an AVAILABILITY bug in both directions. The public ceiling now bounds public spend and
+  `AI_CHAT_ADMIN_DAILY_USD_MAX` (default $2) bounds the console. ⚠️ A caller that does not name
+  its surface keeps the old whole-shop behaviour exactly, so every pre-existing caller and test
+  is unaffected. Both directions are asserted.
+
+**Actions: propose → validate → confirm.** The model returns `{action, params}` and that is a
+suggestion which never reaches the database. `lib/adminActions.js` re-derives everything itself
+— an id must resolve to a real row, a number must be an integer inside a bound written in that
+file (tighter than the equivalent endpoint: the manual screen may pay any bonus a human types,
+a model reading a misheard sentence may not), a date must parse and sit in a sane window. A
+param that fails **kills the proposal rather than being repaired**. The validated proposal is
+then HMAC-signed over `{adminId, action, params, exp}` with a 10-minute TTL, and `/act` verifies
+the signature, the admin identity and the expiry before running anything — without the
+signature a client could post its own `{action, params}` and every validation above would be
+advisory. Six actions, all reversible: extend a rep deadline · set an order cost · approve or
+reject one break · add a bonus · set a production goal.
+
+⚠️ **Permanently excluded, and asserted by test so a future session cannot quietly add them:**
+any approval or rejection of a rep order (HANDOFF ruling 2026-08-14 — that queue holds
+unresolved student↔rep disputes, the damage is social and no revert undoes it) · every DELETE ·
+passwords and the money-gate secret · `verification_mode` (an ordering landmine, not a toggle) ·
+anything customers see · deductions from anyone's pay. Bonuses are in and deductions are out on
+purpose; the asymmetry is the point.
+
+**Suggestions use no model at all** (`lib/adminSuggestions.js`). A suggestion is a claim the
+owner acts on, so every one is a SQL predicate over real rows: free, deterministic, testable,
+and unable to invent a problem or miss one. ⚠️ «بانتظار موافقة الممثل» is deliberately absent
+and the file says why — it looks exactly like a backlog worth clearing, which is why the refusal
+is written down AND asserted.
+
+**Metrics 8 → 22.** Added the staff/attendance/workshop/spend half the owner actually asks
+about. Money metrics stay on `counts.js` vocabulary, so the console and `/admin` agree to the
+dinar. A test runs all 22 against the real schema — `orders.wholesaler_id` does not exist, a
+draft of the suggestions file assumed it did, and only running it found out.
+
+**The nightly push.** `lib/staffReportJob.js` on pg-boss (already running as `loloshop-worker`),
+21:00 Asia/Baghdad, writing one `notifications` row per admin — which `lib/pushOutbox.js` turns
+into a phone push for free, the same path the AI spend warning already uses. ⚠️ Idempotent by
+`NOT EXISTS`, not by trusting the scheduler: a restart or a redelivery must not push the same
+evening twice, and the owner would read a second push as a second day.
+
+**Verified.** 466/466 backend tests (was 427; 39 new) · `tsc` clean · `eslint` 0 errors ·
+`next build` clean with `/admin/assistant` in the route list · all 22 metrics and all 7
+suggestion blocks run against the real dev DB · the console answered a staff question and a
+money question live through the real model, guard passing · **«وافق على كل الطلبات المنتظرة
+موافقة الممثل» and «احذف الممثل» both produced no proposal at all** · a real proposal executed
+end to end (deadline 2026-05-26 → 2026-06-05, `audit_log` row written with the actor and
+`via: admin_ai_console`), and a token with one character flipped was refused. Dev DB restored
+afterwards.
+
+⚠️ **NOT verified: a browser.** Chrome is not running on this laptop and the extension would
+not connect, so `/admin/assistant` has never been opened by a human. The route builds, the page
+compiles into the client bundle and every endpoint it calls is verified by curl — but the
+layout, the RTL table at phone width and the confirm card are unseen. Same gap
+`fix/admin-presence-panel` carries. **Open it once before merging**, since every push to `main`
+auto-deploys.
+
 ## 2026-08-21 (c) — 🧠 The reading layer: the AI proposes, the designer confirms, the sheet stays cheap
 
 Owner ruling that set the shape: **«students are dumb — we fix it from our side»**, and
