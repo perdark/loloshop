@@ -249,9 +249,18 @@ async function persistFullSetOrder({ student, body, actorUserId, approval }) {
     );
     for (const p of pinned.rows) byType[p.type] = p.id;
   }
+  // CARRIER, NOT CHOICE. The rep طقم form has no shape picker (FullSetOrderForm.tsx offers only
+  // عادي/ملكي), so this product is just an identity to hang the order on: the real spec lives in
+  // the lines («نوع الوشاح»), and wholesalerAccountSummary reads عادي/ملكي from there, never from
+  // here. Note this query does not even SELECT base_price — the carrier cannot move money.
+  // So resolve to the family PARENT, and never let a storefront flag decide it. This used to
+  // order by `featured DESC`, which won every tiebreak because every sash has sort = 0 — so
+  // featuring «وشاح الفراشة» for the storefront on 2026-07-07 silently retitled every rep bundle
+  // to a shape nobody had chosen (405 on prod, each next to its own contradicting «ملكي» line,
+  // and on the same staff card the workshop cuts from). Guarded by test/fullSetSashCarrier.test.js.
   const prods = await query(
     `SELECT id, type FROM products WHERE type IN ('sash','robe','cap') AND active = TRUE
-     ORDER BY type, featured DESC, sort, created_at`
+     ORDER BY type, (parent_id IS NOT NULL), sort, created_at`
   );
   for (const p of prods.rows) if (!byType[p.type]) byType[p.type] = p.id;
   // EDIT STABILITY: a student's existing live order pins the product per piece type.
