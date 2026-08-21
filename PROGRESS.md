@@ -117,6 +117,32 @@ at the SHOP rather than at UTC. Its own test caught a real bug on the way in: `n
 is epoch 0, a perfectly valid Date, so a rep with no deadline would have rendered **1970/1/1**
 inside a sentence the owner was about to confirm. Null is now checked before `Date` sees it.
 
+## ✅ DEPLOYED TO PROD 2026-08-21 — verified live
+
+Merged fast-forward to `main` (`08c7180`), CI green on all three jobs, auto-deployed. Verified
+on the box afterwards:
+
+- **Migration 084 applied** — `staff_app_opens` created with its six columns. It did not exist
+  before the deploy (checked first), and `scripts/deploy.sh:17` runs `npm run migrate` *before*
+  the frontend build, so the table existed before the new code served.
+- **The nightly job registered and persisted** — worker log says
+  `[staff-report] scheduled 0 21 * * * Asia/Baghdad`, and `pgboss.schedule` holds the row.
+  Deploy landed at 23:04 Baghdad, so today's 21:00 had already passed: **first push is
+  2026-08-22 21:00**, by which time staff will have opened the app.
+- **First real report**: 8 staff · 6 بصموا · 2 غايبين · 3 لا زالوا بالدوام · 20h23m worked ·
+  205 production actions. Seven suggestions fired.
+- **Storefront «لولو» unaffected** — asked it a live price question through the public endpoint
+  and it answered correctly from the price book, which is the check that matters after splitting
+  the budget.
+
+⚠️ **Today's report reads «6 موظف بصم بس ما فتح التطبيق» and that is an artifact, not a finding.**
+The beacon shipped mid-afternoon; those six stamped in before the code that records an app-open
+existed. The column is only meaningful from 2026-08-22 onward. Do not act on today's row.
+
+**Backup taken first**: `/root/loloshop-prod-2026-08-21-2158.dump` on the VPS — 4.7 MB, 66
+tables with data, `pg_restore -l` reads it cleanly. Prod at the time: 4,310 orders · 2,072
+users · 2,197 plates.
+
 ⚠️ **Still NOT verified: phone width.** Chrome refused to resize the maximized ultrawide window
 (innerWidth stayed 3097 through two attempts) — the same obstacle recorded for the storefront
 assistant on 2026-08-12. No horizontal overflow at desktop width, and the report table sits in

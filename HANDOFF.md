@@ -21,7 +21,7 @@ last verified 2026-08-10 and are unchanged.
 | | |
 |---|---|
 | **Server** | 🚚 **MOVED to `169.58.114.255` (8 GB, shared with RevoArt) on 2026-08-16.** Fronted by RevoArt's `supabase-caddy`, not nginx. Old 2 GB box `142.93.110.202` is stopped-API + forwarder = the rollback. Full detail in the 2026-08-16 PROGRESS entry. |
-| `origin/main` | `f021152` — pushed 2026-08-16, CI green on all three jobs, **auto-deployed to the NEW box** and verified live (assistant answered end-to-end) |
+| `origin/main` | `08c7180` — pushed 2026-08-21, CI green on all three jobs, **auto-deployed** and verified live (migration 084 applied, nightly report scheduled, storefront assistant re-checked) |
 | Eleven-bug tracks | **ALL ELEVEN CLOSED IN CODE.** Deployed: 2·3 (C) · 9·10·11 (A) · 4·5·6 (B) · **7** · **8 part 1**. On `fix/admin-presence-panel`, **unmerged**: **bug 1** + **bug 8 parts 2·3·4**. *(This row said «1, 7, 8 NOT started» until 2026-08-15; 7 and 8-part-1 shipped on 2026-08-14.)* |
 | Migration 077 | ✅ applied to prod AND the dev DB — 3,311 prod rows retired to `skipped` |
 | Migration 080 | ✅ **applied to prod 2026-08-14** — 459 plates moved to their own column, **0** left in `customer_image_url`, 1,885 student photos intact |
@@ -447,6 +447,14 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   ⚠️ **080's backfill is repeated in `db/schema.sql` on purpose**, exactly like 077's — that is
   the file `npm run migrate` applies to a database that already holds the damaged rows. Do not
   tidy it out.
+- **⚠️ `pg_dump` AS THE APP DB USER NOW FAILS ON PROD.** Hit while taking the pre-deploy backup
+  2026-08-21: `permission denied for table _backfill_sash_carrier_20260821`. That scratch table
+  is left over from the 2026-08-21 rep-sash-carrier backfill and is owned by a different role,
+  and `pg_dump` takes an ACCESS SHARE lock on **every** table, so one unreadable table fails the
+  whole dump — including the shop data you actually wanted. **Dump as the superuser instead:**
+  `sudo -u postgres pg_dump -d loloshop -Fc -f /tmp/x.dump` (write to `/tmp`, then `mv` — the
+  `postgres` user cannot write to `/root`). Dropping the leftover backfill table would also fix
+  it, but check with the owner first: it is the rollback evidence for that backfill.
 - **⚠️ THE TWO ANSWER GUARDS ARE OPPOSITE AND MUST NEVER BE MERGED.** `lib/answerGuard.js`
   (storefront) rejects any IQD figure not in the price book; `lib/adminAnswerGuard.js` (console)
   rejects any number NOT in the facts we computed. Point the storefront guard at `/admin` and
@@ -581,25 +589,21 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   `calligraphy_spend_log`, `CALLIG_DAILY_USD_MAX`/`_WARN`, defaults $10/$5 in code). Expected:
   **~$53 → ~$25-30/month at August volume, same quality** — re-check the OpenRouter activity
   page after a week to confirm. Full detail in the 2026-08-18 (b) PROGRESS entry.
-- **⚠️ `feat/admin-ai-console` IS READY AND UNMERGED — 2026-08-21.** «لولو الإدارة»: a full
-  admin page (`/admin/assistant`), the metric catalogue 8 → 22, an action registry the AI can
-  execute only after an explicit تأكيد, a deterministic suggestion feed, staff app-open
-  tracking (**migration 084**) and a nightly staff-report push. 467/467 backend tests (40 new),
-  `tsc`/lint/`next build` clean, every endpoint verified live by curl including a real
-  propose→confirm→execute round trip and a refused tampered token.
-  **Driven in a real browser end to end**: the page renders, a live question answered, and the
-  full propose → تأكيد → execute flow was performed by hand. Doing so found and fixed a real
-  defect (three reps share the spelling «كلية بلاد الرافدين», so the ambiguity refusal listed
-  three identical labels; it now names the rep).
-  ⚠️ **Phone width is still unseen** — Chrome refused to resize the maximized ultrawide window,
-  the same obstacle the assistant hit on 2026-08-12. Look at the suggestion cards, the confirm
-  card and the report table at ~390px. **Every push to `main` auto-deploys**, so open it once first.
-  ⚠️ **Run the migration in the same deploy** — `npm run migrate` applies `db/schema.sql`, which
-  carries 084. Until `staff_app_opens` exists the beacon logs an error and 204s (harmless), but
-  `/admin/staff-daily-report` and four metrics 500.
-  ⚠️ **New env, all optional and safely defaulted in code:** `AI_CHAT_ADMIN_DAILY_USD_MAX` (2.0).
-  · The nightly push needs `loloshop-worker` running — it registers the 21:00 Asia/Baghdad
-  schedule at boot. A scheduling failure is caught and never stops calligraphy consumption.
+- ✅ **`feat/admin-ai-console` MERGED & DEPLOYED 2026-08-21, verified on prod.** «لولو الإدارة»
+  at `/admin/assistant`: metrics 8 → 22, an action registry the AI executes only after an
+  explicit تأكيد, a model-free suggestion feed, staff app-open tracking (**migration 084,
+  applied**) and a nightly staff-report push (**registered: `0 21 * * * Asia/Baghdad`, first
+  fire 2026-08-22 21:00**). 467/467 backend tests, CI green, backup taken first
+  (`/root/loloshop-prod-2026-08-21-2158.dump`). Storefront «لولو» re-checked live and unaffected.
+  ⚠️ **Today's (2026-08-21) report row «بصم بس ما فتح التطبيق» is an ARTIFACT** — the beacon
+  shipped mid-afternoon, so staff stamped before the recording code existed. The column is
+  meaningful from 2026-08-22 on. Do not act on it.
+  ⚠️ **Phone width is still unseen** — Chrome refused to resize the maximized ultrawide window
+  across two attempts, the same obstacle the assistant hit on 2026-08-12. Look at the suggestion
+  cards, the confirm card and the report table at ~390px.
+  ⚠️ New env, optional, defaulted in code: `AI_CHAT_ADMIN_DAILY_USD_MAX` (2.0). Not set on prod;
+  the default applies.
+  Full detail in the 2026-08-21 (d) PROGRESS entry.
 
 - **⚠️ `fix/admin-presence-panel` IS READY AND UNMERGED — 2026-08-15.** Closes the last two
   open bugs (**1**, and **8 parts 2·3·4**), so the eleven-bug board is finished in code.
