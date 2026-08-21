@@ -426,7 +426,12 @@ async function recentTurns({ userId, sessionKey, surface = 'support', limit = 3 
 
 // One completion. `messages` is the standard [{role, content}] array.
 // Never throws for model-quality reasons — only for transport/config/cap failures.
-async function complete({ messages, maxTokens, temperature = 0.3, jsonMode = false }) {
+// `maxOutputCap` is the assistant's own 2–3-sentence ceiling by default. It is a parameter
+// rather than a constant because the calligraphy reader (lib/calligraphySuggest.js) shares this
+// transport and returns a JSON object covering ten lines — under the 300-token assistant cap
+// that JSON came back TRUNCATED, parsed as nothing, and the endpoint answered "0 suggestions"
+// while still paying for the call. Callers that ask for more must say so explicitly.
+async function complete({ messages, maxTokens, temperature = 0.3, jsonMode = false, maxOutputCap = CAPS.maxOutputTokens }) {
   const key = process.env.OPENROUTER_API_KEY;
   if (!key) throw tagged('مفتاح OpenRouter غير مهيأ', 500, 'ERR_OPENROUTER_KEY');
 
@@ -434,7 +439,7 @@ async function complete({ messages, maxTokens, temperature = 0.3, jsonMode = fal
   const body = {
     model,
     messages,
-    max_tokens: Math.min(maxTokens || CAPS.maxOutputTokens, CAPS.maxOutputTokens),
+    max_tokens: Math.min(maxTokens || maxOutputCap, maxOutputCap),
     temperature,
     usage: { include: true },
   };

@@ -11,6 +11,7 @@ import {
   hotspotPixelRect,
 } from "@/lib/gown-hotspots";
 import { panelHasContent, rasterizePanelCanvas } from "@/lib/render-sash-panel";
+import { saveDataUrl } from "@/lib/download";
 
 export type GownCompositeInput = {
   leftCanvas: unknown | null;
@@ -113,18 +114,17 @@ export async function buildGownCompositeDataUrl(
   return off.toDataURL("image/png");
 }
 
-export function triggerPngDownload(dataUrl: string, filename: string): void {
-  const a = document.createElement("a");
-  a.href = dataUrl;
-  a.download = filename;
-  a.click();
-}
-
+/**
+ * ⚠️ Goes through `saveDataUrl`, not a bare `<a download>`. A 300-dpi board is a huge
+ * `data:` URL, and iOS honours `download` on neither a data URL nor anything inside the
+ * app's WebView — the tap NAVIGATED to the image, which is the «صفحة نصف فارغة وفيها
+ * صورة» the staff iPad reported on 2026-08-21. See `lib/download.ts`.
+ */
 export async function exportGownCompositePng(
   input: GownCompositeInput,
   filename: string,
   scale = 2
 ): Promise<void> {
   const dataUrl = await buildGownCompositeDataUrl({ ...input, scale });
-  triggerPngDownload(dataUrl, filename);
+  await saveDataUrl(dataUrl, filename);
 }

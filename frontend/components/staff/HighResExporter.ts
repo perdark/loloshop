@@ -1,4 +1,5 @@
 import { exportGownCompositePng } from "@/lib/render-gown-composite";
+import { saveDataUrl } from "@/lib/download";
 import { rasterizePanelCanvas } from "@/lib/render-sash-panel";
 import {
   HIGH_RES_PANEL_HEIGHT,
@@ -93,7 +94,7 @@ export async function exportHighResCombinedPng(
   filename = "loloshop-sash-300dpi.png"
 ): Promise<void> {
   const dataUrl = await buildHighResCombinedDataUrl(input);
-  triggerDownload(dataUrl, filename);
+  await triggerDownload(dataUrl, filename);
 }
 
 /** Full gown photo with text/images composited on sash hotspots (2× native res) */
@@ -112,12 +113,14 @@ export async function exportHighResPanelPng(
 ): Promise<void> {
   const url = await renderPanelToDataUrl(json, sashColor, fontsUsed);
   if (!url) throw new Error("اللوحة فارغة");
-  triggerDownload(url, filename);
+  await triggerDownload(url, filename);
 }
 
-function triggerDownload(dataUrl: string, filename: string): void {
-  const a = document.createElement("a");
-  a.href = dataUrl;
-  a.download = filename;
-  a.click();
+/**
+ * ⚠️ NOT a bare `<a download>`. iOS ignores the attribute on a `data:` URL (and inside
+ * the app's WebView entirely), so the tap navigated to the image — a white page with the
+ * board in the corner and no way back to the order. See `lib/download.ts`.
+ */
+async function triggerDownload(dataUrl: string, filename: string): Promise<void> {
+  await saveDataUrl(dataUrl, filename);
 }

@@ -15,6 +15,7 @@ import {
   type CreateJobBody,
 } from "@/lib/calligraphy";
 import { getApiErrorMessage } from "@/lib/api";
+import { matchesAr } from "@/lib/arabic";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // «تجزئة» — review BEFORE generation.
@@ -148,7 +149,9 @@ export function RetailReviewBoard({
     return rows.filter((o) =>
       [o.student_name, o.university_name, o.department, o.instagram_username]
         .filter(Boolean)
-        .some((f) => String(f).toLowerCase().includes(q)),
+        // Arabic-fold both sides: «اية» and «آية» are one name typed two ways, and a
+        // raw includes() hid the student under whichever spelling was not used.
+        .some((f) => matchesAr(String(f).toLowerCase(), q)),
     );
   }, [orders, search, showDone]);
 

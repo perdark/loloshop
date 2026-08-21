@@ -1,5 +1,193 @@
 # Progress
 
+## 2026-08-21 (c) — 🧠 The reading layer: the AI proposes, the designer confirms, the sheet stays cheap
+
+Owner ruling that set the shape: **«students are dumb — we fix it from our side»**, and
+**«if it costs a lot more, no»**. So nothing here touches the student's order form.
+
+**Where the money actually is — measured on prod first, and it moved the plan.** Instruction
+text has cost the OpenRouter bill almost nothing: **52 plates ever generated from it, $1.26 of
+$64.91 lifetime, and none since the guard shipped on 2026-08-14**. The cost is downstream —
+**755 non-cancelled order lines** hold a message instead of a name (147 on rep zones, 608
+retail-shaped), **721 of them have no artwork at all**, and **272 are already at التطريز or
+past it**. **645 (85%) are talking about a photo the student attached** and the designer could
+not see it without opening the order.
+
+**An idea killed by measurement.** A deterministic extractor (cut the sentence at the first
+instruction marker, keep the head) was run over all 755: **77 (10%)** produced something
+containing the student's name, **553** produced confident-looking garbage — «الحمدالله مثل» ·
+«شعار الشمس مثل» · «نفس» — and 115 produced nothing. Garbage that passes `isRealName` is worse
+than no suggestion, because it is garbage a tired designer confirms. Defaulting to the
+student's registered name was rejected by the owner for a better reason: many of these are
+deliberately somebody else's name or a title — «المرشدة سرى سعد» · «المحلل محمد حسن».
+
+### What shipped
+
+**1. The photo is on the line.** `wholesalerNames` returns `customer_image_url` and the grab
+row shows a 48px thumbnail that opens full-size. Verified live: 57 thumbnails across 86 rows.
+
+**2. `lib/calligraphySuggest.js` — an AI layer that reads and PROPOSES.** Text in, structured
+JSON out (`text` · `element` · `style` · `note`); it generates nothing and spends no image
+money. Three properties are enforced, not hoped for:
+· **The student's words never reach the image prompt.** `style` must come back as an id from
+  the CLOSED list in `lib/calligraphyStyles.js` or it normalizes to null — otherwise a
+  sentence a stranger typed would be writing our prompt.
+· **A proposal the generator would refuse is dropped**, not offered (same `isRealName` gate).
+· **A model-invented `order_item_id` belongs to nobody** and is discarded. The endpoint reads
+  the text **from the order line**, never from the caller — ids are all the client sends.
+
+**3. The designer confirms every line.** The proposal renders BESIDE the field with the
+student's own words and the photo; «استخدم» is what copies it into the draft — and that press
+is also what marks the line reviewed, so an unread suggestion can never walk a held line past
+the instruction guard.
+
+**4. Styles, on the same sheet, at the same price (migration 083).** «مد الحروف» · «خط أعرض» ·
+«بدون زخرفة». A style is a property of the SHEET: `processNextBatch` now groups pending plates
+by **(variant, style)** — including the cross-job hitchhiker top-up — so ten styled names still
+ride ONE ~$0.10 image (~$0.01 each) instead of buying ten private ones (~$1.00). Mixing styles
+in one image makes the model drift and ruins all ten, and a ruined sheet is a $0.10 re-run.
+
+### Two defects found by using it, both fixed
+
+· **The reader answered nothing while still charging.** `aiChat.complete()` clamped output to
+  the assistant's 300-token ceiling (2–3 sentences), so a JSON object covering ten Arabic lines
+  came back truncated → parsed as nothing → «0 اقتراحات» on a call we had paid for. `complete`
+  now takes an explicit `maxOutputCap` (default unchanged for the assistant) and an unparseable
+  answer is logged instead of swallowed.
+· **Owner's report: «غفران → اقتراح: غفران … what did it change? nothing».** Two fixes: no-op
+  proposals are filtered server-side (compared through `normalizeAr`, so أ/ا alone is not a
+  change) and reported as a count — «N سليم أصلاً» — and the button now reads **only the flagged
+  lines**: «اقرأ التعليمات (7)» instead of all 86 selected. That is 12× less reading per press
+  *and* no rows of noise. When nothing is flagged it still falls back to the whole selection,
+  because the instruction word list is deliberately narrow.
+
+### ⚠️ The «ميم» trap — owner's catch, and the rule it produced
+
+The reader turned «ميم مثل الصورة التي في الاسفل» into text «ميم». That extraction is
+**correct and unwearable**: the student wants the LETTER م drawn like the one in their photo,
+and «ميم» would be stitched as a three-letter word nobody would catch until it was sewn.
+
+**The rule: correctly parsed is not the same as embroiderable.** Letter references are now
+refused deterministically (`isLetterReference` — the 28 letter names, «حرف الميم», «الميم», and
+any single letter, all through `normalizeAr`), never left to the model's judgement, and the
+system prompt names the case too. Every suggestion now carries a `kind`:
+· `name` — there is text; «استخدم» fills the field.
+· `letter` — a letter or shape. **Never offered as text.** The photo is the reference.
+· `photo` — «مثل الصورة»: the attached image IS the design.
+· `unclear` — no name and no photo. A human has to ask the student.
+The row shows the kind as a chip with «افتح الصورة» instead of a «استخدم» button.
+
+**And the reassuring half:** a `photo` line is not a blank piece downstream.
+`productionController`'s `artworkOf` is `plate_image_url || customer_image_url`, so the
+embroidery station already shows the student's own image when no plate exists. What was
+missing was telling the designer that this is the answer rather than a gap.
+
+### Cost, measured not estimated
+
+Eight real prod-snapshot lines through the live endpoint: **$0.0016**, ~$0.0002/line, and it is
+ledgered under `kind='suggest'` in `calligraphy_spend_log` — the **same** `CALLIG_DAILY_USD_MAX`
+ceiling as the image spend, so it can never run away unwatched. All 755 existing lines would
+cost about **$0.15** once. One calligraphy sheet ≈ 600 readings.
+
+Quality on those eight: «الاستاذة نبأ ضياء اوريد نفس الخط…» → «الاستاذة نبأ ضياء» · «صفحه سُهاد
+عُمِر قاسُم وصفحه ثانيه مثل بصورة» → «سُهاد عُمِر قاسُم» · «تطريز هذه الصورة» → *no name*, with
+the request explained. Nothing invented.
+
+**Also fixed in passing:** the grab-row checkbox built its next Set from the render closure, so
+two clicks inside one React tick lost one. Functional update now, like «تحديد الكل» beside it.
+
+**Gates:** 424/424 backend tests before this batch, 107/107 on the affected files after ·
+7 new tests in `test/calligraphySuggest.test.js` · `tsc`, `eslint`, `next build` clean · driven
+end to end in a real browser against the dev DB.
+
+⚠️ **Migration 083 must ride the same deploy as this code.** It is in `db/schema.sql` too, so
+the deploy's `npm run migrate` covers it — same ordering rule 077/078/079/080/082 already have.
+
+## 2026-08-21 (b) — 📥 The iPad «تنزيل» buttons · rep lines editable before generation · Arabic search
+
+Three things the designers hit on the iPad, reported by the owner and by مضر. Branch
+`fix/rep-sash-carrier` (same working branch), **unmerged**. 418/418 backend tests, `tsc`,
+`eslint` and `next build` clean; driven in a real browser against the dev DB.
+
+### 1. «تنزيل» opened an empty page, or a half-empty page holding one photo
+
+Two separate defects, both measured against prod, not guessed:
+
+* **«تنزيل الكل (ZIP)» 401s on every platform.** It did `window.location.href =
+  calDownloadUrl(jobId)`. Every `/api/calligraphy/*` route is behind `authRequired`, which
+  reads the **Authorization header only** — and a browser navigation sends no headers.
+  Measured live: `GET …/jobs/…/download` with no header → **401, 45 bytes of
+  `{"error":"غير مصرح"}`**, with the Bearer header → **200 `application/zip`, 855,198 B**.
+  The workbench was being *replaced* by that 45-byte page. That is the «صفحة فارغة».
+* **Every per-image «تنزيل» was `<a href download>`.** The attribute is inert inside the iOS
+  WebView shell (WKWebView has no downloader wired to it) and on the `data:` URLs the
+  300-dpi board exporter produces, so the tap NAVIGATES to the image — a white page with the
+  artwork in the corner and no way back. That is the «صفحة نصف فارغة وفيها صورة».
+  A third, quieter one: the folder fallback revoked its blob URL on the line **after**
+  `a.click()`, which Safari reads as "cancel".
+
+**Fix — one helper, `frontend/lib/download.ts`,** and now the *only* way this app hands over a
+file (`grep` for `download=` / `a.download` finds nothing else): authenticated bytes are
+fetched through axios and saved as a blob · inside the iOS shell it goes through the **share
+sheet** (which is also the fastest route to WhatsApp) · everywhere else a `blob:` URL, which is
+always same-origin so `download` is honoured, with a **late** revoke · a CORS/offline failure
+falls back to the plain link, so the floor is the old behaviour, never worse.
+
+Converted: the plate card + preview modal + both job ZIPs + the folder fallback
+(`CalligraphyTool`), the 300-dpi board and gown exports (`HighResExporter`,
+`render-gown-composite`), `DesignGallery`, `StaffOrderBreakdown`, and the staff order page's
+attachments — the last four through a shared `components/ui/DownloadLink.tsx`.
+**«لوحات بدون طلب» is the same `PlateCard`**, so it is covered; verified by clicking one.
+
+**Bonus the fix pays for itself with:** plates are stored under a 32-char content hash, so a
+designer's Downloads folder was N files nobody could tell apart. The saved file is now named
+after the student and the zone — verified on disk: `الأستاذ أحمد فراس الأمير أمامي.png`.
+
+### 2. A ممثل's lines are now editable BEFORE the paid generation (مضر's report)
+
+Rep students type instructions into the embroidery-name field exactly like retail students do
+— *«خلي التطريز محمد مع حرف N»* — and the generator embroidered the sentence. The owner rule
+from 2026-07-21 («ممثل = generate in bulk then review · تجزئة = review first») rested on rep
+forms producing clean names. They do not.
+
+The grab list now renders **an editable field per line** instead of a read-only span, with the
+student's own words kept underneath as «كلام الطالب: …» plus «استرجاع», exactly like
+`RetailReviewBoard`. Same two rules as that board: the draft is a **render draft** — it rides
+with the plate and is never written back to `order_items.customer_text` — and **a line the
+designer retyped counts as reviewed**, so it stops being held.
+
+That last part needed a backend change: `reviewed` was job-level only, and flagging the whole
+job would have waved through every untouched line in the same batch. It is now settable
+**per item** (`backend/controllers/calligraphyController.js`), which grants a crafted call no
+new power — the job-level flag was always settable by the same caller. Covered by
+`backend/test/calligraphyReviewedLine.test.js` (4 tests, incl. "the corrected line generates
+while the untouched instruction beside it is still dropped" and "a per-item flag cannot rescue
+junk"). Drafts survive navigation in sessionStorage, capped like the «لصق أسماء» draft is.
+The row counter now reads «N محدد · N لم يُولَّد بعد · N نص مُصحَّح · N تعليمات بحاجة تصحيح» —
+verified live: editing one held line moved it 8 → 7.
+
+### 3. «سجى» and «سجي» are the same name and the search disagreed
+
+Owner's report, verbatim: *«press سجى or سجى»* — the two look identical and are different code
+points (ى U+0649 · ي U+064A). Every name search was a raw `includes()`, so which key the
+designer pressed decided whether a student existed.
+
+**Measured on the prod snapshot: 318 of 1,147 student names (28%) and 226 of 458 plates carry
+at least one variant character** (أ إ آ ى ة ؤ ئ or a diacritic) — «سرى رحمن» · «اية علي احمد» ·
+«طيبة فراس» · «زبيدة أكبر». Verified in the browser: searching «سري» matched **0** plates
+before and **2** after («سرى», «المرشدة سرى سعد»).
+
+`frontend/lib/arabic.ts` is the byte-for-byte twin of the server's `normalizeAr`
+(`backend/lib/calligraphyText.js`) plus a `matchesAr()` predicate, and it replaced the raw
+`includes()` in **all nine** places that search Arabic names: the plates grid, the تجزئة board,
+both lists on the rep's students page, `/design-support`, the rep's own students page (phone
+audience), the shelf map, and both `StationConsole` filters.
+
+Same pass, same screen: a search hit inside «لوحات بدون طلب» used to drag **all 58** orphan
+plates onto the screen, because that bucket is not an order and was matched as one group. It is
+now filtered per plate; a matching real ORDER still shows all of its zones, which is correct —
+they belong together.
+
 ## 2026-08-21 — 🎀 A featured sash was renaming every rep bundle («وشاح الفراشة» vs «ملكي»)
 
 Reported by the admin as *«wholesaler students see وشاح الفراشى not وشاح ملكي»*, seen from the

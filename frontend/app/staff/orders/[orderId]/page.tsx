@@ -34,6 +34,7 @@ import {
 } from "@/lib/staff";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
+import { DownloadLink } from "@/components/ui/DownloadLink";
 import { getApiErrorMessage } from "@/lib/api";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 import type { ProductionOrderDetail, ProductionOrderItem } from "@/lib/staff-types";
@@ -2208,13 +2209,13 @@ function ProductionOrderDetailContent() {
                         loading="lazy"
                       />
                     </div>
-                    <a
-                      href={logoUrl}
-                      download
-                      className="mt-1 inline-flex min-h-[44px] items-center justify-center rounded-xl border border-orange-ink/30 bg-surface-sink px-4 py-2 text-sm font-medium text-orange-ink transition-colors hover:bg-orange-ink/10"
+                    <DownloadLink
+                      url={logoUrl}
+                      name={`${order?.student_name ?? "طلب"} شعار الجامعة`}
+                      className="mt-1 inline-flex min-h-[44px] items-center justify-center rounded-xl border border-orange-ink/30 bg-surface-sink px-4 py-2 text-sm font-medium text-orange-ink transition-colors hover:bg-orange-ink/10 disabled:opacity-60"
                     >
                       تنزيل الشعار
-                    </a>
+                    </DownloadLink>
                   </div>
                 )}
                 {extraUrl && (
@@ -2230,13 +2231,13 @@ function ProductionOrderDetailContent() {
                         loading="lazy"
                       />
                     </div>
-                    <a
-                      href={extraUrl}
-                      download
-                      className="mt-1 inline-flex min-h-[44px] items-center justify-center rounded-xl border border-orange-ink/30 bg-surface-sink px-4 py-2 text-sm font-medium text-orange-ink transition-colors hover:bg-orange-ink/10"
+                    <DownloadLink
+                      url={extraUrl}
+                      name={`${order?.student_name ?? "طلب"} صورة إضافية`}
+                      className="mt-1 inline-flex min-h-[44px] items-center justify-center rounded-xl border border-orange-ink/30 bg-surface-sink px-4 py-2 text-sm font-medium text-orange-ink transition-colors hover:bg-orange-ink/10 disabled:opacity-60"
                     >
                       تنزيل الصورة
-                    </a>
+                    </DownloadLink>
                   </div>
                 )}
               </div>

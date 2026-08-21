@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { DownloadLink } from "@/components/ui/DownloadLink";
 
 interface GalleryEntry {
   title: string;
@@ -92,13 +93,11 @@ export function DesignGallery({
               <span className="min-w-0 truncate text-xs font-semibold text-ink-soft">
                 {entry.title}
               </span>
-              <a
-                href={entry.url}
-                download
-                className="shrink-0 rounded-full border border-line bg-beige px-2.5 py-1 text-[11px] font-semibold text-ink transition-colors hover:border-orange/40 hover:text-orange-ink"
-              >
-                تنزيل
-              </a>
+              <DownloadLink
+                url={entry.url}
+                name={entry.title}
+                className="shrink-0 rounded-full border border-line bg-beige px-2.5 py-1 text-[11px] font-semibold text-ink transition-colors hover:border-orange/40 hover:text-orange-ink disabled:opacity-60"
+              />
             </figcaption>
           </figure>
         ))}
@@ -136,13 +135,11 @@ export function DesignGallery({
               />
               <figcaption className="mt-3 flex items-center justify-center gap-3">
                 <span className="text-sm font-semibold text-white">{open.title}</span>
-                <a
-                  href={open.url}
-                  download
-                  className="rounded-full bg-white/15 px-4 py-1.5 text-sm font-semibold text-white transition-colors hover:bg-white/30"
-                >
-                  تنزيل
-                </a>
+                <DownloadLink
+                  url={open.url}
+                  name={open.title}
+                  className="min-h-11 rounded-full bg-white/15 px-4 py-1.5 text-sm font-semibold text-white transition-colors hover:bg-white/30 disabled:opacity-60"
+                />
               </figcaption>
             </figure>
           </div>,

@@ -11,6 +11,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { StatCard } from "@/components/ui/StatCard";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { matchesAr } from "@/lib/arabic";
 
 type CompletionFilter = "" | "completed" | "not_completed";
 
@@ -83,8 +84,9 @@ export default function WholesalerStudentsPage() {
   const filtered = useMemo(() => {
     let out = rows;
     if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      out = out.filter((r) => r.name.toLowerCase().includes(q));
+      // The rep searches 100+ of their own students on a phone; «اية» vs «آية» must
+      // not decide whether the student exists. See lib/arabic.ts.
+      out = out.filter((r) => matchesAr(r.name, search));
     }
     if (completion) {
       const wantCompleted = completion === "completed";

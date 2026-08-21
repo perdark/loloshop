@@ -23,6 +23,8 @@ export interface CalPlate {
   error: string | null;
   variant: CalVariant;
   element_text: string | null;
+  /** Style id from the closed list, or null for the shop default (migration 083). */
+  style?: string | null;
   /** Paid regenerations already spent on this plate. The server refuses past CAL_REROLL_LIMIT. */
   reroll_count?: number;
   /**
@@ -96,6 +98,40 @@ export interface CalGrabRow {
    * paid generator.
    */
   text_is_instruction?: boolean;
+  /**
+   * The student's OWN uploaded reference (never the generated plate — migration 080).
+   * 85% of the lines that read as instructions are talking about this image, and the designer
+   * used to have to open the order to see it.
+   */
+  customer_image_url?: string | null;
+}
+
+/** One entry of the CLOSED style list — served by the API so this file never holds a
+ *  second copy of `backend/lib/calligraphyStyles.js` to drift from. */
+export interface CalStyle {
+  id: string;
+  label: string;
+  hint: string;
+}
+
+/** What the reading layer proposes for one line. Nothing is generated until a designer
+ *  presses «استخدم» — a suggestion is a draft, never an instruction to spend. */
+export interface CalSuggestion {
+  order_item_id: string;
+  /** The text to embroider, or null when the line genuinely holds no name. */
+  text: string | null;
+  element: string | null;
+  style: string | null;
+  /**
+   * What the line IS, which decides what the designer can do with it:
+   * `name` there is text · `letter` the student points at a letter/shape («ميم مثل الصورة» —
+   * never offered as text, it would be stitched as a three-letter word) · `photo` the attached
+   * image is the design (the embroidery station already falls back to it) · `unclear` someone
+   * has to ask the student.
+   */
+  kind: "name" | "letter" | "photo" | "unclear";
+  note: string;
+  original_text: string;
 }
 
 export interface CreateJobItem {
@@ -104,6 +140,16 @@ export interface CreateJobItem {
   order_item_id?: string | null;
   variant?: CalVariant;
   element_text?: string | null;
+  /** Style id from the closed list (`getCalStyles`). Plates are batched by (zone, style), so a
+   *  styled name still rides a shared sheet — it does not buy a private image. */
+  style?: string | null;
+  /**
+   * «A designer read THIS line and typed this text.» Per-line twin of the job-level
+   * `reviewed` below — set on the ممثل lines the designer corrected in the grab list, so
+   * the instruction guard lets them through without also waving through the untouched
+   * lines riding in the same batch.
+   */
+  reviewed?: boolean;
 }
 
 export interface CreateJobBody {
@@ -154,6 +200,25 @@ export async function getCalNames(id: string): Promise<CalGrabRow[]> {
   const { data } = await api.get<{ data: CalGrabRow[] }>(
     `/calligraphy/wholesalers/${id}/names`
   );
+  return data.data;
+}
+
+export async function getCalStyles(): Promise<CalStyle[]> {
+  const { data } = await api.get<{ data: CalStyle[] }>("/calligraphy/styles");
+  return data.data;
+}
+
+/**
+ * Ask the reading layer what these lines mean. Costs ~$0.00006 a line (text, not an image) and
+ * generates nothing. Only ids travel — the server reads the text from the order line itself, so
+ * this can never be used to put arbitrary text in front of the model on the shop's bill.
+ */
+export async function suggestCalText(
+  orderItemIds: string[]
+): Promise<{ items: CalSuggestion[]; cost_usd: number; unchanged: number }> {
+  const { data } = await api.post<{
+    data: { items: CalSuggestion[]; cost_usd: number; unchanged: number };
+  }>("/calligraphy/suggest", { order_item_ids: orderItemIds });
   return data.data;
 }
 
@@ -250,8 +315,21 @@ export async function platesZipBlob(ids: string[]): Promise<Blob> {
   return data as Blob;
 }
 
-export function calDownloadUrl(jobId: string, sheets = false): string {
-  return `${API_BASE}/api/calligraphy/jobs/${jobId}/download${sheets ? "?sheets=1" : ""}`;
+/**
+ * The whole job as a ZIP. Fetched through axios — NOT linked to.
+ *
+ * ⚠️ This used to be `calDownloadUrl()`, handed to `window.location.href`. Every
+ * `/calligraphy/*` route is behind `authRequired`, which reads the Bearer header only,
+ * and a browser navigation sends no headers: the designer got `401 غير مصرح` rendered as
+ * a blank page WHERE THE WORKBENCH USED TO BE. Keep the token on the request — see
+ * `lib/download.ts` for the rest of that story.
+ */
+export async function calJobZipBlob(jobId: string, sheets = false): Promise<Blob> {
+  const { data } = await api.get(`/calligraphy/jobs/${jobId}/download`, {
+    params: sheets ? { sheets: 1 } : undefined,
+    responseType: "blob",
+  });
+  return data as Blob;
 }
 
 // ─── Queue ───────────────────────────────────────────────────────────────────

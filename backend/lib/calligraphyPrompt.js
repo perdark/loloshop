@@ -1,4 +1,9 @@
-// backend/lib/calligraphyPrompt.js — variant-aware calligraphy prompt builders.
+// backend/lib/calligraphyPrompt.js — variant- and style-aware calligraphy prompt builders.
+//
+// ⚠️ Nothing a STUDENT typed ever reaches these strings. A style arrives as an id from the
+// closed list in lib/calligraphyStyles.js and `element` is a single motif word the designer
+// approved. The student's own sentence stays on the order line where it belongs.
+const { styleClause } = require('./calligraphyStyles');
 
 const BASE = [
   'Elegant Arabic Thuluth calligraphy, pure black ink on a PURE FLAT WHITE (#FFFFFF) background.',
@@ -15,13 +20,18 @@ const ORNAMENT = {
   cap:   'Add small floated decorative ornaments around the words.',
 };
 
-function styleFor(variant) {
-  return [BASE, ORNAMENT[variant] || ORNAMENT.front, NEG].join(' ');
+// The style knob (lib/calligraphyStyles.js) is a SHEET-level clause, not a per-name one: the
+// batcher groups pending plates by (variant, style) so one sheet is always one style. Mixing
+// several styles inside one image makes the model drift and ruins all ten names — and a ruined
+// sheet is a $0.10 re-run, not a free retry.
+function styleFor(variant, style = null) {
+  const extra = styleClause(style);
+  return [BASE, ORNAMENT[variant] || ORNAMENT.front, extra, NEG].filter(Boolean).join(' ');
 }
 
 // buildSheetPrompt accepts items as plain strings OR { text, element } objects.
 // element is an optional decorative motif word drawn beside the name on the SAME line.
-function buildSheetPrompt(items, variant = 'front') {
+function buildSheetPrompt(items, variant = 'front', style = null) {
   // Normalize: plain string → { text, element: null }
   const normalized = items.map((it) =>
     typeof it === 'string'
@@ -37,7 +47,7 @@ function buildSheetPrompt(items, variant = 'front') {
   }).join('\n');
 
   return [
-    styleFor(variant),
+    styleFor(variant, style),
     `Write each of the following ${normalized.length} Arabic names as its own separate centered line,`,
     'stacked vertically top to bottom, and SPREAD THEM OUT to fill the whole height of the image.',
     'CRITICAL — line separation: leave a VERY LARGE empty white gap between every consecutive line,',
@@ -51,9 +61,9 @@ function buildSheetPrompt(items, variant = 'front') {
   ].join('\n');
 }
 
-function buildSinglePrompt(name, variant = 'front', element = null) {
+function buildSinglePrompt(name, variant = 'front', element = null, style = null) {
   const parts = [
-    styleFor(variant),
+    styleFor(variant, style),
     'Write the following single Arabic name as one centered line. Spell it EXACTLY as written,',
     `do not add or remove any letters or words: ${name}`,
   ];

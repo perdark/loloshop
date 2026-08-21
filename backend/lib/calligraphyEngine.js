@@ -19,6 +19,9 @@ function toPlate(r) {
   return {
     id: r.id, render_text: r.render_text, status: r.status,
     variant: r.variant, element_text: r.element_text,
+    // Style id from the closed list, or null for the shop default (migration 083). The card
+    // shows it so a designer can see WHY two plates of the same zone look different.
+    style: r.style || null,
     plate_path: r.plate_path, sheet_path: r.sheet_path,
     student_id: r.student_id, order_item_id: r.order_item_id,
     linked: !!r.linked_at, cost_usd: Number(r.cost_usd || 0), error: r.error,
@@ -111,16 +114,23 @@ async function processNextBatch(jobId, req = null) {
   // Pick the variant of the OLDEST pending plate, then take up to BATCH of that variant.
   // This guarantees one sheet = one prompt (front and back must never share a sheet).
   const { rows: head } = await query(
-    `SELECT variant FROM calligraphy_plates WHERE job_id=$1 AND status='pending' ORDER BY created_at LIMIT 1`,
+    `SELECT variant, style FROM calligraphy_plates WHERE job_id=$1 AND status='pending' ORDER BY created_at LIMIT 1`,
     [jobId]);
   if (!head.length) {
     const c = await jobCounts(jobId);
     return { data: { processed: 0, ...c, remaining: c.pending, job_cost: await jobCost(jobId), plates: [] } };
   }
   const variant = head[0].variant;
+  // STYLE is part of the sheet identity, not just the variant (migration 083). One sheet is one
+  // prompt, and a prompt carries exactly one style clause — mixing «مد الحروف» with the default
+  // in one image makes the model drift across all ten names, and a ruined sheet is a $0.10
+  // re-run, not a free retry. Grouping costs nothing: ten styled names still ride ONE image.
+  const style = head[0].style || null;
   const { rows: batch } = await query(
-    `SELECT * FROM calligraphy_plates WHERE job_id=$1 AND status='pending' AND variant=$3 ORDER BY created_at LIMIT $2`,
-    [jobId, BATCH, variant]);
+    `SELECT * FROM calligraphy_plates
+      WHERE job_id=$1 AND status='pending' AND variant=$3 AND COALESCE(style,'') = COALESCE($4,'')
+      ORDER BY created_at LIMIT $2`,
+    [jobId, BATCH, variant, style]);
   if (!batch.length) {
     const c = await jobCounts(jobId);
     return { data: { processed: 0, ...c, remaining: c.pending, job_cost: await jobCost(jobId), plates: [] } };
@@ -142,8 +152,9 @@ async function processNextBatch(jobId, req = null) {
       `SELECT * FROM calligraphy_plates
         WHERE status='pending' AND variant=$1 AND job_id <> $2
           AND COALESCE(model,'') = COALESCE($3,'')
+          AND COALESCE(style,'') = COALESCE($5,'')
         ORDER BY created_at LIMIT $4`,
-      [variant, jobId, batch[0].model || null, BATCH - batch.length]);
+      [variant, jobId, batch[0].model || null, BATCH - batch.length, style]);
     hitchhikers = rows;
   }
   const sheetBatch = batch.concat(hitchhikers);
@@ -178,7 +189,7 @@ async function processNextBatch(jobId, req = null) {
     attemptsUsed = attempt;
     let gen;
     try {
-      gen = await generateImage({ model, prompt: buildSheetPrompt(names, promptVariant(variant)) });
+      gen = await generateImage({ model, prompt: buildSheetPrompt(names, promptVariant(variant), style) });
     } catch (err) {
       // Only the requesting job's plates fail — nothing was paid for THIS attempt, and a
       // hitchhiker left pending simply rides its own job's next batch instead.

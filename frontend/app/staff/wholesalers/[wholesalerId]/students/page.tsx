@@ -25,6 +25,7 @@ import { useRequireAuth } from "@/hooks/useRequireAuth";
 import { formatIQD } from "@/lib/format";
 import { Count } from "@/components/ui/Count";
 import { CalculationDetails } from "@/components/admin/CalculationDetails";
+import { matchesAr } from "@/lib/arabic";
 
 // ─── Shared status pill (warm brand palette, no blue/purple) ──────────────────
 const STATUS_PILL: Partial<Record<OrderStatus, string>> = {
@@ -349,8 +350,10 @@ function OrdersTab({
     else if (view === "mine" && myStageSet.size > 0)
       out = out.filter((o) => myStageSet.has(o.status));
     if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      out = out.filter((o) => o.studentName.toLowerCase().includes(q));
+      // Spelling-insensitive — see lib/arabic.ts. 28% of student names carry a
+      // variant character («سرى» vs «سري»), and a raw includes() hid every one of
+      // them from whoever typed the other spelling.
+      out = out.filter((o) => matchesAr(o.studentName, search));
     }
     return out;
   }, [orders, view, search, myStageSet]);
@@ -907,8 +910,7 @@ function RosterTab({
   const filtered = useMemo(() => {
     let out = rows;
     if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      out = out.filter((r) => r.name.toLowerCase().includes(q));
+      out = out.filter((r) => matchesAr(r.name, search));
     }
     if (statusFilter) out = out.filter((r) => r.status === statusFilter);
     if (completion) {

@@ -11,15 +11,18 @@ import { Modal } from "@/components/ui/Modal";
 import { RetailReviewBoard } from "@/components/calligraphy/RetailReviewBoard";
 import { getApiErrorMessage } from "@/lib/api";
 import { isAuthenticated, getUser } from "@/lib/auth";
+import { safeFileName, saveFile, saveFromUrl } from "@/lib/download";
+import { matchesAr } from "@/lib/arabic";
 import {
   absUrl,
   CAL_REROLL_LIMIT,
-  calDownloadUrl,
+  calJobZipBlob,
   createCalJob,
   generateFromQueue,
   getCalJob,
   getCalNames,
   getCalQueue,
+  getCalStyles,
   getCalWholesalers,
   getOrdersZones,
   getRecentPlates,
@@ -29,6 +32,7 @@ import {
   processCalJob,
   rerollPlate,
   sendCalOrder,
+  suggestCalText,
   VARIANT_LABEL,
   type CalJob,
   type CalOrderZones,
@@ -36,6 +40,8 @@ import {
   type CalQueueHeldItem,
   type CalQueueZone,
   type CalGrabRow,
+  type CalStyle,
+  type CalSuggestion,
   type CalPlate,
   type CalVariant,
   type CalWholesaler,
@@ -75,6 +81,17 @@ function StatusPill({ status }: { status: CalPlate["status"] | string }) {
   );
 }
 
+/**
+ * What the saved file is called. `plate_path` is a 32-char content hash, so a designer
+ * who downloaded ten plates got ten files they had to open one by one to tell apart.
+ * The zone rides along because a student usually has more than one.
+ */
+function plateFileName(plate: Pick<CalPlate, "student_name" | "render_text" | "variant">): string {
+  const who = plate.student_name || plate.render_text || "لوحة";
+  const zone = VARIANT_LABEL[plate.variant] ?? plate.variant;
+  return safeFileName(`${who} ${zone}`, "png", "لوحة");
+}
+
 // ─── Plate card ──────────────────────────────────────────────────────────────
 
 function PlateCard({
@@ -96,6 +113,7 @@ function PlateCard({
   // card asks for it instead of offering a button that spends money to change nothing.
   const needsText = plate.text_is_instruction === true;
   const [fixText, setFixText] = useState("");
+  const [saving, setSaving] = useState(false);
   const rerollsUsed = plate.reroll_count ?? 0;
   const atRerollLimit = rerollsUsed >= CAL_REROLL_LIMIT;
 
@@ -148,6 +166,18 @@ function PlateCard({
           <span className="rounded-full bg-beige px-2 py-0.5 text-[11px] text-ink-soft border border-line">
             {VARIANT_LABEL[plate.variant] ?? plate.variant}
           </span>
+          {/* Why two plates of the same zone can look different. */}
+          {plate.style && (
+            <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] text-sky-800">
+              {plate.style === "extend"
+                ? "مد الحروف"
+                : plate.style === "bold"
+                  ? "خط أعرض"
+                  : plate.style === "plain"
+                    ? "بدون زخرفة"
+                    : plate.style}
+            </span>
+          )}
           {plate.element_text && (
             <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] text-amber-700 border border-amber-200">
               + {plate.element_text}
@@ -194,13 +224,24 @@ function PlateCard({
 
         {plate.status === "done" && imgUrl && (
           <>
-            <a
-              href={imgUrl}
-              download
-              className="inline-flex min-h-11 items-center justify-center rounded-full border border-line bg-beige px-3.5 py-1.5 text-xs font-semibold text-ink transition-all duration-200 hover:border-orange/40 hover:text-orange-ink"
+            <Button
+              size="sm"
+              variant="ghost"
+              loading={saving}
+              onClick={async () => {
+                setSaving(true);
+                try {
+                  const out = await saveFromUrl(imgUrl, plateFileName(plate));
+                  if (out !== "cancelled") toast.success("تم تنزيل الصورة");
+                } catch {
+                  toast.error("تعذّر تنزيل الصورة");
+                } finally {
+                  setSaving(false);
+                }
+              }}
             >
               تنزيل
-            </a>
+            </Button>
             <Button
               size="sm"
               variant="ghost"
@@ -505,6 +546,8 @@ interface StoredCalligraphyState {
    *  at the top is the most disorienting part of returning from an order page —
    *  both hops are `<Link>` pushes, which Next always scrolls to top. */
   scrollY?: number;
+  /** Designer-corrected embroidery text for a ممثل's lines, keyed by order_item_id. */
+  grabDrafts?: Record<string, string>;
 }
 const STORAGE_KEY = "loloshop-calligraphy";
 
@@ -533,6 +576,20 @@ function validVariant(v: CalVariant | undefined): CalVariant {
  *  quota and take the (more important) filter/scroll snapshot down with it. ~40k chars
  *  is far past any real batch — a 500-name list is ~10k. */
 const MAX_DRAFT_CHARS = 40000;
+
+/** Same bound, applied to the per-line drafts: a ممثل can carry hundreds of rows and the
+ *  snapshot must never grow big enough to cost us the filter/scroll state beside it. */
+function boundDrafts(drafts: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  let budget = MAX_DRAFT_CHARS;
+  for (const [id, text] of Object.entries(drafts)) {
+    if (budget <= 0) break;
+    const t = text.slice(0, 200);
+    out[id] = t;
+    budget -= t.length + id.length;
+  }
+  return out;
+}
 
 // ─── Main tool ─────────────────────────────────────────────────────────────────
 // Shared by the admin page (`/admin/calligraphy`) and the designer/staff page
@@ -589,6 +646,28 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
   );
   // element_text per order_item_id — only used for cap rows in wholesaler mode
   const [capElements, setCapElements] = useState<Record<string, string>>({});
+  // ── the designer's corrected embroidery text, per order_item_id ──────────────
+  // The owner rule this relaxes (2026-07-21): «ممثل = generate in bulk then review ·
+  // تجزئة = review first». It rested on rep students producing clean names — مضر
+  // reported 2026-08-21 that they do not: they type instructions into the same field
+  // («خلي التطريز محمد مع حرف N») and the generator embroidered the sentence. The
+  // designer can now fix the line BEFORE it is paid for, exactly like the retail board.
+  //
+  // Same two rules as RetailReviewBoard: the draft is a RENDER draft — it rides with
+  // the plate and is never written back to the student's own words — and a line the
+  // designer retyped counts as read, so it may be generated even if the instruction
+  // guard flagged the original.
+  const [textDrafts, setTextDrafts] = useState<Record<string, string>>(stored.grabDrafts ?? {});
+  // Style id per order_item_id, from the closed list the API serves. Null/absent = the shop
+  // default. Plates batch by (zone, style), so picking one does NOT buy a private image.
+  const [styleChoice, setStyleChoice] = useState<Record<string, string>>({});
+  const [styles, setStyles] = useState<CalStyle[]>([]);
+  // ── the AI reading layer ────────────────────────────────────────────────────
+  // It PROPOSES; it never generates and never spends image money. A proposal sits beside the
+  // student's own words until the designer presses «استخدم» — which is also what marks the
+  // line reviewed, so an unread suggestion can never let a held line through the guard.
+  const [suggestions, setSuggestions] = useState<Record<string, CalSuggestion>>({});
+  const [suggesting, setSuggesting] = useState(false);
 
   // ── queue ────────────────────────────────────────────────────────────────────
   const [queue, setQueue] = useState<CalQueue | null>(null);
@@ -631,6 +710,10 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
 
   // ── full-size plate preview (click a result) ─────────────────────────────────
   const [preview, setPreview] = useState<CalPlate | null>(null);
+  const [previewSaving, setPreviewSaving] = useState(false);
+  // The student's reference photo, opened full-size from a grab row.
+  const [photoPreview, setPhotoPreview] = useState<{ url: string; name: string } | null>(null);
+  const [zipSaving, setZipSaving] = useState<"plates" | "sheets" | null>(null);
 
   // ── plate compositor (overlay editor) ────────────────────────────────────────
   const [compositorPlate, setCompositorPlate] = useState<CalPlate | null>(null);
@@ -705,6 +788,7 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
       mode,
       typedVariant,
       typedText: typedText.slice(0, MAX_DRAFT_CHARS),
+      grabDrafts: boundDrafts(textDrafts),
     };
     persistSnapshot();
   }, [
@@ -716,6 +800,7 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
     mode,
     typedVariant,
     typedText,
+    textDrafts,
     persistSnapshot,
   ]);
 
@@ -1014,6 +1099,89 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
     }
   }
 
+  // ── the designer's draft for one ممثل line ───────────────────────────────────
+  // `renderTextOf` is what actually gets embroidered; `r.render_text` (the student's own
+  // words) stays untouched on screen and in the database as the reference of record.
+  const renderTextOf = useCallback(
+    (r: CalGrabRow) => (textDrafts[r.order_item_id] ?? r.render_text).trim(),
+    [textDrafts]
+  );
+  const isDraftEdited = useCallback(
+    (r: CalGrabRow) => renderTextOf(r) !== r.render_text.trim(),
+    [renderTextOf]
+  );
+
+  // The closed style list, fetched once. A failure is silent: the picker simply does not
+  // appear and everything generates in the shop default, which is the old behaviour.
+  useEffect(() => {
+    let alive = true;
+    getCalStyles()
+      .then((list) => { if (alive) setStyles(list); })
+      .catch(() => { /* default-only is a fine degradation */ });
+    return () => { alive = false; };
+  }, []);
+
+  // ── «اقرأ النصوص» — the AI reading layer over the SELECTED lines ─────────────
+  // Sends ids only; the server reads the text off the order line. Costs ~$0.00006 per line
+  // (text, not an image) and is ledgered under the same daily ceiling as the generator.
+  async function runSuggest() {
+    const untouched = grabRows.filter(
+      (r) => checkedIds.has(r.order_item_id) && !textDrafts[r.order_item_id]
+    );
+    // Read the lines the shop actually has a doubt about, not every selected name. Two
+    // reasons, and the cheaper one is not the important one: reading is billed per line, but
+    // more than that, a clean «غفران» comes back as «غفران» — a row of noise the designer has
+    // to read and dismiss. When nothing is flagged, fall back to the whole selection, because
+    // the instruction word list is deliberately narrow and misses some real requests.
+    const held = untouched.filter((r) => r.text_is_instruction);
+    const target = held.length ? held : untouched;
+    if (!target.length) {
+      toast.error("اختر سطوراً لم تصححها بعد");
+      return;
+    }
+    setSuggesting(true);
+    try {
+      const out = await suggestCalText(target.slice(0, 60).map((r) => r.order_item_id));
+      if (!out.items.length) {
+        // Everything read back identical to what the student wrote — that IS the answer.
+        toast.success(
+          out.unchanged
+            ? `النصوص سليمة كما هي (${out.unchanged})`
+            : "ما رجع أي اقتراح — جرّب مرة ثانية"
+        );
+        return;
+      }
+      setSuggestions((prev) => {
+        const next = { ...prev };
+        for (const it of out.items) next[it.order_item_id] = it;
+        return next;
+      });
+      const usable = out.items.filter((i) => i.text).length;
+      const noName = out.items.length - usable;
+      toast.success(
+        [
+          `${usable} اقتراح جاهز`,
+          noName ? `${noName} بلا اسم` : "",
+          out.unchanged ? `${out.unchanged} سليم أصلاً` : "",
+        ].filter(Boolean).join(" · ")
+      );
+    } catch (e) {
+      toast.error(getApiErrorMessage(e, "تعذّرت قراءة النصوص"));
+    } finally {
+      setSuggesting(false);
+    }
+  }
+
+  /** Accept one suggestion: it becomes the designer's draft (and therefore reviewed). */
+  function applySuggestion(s: CalSuggestion) {
+    if (!s.text) return;
+    setTextDrafts((prev) => ({ ...prev, [s.order_item_id]: s.text as string }));
+    if (s.style) setStyleChoice((prev) => ({ ...prev, [s.order_item_id]: s.style as string }));
+    if (s.element) {
+      setCapElements((prev) => ({ ...prev, [s.order_item_id]: s.element as string }));
+    }
+  }
+
   // Returns the job body (valid names only) plus the junk names that were excluded,
   // so junk never reaches the paid generator. null = nothing usable (with a toast).
   function buildItems(): { body: CreateJobBody; junk: string[] } | null {
@@ -1055,20 +1223,29 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
       // Rows the server already classified as messages to the shop. Excluded here so the
       // confirm dialog's count matches what will actually be generated — the server refuses
       // them either way, this just stops the preview from lying about how many.
+      // A row the designer RETYPED is no longer one of them: a person read that exact
+      // string and typed the replacement, which is the review the guard is asking for.
       instructionRows = selected
-        .filter((r) => r.text_is_instruction)
+        .filter((r) => r.text_is_instruction && !isDraftEdited(r))
         .map((r) => r.render_text);
-      allItems = selected.filter((r) => !r.text_is_instruction).map((r) => {
-        const isCap = isCapLike(r.variant);
-        const element = isCap ? (capElements[r.order_item_id] ?? "").trim() : "";
-        return {
-          render_text: r.render_text,
-          student_id: r.student_id,
-          order_item_id: r.order_item_id,
-          variant: r.variant,
-          ...(isCap && element ? { element_text: element } : {}),
-        };
-      });
+      allItems = selected
+        .filter((r) => !r.text_is_instruction || isDraftEdited(r))
+        .map((r) => {
+          const isCap = isCapLike(r.variant);
+          const element = isCap ? (capElements[r.order_item_id] ?? "").trim() : "";
+          const edited = isDraftEdited(r);
+          return {
+            render_text: renderTextOf(r),
+            student_id: r.student_id,
+            order_item_id: r.order_item_id,
+            variant: r.variant,
+            ...(isCap && element ? { element_text: element } : {}),
+            ...(styleChoice[r.order_item_id] ? { style: styleChoice[r.order_item_id] } : {}),
+            // Per-LINE review flag — never the job-level one, which would also wave
+            // through the lines in this same batch that nobody looked at.
+            ...(edited ? { reviewed: true } : {}),
+          };
+        });
     }
 
     const valid = allItems.filter((it) => isRealName(it.render_text));
@@ -1184,22 +1361,53 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
 
   const visibleGroups = useMemo(() => {
     const q = searchText.trim();
-    return groups.filter((g) => {
-      const z = g.orderId ? orderZones[g.orderId] : null;
-      if (gridFilter === "awaiting" && !(z?.can_send)) return false;
-      if (gridWid && g.wholesalerId !== gridWid) return false;
-      if (q) {
-        const hay = `${g.studentName ?? ""} ${g.plates.map((p) => p.render_text).join(" ")}`;
-        if (!hay.includes(q)) return false;
-      }
-      return true;
-    });
+    return groups
+      .filter((g) => {
+        const z = g.orderId ? orderZones[g.orderId] : null;
+        if (gridFilter === "awaiting" && !(z?.can_send)) return false;
+        if (gridWid && g.wholesalerId !== gridWid) return false;
+        if (q) {
+          // Spelling-insensitive: «سجى» and «سجي» are the same name and look identical,
+          // so a raw includes() answered differently depending on which key was pressed —
+          // and 28% of student names carry a variant character. See lib/arabic.ts.
+          const hay = `${g.studentName ?? ""} ${g.plates.map((p) => p.render_text).join(" ")}`;
+          if (!matchesAr(hay, q)) return false;
+        }
+        return true;
+      })
+      // A matching ORDER shows all its zones — they belong together. «لوحات بدون طلب»
+      // is not an order though, it is a bucket of every orphan there is, so one hit
+      // used to drag all 58 of them onto the screen (measured on the dev snapshot).
+      .map((g) =>
+        q && !g.orderId
+          ? { ...g, plates: g.plates.filter((p) => matchesAr(p.render_text, q)) }
+          : g
+      )
+      .filter((g) => g.plates.length > 0);
   }, [groups, gridFilter, gridWid, searchText, orderZones]);
 
   const visiblePlates = useMemo(
     () => visibleGroups.flatMap((g) => g.plates),
     [visibleGroups]
   );
+
+  // ── «تنزيل الكل» — the whole job as one ZIP ──────────────────────────────────
+  // Fetched with the Bearer token and saved as a blob. It used to be
+  // `window.location.href = <API url>`, which sent no Authorization header at all and
+  // replaced the workbench with `401 غير مصرح` — the empty page the designer reported.
+  async function downloadJobZip(sheets: boolean) {
+    if (!jobId) return;
+    setZipSaving(sheets ? "sheets" : "plates");
+    try {
+      const blob = await calJobZipBlob(jobId, sheets);
+      const out = await saveFile(blob, `calligraphy-${jobId.slice(0, 8)}${sheets ? "-sheets" : ""}.zip`);
+      if (out !== "cancelled") toast.success("تم تنزيل ملف ZIP");
+    } catch (e) {
+      toast.error(getApiErrorMessage(e, "تعذّر تنزيل الملف"));
+    } finally {
+      setZipSaving(null);
+    }
+  }
 
   // ── «تنزيل إلى مجلد…» — write every visible done plate into a user-picked folder
   //    (File System Access API, Chrome/Edge desktop). Fallback: ZIP of the same set.
@@ -1222,13 +1430,10 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
           const res = await fetch(absUrl(p.plate_path));
           if (!res.ok) continue;
           const blob = await res.blob();
-          const base = (p.student_name || p.render_text || "name")
-            .replace(/[\/\\:*?"<>|]+/g, "_")
-            .slice(0, 40);
-          const zone = VARIANT_LABEL[p.variant] ? `-${p.variant}` : "";
-          let name = `${base}${zone}.png`;
+          const first = plateFileName(p);
+          let name = first;
           let n = 2;
-          while (used.has(name)) name = `${base}${zone}-${n++}.png`;
+          while (used.has(name)) name = first.replace(/\.png$/, ` ${n++}.png`);
           used.add(name);
           const fh = await dir.getFileHandle(name, { create: true });
           const ws = await fh.createWritable();
@@ -1238,17 +1443,11 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
         }
         toast.success(`تم حفظ ${ok} صورة في المجلد`);
       } else {
-        // ZIP fallback (phones / Safari / Firefox)
+        // ZIP fallback (phones / Safari / Firefox). Goes through saveFile: the old inline
+        // anchor revoked its blob URL on the next line, which Safari reads as "cancel".
         const blob = await platesZipBlob(target.map((p) => p.id));
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `calligraphy-${target.length}.zip`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-        toast.success("تم تنزيل ملف ZIP بالصور");
+        const out = await saveFile(blob, `calligraphy-${target.length}.zip`);
+        if (out !== "cancelled") toast.success("تم تنزيل ملف ZIP بالصور");
       }
     } catch (e) {
       if ((e as Error)?.name !== "AbortError") {
@@ -1262,6 +1461,14 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
   // ── remaining ungenerated in wholesaler list ─────────────────────────────────
   const pendingGrabCount = grabRows.filter(
     (r) => checkedIds.has(r.order_item_id) && r.plate_status !== "done"
+  ).length;
+  // Counted over the SELECTED rows, because that is what «توليد» will act on: how many
+  // lines the designer corrected, and how many are still the student's own instructions
+  // and will therefore be skipped.
+  const selectedGrabRows = grabRows.filter((r) => checkedIds.has(r.order_item_id));
+  const editedGrabCount = selectedGrabRows.filter((r) => isDraftEdited(r)).length;
+  const heldGrabCount = selectedGrabRows.filter(
+    (r) => r.text_is_instruction === true && !isDraftEdited(r)
   ).length;
 
   // ── زون filter for the grab list — cap + cap_side both map to «قبعة» ──────────
@@ -1657,34 +1864,225 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
                     >
                       إلغاء الكل
                     </button>
+                    {/* Reads the selected lines and proposes what to embroider. Generates
+                        nothing: ~$0.00006 a line of TEXT, against ~$0.01 for a name on a
+                        sheet. The designer presses «استخدم» on each proposal. */}
+                    <button
+                      type="button"
+                      disabled={suggesting}
+                      onClick={runSuggest}
+                      className="inline-flex min-h-11 items-center gap-1 rounded-full border border-sky-300 bg-sky-50 px-3 text-xs font-semibold text-sky-800 transition hover:border-sky-500 disabled:opacity-60"
+                    >
+                      {suggesting
+                        ? "جارٍ القراءة…"
+                        : heldGrabCount > 0
+                          ? `اقرأ التعليمات (${heldGrabCount})`
+                          : "اقرأ النصوص"}
+                    </button>
                   </div>
                 </div>
-                <ul className="max-h-72 divide-y divide-line overflow-x-hidden overflow-y-auto rounded-xl border border-line bg-beige">
-                  {visibleGrabRows.map((r) => (
-                    <li key={r.order_item_id} className="flex min-w-0 flex-wrap items-center gap-2 px-3 py-2.5 sm:gap-3">
+                <ul className="max-h-96 divide-y divide-line overflow-x-hidden overflow-y-auto rounded-xl border border-line bg-beige">
+                  {visibleGrabRows.map((r) => {
+                    const draft = textDrafts[r.order_item_id] ?? r.render_text;
+                    const edited = isDraftEdited(r);
+                    // Held only while it is still the student's own sentence — the moment
+                    // the designer retypes it, it is a reviewed name and will generate.
+                    const held = r.text_is_instruction === true && !edited;
+                    const photo = absUrl(r.customer_image_url ?? null);
+                    const sug = suggestions[r.order_item_id];
+                    return (
+                    <li key={r.order_item_id} className="flex min-w-0 flex-wrap items-start gap-2 px-3 py-2.5 sm:gap-3">
                       <input
                         type="checkbox"
                         id={`grab-${r.order_item_id}`}
                         checked={checkedIds.has(r.order_item_id)}
                         onChange={(e) => {
-                          const next = new Set(checkedIds);
-                          if (e.target.checked) next.add(r.order_item_id);
-                          else next.delete(r.order_item_id);
-                          setCheckedIds(next);
+                          // Functional update, like «تحديد الكل» beside it: building the next
+                          // Set from the render's closure loses a tick's other clicks.
+                          const on = e.target.checked;
+                          setCheckedIds((prev) => {
+                            const next = new Set(prev);
+                            if (on) next.add(r.order_item_id);
+                            else next.delete(r.order_item_id);
+                            return next;
+                          });
                         }}
-                        className="h-5 w-5 shrink-0 accent-orange-ink"
+                        className="mt-3 h-5 w-5 shrink-0 accent-orange-ink"
                       />
-                      <label
-                        htmlFor={`grab-${r.order_item_id}`}
-                        className="flex min-h-11 min-w-0 flex-1 cursor-pointer flex-wrap items-center gap-x-2 gap-y-1 sm:flex-nowrap"
-                      >
-                        <span className="min-w-0 break-words text-sm text-ink">{r.render_text}</span>
-                        <span className="min-w-0 break-words text-xs text-ink-soft">{r.student_name}</span>
-                        <span className="rounded-full bg-beige px-2 py-0.5 text-[11px] text-ink-soft border border-line shrink-0">
-                          {VARIANT_LABEL[r.variant] ?? r.variant}
-                        </span>
-                        <StatusPill status={r.plate_status ?? "pending"} />
-                      </label>
+                      {/* The student's own reference photo. 85% of the lines that read as a
+                          message are talking about THIS image, and until now the designer had
+                          to open the order to see it. */}
+                      {photo && (
+                        <button
+                          type="button"
+                          onClick={() => setPhotoPreview({ url: photo, name: r.student_name })}
+                          className="mt-1 h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-line bg-white focus:outline-none focus:ring-2 focus:ring-orange-ink/40"
+                          aria-label={`صورة ${r.student_name}`}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={photo} alt="" className="h-full w-full object-cover" loading="lazy" />
+                        </button>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <label
+                          htmlFor={`grab-${r.order_item_id}`}
+                          className="flex min-h-8 min-w-0 cursor-pointer flex-wrap items-center gap-x-2 gap-y-1"
+                        >
+                          <span className="min-w-0 break-words text-xs font-semibold text-ink-soft">
+                            {r.student_name}
+                          </span>
+                          <span className="rounded-full bg-beige px-2 py-0.5 text-[11px] text-ink-soft border border-line shrink-0">
+                            {VARIANT_LABEL[r.variant] ?? r.variant}
+                          </span>
+                          <StatusPill status={r.plate_status ?? "pending"} />
+                          {held && (
+                            <span className="shrink-0 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+                              تعليمات — اكتب الاسم الصحيح
+                            </span>
+                          )}
+                        </label>
+                        {/* The text that will be embroidered. Editable BEFORE the paid
+                            generation — rep students type instructions into this field just
+                            like retail students do. */}
+                        <input
+                          type="text"
+                          dir="rtl"
+                          aria-label={`نص التطريز لـ ${r.student_name}`}
+                          value={draft}
+                          onChange={(e) =>
+                            setTextDrafts((prev) => ({
+                              ...prev,
+                              [r.order_item_id]: e.target.value,
+                            }))
+                          }
+                          className={`min-h-11 w-full min-w-0 rounded-lg border bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-orange-ink/15 ${
+                            held
+                              ? "border-amber-300"
+                              : edited
+                                ? "border-orange-ink"
+                                : "border-line focus:border-orange-ink"
+                          }`}
+                        />
+                        {edited && (
+                          <p className="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-[11px] text-ink-soft">
+                            <span className="min-w-0 break-words">
+                              كلام الطالب: {r.render_text}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setTextDrafts((prev) => {
+                                  const next = { ...prev };
+                                  delete next[r.order_item_id];
+                                  return next;
+                                })
+                              }
+                              className="shrink-0 font-semibold text-orange-ink underline-offset-2 hover:underline"
+                            >
+                              استرجاع
+                            </button>
+                          </p>
+                        )}
+
+                        {/* What the reader proposed. It sits BESIDE the field, never inside it:
+                            «استخدم» is the designer's press, and that press is what marks the
+                            line reviewed. An unread suggestion changes nothing. */}
+                        {sug && !edited && (
+                          <div className="mt-1.5 rounded-lg border border-sky-200 bg-sky-50/70 px-2.5 py-2 text-[11px]">
+                            {sug.text ? (
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="font-semibold text-sky-900">اقتراح:</span>
+                                <span className="min-w-0 break-words text-ink">{sug.text}</span>
+                                {sug.style && (
+                                  <span className="rounded-full border border-sky-300 bg-white px-2 py-0.5 text-sky-800">
+                                    {styles.find((x) => x.id === sug.style)?.label ?? sug.style}
+                                  </span>
+                                )}
+                                {sug.element && (
+                                  <span className="rounded-full border border-sky-300 bg-white px-2 py-0.5 text-sky-800">
+                                    رمز: {sug.element}
+                                  </span>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => applySuggestion(sug)}
+                                  className="ms-auto min-h-8 shrink-0 rounded-full bg-sky-700 px-3 py-1 font-semibold text-white hover:opacity-90"
+                                >
+                                  استخدم
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="shrink-0 rounded-full border border-sky-300 bg-white px-2 py-0.5 font-semibold text-sky-800">
+                                  {sug.kind === "letter"
+                                    ? "حرف أو شكل — لا يُكتب"
+                                    : sug.kind === "photo"
+                                      ? "التصميم = صورة الطالب"
+                                      : "بحاجة سؤال الطالب"}
+                                </span>
+                                <span className="min-w-0 break-words text-sky-900">
+                                  {sug.note || "راجع الصورة المرفقة"}
+                                </span>
+                                {photo && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setPhotoPreview({ url: photo, name: r.student_name })}
+                                    className="ms-auto min-h-8 shrink-0 rounded-full border border-sky-300 bg-white px-3 py-1 font-semibold text-sky-800 hover:border-sky-500"
+                                  >
+                                    افتح الصورة
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                            {sug.text && sug.note && (
+                              <p className="mt-1 text-ink-soft">{sug.note}</p>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Style picker — only when the designer has actually taken this line
+                            in hand. Ten styled names still ride ONE sheet (batched by zone +
+                            style), so this costs nothing extra unless styles are scattered. */}
+                        {styles.length > 0 && edited && (
+                          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                            <span className="text-[11px] text-ink-soft">الشكل:</span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setStyleChoice((prev) => {
+                                  const next = { ...prev };
+                                  delete next[r.order_item_id];
+                                  return next;
+                                })
+                              }
+                              className={`min-h-8 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold transition ${
+                                !styleChoice[r.order_item_id]
+                                  ? "border-orange-ink bg-orange-ink text-white"
+                                  : "border-line bg-white text-ink-soft hover:border-orange-ink/40"
+                              }`}
+                            >
+                              افتراضي
+                            </button>
+                            {styles.map((st) => (
+                              <button
+                                key={st.id}
+                                type="button"
+                                title={st.hint}
+                                onClick={() =>
+                                  setStyleChoice((prev) => ({ ...prev, [r.order_item_id]: st.id }))
+                                }
+                                className={`min-h-8 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold transition ${
+                                  styleChoice[r.order_item_id] === st.id
+                                    ? "border-orange-ink bg-orange-ink text-white"
+                                    : "border-line bg-white text-ink-soft hover:border-orange-ink/40"
+                                }`}
+                              >
+                                {st.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                       {(r.variant === "cap" || r.variant === "cap_side") && (
                         <input
                           type="text"
@@ -1697,14 +2095,17 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
                               [r.order_item_id]: e.target.value,
                             }))
                           }
-                          className="min-h-11 w-full min-w-0 rounded-lg border border-line bg-white px-3 py-2 text-xs text-ink placeholder:text-ink/50 focus:border-orange-ink focus:outline-none focus:ring-2 focus:ring-orange-ink/15 sm:w-32"
+                          className="mt-8 min-h-11 w-full min-w-0 rounded-lg border border-line bg-white px-3 py-2 text-xs text-ink placeholder:text-ink/50 focus:border-orange-ink focus:outline-none focus:ring-2 focus:ring-orange-ink/15 sm:w-32"
                         />
                       )}
                     </li>
-                  ))}
+                    );
+                  })}
                 </ul>
                 <p className="mt-1.5 text-xs text-ink-soft">
                   {checkedIds.size} محدد · {pendingGrabCount} لم يُولَّد بعد
+                  {editedGrabCount > 0 ? ` · ${editedGrabCount} نص مُصحَّح` : ""}
+                  {heldGrabCount > 0 ? ` · ${heldGrabCount} تعليمات بحاجة تصحيح` : ""}
                 </p>
               </div>
             )}
@@ -1779,17 +2180,17 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
         <section className="mb-6 flex flex-wrap gap-3">
           <Button
             variant="secondary"
-            onClick={() => {
-              window.location.href = calDownloadUrl(jobId);
-            }}
+            loading={zipSaving === "plates"}
+            disabled={!!zipSaving}
+            onClick={() => downloadJobZip(false)}
           >
             تنزيل الكل (ZIP)
           </Button>
           <Button
             variant="ghost"
-            onClick={() => {
-              window.location.href = calDownloadUrl(jobId, true);
-            }}
+            loading={zipSaving === "sheets"}
+            disabled={!!zipSaving}
+            onClick={() => downloadJobZip(true)}
           >
             تنزيل الكل مع الأوراق
           </Button>
@@ -1993,14 +2394,61 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
                 className="max-h-[64dvh] w-auto max-w-full object-contain"
               />
               <p className="font-display text-lg font-bold text-ink">{preview.render_text}</p>
-              <a
-                href={absUrl(preview.plate_path)}
-                download
-                className="inline-flex min-h-11 items-center justify-center rounded-full bg-orange-ink px-5 py-2 text-sm font-semibold text-white transition hover:opacity-90"
+              <button
+                type="button"
+                disabled={previewSaving}
+                onClick={async () => {
+                  setPreviewSaving(true);
+                  try {
+                    const out = await saveFromUrl(
+                      absUrl(preview.plate_path),
+                      plateFileName(preview)
+                    );
+                    if (out !== "cancelled") toast.success("تم تنزيل الصورة");
+                  } catch {
+                    toast.error("تعذّر تنزيل الصورة");
+                  } finally {
+                    setPreviewSaving(false);
+                  }
+                }}
+                className="inline-flex min-h-11 items-center justify-center rounded-full bg-orange-ink px-5 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-60"
               >
-                تنزيل الصورة
-              </a>
+                {previewSaving ? "جارٍ التنزيل…" : "تنزيل الصورة"}
+              </button>
             </div>
+          </div>,
+          document.body
+        )}
+
+      {/* ── The student's reference photo, full size ───────────────────────── */}
+      {mounted && photoPreview &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[220] flex items-center justify-center bg-ink/80 p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`صورة ${photoPreview.name}`}
+            onClick={() => setPhotoPreview(null)}
+          >
+            <button
+              type="button"
+              onClick={() => setPhotoPreview(null)}
+              aria-label="إغلاق"
+              className="absolute end-4 top-[max(1rem,calc(env(safe-area-inset-top,0px)+0.5rem))] flex h-11 w-11 items-center justify-center rounded-full bg-white/15 text-2xl leading-none text-white transition hover:bg-white/30"
+            >
+              ✕
+            </button>
+            <figure className="max-h-full max-w-3xl" onClick={(e) => e.stopPropagation()}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={photoPreview.url}
+                alt={`صورة ${photoPreview.name}`}
+                className="max-h-[80dvh] w-auto max-w-full rounded-xl bg-white object-contain"
+              />
+              <figcaption className="mt-3 text-center text-sm font-semibold text-white">
+                {photoPreview.name}
+              </figcaption>
+            </figure>
           </div>,
           document.body
         )}

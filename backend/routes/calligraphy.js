@@ -76,6 +76,12 @@ router.get('/queue', c.getQueue);
 router.post('/queue/generate', genLimit, c.queueGenerate);
 router.get('/recent', c.recentPlates);
 
+// The AI reading layer: proposes what to embroider, generates nothing. Rate-limited like the
+// paid path even though it costs ~$0.00006 a line — a loop that calls it a million times is
+// still a bill, and the daily ledger it writes to is shared with the image spend.
+router.post('/suggest', genLimit, c.suggestText);
+router.get('/styles', c.listStyles);
+
 // Compositor endpoints
 router.post('/plates/:id/compose', imageUploadLimit, memUpload.single('image'), c.composePlate);
 router.post('/element', genLimit, c.generateElement);

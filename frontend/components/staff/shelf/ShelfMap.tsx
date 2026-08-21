@@ -10,6 +10,7 @@
 //  2. Pieces render as stacked spines rather than a digit, so depth is legible at a glance.
 
 import type { Shelf, ShelfSlot } from "@/lib/shelf";
+import { matchesAr } from "@/lib/arabic";
 
 const STATE_STYLE: Record<string, { bin: string; label: string }> = {
   empty: { bin: "border-[#4e4941] bg-[#302d28]", label: "text-[#817a70]" },
@@ -97,7 +98,7 @@ export function ShelfMap({ shelves, search, onSlotClick }: ShelfMapProps) {
                 const style = STATE_STYLE[slot.state] ?? STATE_STYLE.empty;
                 const hit =
                   q.length > 0 &&
-                  slot.pieces.some((p) => p.student_name.includes(q));
+                  slot.pieces.some((p) => matchesAr(p.student_name, q));
                 const dimmed = q.length > 0 && !hit;
                 return (
                   <button

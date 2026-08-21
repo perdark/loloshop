@@ -1158,6 +1158,17 @@ CREATE TABLE IF NOT EXISTS calligraphy_spend_log (
 );
 CREATE INDEX IF NOT EXISTS idx_callig_spend_created ON calligraphy_spend_log(created_at);
 
+-- Migration 083: the per-plate style knob («مد الحروف» · «خط أعرض» · «بدون زخرفة»).
+-- NULL = the shop default. Values are ids from backend/lib/calligraphyStyles.js, NEVER free
+-- text — nothing a student typed may reach the image prompt. The column exists so the batcher
+-- can group pending plates by (variant, style): one sheet is one style, which is what keeps ten
+-- styled names on ONE $0.10 image instead of ten private ones, and what stops the cross-job
+-- hitchhiker top-up from mixing styles into a single (ruined, already paid for) sheet.
+ALTER TABLE calligraphy_plates ADD COLUMN IF NOT EXISTS style TEXT;
+CREATE INDEX IF NOT EXISTS idx_callig_plates_pending_batch
+  ON calligraphy_plates (variant, style, created_at)
+  WHERE status = 'pending';
+
 -- ---------------------------------------------------------------------------------------
 -- Migration 080: the calligraphy plate gets its OWN column on order_items.
 --

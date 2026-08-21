@@ -20,6 +20,8 @@ const {
   isRealName, looksLikeInstruction, checkRenderText,
 } = require('../lib/calligraphyText');
 const { matchPlateGeometry } = require('../lib/imageFx');
+const { normalizeStyle, STYLES } = require('../lib/calligraphyStyles');
+const { suggestLines } = require('../lib/calligraphySuggest');
 const { enqueueGeneration } = require('../lib/queue');
 
 const FRONT_LABEL    = 'تطريز الوشاح من الأمام';
@@ -63,7 +65,7 @@ async function wholesalerNames(req, res) {
   const { rows } = await query(
     `SELECT s.id AS student_id, u.name AS student_name,
             oi.id AS order_item_id, oi.customer_text AS render_text,
-            oi.label_snapshot AS label,
+            oi.label_snapshot AS label, oi.customer_image_url,
             cp.id AS plate_id, cp.status AS plate_status, cp.plate_path, cp.linked_at
        FROM students s
        JOIN users u   ON u.id = s.user_id
@@ -84,6 +86,11 @@ async function wholesalerNames(req, res) {
     variant: LABEL_VARIANT[r.label] || 'front',
     plate_id: r.plate_id, plate_status: r.plate_status,
     plate_path: r.plate_path, linked: !!r.linked_at,
+    // The student's OWN upload (migration 080 — never the generated plate). Measured on prod
+    // 2026-08-21: of the 755 lines whose text is a message rather than a name, 645 (85%) are
+    // talking about THIS image («نفس الصورة»). The designer was reading those words with the
+    // picture nowhere on screen, which is most of why the line was hard to fix.
+    customer_image_url: r.customer_image_url || null,
     // This list is raw `customer_text`, so a share of it is students writing TO the shop.
     // Flagging it here is what lets «لصق أسماء» stop being the route those strings took into
     // the paid generator — the designer sees which rows are messages before ticking them.
@@ -101,13 +108,52 @@ async function insertPlates(jobId, items, { source, model, createdBy }) {
   for (const it of items) {
     const { rows } = await query(
       `INSERT INTO calligraphy_plates
-         (job_id, wholesaler_id, student_id, order_item_id, source, render_text, variant, element_text, status, model, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'pending',$9,$10) RETURNING *`,
+         (job_id, wholesaler_id, student_id, order_item_id, source, render_text, variant, element_text, style, status, model, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending',$10,$11) RETURNING *`,
       [jobId, it.wholesaler_id || null, it.student_id || null, it.order_item_id || null,
-       source, it.render_text, it.variant || 'front', it.element_text || null, model, createdBy]);
+       source, it.render_text, it.variant || 'front', it.element_text || null,
+       normalizeStyle(it.style), model, createdBy]);
     out.push(toPlate(rows[0]));
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// POST /suggest {order_item_ids:[…]} — «اقرأ لي هذي السطور»
+//
+// Reads what the student wrote on each line and proposes what to embroider. It generates
+// NOTHING and spends no image money; the designer confirms every suggestion in the workbench.
+//
+// ⚠️ THE TEXT IS RESOLVED FROM THE DATABASE, never taken from the caller. The client sends ids
+// only. Otherwise this endpoint would be a way to put arbitrary text in front of the model (and
+// on the shop's bill) while pretending it was a student's words.
+async function suggestText(req, res) {
+  const raw = Array.isArray(req.body && req.body.order_item_ids) ? req.body.order_item_ids : [];
+  const ids = [...new Set(raw.filter((x) => typeof x === 'string' && UUID_RE.test(x)))].slice(0, 60);
+  if (!ids.length) return bad(res, 'لا توجد سطور محددة');
+
+  const { rows } = await query(
+    `SELECT oi.id, oi.customer_text, oi.label_snapshot,
+            (oi.customer_image_url IS NOT NULL) AS has_photo
+       FROM order_items oi
+       JOIN orders o ON o.id = oi.order_id AND o.status::text <> 'cancelled'
+      WHERE oi.id = ANY($1) AND COALESCE(oi.customer_text,'') <> ''`, [ids]);
+  if (!rows.length) return bad(res, 'لا توجد نصوص لقراءتها', 'ERR_NOT_FOUND', 404);
+
+  try {
+    const out = await suggestLines(rows.map((r) => ({
+      id: r.id,
+      text: r.customer_text,
+      zone: r.label_snapshot || null,
+      has_photo: r.has_photo,
+    })));
+    return res.json({ data: out });
+  } catch (err) {
+    return res.status(err.status || 502).json({
+      error: err.expose ? err.message : 'تعذّرت قراءة النصوص',
+      code: err.code || 'ERR_AI_SUGGEST',
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -320,6 +366,12 @@ async function createJob(req, res) {
       student_id: (it && it.student_id) || null,
       order_item_id: (it && it.order_item_id) || null,
       variant: VARIANTS.includes(it && it.variant) ? it.variant : jobVariant,
+      // Style id from the CLOSED list (lib/calligraphyStyles.js). Anything else normalizes to
+      // NULL — the shop default — so a stale or crafted value can only ever degrade, never
+      // reach the image prompt. The student's own words are not a style and never become one.
+      style: normalizeStyle(it && it.style),
+      // Per-LINE review flag. See the guard below.
+      reviewed: (it && it.reviewed) === true,
     }))
     .filter((it) => it.render_text);
   if (!items.length) return bad(res, 'لا توجد أسماء صالحة');
@@ -339,13 +391,22 @@ async function createJob(req, res) {
   // held line and pressed generate on it deliberately. No word list is perfect (a sash verse
   // carrying «أريد» reads exactly like a request), and a guard with no override would strand
   // real work in «موقوف» forever, which is the failure this whole track is about.
-  const reviewed = source === 'retail' || (req.body && req.body.reviewed === true);
+  //
+  // PER ITEM as well as per job (2026-08-21). A ممثل's batch is one job, and the designer
+  // now retypes the bad lines in it before pressing توليد — «خلي التطريز محمد مع حرف N»
+  // becomes «محمد N». Flagging the whole job reviewed would also wave through the lines
+  // nobody looked at, so the corrected line carries the flag itself. This grants no new
+  // power to a crafted call: the job-level flag has always been settable by the same caller.
+  const jobReviewed = source === 'retail' || (req.body && req.body.reviewed === true);
   const dropped = [];
   const warned = [];
   items = items.filter((it) => {
     const verdict = checkRenderText(it.render_text);
     if (verdict.ok) return true;
-    if (reviewed && verdict.reason === 'instruction') { warned.push(it.render_text); return true; }
+    if ((jobReviewed || it.reviewed) && verdict.reason === 'instruction') {
+      warned.push(it.render_text);
+      return true;
+    }
     dropped.push(it.render_text);
     return false;
   });
@@ -393,6 +454,11 @@ async function createJob(req, res) {
   res.status(201).json({
     data: { job_id: jobId, total: out.length, dropped, warned, plates: await attachOrderContext(out) },
   });
+}
+
+// GET /styles — the closed style list, so the workbench never hard-codes a second copy of it.
+function listStyles(req, res) {
+  res.json({ data: Object.entries(STYLES).map(([id, s]) => ({ id, label: s.label, hint: s.hint })) });
 }
 
 // autoLinkPlate / attachOrderContext / jobCost / jobCounts moved to
@@ -458,6 +524,10 @@ async function reroll(req, res) {
   const elementText = typeof body.element_text === 'string'
     ? (body.element_text.trim() || null) : p.element_text;
   const variant = VARIANTS.includes(body.variant) ? body.variant : p.variant;
+  // A reroll may change the style («جرّب مد الحروف») — it is already its own single image, so
+  // unlike a batch there is no sheet to keep pure. Absent key = keep what the plate has.
+  const style = Object.prototype.hasOwnProperty.call(body, 'style')
+    ? normalizeStyle(body.style) : (p.style || null);
 
   // Daily ceiling BEFORE the money leaves (lib/calligraphySpend.js, 2026-08-18 audit).
   const budget = await checkBudget();
@@ -473,7 +543,7 @@ async function reroll(req, res) {
   // nothing but cost — measured $0.101 vs $0.067 per press, 47% of lifetime spend was solo
   // images (2026-08-18 audit). 1:1 keeps the canvas ~1024px wide so long teacher names don't
   // cramp or wrap the way they would on a 1K 9:16 portrait (~576px wide).
-  try { gen = await generateImage({ model, prompt: buildSinglePrompt(renderText, promptVariant(variant), elementText), resolution: '1K', aspectRatio: '1:1' }); }
+  try { gen = await generateImage({ model, prompt: buildSinglePrompt(renderText, promptVariant(variant), elementText, style), resolution: '1K', aspectRatio: '1:1' }); }
   catch (err) { return res.status(err.status || 502).json({ error: err.message, code: err.code || 'ERR_OPENROUTER' }); }
   await logSpend('reroll', gen.cost);
   // single-name image: trim to one band (expected 1); fall back to full image
@@ -497,10 +567,10 @@ async function reroll(req, res) {
   const { rows } = await query(
     `UPDATE calligraphy_plates
         SET status='done', plate_path=$2, cost_usd = cost_usd + $3, error=NULL, linked_at = NULL,
-            render_text=$4, element_text=$5, variant=$6, reroll_count = reroll_count + 1,
+            render_text=$4, element_text=$5, variant=$6, style=$8, reroll_count = reroll_count + 1,
             original_plate_path = COALESCE(original_plate_path, $7)
       WHERE id=$1 RETURNING *`,
-    [id, plate.url, Number(gen.cost || 0), renderText, elementText, variant, p.plate_path]);
+    [id, plate.url, Number(gen.cost || 0), renderText, elementText, variant, p.plate_path, style]);
   // Re-attach the fresh artwork onto the order line right away (auto-link, no manual step).
   const [withCtx] = await attachOrderContext([toPlate(await autoLinkPlate(rows[0]))]);
   res.json({ data: withCtx });
@@ -744,5 +814,5 @@ async function generateElement(req, res) {
 module.exports = {
   listWholesalers, wholesalerNames, createJob, processNext, getJob, reroll, downloadZip,
   getQueue, queueGenerate, recentPlates, composePlate, generateElement,
-  ordersZones, sendOrder, platesZip, retailQueue,
+  ordersZones, sendOrder, platesZip, retailQueue, suggestText, listStyles,
 };

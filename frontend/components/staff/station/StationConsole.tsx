@@ -42,6 +42,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StudentSheet } from "./StudentSheet";
 import { Lightbox } from "./Lightbox";
+import { matchesAr } from "@/lib/arabic";
 import {
   advancedLabelFor,
   isPieceOverdue,
@@ -340,7 +341,7 @@ export function StationConsole({
     const q = search.trim().toLowerCase();
     return pieces.filter(
       (p) =>
-        (!q || p.studentName.toLowerCase().includes(q)) &&
+        (!q || matchesAr(p.studentName, q)) &&
         (!sourceFilter || p.source === sourceFilter) &&
         (!repFilter || p.wholesalerName === repFilter)
     );
@@ -1048,7 +1049,7 @@ function DoneList({
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return rows;
-    return rows.filter((r) => r.studentName.toLowerCase().includes(q));
+    return rows.filter((r) => matchesAr(r.studentName, q));
   }, [rows, search]);
 
   return (

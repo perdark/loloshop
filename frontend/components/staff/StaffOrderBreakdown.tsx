@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { formatIQD } from "@/lib/format";
 import { resolveCatalogMediaUrl } from "@/lib/catalog";
+import { DownloadLink } from "@/components/ui/DownloadLink";
 import type { OrderBreakdownDetail } from "@/lib/types";
 
 interface StaffOrderBreakdownProps {
@@ -42,16 +43,16 @@ export function StaffOrderBreakdown({ detail }: StaffOrderBreakdownProps) {
                   />
                 </div>
                 {/* Download the original upload file — use raw /uploads URL, not next/image re-encode */}
-                <a
-                  href={
+                <DownloadLink
+                  url={
                     resolveCatalogMediaUrl(line.customerImageUrl) ||
                     line.customerImageUrl
                   }
-                  download
-                  className="mt-2 inline-flex min-h-[44px] w-full items-center justify-center rounded-xl border border-orange-ink/30 bg-surface-sink px-3 py-2 text-xs font-medium text-orange-ink transition-colors hover:bg-orange-ink/10"
+                  name={`${detail.studentName ?? "زبون"} ${line.label}`}
+                  className="mt-2 inline-flex min-h-[44px] w-full items-center justify-center rounded-xl border border-orange-ink/30 bg-surface-sink px-3 py-2 text-xs font-medium text-orange-ink transition-colors hover:bg-orange-ink/10 disabled:opacity-60"
                 >
                   تنزيل الصورة
-                </a>
+                </DownloadLink>
               </div>
             )}
           </li>

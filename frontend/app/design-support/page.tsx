@@ -34,6 +34,7 @@ import {
 } from "@/lib/design-team";
 import { formatDateShort } from "@/lib/format";
 import { PASSWORD_MIN_PRIVILEGED } from "@/lib/constants";
+import { matchesAr } from "@/lib/arabic";
 
 type Tab = "jobs" | "team";
 
@@ -657,7 +658,8 @@ export default function DesignSupportPage() {
         job.productName,
       ]
         .filter(Boolean)
-        .some((field) => String(field).toLowerCase().includes(q))
+        // Spelling-insensitive Arabic match — see lib/arabic.ts.
+        .some((field) => matchesAr(String(field), q))
     );
   }, [jobs, search]);
 
