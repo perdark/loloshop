@@ -1,5 +1,68 @@
 # Progress
 
+## 2026-08-21 — 🎀 A featured sash was renaming every rep bundle («وشاح الفراشة» vs «ملكي»)
+
+Reported by the admin as *«wholesaler students see وشاح الفراشى not وشاح ملكي»*, seen from the
+rep-facing student accounts. Real bug, **no money impact**, now fixed in code (branch
+`fix/rep-sash-carrier`, **unmerged**) and backfilled on prod.
+
+**Root cause.** The rep طقم form has no shape picker — `FullSetOrderForm.tsx:338` offers only
+عادي/ملكي — so the sash *product* on a rep order is a pure **carrier**: an identity to hang the
+order on. The spec lives in the order lines («نوع الوشاح: ملكي»), and
+`staffController.wholesalerAccountSummary` reads عادي/ملكي from **there**, never from the product.
+But `lib/fullSetOrder.js` resolved the carrier with `ORDER BY type, featured DESC, sort,
+created_at`, and every sash has `sort = 0` — so the tiebreaker that actually decided it was
+`featured`, a **storefront merchandising flag**. «وشاح الفراشة» was featured on 2026-07-07 and
+from that moment every rep bundle silently took its name.
+
+**Measured on prod before the fix** (all figures from the prod DB, not the stale laptop copy):
+
+| month | rep sash carrier | orders |
+|---|---|---|
+| 2026-06 | وشاح (family parent) | 49 |
+| 2026-07 | **وشاح الفراشة** | 321 |
+| 2026-07 | وشاح | 116 |
+| 2026-08 | **وشاح الفراشة** | 114 |
+
+**405** rep orders were titled «وشاح الفراشة» while the student had picked ملكي — on the same card
+as their own «نوع الوشاح: ملكي» and «إضافة: وشاح ملكي» (+15,000) lines. Rep students had landed on
+**no other sash** since the flag (435 «الفراشة» + 165 «وشاح», zero of the other ten) while retail
+spread normally across all eleven, which is why it hid for six weeks.
+
+**Why no money was at risk** — verified three ways, not assumed: the resolver does not even
+`SELECT base_price` (it selects `id, type`); money/inventory read عادي/ملكي from `order_items`
+(`staffController.js:77-115`); and the +15,000 ملكي add-on line was present throughout (506 rows).
+The damage was that staff, rep and student screens all showed a shape nobody chose — including the
+staff card the workshop cuts from, where «الفراشة» and «ملكي» are different physical shapes.
+
+**Fix** (`lib/fullSetOrder.js`): resolve the carrier to the family **parent** and drop `featured`
+from the ordering — `ORDER BY type, (parent_id IS NOT NULL), sort, created_at`. Merchandising can
+never rename an order again. Robe and cap already resolved to their parent («روب» 544, «قبعة» 590,
+single-valued on prod), so only the sash moves.
+
+**Test** — `test/fullSetSashCarrier.test.js`, written first and watched fail (it featured «وشاح عدل»
+and the resolver immediately handed the rep bundle that name). It features a child sash itself and
+restores every flag afterwards, so it does not depend on the local catalog. A second case asserts
+the ملكي choice is still on the lines, so a future "fix" cannot make the name right by dropping the
+choice. **414/414 backend tests.**
+⚠️ `node --test test/` now fails on Node v26 with a bare `MODULE_NOT_FOUND`; use
+**`node --test test/*.test.js`** from `backend/`.
+
+**Prod backfill — done 2026-08-21, reversible.** Dry-run first: 444 rows in scope, **0** retail
+orders caught by the filter, **0** collisions against `uq_orders_student_product_nodesign`. Scope is
+rep-linked students whose sash order carries a *child* product and has a `group_id IS NULL` line
+labelled «نوع الوشاح» (the rep-flow signature — retail uses `group_id`/`option_id`, so it cannot be
+caught). 444 orders moved to «وشاح» inside one transaction. After: rep students **600/600** on
+«وشاح»; retail untouched, including the **22** who genuinely chose «وشاح الفراشة».
+· Backups before the write: full dump at `/root/db-backups/loloshop-pre-sash-carrier-20260821.dump`
+on the server, copied to `~/Desktop/_private/loloshop-db/`, **plus** table
+`_backfill_sash_carrier_20260821` holding all 444 old `product_id`s — rollback is one UPDATE.
+
+⚠️ **The code fix is NOT deployed.** Existing orders read correctly now, but a *new* rep bundle
+still picks up whatever is featured until `fix/rep-sash-carrier` reaches `main` (every push to
+`main` auto-deploys). Backfill order was safe either way: the EDIT-STABILITY pin in
+`fullSetOrder.js` re-pins an existing student to their corrected carrier on re-save.
+
 ## 2026-08-18 (b) — 💸 The four calligraphy cost fixes — MERGED & DEPLOYED, verified on prod
 
 Same session as the audit below; the owner approved «50% cost less? ok go work», then «go
