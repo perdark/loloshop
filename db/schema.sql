@@ -1417,10 +1417,23 @@ CREATE INDEX IF NOT EXISTS shelf_placements_occupancy
 INSERT INTO shelf_sections (shelf_code, piece_type, label_ar, slot_count, max_per_slot, mode, sort_order)
 VALUES
   ('A', 'robe',  'روب',   10, 10,   'exclusive', 1),
-  ('B', 'sash',  'وشاح',  15, 10,   'exclusive', 1),
+  ('B', 'sash',  'وشاح',  15, 20,   'shared',    1),
   ('C', 'cap',   'قبعة',   6,  4,   'exclusive', 1),
   ('C', 'shawl', 'شال',    1, NULL, 'shared',    2)
 ON CONFLICT (shelf_code, sort_order) DO NOTHING;
+
+-- Migration 085, repeated here on purpose (the 077 / 080 pattern). The INSERT above is
+-- ON CONFLICT DO NOTHING, so on a database that already carries the seeded exclusive sash
+-- section it changes nothing — and THIS file is what `npm run migrate` applies to production.
+-- Guarded on `mode` so re-running is a no-op and a runtime edit through
+-- PATCH /production/shelf/sections/:id survives the next deploy instead of being reset.
+-- Do not tidy it out; migration 085's header carries the measurements behind it.
+UPDATE shelf_sections SET mode = 'shared', max_per_slot = 20
+ WHERE piece_type = 'sash' AND mode = 'exclusive';
+UPDATE shelf_slot_occupancy so SET student_id = NULL
+  FROM shelf_sections sec
+ WHERE so.section_id = sec.id AND sec.piece_type = 'sash'
+   AND so.closed_at IS NULL AND so.student_id IS NOT NULL;
 
 -- =====================================================
 -- AI CHAT — support chatbot + admin analytics (migration 078)

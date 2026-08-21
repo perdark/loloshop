@@ -30,7 +30,7 @@ last verified 2026-08-10 and are unchanged.
 | iOS | **1.0.4 (build 1786309948) SUBMITTED — «Waiting for Review»** (2026-08-10, ≤48h) |
 | Android push | ✅ working end to end |
 | iOS push | ✅ **APNs key installed and verified against Apple** — `push.configured()` → `{"android":true,"ios":true}` |
-| Backend tests | **467/467 on `feat/admin-ai-console`** (40 new, 2026-08-21). Older rows said 266/275; the suite has grown since. ⚠️ Run from `backend/` as `node --test test/*.test.js` — see the landmine below; the old `test/` and bare forms both misbehave on Node 26. |
+| Backend tests | **471/472 on `fix/shelf-and-queue-price`** (2026-08-21 (e)). ⚠️ The one failure — `app-open: a ping inside the session window does NOT count a second open`, `test/adminConsole.test.js:371` — **reproduces on clean `main`**, verified by stashing. It is pre-existing and unrelated to that branch; don't let it read as a broken change. Older rows said 266/275 and 467/467; the suite keeps growing. ⚠️ Run from `backend/` as `node --test test/*.test.js` — see the landmine below; the old `test/` and bare forms both misbehave on Node 26. |
 | Prod DB backup | ✅ `~/Desktop/_private/loloshop-db/loloshop-prod-2026-08-14.dump` — restore-tested, row counts match live |
 
 **Both platforms are now on the same version (1.0.4) carrying the same three features.**
@@ -487,6 +487,21 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   `sudo -u postgres pg_dump -d loloshop -Fc -f /tmp/x.dump` (write to `/tmp`, then `mv` — the
   `postgres` user cannot write to `/root`). Dropping the leftover backfill table would also fix
   it, but check with the owner first: it is the rollback evidence for that backfill.
+- **⚠️ «ONE STUDENT PER خانة» IS NO LONGER A SHELF-WIDE RULE — it is PER SECTION.** Since
+  migration 085 the وشاح section is `mode = 'shared'` with `max_per_slot = 20`: any student's
+  sash may join a خانة, bins fill to 20 and then spill to the next one. روب (10) and قبعة (4)
+  are still `exclusive` and still enforce D2. So `placePiece`'s «الخانة مشغولة بطالب آخر» now
+  fires for some sections and not others, on purpose, and a reader who assumes D2 everywhere
+  will misread the code. Two things follow and must not be "tidied":
+  · **A communal bin's `student_id` is NULL and must stay NULL.** «وين وشاح فلان؟» is answered by
+    searching each PLACED PIECE's student name (`ShelfMap.tsx`), never the bin's owner. Writing
+    an owner onto a communal bin would make it claim one student while holding twenty.
+  · **`max_per_slot` is a FLAG, not a cap.** `placePiece` never refuses on count; D4 says the
+    worker may always keep stacking. The number only decides when the screen says «فوق الحد».
+    A section with a NULL max (شال) is the bottomless single bin it has always been.
+  The measurements behind the change are in migration 085's header — read them before reverting
+  it: one-student-per-خانة capped the sash shelf at 15 students while 47 sashes were waiting.
+
 - **⚠️ THE TWO ANSWER GUARDS ARE OPPOSITE AND MUST NEVER BE MERGED.** `lib/answerGuard.js`
   (storefront) rejects any IQD figure not in the price book; `lib/adminAnswerGuard.js` (console)
   rejects any number NOT in the facts we computed. Point the storefront guard at `/admin` and
@@ -636,6 +651,22 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   ⚠️ New env, optional, defaulted in code: `AI_CHAT_ADMIN_DAILY_USD_MAX` (2.0). Not set on prod;
   the default applies.
   Full detail in the 2026-08-21 (d) PROGRESS entry.
+
+- **⚠️ `fix/shelf-and-queue-price` IS READY AND UNMERGED — 2026-08-21 (e).** Four owner asks:
+  the price on «الإنتاج والمتابعة» → جميع الطلبات · رف التجهيز refusing a second piece · the sash
+  bin limit · «السابق»/«التالي» for المجهز. **Carries migration 085**, which changes the وشاح
+  section to communal 20-per-خانة — see the landmine above and 085's own header before merging.
+  Off `main` (`c0e3c86`), no new dependency, 471/472 backend tests (the one failure reproduces on
+  clean `main`), `next build` clean, driven in a real browser as admin and as المجهز.
+  ⚠️ **Every push to `main` auto-deploys and `scripts/deploy.sh` runs `npm run migrate` first**,
+  so 085's UPDATEs (repeated in `db/schema.sql`, the 077/080 pattern) land with the code. On prod
+  that moves the وشاح section and NULLs the owner on its **two** open bins — B01 and B02, one
+  sash each, which is the whole live state of that shelf today.
+  ⚠️ **Phone width is STILL unseen — third session in a row.** `resize_window` is a no-op on this
+  window, the app's own `X-Frame-Options: DENY` refuses an iframe rig, and a sized popup lands
+  outside the MCP tab group. Measured instead at a forced 390px panel: no horizontal overflow,
+  44px nav buttons. Someone with a phone should look at the المجهز sheet's new nav row and the
+  shelf map's «١/٢٠ وشاح» labels.
 
 - **⚠️ `fix/admin-presence-panel` IS READY AND UNMERGED — 2026-08-15.** Closes the last two
   open bugs (**1**, and **8 parts 2·3·4**), so the eleven-bug board is finished in code.

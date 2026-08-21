@@ -532,6 +532,7 @@ export function ShelfConsole() {
         open={!!sheet}
         pieceLabel={sheet?.piece_label ?? ""}
         studentName={sheet?.student_name ?? ""}
+        studentId={sheet?.student_id ?? null}
         pieceType={sheet?.piece_type ?? ""}
         suggestion={sheet?.suggestion ?? null}
         board={board}

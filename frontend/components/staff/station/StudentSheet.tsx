@@ -16,6 +16,7 @@ import { ZoneThumb } from "@/components/staff/ZoneThumb";
 import { PieceSpec } from "@/components/staff/PieceSpec";
 import { Button } from "@/components/ui/Button";
 import { ORDER_STATUS_LABELS } from "@/lib/constants";
+import { toArabicDigits } from "@/lib/format";
 import type { OrderStatus } from "@/lib/types";
 
 interface StudentSheetProps {
@@ -42,9 +43,54 @@ interface StudentSheetProps {
   /** التجهيز only — the set's absent pieces, so the sheet can say what it is waiting on
    *  before anyone bags a partial طقم (bug 8, part 4). Empty/omitted renders nothing. */
   waitingPieces?: { productName: string; status: OrderStatus }[];
+  /**
+   * «السابق»/«التالي» through the list this sheet was opened from (owner 2026-08-21, for
+   * المجهز). Omitted → no nav row at all, so التطريز/الفصال/الكوي are untouched.
+   *
+   * The caller owns the ORDER: it is whatever the console is showing after its own search
+   * and filters, which is the only sequence the worker can see and therefore the only one
+   * stepping through can match. `onPrev`/`onNext` are null at the ends — rendered disabled
+   * rather than dropped, for the same reason the order page gives: a pair that silently
+   * becomes one button moves «التالي» under the thumb aiming at «السابق».
+   */
+  nav?: {
+    position: number;
+    total: number;
+    onPrev: (() => void) | null;
+    onNext: (() => void) | null;
+  };
   onClose: () => void;
   onTickZone: (piece: StationPiece, zoneKey: string, done: boolean) => void;
   onComplete: (piece: StationPiece) => void;
+}
+
+/**
+ * One step of the sheet's «السابق»/«التالي». A null handler renders a disabled span, not
+ * nothing — same rule (and same reason) as QueueStepLink on the order page.
+ */
+function SheetStepButton({
+  onClick,
+  arrow,
+  children,
+}: {
+  onClick: (() => void) | null;
+  arrow: string;
+  children: ReactNode;
+}) {
+  const base =
+    "inline-flex min-h-11 items-center gap-1 rounded-full px-3 text-sm font-semibold transition-colors";
+  if (!onClick) {
+    return (
+      <span aria-disabled className={`${base} cursor-not-allowed text-muted`}>
+        <span aria-hidden>{arrow}</span> {children}
+      </span>
+    );
+  }
+  return (
+    <button type="button" onClick={onClick} className={`${base} text-orange-ink hover:bg-orange-ink/8`}>
+      <span aria-hidden>{arrow}</span> {children}
+    </button>
+  );
 }
 
 export function StudentSheet({
@@ -59,6 +105,7 @@ export function StudentSheet({
   footer,
   noActionHint = "لا يمكن إكمال هذه القطعة من هنا حالياً.",
   waitingPieces,
+  nav,
   onClose,
   onTickZone,
   onComplete,
@@ -113,6 +160,26 @@ export function StudentSheet({
             ✕
           </button>
         </div>
+
+        {/* Step through the list without closing (owner 2026-08-21). Its own row, not
+            squeezed into the header: on a phone the header already carries the name, the
+            batch line and a 44px ✕, and a third control there is where mis-taps happen. */}
+        {nav && nav.total > 1 && (
+          <nav
+            aria-label="التنقل بين الطلاب"
+            className="flex shrink-0 items-center justify-between gap-2 border-b border-line bg-surface-sink px-2 py-1.5"
+          >
+            <SheetStepButton onClick={nav.onPrev} arrow="→">
+              السابق
+            </SheetStepButton>
+            <span className="px-1 text-xs tabular-nums text-ink-soft" aria-live="polite">
+              {toArabicDigits(nav.position)} من {toArabicDigits(nav.total)}
+            </span>
+            <SheetStepButton onClick={nav.onNext} arrow="←">
+              التالي
+            </SheetStepButton>
+          </nav>
+        )}
 
         {/* Pieces */}
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">

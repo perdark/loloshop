@@ -1016,6 +1016,7 @@ export function StationConsole({
         open={!!shelfPrompt}
         pieceLabel={shelfPrompt?.piece_label ?? ""}
         studentName={shelfPrompt?.student_name ?? ""}
+        studentId={shelfPrompt?.student_id ?? null}
         pieceType={shelfPrompt?.piece_type ?? ""}
         suggestion={shelfPrompt?.suggestion ?? null}
         board={shelfBoard}

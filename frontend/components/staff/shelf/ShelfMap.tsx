@@ -66,7 +66,7 @@ export function ShelfMap({ shelves, search, onSlotClick }: ShelfMapProps) {
             ["ready", "الطقم كامل"],
             ["waiting", "ينتظر قطعة"],
             ["over", "فوق الحد"],
-            ["shared", "خانة مشتركة"],
+            ["shared", "خانة مشتركة (عدة طلاب)"],
             ["empty", "فارغة"],
           ].map(([k, label]) => (
             <span key={k} className="inline-flex items-center gap-1.5">
@@ -114,7 +114,9 @@ export function ShelfMap({ shelves, search, onSlotClick }: ShelfMapProps) {
                     ].join(" ")}
                     aria-label={
                       slot.count > 0
-                        ? `الخانة ${slot.slot_code}: ${slot.count} قطعة، ${slot.student_name ?? "مشتركة"}`
+                        ? `الخانة ${slot.slot_code}: ${slot.count} قطعة، ${
+                            slot.mode === "shared" ? "مشتركة" : (slot.student_name ?? "مشتركة")
+                          }`
                         : `الخانة ${slot.slot_code} فارغة`
                     }
                   >
@@ -128,8 +130,15 @@ export function ShelfMap({ shelves, search, onSlotClick }: ShelfMapProps) {
                           className={`truncate text-[9px] font-bold ${style.label}`}
                           dir="rtl"
                         >
+                          {/* A communal bin has no single owner to name, so it says WHAT it
+                              holds and how much. `piece_label` rather than a literal «شال»:
+                              since 2026-08-21 the وشاح shelf is communal too, and the old
+                              hardcoded word labelled every sash bin as shawls. A capped bin
+                              also shows its ceiling — the number is the point of the bin. */}
                           {slot.mode === "shared"
-                            ? `${slot.count} شال`
+                            ? slot.max != null
+                              ? `${slot.count}/${slot.max} ${slot.piece_label}`
+                              : `${slot.count} ${slot.piece_label}`
                             : slot.student_name}
                         </span>
                       </>

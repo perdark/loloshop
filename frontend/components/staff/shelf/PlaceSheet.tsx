@@ -14,6 +14,13 @@ interface PlaceSheetProps {
   /** What we're shelving — used for the title only. */
   pieceLabel: string;
   studentName: string;
+  /**
+   * Whose piece this is. NOT cosmetic — it is what lets the picker tell a bin it must refuse
+   * (a stranger's) from the one bin a second piece is SUPPOSED to go into (this student's
+   * own). Without it the picker blocks every occupied خانة and the worker can never place
+   * more than one piece in a bin by hand.
+   */
+  studentId: string | null;
   suggestion: ShelfSuggestion | null;
   board: ShelfBoard | null;
   pieceType: string;
@@ -27,6 +34,7 @@ export function PlaceSheet({
   open,
   pieceLabel,
   studentName,
+  studentId,
   suggestion,
   board,
   pieceType,
@@ -40,16 +48,21 @@ export function PlaceSheet({
 
   // Only the section this piece type belongs to — a robe can never go on the cap shelf,
   // so offering the whole shelf would just invite a 400 from the server.
+  const section = useMemo(
+    () => board?.sections.find((s) => s.piece_type === pieceType) ?? null,
+    [board, pieceType],
+  );
   const slots = useMemo(() => {
-    if (!board) return [];
-    const section = board.sections.find((s) => s.piece_type === pieceType);
-    if (!section) return [];
+    if (!board || !section) return [];
     const shelf = board.shelves.find((s) => s.code === section.shelf_code);
     if (!shelf) return [];
     return shelf.slots.filter(
       (s) => s.index >= section.slot_from && s.index <= section.slot_to,
     );
-  }, [board, pieceType]);
+  }, [board, section]);
+  // A communal section (شال, and وشاح since 2026-08-21) has no per-student bins, so every
+  // message about «خانة نفس الطالب» is nonsense there and the useful fact is fullness.
+  const communal = section?.mode === "shared";
 
   if (!open) return null;
 
@@ -89,7 +102,9 @@ export function PlaceSheet({
             </span>
             {suggestion?.over && !chosen ? (
               <span className="mt-1 rounded-full bg-[#9f382d] px-3 py-1 text-xs font-bold text-white">
-                الخانة تجاوزت الحد — لكنها خانة نفس الطالب
+                {communal
+                  ? "كل الخانات وصلت حدها — حطها بأي وحدة وخبّر الإدارة"
+                  : "الخانة تجاوزت الحد — لكنها خانة نفس الطالب"}
               </span>
             ) : null}
             <span className="mt-2 text-xs text-[#6b6356] underline">تغيير الخانة</span>
@@ -109,8 +124,18 @@ export function PlaceSheet({
               {slots.map((s) => {
                 const isChosen =
                   chosen?.shelf_code === s.slot_code[0] && chosen?.slot_index === s.index;
+                // THIS student's own bin. A bin belongs to one student (D2), and D4 says a
+                // second piece of theirs goes in beside the first — past the max is allowed
+                // and merely flagged. placePiece() implements exactly that: it only 409s when
+                // the open bin belongs to somebody ELSE.
+                const ownBin =
+                  s.mode === "exclusive" && studentId != null && s.student_id === studentId;
                 // Someone else's exclusive bin — the server would refuse it, so don't offer it.
-                const blocked = s.mode === "exclusive" && s.count > 0 && !isChosen;
+                // ⚠️ This used to be `s.count > 0` with no owner check, which also greyed out
+                // the student's OWN خانة — so «تغيير الخانة» could never place a second piece
+                // anywhere, even though the server accepts it. That was the whole «ما يقبل
+                // أكثر من قطعة» bug: the guard is about WHOSE bin it is, never how full it is.
+                const blocked = s.mode === "exclusive" && s.count > 0 && !ownBin && !isChosen;
                 return (
                   <button
                     key={s.slot_code}
@@ -126,11 +151,31 @@ export function PlaceSheet({
                         ? "border-[#F47B42] bg-[#F47B42] text-white"
                         : blocked
                           ? "cursor-not-allowed border-[#ded6c8] bg-[#f2ede4] text-[#bdb3a3]"
-                          : "border-[#ded6c8] bg-white text-[#1A1A1A] hover:border-[#F47B42]",
+                          : ownBin
+                            // Own bin: pickable, and marked — so an occupied-looking خانة
+                            // reads as «this is the one to add to», not as a mistake.
+                            ? "border-[#639a7b] bg-[#e5f0e9] text-[#256347] hover:border-[#F47B42]"
+                            : "border-[#ded6c8] bg-white text-[#1A1A1A] hover:border-[#F47B42]",
                     ].join(" ")}
-                    title={blocked ? `مشغولة — ${s.student_name ?? ""}` : undefined}
+                    title={
+                      blocked
+                        ? `مشغولة — ${s.student_name ?? ""}`
+                        : s.mode === "shared"
+                          ? `خانة مشتركة — فيها ${s.count} ${s.piece_label}`
+                          : ownBin
+                            ? `خانة ${s.student_name ?? studentName} — فيها ${s.count} قطعة`
+                            : undefined
+                    }
                   >
-                    {s.slot_code}
+                    <span className="block">{s.slot_code}</span>
+                    {/* Communal bins are the ones a worker CHOOSES between, so they carry the
+                        only number that helps: how full each one already is. Exclusive bins
+                        are decided by ownership, where a count would say nothing. */}
+                    {s.mode === "shared" && s.max != null ? (
+                      <span className="mt-0.5 block text-[9px] font-normal opacity-70">
+                        {s.count}/{s.max}
+                      </span>
+                    ) : null}
                   </button>
                 );
               })}

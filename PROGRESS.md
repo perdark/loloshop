@@ -111,6 +111,72 @@ prices move only when a human presses the button — which is the entire design.
 ⚠️ **Phone width unseen**, the same obstacle as the last two sessions: there is no browser in
 this sandbox at all. The panel is built mobile-first (every row ≥44px, nothing behind hover),
 but the radio pair, the per-cell rows and the confirm card want one look at ~390px.
+## 2026-08-21 (e) — 🧵 The sash shelf goes communal, the admin queue shows money, and المجهز stops closing the sheet to move on
+
+Four owner asks, all small except the second, which turned out not to be the bug it looked like.
+Branch `fix/shelf-and-queue-price`, off `main` (`c0e3c86`). No new dependency. **Migration 085.**
+
+**1. «الإنتاج والمتابعة» → جميع الطلبات now carries the price.** `getQueue` selects `o.price` and
+then DELETES it for every role but front-desk — literally the same `canSeeMoney` predicate
+`getOrder` already applies (`isManager(u) || staffTypesOf(u).includes('preparer')`), so the list
+can never show money a station's own detail page hides. Measured live: admin 1,447 rows with
+price, preparer 435 with, **embroiderer 0, presser 0**.
+⚠️ **A طقم carries its whole price on ONE piece.** 527 of 1,705 bundled rows on the dev DB have
+`price = 0`, because the sash (usually) holds the bundle's whole price and its siblings hold
+nothing — the same fact `deleteOrder`'s price re-anchoring exists for. A raw per-piece figure
+would therefore print «٠ د.ع» on ~31% of the list and read as *free*. So the row shows
+`group_price` (the SUM over the checkout group) for a bundled piece, labelled **«الطقم»**, and
+the bare price only for a piece bought alone. The label is half the answer.
+
+**2. رف التجهيز — «ما يقبل أكثر من قطعة». The picker was wrong, AND the shelf model was wrong.**
+
+*The picker bug (frontend only).* `PlaceSheet.tsx` computed `blocked = mode === 'exclusive' &&
+count > 0` with **no owner check**, despite a comment saying "someone else's bin". So «تغيير
+الخانة» greyed out every occupied خانة **including the student's own** — the one bin `placePiece`
+has always accepted a second piece into (D4: over the max in your own bin is allowed, just
+flagged). Now `ownBin` is excluded from `blocked` and rendered green. Verified in a real browser:
+the A01 button went from `disabled` to enabled with the title «خانة آيات خليل ابراهيم — فيها 1
+قطعة», and a second robe was actually placed into A01 through it.
+
+*The model was also wrong — this is the part that mattered.* Prod said the picker could not have been what
+the owner hit. **Measured on production:** 47 sashes at التجهيز against **15** sash خانات · **zero**
+retail students owning more than one sash · exactly two bins ever opened, **B01 (طيبة محمد) and
+B02 (9m_so Marwa) — two different students each burning a whole خانة**. Under D2 (one student per
+bin) the sash shelf caps at 15 students while 47 sashes need an address, and the obvious move —
+stack the next sash in the same خانة — returns «B01 مشغولة بطالب آخر». The old `max_per_slot = 10`
+could never even be reached: it bounds ONE student's own pile.
+So, **owner-confirmed**: **migration 085 makes the وشاح section `mode = 'shared'` with
+`max_per_slot = 20`.** روب (10) and قبعة (4) keep D2 — they are bulky and «whose bin is this» is
+the useful label there. `suggestSlot`'s shared branch now **fills a communal bin to its max and
+moves to the next**; a communal section with NO max (شال) never reaches that test and stays the
+single bottomless bin it has always been. A full shelf proposes the LAST bin flagged `over`
+rather than «بلا خانة» — the worker is holding the piece and it has to go somewhere.
+⚠️ **«وين وشاح فلان؟» still works, and that is not luck:** `ShelfMap` searches each PLACED
+PIECE's student name, never the bin's owner. Verified live — typing «رباب» ringed B01 while
+everything else dimmed. The bin's own `student_id` is what stops meaning anything, so 085 NULLs
+it on open sash bins; a stale owner would make a communal bin claim one student while holding
+several. Bin colour now reports FULLNESS for communal bins (`over ? 'over' : 'shared'`) and the
+map prints «1/20 وشاح» — `piece_label`, not the old hardcoded «شال», which had been labelling
+every sash bin as shawls.
+Verified end to end: B01 holding **Malak Khalid + رباب رحمن**, `student_id: null`, `max: 20`.
+
+**3. المجهز gets «السابق»/«التالي».** `StudentSheet` takes an optional `nav` prop; `PrepConsole`
+wires it to the **filtered** `groups` list — the sequence actually on screen, since landing on a
+student the worker's own search excluded would read as a bug. At the ends the control is a
+disabled span, not omitted, for the reason the order page already records: a pair that silently
+becomes one button moves «التالي» under the thumb aiming at «السابق». Omitting `nav` leaves
+التطريز/الفصال/الكوي untouched. Verified: stepped 2→3→4→3→2→1, counter tracked, «السابق» became a
+SPAN at position 1.
+
+**Verified:** 471/472 backend tests (the one failure, `app-open: a ping inside the session
+window`, **reproduces on clean `main`** — pre-existing, unrelated, confirmed by stashing) · 6 new
+shelf tests, 0 skipped · `tsc` + `eslint` + `next build` clean · driven in a real browser as
+admin and as المجهز.
+⚠️ **Phone width could not be screenshotted — third session running.** `resize_window` is a
+no-op on this window (`innerWidth` stays 1564), an iframe rig is refused by the app's own
+`X-Frame-Options: DENY`, and a sized popup lands outside the MCP tab group. What WAS measured at
+390px: the sheet panel forced to 390 shows **no horizontal overflow** and both nav buttons are
+**44px** tall (83 + 55 + 73 px of 390 used). The full-page phone pass is still owed.
 
 ## 2026-08-21 (d) — 🧠 «لولو الإدارة»: a console that reads the whole shop, acts under confirmation, and finally answers «هل الموظفين يشتغلون»
 

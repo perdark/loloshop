@@ -404,6 +404,22 @@ async function getQueue(req, res) {
             o.student_id, o.needs_pressing, o.embroidery_zones,
             o.working_staff_id, o.working_since,
             o.final_design_url, o.has_embroidery,
+            -- MONEY (owner 2026-08-21): the admin reads this list as «الإنتاج والمتابعة» and
+            -- wants each order's price on it. Selected for everyone, then DELETED below for
+            -- every role but front-desk/manager — the same canSeeMoney rule getOrder applies,
+            -- so the queue can never expose money a station's detail page already hides.
+            o.price,
+            -- ⚠️ A طقم carries its WHOLE price on ONE piece (usually the sash) — see
+            -- deleteOrder's re-anchoring comment. Measured on the dev DB: 527 of 1,705
+            -- bundled rows have price = 0, so a per-piece figure would print «٠ د.ع» on
+            -- ~31% of this list and read as free. The bundle total is what the admin means
+            -- by "the price of the order", so send it alongside and let the row say which
+            -- number it is showing. Uses idx_orders_checkout_group; NULL for a solo piece.
+            CASE WHEN o.checkout_group_id IS NOT NULL THEN (
+              SELECT SUM(o2.price) FROM orders o2
+               WHERE o2.checkout_group_id = o.checkout_group_id
+                 AND o2.status::text <> 'cancelled'
+            ) END AS group_price,
             EXISTS(SELECT 1 FROM order_items oi2
                     WHERE oi2.order_id = o.id
                       AND (oi2.plate_image_url IS NOT NULL
@@ -557,6 +573,15 @@ async function getQueue(req, res) {
   }
   // The raw progress jsonb is internal — expose only the computed zones list.
   for (const r of rows) delete r.embroidery_zones;
+  // PRICE VISIBILITY — the SAME rule getOrder's canSeeMoney uses (front-desk = preparer,
+  // plus manager/admin). Deleted rather than zeroed so the column simply does not exist for
+  // an embroiderer/presser/tailor/designer and the UI has nothing to render or leak.
+  if (!(isManager(u) || staffTypesOf(u).includes('preparer'))) {
+    for (const r of rows) {
+      delete r.price;
+      delete r.group_price;
+    }
+  }
   res.json({ data: rows });
 }
 

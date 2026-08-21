@@ -368,6 +368,28 @@ export function PrepConsole({ showSourceFilter }: { showSourceFilter: boolean })
   const openAdvanceable = openGroup?.pieces.filter((p) => p.canComplete) ?? [];
   const openAnyBusy = openGroup?.pieces.some((p) => busyKeys.has(p.id)) ?? false;
 
+  // «السابق»/«التالي» through the students (owner 2026-08-21). Stepping over the FILTERED
+  // `groups`, not the raw rows: that is the sequence on screen, and it is the only one the
+  // worker can predict — landing on a student their own search excluded would read as a bug.
+  //
+  // A student whose every piece was finished in this session drops out of `groups` while the
+  // sheet stays open on their ✓ ghosts, so the index can legitimately be -1. Then there is no
+  // «here» to step from and the nav is simply not rendered.
+  const openIndex = openStudentKey ? groups.findIndex((g) => g.key === openStudentKey) : -1;
+  const sheetNav =
+    openIndex >= 0
+      ? {
+          position: openIndex + 1,
+          total: groups.length,
+          onPrev:
+            openIndex > 0 ? () => setOpenStudentKey(groups[openIndex - 1].key) : null,
+          onNext:
+            openIndex < groups.length - 1
+              ? () => setOpenStudentKey(groups[openIndex + 1].key)
+              : null,
+        }
+      : undefined;
+
   return (
     <div dir="rtl" lang="ar" className="space-y-5 pb-28">
       <PageHeader
@@ -539,6 +561,7 @@ export function PrepConsole({ showSourceFilter }: { showSourceFilter: boolean })
             view === "ready" ? "أكّد التسليم من «التفاصيل»." : undefined
           }
           waitingPieces={openGroup?.set.waiting}
+          nav={sheetNav}
           onClose={() => setOpenStudentKey(null)}
           // التجهيز zones are read-only, so this is never reached — the sheet renders no
           // tick targets for kind="preparing".

@@ -21,6 +21,7 @@ import {
   PRODUCT_TYPE_LABELS,
   type EmbroideryZone,
 } from "@/lib/constants";
+import { formatIQD } from "@/lib/format";
 import { usePolling } from "@/lib/hooks/usePolling";
 import { useScrollRestore } from "@/hooks/useScrollRestore";
 import type { ProductionQueueItem } from "@/lib/staff-types";
@@ -381,12 +382,39 @@ function KpiStrip({ items }: { items: ProductionQueueItem[] }) {
   );
 }
 
+/**
+ * «السعر» for one queue row (owner 2026-08-21, «show the price of order»).
+ *
+ * Returns null when the backend sent NO money field. That means the requester is a station
+ * role the price is hidden from (getQueue deletes both fields for anyone but front-desk /
+ * manager / admin) — not that the order is free — so the column simply does not render.
+ *
+ * ⚠️ A طقم carries its whole price on ONE piece and its siblings are 0 (527 of 1,705 bundled
+ * rows on the dev DB). So a bundled row shows the SET total and says «الطقم»; only a piece
+ * bought on its own shows its own price bare. The label is half the answer — the same figure
+ * means two different things depending on which one it is.
+ */
+function orderPriceLabel(item: ProductionQueueItem): { text: string; isSet: boolean } | null {
+  const bundled = item.checkout_group_id != null;
+  const raw = bundled ? (item.group_price ?? item.price) : item.price;
+  if (raw === undefined || raw === null) return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return null;
+  return { text: formatIQD(n), isSet: bundled };
+}
+
+/** True once any row carries money — drives the desktop column header on/off as one unit. */
+function anyPriceVisible(items: ProductionQueueItem[]): boolean {
+  return items.some((i) => i.price !== undefined || i.group_price !== undefined);
+}
+
 // ─── Mobile order card ────────────────────────────────────────────────────────
 
 function OrderMobileCard({ item, canDelete, onDelete }: { item: ProductionQueueItem; canDelete: boolean; onDelete: (id: string) => void }) {
   const overdue = isOverdue(item);
   const missing = isMissingDesign(item);
   const dl      = deadlineLabel(item);
+  const price   = orderPriceLabel(item);
 
   return (
     <div className="rounded-xl border border-line bg-surface">
@@ -432,6 +460,12 @@ function OrderMobileCard({ item, canDelete, onDelete }: { item: ProductionQueueI
             {item.wholesaler_name}
           </span>
         )}
+        {price && (
+          <span className="ms-auto rounded px-1.5 py-0.5 text-[11px] font-bold tabular-nums text-ink">
+            {price.text}
+            {price.isSet && <span className="ms-1 font-normal text-muted">الطقم</span>}
+          </span>
+        )}
       </div>
 
       {/* Row 3: working + time */}
@@ -454,11 +488,14 @@ function OrderMobileCard({ item, canDelete, onDelete }: { item: ProductionQueueI
 function OrderTableRow({
   item,
   showStage,
+  showPrice,
   canDelete,
   onDelete,
 }: {
   item: ProductionQueueItem;
   showStage: boolean;
+  /** Table-level, not row-level: the header and every cell appear or vanish together. */
+  showPrice: boolean;
   canDelete: boolean;
   onDelete: (id: string) => void;
 }) {
@@ -466,6 +503,7 @@ function OrderTableRow({
   const overdue = isOverdue(item);
   const missing = isMissingDesign(item);
   const dl      = deadlineLabel(item);
+  const price   = orderPriceLabel(item);
   const href    = `/staff/orders/${item.id}?from=${encodeURIComponent("/staff/queue")}`;
 
   return (
@@ -512,6 +550,20 @@ function OrderTableRow({
           )}
         </div>
       </td>
+
+      {/* السعر — «الطقم» when the figure is the bundle total (see orderPriceLabel) */}
+      {showPrice && (
+        <td className="px-4 py-2.5 whitespace-nowrap">
+          {price ? (
+            <div>
+              <span className="text-sm font-bold tabular-nums text-ink">{price.text}</span>
+              {price.isSet && <div className="text-[11px] text-muted mt-0.5">الطقم</div>}
+            </div>
+          ) : (
+            <span className="text-[11px] text-muted">—</span>
+          )}
+        </td>
+      )}
 
       {/* المصدر / الممثل */}
       <td className="px-4 py-2.5">
@@ -1003,6 +1055,10 @@ function ConsoleContent() {
 
   // ── Pagination ────────────────────────────────────────────────────────────
   const pageItems = filtered.slice((page - 1) * PER_PAGE, (page - 1) * PER_PAGE + PER_PAGE);
+  // Derived from the WHOLE fetch, not the current page: whether money is visible is a
+  // property of the viewer's role, so the column must not appear and vanish while paging
+  // through (a page that happens to hold only rows with a null price would otherwise drop it).
+  const showPrice = anyPriceVisible(items);
 
   // A restored page number may exceed the fresh list's page count — degrade to page 1 instead
   // of silently rendering an empty slice. Gated on `rehydrated` too (see definition above) so
@@ -1258,13 +1314,14 @@ function ConsoleContent() {
               >
                 <table
                   className="w-full text-sm border-collapse"
-                  style={{ minWidth: 760 }}
+                  style={{ minWidth: showPrice ? 860 : 760 }}
                   aria-label="قائمة الطلبات"
                 >
                   <thead>
                     <tr className="bg-beige border-b-2 border-line text-right text-[11px] uppercase tracking-wider text-muted">
                       <th className="sticky top-0 bg-beige z-10 px-4 py-2.5 font-bold">الطالب / الجامعة</th>
                       <th className="sticky top-0 bg-beige z-10 px-4 py-2.5 font-bold">المنتج</th>
+                      {showPrice && <th className="sticky top-0 bg-beige z-10 px-4 py-2.5 font-bold">السعر</th>}
                       <th className="sticky top-0 bg-beige z-10 px-4 py-2.5 font-bold">المصدر / الممثل</th>
                       <th className="sticky top-0 bg-beige z-10 px-4 py-2.5 font-bold">الدفعة</th>
                       <th className="sticky top-0 bg-beige z-10 px-4 py-2.5 font-bold">يعمل عليه</th>
@@ -1279,6 +1336,7 @@ function ConsoleContent() {
                         key={item.id}
                         item={item}
                         showStage={!stage}
+                        showPrice={showPrice}
                         canDelete={canDelete}
                         onDelete={handleDelete}
                       />

@@ -93,6 +93,17 @@ export interface ProductionQueueItem {
   search_text?: string | null;
   /** Non-null when this order belongs to a multi-item checkout bundle. */
   checkout_group_id: string | null;
+  /**
+   * MONEY — present ONLY for front-desk (preparer) + manager/admin; the backend deletes both
+   * fields for every other station, so `undefined` means "not allowed to see", not "free".
+   *
+   * `price` is THIS piece's own price. ⚠️ In a طقم the whole price sits on one piece (usually
+   * the sash) and the siblings are 0, so never render `price` alone for a bundled row —
+   * `group_price` is the set total and is what «سعر الطلب» means to the admin. Null for a
+   * piece bought on its own.
+   */
+  price?: number | string | null;
+  group_price?: number | string | null;
   /** Staff presence — who is actively working on this order (admin monitor). */
   working_staff_id?: string | null;
   working_staff_name?: string | null;

@@ -83,11 +83,17 @@ async function loadOpenBins(client) {
 }
 
 // D3: the system proposes, the worker disposes.
-//   shared   → the section's single communal bin, no max, never "over".
+//   shared   → a COMMUNAL bin: any student's piece may join it. Two shapes, told apart by
+//              whether the section has a max:
+//                · no max  (شال) — one bin, bottomless, never "over". Unchanged since D1.
+//                · a max   (وشاح, owner 2026-08-21) — fill each bin to its max, then move to
+//                  the next. See the block comment below for why the sash needed this.
 //   exclusive→ the student's OWN open bin if they have one (over = at/past max), else the
 //              lowest free index, else null («بلا خانة»).
-// Because a bin belongs to one student, over-stuffing can only ever spill into that
-// student's own bin — never a stranger's. That is what makes D4 safe rather than chaotic.
+// For exclusive sections, because a bin belongs to one student, over-stuffing can only ever
+// spill into that student's own bin — never a stranger's. That is what makes D4 safe rather
+// than chaotic. A communal section has no owner to protect, so D4 there means the worker may
+// keep stacking past the max on the LAST bin rather than be told «بلا خانة».
 function suggestSlot(section, studentId, openBins) {
   if (section.slot_count < 1) return null;
   const inSection = openBins.filter(
@@ -97,8 +103,27 @@ function suggestSlot(section, studentId, openBins) {
       b.slot_index <= section.slot_to
   );
 
+  // ── Why the وشاح section is communal (owner 2026-08-21) ──────────────────────────────
+  // D2 gives each student their own خانة, which is right for روب and قبعة: they are bulky,
+  // a خانة holds a handful, and «whose bin is this» is the useful label. Sashes are thin and
+  // stack. Measured on prod the day this changed: 47 sashes waiting at التجهيز against 15
+  // sash خانات, and NOT ONE student owned two of them — so one-student-per-خانة capped the
+  // sash shelf at 15 students while 47 sashes needed somewhere to go, and the worker got
+  // «B01 مشغولة بطالب آخر» for the obvious move. Sashes now stack ~20 to a خانة, any
+  // students, and «وين وشاح فلان؟» is answered by searching the piece (the map already
+  // matches on each placed piece's student name, not on the bin's owner).
   if (section.mode === 'shared') {
-    return { shelf_code: section.shelf_code, slot_index: section.slot_from, over: false };
+    for (let i = section.slot_from; i <= section.slot_to; i += 1) {
+      const bin = inSection.find((b) => b.slot_index === i);
+      // An unopened bin is free; an open one takes more until it reaches its max. A section
+      // with NO max never satisfies the second test's negation, so it never leaves slot_from
+      // — which is exactly the single bottomless شال bin this branch has always returned.
+      if (!bin || section.max_per_slot == null || bin.live_count < section.max_per_slot) {
+        return { shelf_code: section.shelf_code, slot_index: i, over: false };
+      }
+    }
+    // Every communal bin is at its max. D4: propose the last one, flagged — never «بلا خانة».
+    return { shelf_code: section.shelf_code, slot_index: section.slot_to, over: true };
   }
 
   const own = inSection.find((b) => b.student_id === studentId);
@@ -503,7 +528,10 @@ async function buildBoard() {
         let waitingFor = [];
         if (count > 0 || bin) {
           if (section.mode === 'shared') {
-            state = 'shared';
+            // A communal bin has no owner, so its colour cannot report whose set is waiting.
+            // It reports FULLNESS instead: neutral «مشتركة» until it passes its max, red
+            // after. An uncapped bin (شال) can never pass a max and stays neutral forever.
+            state = over ? 'over' : 'shared';
           } else {
             const studentSets = setByStudent.get(bin?.student_id) || [];
             const anyWaiting = studentSets.some((s) => s.state === 'waiting');
