@@ -30,6 +30,8 @@ const {
 } = require('./counts');
 
 const presence = require('./staffPresence');
+// «2026/8/30» — the console's one date format. See lib/shopTime.js.
+const { fmtShopDate } = require('./shopTime');
 
 const fmtIQD = (n) => `${Number(n || 0).toLocaleString('en-US')} دينار`;
 
@@ -223,7 +225,7 @@ const METRICS = {
       if (!rows.length) return { label: 'المواعيد', facts: ['ماكو مواعيد محددة لأي ممثل'] };
       return {
         label: 'آخر موعد لتقديم الطلبات لكل ممثل',
-        facts: rows.map((r) => `${r.rep_name}: ${new Date(r.deadline).toISOString().slice(0, 10)}`),
+        facts: rows.map((r) => `${r.rep_name}: ${fmtShopDate(r.deadline)}`),
       };
     },
   },
@@ -353,7 +355,7 @@ const METRICS = {
         facts: rows.map(
           (r) =>
             `${r.name}: ${r.opens} مرة خلال ${r.days_opened} يوم` +
-            `${r.last_seen ? `، آخر مرة ${new Date(r.last_seen).toISOString().slice(0, 10)}` : '، ولا مرة'}`
+            `${r.last_seen ? `، آخر مرة ${fmtShopDate(r.last_seen)}` : '، ولا مرة'}`
         ),
       };
     },
@@ -532,7 +534,7 @@ const METRICS = {
       return {
         label: `قطع ما تحركت من أكثر من ${d} يوم`,
         facts: rows.map(
-          (r) => `${STATUS_AR[r.status] || r.status}: ${r.pieces} قطعة، أقدمها من ${new Date(r.oldest).toISOString().slice(0, 10)}`
+          (r) => `${STATUS_AR[r.status] || r.status}: ${r.pieces} قطعة، أقدمها من ${fmtShopDate(r.oldest)}`
         ),
       };
     },

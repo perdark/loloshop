@@ -30,7 +30,7 @@ last verified 2026-08-10 and are unchanged.
 | iOS | **1.0.4 (build 1786309948) SUBMITTED — «Waiting for Review»** (2026-08-10, ≤48h) |
 | Android push | ✅ working end to end |
 | iOS push | ✅ **APNs key installed and verified against Apple** — `push.configured()` → `{"android":true,"ios":true}` |
-| Backend tests | **466/466 on `feat/admin-ai-console`** (39 new, 2026-08-21). Older rows said 266/275; the suite has grown since. ⚠️ Run from `backend/` as `node --test test/*.test.js` — see the landmine below; the old `test/` and bare forms both misbehave on Node 26. |
+| Backend tests | **467/467 on `feat/admin-ai-console`** (40 new, 2026-08-21). Older rows said 266/275; the suite has grown since. ⚠️ Run from `backend/` as `node --test test/*.test.js` — see the landmine below; the old `test/` and bare forms both misbehave on Node 26. |
 | Prod DB backup | ✅ `~/Desktop/_private/loloshop-db/loloshop-prod-2026-08-14.dump` — restore-tested, row counts match live |
 
 **Both platforms are now on the same version (1.0.4) carrying the same three features.**
@@ -527,7 +527,7 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   flips the noun with the view mode. Two labels were deliberately left as «طلب» because they
   really are bundles. The «40 vs 118» disagreement this line described is gone.
 - **`backend/` has no `npm test`** — verified in `backend/package.json`. The real command is
-  **`node --test test/*.test.js`**, and it **must be run from `backend/`** (466 tests on
+  **`node --test test/*.test.js`**, and it **must be run from `backend/`** (467 tests on
   `feat/admin-ai-console`; the count in older entries is stale).
   ⚠️ On Node 26 the bare `node --test test/` form this file used to give now fails to resolve
   the directory, and `node --test` with no path sweeps in `test-full-set.js` / `test-zentramsg.js`
@@ -584,12 +584,16 @@ longer stranded on a branch · the laptop's loose credentials are filed in
 - **⚠️ `feat/admin-ai-console` IS READY AND UNMERGED — 2026-08-21.** «لولو الإدارة»: a full
   admin page (`/admin/assistant`), the metric catalogue 8 → 22, an action registry the AI can
   execute only after an explicit تأكيد, a deterministic suggestion feed, staff app-open
-  tracking (**migration 084**) and a nightly staff-report push. 466/466 backend tests (39 new),
+  tracking (**migration 084**) and a nightly staff-report push. 467/467 backend tests (40 new),
   `tsc`/lint/`next build` clean, every endpoint verified live by curl including a real
   propose→confirm→execute round trip and a refused tampered token.
-  ⚠️ **NOT opened in a browser** — Chrome would not connect on this laptop. `/admin/assistant`
-  has three surfaces nobody has seen: the suggestion cards, the confirm card, and the report
-  table at phone width. **Every push to `main` auto-deploys**, so open it once first.
+  **Driven in a real browser end to end**: the page renders, a live question answered, and the
+  full propose → تأكيد → execute flow was performed by hand. Doing so found and fixed a real
+  defect (three reps share the spelling «كلية بلاد الرافدين», so the ambiguity refusal listed
+  three identical labels; it now names the rep).
+  ⚠️ **Phone width is still unseen** — Chrome refused to resize the maximized ultrawide window,
+  the same obstacle the assistant hit on 2026-08-12. Look at the suggestion cards, the confirm
+  card and the report table at ~390px. **Every push to `main` auto-deploys**, so open it once first.
   ⚠️ **Run the migration in the same deploy** — `npm run migrate` applies `db/schema.sql`, which
   carries 084. Until `staff_app_opens` exists the beacon logs an error and 204s (harmless), but
   `/admin/staff-daily-report` and four metrics 500.

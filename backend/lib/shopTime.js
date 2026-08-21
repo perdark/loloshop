@@ -36,4 +36,28 @@ function localParts(date = new Date(), timeZone = DEFAULT_TZ) {
   };
 }
 
-module.exports = { localParts, DEFAULT_TZ };
+/**
+ * «2026/8/30» — the shop's date format everywhere a human reads one.
+ *
+ * Owner preference 2026-08-21: numerals, not month names. `toLocaleDateString('ar-IQ', {month:
+ * 'long'})` renders «٢ حزيران ٢٠٢٦`, which is correct Arabic and slower to scan than digits —
+ * and on a confirmation card the owner is checking a date against one in his head, so scanning
+ * speed is the whole job. Latin digits deliberately: this is the form he wrote it in, and a
+ * date is the one string where Arabic-Indic digits cost more than they give.
+ *
+ * Year first so it sorts and never reads as ambiguous D/M vs M/D. No leading zeros.
+ */
+function fmtShopDate(value, timeZone = DEFAULT_TZ) {
+  // ⚠️ null/undefined/'' FIRST, before `new Date()` sees them. `new Date(null)` is epoch 0 —
+  // a perfectly valid Date — so a NaN check alone lets a missing deadline render as «1970/1/1»
+  // inside an Arabic sentence the owner is about to confirm. Caught by its own test.
+  if (value === null || value === undefined || value === '') return '';
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  // Go through Intl so the date is the one at the SHOP, not the one at UTC — the same
+  // off-by-one-day trap localParts exists for.
+  const [y, m, day] = localParts(d, timeZone).date.split('-');
+  return `${Number(y)}/${Number(m)}/${Number(day)}`;
+}
+
+module.exports = { localParts, fmtShopDate, DEFAULT_TZ };

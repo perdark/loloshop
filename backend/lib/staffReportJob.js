@@ -21,6 +21,8 @@
 
 const { query } = require('./db');
 const presence = require('./staffPresence');
+// «2026/8/30» — the shop's one human-readable date format. See lib/shopTime.js.
+const { fmtShopDate } = require('./shopTime');
 
 const QUEUE_STAFF_REPORT = 'staff-daily-report';
 
@@ -85,7 +87,7 @@ async function runDailyReport(now = new Date()) {
                WHERE n.type = 'staff_daily_report'
                  AND n.user_id = u.id
                  AND n.created_at > NOW() - INTERVAL '20 hours')`,
-    [`تقرير الموظفين — ${date}`, composeBody(report)]
+    [`تقرير الموظفين — ${fmtShopDate(date)}`, composeBody(report)]
   );
 
   if (rowCount === 0) {

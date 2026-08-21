@@ -20,7 +20,7 @@ const guard = require('../lib/adminAnswerGuard');
 const actions = require('../lib/adminActions');
 const { evaluateCaps } = require('../lib/aiChat')._internals;
 const { parseJson } = require('../controllers/adminConsoleController')._internals;
-const { localParts } = require('../lib/shopTime');
+const { localParts, fmtShopDate } = require('../lib/shopTime');
 const metrics = require('../lib/adminMetrics');
 const presence = require('../lib/staffPresence');
 const reportJob = require('../lib/staffReportJob');
@@ -351,6 +351,21 @@ test('shop date: app-opens and بصمة agree on which day it is', () => {
   assert.equal(presence.shopToday(lateEvening), '2026-08-22');
   // And the plain UTC answer, which is what a naive CURRENT_DATE would have given:
   assert.equal(lateEvening.toISOString().slice(0, 10), '2026-08-21');
+});
+
+test('dates: the console prints numerals, not month names', () => {
+  // Owner preference 2026-08-21. `toLocaleDateString('ar-IQ', {month:'long'})` gave
+  // «٢ حزيران ٢٠٢٦» — correct Arabic, slower to scan than digits, and on a confirmation card
+  // the owner is checking a date against one in his head.
+  assert.equal(fmtShopDate('2026-08-30'), '2026/8/30');
+  assert.equal(fmtShopDate('2026-06-02'), '2026/6/2', 'no leading zeros');
+  assert.equal(fmtShopDate(new Date('2026-01-01T09:00:00Z')), '2026/1/1');
+  // Shop time, not UTC — the same off-by-one-day trap localParts exists for. 21:30Z is already
+  // tomorrow in Baghdad, and a confirmation card showing yesterday's date is a wrong card.
+  assert.equal(fmtShopDate(new Date('2026-08-21T21:30:00Z')), '2026/8/22');
+  // A bad value must render as nothing rather than «Invalid Date» in an Arabic sentence.
+  assert.equal(fmtShopDate('nope'), '');
+  assert.equal(fmtShopDate(null), '');
 });
 
 test('app-open: a ping inside the session window does NOT count a second open', async (t) => {

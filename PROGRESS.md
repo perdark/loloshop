@@ -94,12 +94,34 @@ end to end (deadline 2026-05-26 → 2026-06-05, `audit_log` row written with the
 `via: admin_ai_console`), and a token with one character flipped was refused. Dev DB restored
 afterwards.
 
-⚠️ **NOT verified: a browser.** Chrome is not running on this laptop and the extension would
-not connect, so `/admin/assistant` has never been opened by a human. The route builds, the page
-compiles into the client bundle and every endpoint it calls is verified by curl — but the
-layout, the RTL table at phone width and the confirm card are unseen. Same gap
-`fix/admin-presence-panel` carries. **Open it once before merging**, since every push to `main`
-auto-deploys.
+**Then verified in a real browser** (Chrome was started and the extension connected on the
+second attempt). `/admin/assistant` renders: RTL sidebar with «لولو الإدارة», the four stat
+tiles, five suggestion cards in severity order, the thread, the report table. History restored
+correctly and scoped to this admin. A live question answered through the model. **The full
+action flow was driven by hand — typed «مدد آخر موعد لممثل كلية اليرموك سبعة أيام», the confirm
+card appeared, tapped تأكيد, the deadline moved and the card was replaced by the outcome so it
+cannot be confirmed twice.**
+
+**Driving it found a defect nothing else would have.** «كلية بلاد الرافدين» matches THREE reps
+whose `university_name` is spelled identically, so the ambiguity refusal rendered «كلية بلاد
+الرافدين · كلية بلاد الرافدين · كلية بلاد الرافدين» — a refusal the owner cannot act on, which
+is barely better than guessing. The list now leads with the rep's own name: «مهدي علي حسين
+(كلية بلاد الرافدين) · عبدالعزيز رعد خضير (…) · كرار حيدر حسين (…)». Same data as HANDOFF owner
+action 7.
+
+**Owner ask during the session: dates as numerals, not month names.** `toLocaleDateString('ar-IQ',
+{month:'long'})` gave «٢ حزيران ٢٠٢٦»; the console now prints **2026/6/2** everywhere — confirm
+cards, run messages, deadline metrics, stalled-piece dates, last-seen dates and the nightly push
+title. One definition, `shopTime.fmtShopDate`, and it goes through Intl so the date is the one
+at the SHOP rather than at UTC. Its own test caught a real bug on the way in: `new Date(null)`
+is epoch 0, a perfectly valid Date, so a rep with no deadline would have rendered **1970/1/1**
+inside a sentence the owner was about to confirm. Null is now checked before `Date` sees it.
+
+⚠️ **Still NOT verified: phone width.** Chrome refused to resize the maximized ultrawide window
+(innerWidth stayed 3097 through two attempts) — the same obstacle recorded for the storefront
+assistant on 2026-08-12. No horizontal overflow at desktop width, and the report table sits in
+its own `overflow-x-auto`, but the suggestion cards, the confirm card and that table have not
+been seen at ~390px. **Every push to `main` auto-deploys**, so look at it on a phone once.
 
 ## 2026-08-21 (c) — 🧠 The reading layer: the AI proposes, the designer confirms, the sheet stays cheap
 

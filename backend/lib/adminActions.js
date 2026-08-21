@@ -60,14 +60,9 @@ const PROPOSAL_TTL_MS = 10 * 60 * 1000;
 
 const fmtIQD = (n) => `${Number(n || 0).toLocaleString('en-US')} دينار`;
 
-/** Arabic-friendly date, for the confirmation sentence. */
-const fmtDate = (d) =>
-  new Date(d).toLocaleDateString('ar-IQ', {
-    timeZone: 'Asia/Baghdad',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
+// «2026/8/30». One definition, in lib/shopTime.js — see there for why numerals beat month
+// names on a confirmation card the owner is checking against a date in his head.
+const { fmtShopDate: fmtDate } = require('./shopTime');
 
 // ── Param coercion. Every one of these REJECTS rather than repairs. ─────────────────────────
 
@@ -335,7 +330,20 @@ async function findRep(name) {
     [`%${name}%`]
   );
   if (!rows.length) return null;
-  if (rows.length > 1) return { ambiguous: rows.map((r) => r.label).join(' · ') };
+  if (rows.length > 1) {
+    // ⚠️ The disambiguation list MUST name the person, not just the university.
+    // Found by driving this in a browser 2026-08-21: «كلية بلاد الرافدين» matches three reps
+    // whose university_name is spelled identically, so listing labels alone produced
+    // «كلية بلاد الرافدين · كلية بلاد الرافدين · كلية بلاد الرافدين» — a refusal the admin
+    // cannot act on, which is barely better than guessing. (HANDOFF owner action 7 is the
+    // same data: one university spelled three ways, plus genuine duplicates.) The rep's own
+    // name is what distinguishes them, so it leads.
+    return {
+      ambiguous: rows
+        .map((r) => (r.label && r.label !== r.name ? `${r.name} (${r.label})` : r.name))
+        .join(' · '),
+    };
+  }
   return rows[0];
 }
 
