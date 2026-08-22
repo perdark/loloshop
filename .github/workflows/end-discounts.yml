@@ -30,6 +30,12 @@ on:
         default: 'report'
         type: choice
         options: [report, restore, clear-only]
+      scopes:
+        description: 'Which prices to restore. Measured on prod 2026-08-22 the round moved only the RETAIL price (−5,000 on 51 products), so `retail` is the right answer there; `product,retail` also raises the product-level fallback price, which is what rep-linked students pay when a product has no wholesaler row.'
+        required: false
+        default: 'retail'
+        type: choice
+        options: [retail, 'product,retail', product]
       include_wholesaler:
         description: 'Also restore سعر الجملة rows. Usually NO — a wholesale price is below the retail old price by the normal margin, discount or not.'
         required: false
@@ -64,6 +70,7 @@ jobs:
               report)     FLAGS="" ;;
               *) echo "unknown mode"; exit 1 ;;
             esac
+            if [ -n "${{ inputs.scopes }}" ]; then FLAGS="$FLAGS --scopes=${{ inputs.scopes }}"; fi
             if [ "${{ inputs.include_wholesaler }}" = "true" ]; then FLAGS="$FLAGS --include-wholesaler"; fi
             if [ "${{ inputs.keep_promo }}" = "true" ]; then FLAGS="$FLAGS --keep-promo"; fi
             echo "==> node scripts/end-discounts.js $FLAGS"

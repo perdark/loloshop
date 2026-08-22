@@ -5,6 +5,7 @@
 //   node scripts/end-discounts.js --restore       # put the prices back, clear the old price
 //   node scripts/end-discounts.js --clear-only    # clear the old price, touch NO price
 //
+//   --scopes=retail        restore ONLY these cells (csv: product,retail,wholesaler)
 //   --include-wholesaler   also restore سعر الجملة rows (see the warning below)
 //   --keep-promo           leave the promo banner switch alone
 //
@@ -46,6 +47,27 @@ const RESTORE = has('--restore');
 const CLEAR_ONLY = has('--clear-only');
 const INCLUDE_WHOLESALER = has('--include-wholesaler');
 const KEEP_PROMO = has('--keep-promo');
+
+// --scopes=retail  ·  --scopes=product,retail
+// Restore ONLY these price cells. Measured on prod 2026-08-22, this is not a nicety: the round
+// there discounted the `retail` cell of 51 products by exactly 5,000 each, but FOUR products
+// also had a product-level base_price sitting below the compare-at by 20,000 / 15,000 / 10,000
+// / 5,000. Those gaps are not the discount — they are the ordinary distance between a
+// product-level fallback price and the retail price — and `products.base_price` is what a
+// REP-LINKED student pays when the product has no wholesaler row. Restoring them would have
+// raised real order prices by up to 20,000 on a round the owner described as "5000".
+// So: when the round touched one kind of cell, restore that kind and leave the rest alone.
+const SCOPES_ARG = argv.find((a) => a.startsWith('--scopes='));
+const SCOPES = SCOPES_ARG
+  ? SCOPES_ARG.slice('--scopes='.length).split(',').map((s) => s.trim()).filter(Boolean)
+  : null;
+
+// Which price cells this run is allowed to write. --scopes wins outright when given;
+// otherwise the default is product-level + retail, with wholesaler behind its own opt-in.
+function wanted(scope) {
+  if (SCOPES) return SCOPES.includes(scope);
+  return scope !== 'wholesaler' || INCLUDE_WHOLESALER;
+}
 
 const iqd = (n) => `${Number(n).toLocaleString('en-US')} IQD`;
 const pad = (s, n) => String(s).padEnd(n);
@@ -89,7 +111,7 @@ async function main() {
       const line = c.discounted
         ? `${pad(iqd(c.current_price), 16)} -> ${pad(iqd(c.compare_at_price), 16)} (+${iqd(c.delta)})`
         : `${pad(iqd(c.current_price), 16)}    (no discount on this price)`;
-      const mark = c.discounted && (c.scope !== 'wholesaler' || INCLUDE_WHOLESALER) ? '*' : ' ';
+      const mark = c.discounted && wanted(c.scope) ? '*' : ' ';
       console.log(`   ${mark} ${pad(c.scope, 12)} ${line}`);
     }
     console.log('');
@@ -112,9 +134,7 @@ async function main() {
     expected_compare_at_price: p.compare_at_price,
     scopes: CLEAR_ONLY
       ? []
-      : p.cells
-          .filter((c) => c.discounted && (c.scope !== 'wholesaler' || INCLUDE_WHOLESALER))
-          .map((c) => c.scope),
+      : p.cells.filter((c) => c.discounted && wanted(c.scope)).map((c) => c.scope),
   }));
 
   const planned = planFrom(selection, report);
@@ -139,6 +159,23 @@ async function main() {
   }
   console.log('');
 
+  // A discounted cell we did NOT write still has its old price cleared from the product a
+  // moment ago, so this log line is the only human-readable record left of it (the machine
+  // copy is discount_restore_log.old_compare_at_price). Print it, always.
+  const skipped = [];
+  for (const p of report.products) {
+    for (const c of p.cells) {
+      if (c.discounted && !wanted(c.scope)) {
+        skipped.push(`    ${pad(p.name_ar, 28)} ${pad(c.scope, 12)} left at ${pad(iqd(c.current_price), 16)} (old price was ${iqd(c.compare_at_price)})`);
+      }
+    }
+  }
+  if (skipped.length) {
+    console.log(`  DELIBERATELY NOT RESTORED — ${skipped.length} discounted cell(s) outside this run's scope:`);
+    skipped.forEach((l) => console.log(l));
+    console.log('');
+  }
+
   if (!KEEP_PROMO) {
     const off = await deactivatePromo();
     console.log(`  Promo banner switched OFF (was ${off.changed ? 'on' : 'already off'}).`);
@@ -148,11 +185,24 @@ async function main() {
   const after = await buildReport();
   console.log(`  Re-read: ${after.summary.products} products still carry an old price.`);
   console.log('');
+  // Two statements, because a price lives in two tables. Printing only the products one — as
+  // this did first — silently fails to undo a --scopes=retail run, which is the common case.
   console.log('  UNDO: every old value is in discount_restore_log for this batch_id.');
+  console.log(`    -- product-level prices`);
   console.log(`    UPDATE products p SET base_price = l.old_price`);
   console.log(`      FROM discount_restore_log l`);
   console.log(`     WHERE l.batch_id = '${result.batch_id}'`);
   console.log(`       AND l.scope = 'product' AND p.id = l.product_id;`);
+  console.log(`    -- per-role prices (retail / wholesaler)`);
+  console.log(`    UPDATE product_price_roles r SET base_price = l.old_price`);
+  console.log(`      FROM discount_restore_log l`);
+  console.log(`     WHERE l.batch_id = '${result.batch_id}'`);
+  console.log(`       AND l.scope <> 'product' AND r.product_id = l.product_id`);
+  console.log(`       AND r.role::text = l.scope;`);
+  console.log(`    -- and the old price itself, if you want the badges back`);
+  console.log(`    UPDATE products p SET compare_at_price = l.old_compare_at_price`);
+  console.log(`      FROM discount_restore_log l`);
+  console.log(`     WHERE l.batch_id = '${result.batch_id}' AND p.id = l.product_id;`);
   console.log('');
 }
 
