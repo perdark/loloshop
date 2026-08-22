@@ -1,5 +1,43 @@
 # Progress
 
+## 2026-08-22 (b) — ✅ THE DISCOUNT ROUND IS ENDED ON PROD — 51 retail prices back, 5 cells left alone
+
+Run 3 of «End discounts (manual)», batch **`12198690-d531-4683-b52a-9f69910f73c4`**, 17:46 UTC.
+`products cleared : 51 · prices restored : 51 · promo banner OFF · re-read: 0 products still
+carry an old price.`
+
+**The owner's «i think 5000» was exactly right, and the report proved it before anything was
+written.** Every one of the 51 discounted `retail` cells sat exactly 5,000 below its compare-at:
+وشاح الفراشة + the وشاح variants + شال امريكي 1‑17 at 25,000 → **30,000** · the روب فصال family at
+45,000 → 50,000, 40,000 → 45,000, 35,000 → 40,000, 30,000 → 35,000, 20,000 → 25,000 · وشاح عدل
+15,000 → 20,000.
+
+**⚠️ THE FINDING THAT MADE THE REPORT-FIRST DESIGN WORTH IT.** An unscoped `--restore` would have
+ALSO raised four product-level `base_price` cells that were below their compare-at by amounts
+that were never the discount: **وشاح +20,000** (30,000 → 50,000), **روب فصال بشت +15,000**,
+**وشاح عدل +10,000**, وشاح منحني +5,000. `products.base_price` is the FALLBACK a **rep-linked
+student** pays when a product has no wholesaler row, so that would have raised real order prices
+by up to 20,000 on a round the owner described as 5,000. Hence `--scopes=retail`: restore the
+kind of cell the round actually touched, leave every other kind alone. These five cells (the four
+above plus وشاح عدل's wholesaler row at 15,000/20,000) are listed in the run log under
+«DELIBERATELY NOT RESTORED», with their old prices — **that log line is the only human-readable
+copy left**, because the same operation clears `compare_at_price`. Still open for the owner: are
+any of those four product-level prices genuinely meant to be higher?
+
+**Two defects the live run surfaced, both fixed before the write:**
+· The printed UNDO covered only `products.base_price`, so it silently failed to reverse a
+  retail-scoped run — i.e. the common case. It now covers `product_price_roles` and
+  `compare_at_price` too, and the three statements were REHEARSED on a seeded copy and returned
+  every value to its pre-run state.
+· Skipped-but-discounted cells were invisible in the output.
+
+**How it was run at all.** The owner had no laptop and no admin session on his phone, and this
+sandbox has neither `DATABASE_URL` nor network access to `lolo-shop96.com`. So the same
+`lib/discountRestore.js` got a CLI (`backend/scripts/end-discounts.js`, `npm run end-discounts`)
+and a **`workflow_dispatch`-only** workflow (`.github/workflows/end-discounts.yml`) that runs it
+over the SSH secrets the deploy job already holds. Default mode is `report`, which writes
+nothing. ⚠️ **Never give that workflow a `push:` trigger.**
+
 ## 2026-08-22 — 💸 «إنهاء الخصومات»: ending a discount round, from a phone, without guessing
 
 Owner ask, sent with no laptop in reach: «remove the discounts at loloshop and back to normal

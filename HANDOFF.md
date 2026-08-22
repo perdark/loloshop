@@ -300,7 +300,25 @@ longer stranded on a branch · the laptop's loose credentials are filed in
 
 **Still outstanding:**
 
-00. **💸 END THE DISCOUNT ROUND — one screen, one press, on the phone. Shipped 2026-08-22.**
+00. ✅ **DONE 2026-08-22 17:46 UTC — the discount round is ENDED on prod.** Batch
+   `12198690-d531-4683-b52a-9f69910f73c4`: **51 retail prices restored (+5,000 each)**, all 51
+   «السعر قبل الخصم» cleared, promo banner OFF, re-read confirms 0 products still discounted.
+   ⚠️ **FIVE cells were deliberately NOT restored and are the one thing still open** — four
+   product-level `base_price` cells sitting below their old price by amounts that were never the
+   discount (**وشاح** 30,000 vs 50,000 · **روب فصال بشت** 35,000 vs 50,000 · **وشاح عدل** 10,000
+   vs 20,000 · **وشاح منحني** 25,000 vs 30,000), plus وشاح عدل's سعر الجملة (15,000 vs 20,000).
+   `products.base_price` is what a REP-LINKED student pays when a product has no wholesaler row,
+   so restoring them would have raised real order prices by up to 20,000. **Owner question: are
+   any of those four meant to be higher?** Set them by hand on `/admin/products` — the run log is
+   now the only human-readable copy of those old prices, since the run cleared `compare_at_price`.
+   · **Undo** (all three statements are printed in the run log): `discount_restore_log` keyed by
+   that `batch_id` holds every old value, including `old_compare_at_price` to bring the badges
+   back. The rollback was rehearsed on a seeded copy before the live run.
+   · Two ways to do this again: `/admin` → الإعلانات والعروض → «إنهاء الخصومات» (needs an admin
+   session), or the **End discounts (manual)** workflow in the Actions tab — `mode: report`
+   writes nothing and prints the whole picture. ⚠️ **Never add a `push:` trigger to that workflow.**
+
+0X. **💸 (superseded, kept for the how-to) END THE DISCOUNT ROUND — one screen, one press.**
    `/admin` → **الإعلانات والعروض** → **«إنهاء الخصومات»**. It lists every product carrying a
    «السعر قبل الخصم», what its price is now, what the old price was, and the gap — read that
    first, it answers «كم كان الفرق؟» from the data. Then pick ONE of the two radios:
