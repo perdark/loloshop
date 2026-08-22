@@ -300,6 +300,20 @@ longer stranded on a branch · the laptop's loose credentials are filed in
 
 **Still outstanding:**
 
+00. **💸 END THE DISCOUNT ROUND — one screen, one press, on the phone. Shipped 2026-08-22.**
+   `/admin` → **الإعلانات والعروض** → **«إنهاء الخصومات»**. It lists every product carrying a
+   «السعر قبل الخصم», what its price is now, what the old price was, and the gap — read that
+   first, it answers «كم كان الفرق؟» from the data. Then pick ONE of the two radios:
+   · **«رجّع الأسعار للسعر القديم»** — if the real prices were lowered when the round started.
+   · **«الأسعار صحيحة — امسح السعر القديم بس»** — if they never moved and it was a strike-through.
+   ⚠️ **The wholesaler row is unticked on purpose and should usually stay that way** — سعر الجملة
+   sits below the retail old price by the normal margin whether or not any discount ran, so
+   ticking it raises what every ممثل pays. Old prices are kept in `discount_restore_log`
+   (migration 085, `batch_id`) so any press is reversible with one UPDATE — which matters
+   because there is **no DB backup right now**. Existing orders are snapshots and never change.
+   · Turning the promo banner off alone (the toggle right above it) hides every badge instantly
+   but leaves the real prices where they are — that is the fast half, not the whole job.
+
 0. **🛡️ PUT CLOUDFLARE IN FRONT OF THE VPS — ~20 min in a browser, free tier.** Decided
    2026-08-12. Nothing in the app is DDoS protection: `express-rate-limit` runs *after* traffic
    has already reached the origin and consumed its bandwidth and event loop. ⚠️ Re-scope this:

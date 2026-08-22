@@ -39,6 +39,82 @@ export async function updatePromo(payload: PromoConfig): Promise<PromoConfig> {
   return data.data;
 }
 
+// ─── «إنهاء الخصومات» — ending a discount round ──────────────────────────────
+// A price can live in two places (see the backend's lib/discountRestore.js): the product's own
+// base_price, or a per-role row. `scope` names which cell each number came from.
+
+export type DiscountScope = "product" | "retail" | "wholesaler";
+
+export interface DiscountCell {
+  scope: DiscountScope;
+  current_price: number;
+  compare_at_price: number;
+  delta: number;
+  /** The storefront would draw a «خصم ٪N» badge for this audience. */
+  discounted: boolean;
+}
+
+export interface DiscountProduct {
+  id: string;
+  name_ar: string;
+  type: string;
+  active: boolean;
+  compare_at_price: number;
+  cells: DiscountCell[];
+}
+
+export interface DiscountReport {
+  products: DiscountProduct[];
+  summary: {
+    products: number;
+    discounted_cells: number;
+    /** Set only when every discounted cell moved by the SAME amount. */
+    uniform_delta: number | null;
+  };
+  promo: {
+    configured: boolean;
+    active: boolean;
+    deadline: string | null;
+    live: boolean;
+  };
+}
+
+export interface EndDiscountsPayload {
+  products: {
+    id: string;
+    /** Echoed back so the server can refuse if the data moved since it was displayed. */
+    expected_compare_at_price: number;
+    /** Empty = clear «السعر قبل الخصم» only, leave every price untouched. */
+    scopes: DiscountScope[];
+  }[];
+  deactivate_promo?: boolean;
+  note?: string;
+}
+
+export interface EndDiscountsResult {
+  batch_id: string;
+  products_cleared: number;
+  prices_restored: number;
+  written: { product_id: string; scope: DiscountScope; from: number; to: number }[];
+}
+
+/** Admin-only, read-only: which products carry a «السعر قبل الخصم» and what it did. */
+export async function getDiscountReport(): Promise<DiscountReport> {
+  const { data } = await api.get<{ data: DiscountReport }>("/admin/discounts");
+  return data.data;
+}
+
+/** Admin-only: put the selected prices back and clear the old-price field. */
+export async function endDiscounts(
+  payload: EndDiscountsPayload
+): Promise<EndDiscountsResult> {
+  const { data } = await api.post<{ data: EndDiscountsResult }>(
+    "/admin/discounts/end",
+    payload
+  );
+  return data.data;
+}
+
 export type { MaintenanceConfig };
 
 /** Admin-only: toggle/save the maintenance-mode flag. */

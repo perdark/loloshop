@@ -1,5 +1,79 @@
 # Progress
 
+## 2026-08-22 — 💸 «إنهاء الخصومات»: ending a discount round, from a phone, without guessing
+
+Owner ask, sent with no laptop in reach: «remove the discounts at loloshop and back to normal
+prices — i think 5000 change in price». Everything below follows from one fact discovered before
+writing any code: **the database cannot say what "back to normal" means**, and this session
+could not read it either (no `DATABASE_URL` in a cloud sandbox, and the network policy blocks
+`lolo-shop96.com`, so both the DB and the public catalogue API were out of reach).
+
+**The two rounds that look identical.** A discount can have been run two ways:
+· **A** — the real prices were LOWERED and `products.compare_at_price` kept the old one.
+· **B** — the prices never moved and `compare_at_price` is a marketing strike-through.
+In both, `compare_at_price > base_price` by the same amount. Nothing in the schema distinguishes
+them. Guessing **A** when it was **B** raises every price in the shop; guessing **B** when it was
+**A** leaves it selling at the discount forever. **That is why this shipped as a screen and not
+as a migration** — a migration would have had to guess, on production, with no backup.
+
+**What actually shipped** (`/admin` → الإعلانات والعروض → «إنهاء الخصومات»):
+· `GET /admin/discounts` — read-only. Every product carrying a «السعر قبل الخصم», every price
+  cell it has, the current price, the old price, and the gap. It answers the owner's own
+  question («i think 5000») from the data instead of from memory.
+· `POST /admin/discounts/end` — writes only the cells sent back from that report.
+· Both modes are one radio: **«رجّع الأسعار»** (case A) and **«الأسعار صحيحة — امسح السعر القديم
+  بس»** (case B, an empty `scopes` list). The owner chooses after seeing the numbers.
+
+**A price lives in two places** and the report had to model that: `buildShopFeed` prices a
+product as `COALESCE(product_price_roles.base_price[role], products.base_price)`, so one product
+has up to three restorable cells. `scope` names which.
+
+⚠️ **The wholesaler cell is the trap, and it is handled twice.** A wholesale price sits below the
+retail compare-at by the *normal margin*, discount or no discount — so it looks discounted when
+it is not. It is therefore **never selected by default** (raising it to a retail old price would
+overcharge every rep), it carries a red warning in the UI, and it is **excluded from the headline
+delta**. That last one is not cosmetic: measured on a seeded shop, including it reported the
+round as "mixed" (`uniform_delta = null`) on a shop where every real discount was exactly 5,000.
+Excluding it reports **5,000** — the answer the owner was asking for.
+
+**Three refusals, because this is the one catalogue edit that RAISES a live price:**
+· A **stale press is refused whole** (409 `ERR_STALE`) — the client echoes back the numbers it
+  displayed, and if any moved, nothing is written, not even the products that still match. Same
+  principle as the confirmation signature in `lib/adminActions.js`: what executes must be what
+  the human was shown.
+· A cell that is **not actually discounted is dropped**, never written — this operation undoes a
+  discount and must never CUT a price.
+· An **empty selection is refused**, never read as "all products".
+
+**Migration 085 — `discount_restore_log`, the undo the shop did not have.** A product's price is
+a single mutable column with no history, and the only record of the pre-discount price is the
+`compare_at_price` this very operation clears. So the old value is written *before* the price
+that replaces it, keyed by `batch_id`: a rollback is one `UPDATE … FROM old_price`. The
+clear-only mode logs too (`scope = 'compare_at_only'`), so even "I only cleared the badge" is
+recoverable. This matters more than usual today — **the owner has no database backup right now.**
+
+**Not touched, verified rather than assumed: orders.** `orders.price`, `order_items.price` and
+the cart's `price_snapshot` are snapshots taken at checkout, so restoring a catalogue price
+cannot reprice anything already bought or sitting in a cart.
+
+**Verified against a real PostgreSQL 16, not by reading:** a throwaway cluster was built in this
+sandbox, the whole of `db/schema.sql` applied to it (twice — idempotent, and 085 also applies
+standalone), a discounted shop seeded, and the real controller functions driven end to end.
+Measured: report reads 5,000 uniform with a wholesaler cell present · a stale press returns 409
+and leaves `base_price` and `compare_at_price` untouched · the real press restores 3 cells across
+2 products, leaves the unticked wholesaler price at 18,000, clears every `compare_at_price`,
+turns the promo off and writes 3 ledger rows · clear-only restores 0 prices, clears the badge and
+still logs the old compare-at · the report is empty afterwards. Server boots with the routes
+mounted and both return 401 unauthenticated. 7/7 new unit tests on the validation layer,
+`tsc --noEmit` clean, `npm run lint` clean, `next build` clean.
+
+⚠️ **Deploying this changes NO data.** It creates one empty table and adds one admin screen. The
+prices move only when a human presses the button — which is the entire design.
+
+⚠️ **Phone width unseen**, the same obstacle as the last two sessions: there is no browser in
+this sandbox at all. The panel is built mobile-first (every row ≥44px, nothing behind hover),
+but the radio pair, the per-cell rows and the confirm card want one look at ~390px.
+
 ## 2026-08-21 (d) — 🧠 «لولو الإدارة»: a console that reads the whole shop, acts under confirmation, and finally answers «هل الموظفين يشتغلون»
 
 Owner ask, four parts: a full page for the admin · it should know the whole dashboard, **kept

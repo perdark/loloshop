@@ -1487,4 +1487,33 @@ CREATE TABLE IF NOT EXISTS staff_app_opens (
 );
 CREATE INDEX IF NOT EXISTS idx_staff_app_opens_date ON staff_app_opens(work_date DESC);
 
+-- =====================================================
+-- Migration 085 — an UNDO ledger for «إنهاء الخصومات» (ending a storefront discount round).
+-- Ending a discount is the one catalogue edit that RAISES a live price, and it touches many
+-- products in one press. A product's price is a single mutable column with no history, and the
+-- only record of the pre-discount price — products.compare_at_price — is cleared by the very
+-- same operation. This table keeps it, so a rollback is an UPDATE from old_price on one
+-- batch_id. Full reasoning in db/migrations/085_discount_restore_log.sql.
+--
+-- `scope` is 'product' (products.base_price) or a price_role name ('retail'/'wholesaler', the
+-- matching product_price_roles row) — the two places an effective price can live.
+-- ⚠️ Data only ever APPENDED here, never read by the storefront. Do not "tidy" it away: it is
+-- the shop's only undo for a price raise, and it is written before the price it describes.
+-- =====================================================
+CREATE TABLE IF NOT EXISTS discount_restore_log (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  batch_id      UUID NOT NULL,
+  restored_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  admin_id      UUID REFERENCES users(id) ON DELETE SET NULL,
+  product_id    UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  product_name  TEXT NOT NULL,
+  scope         TEXT NOT NULL,
+  old_price     BIGINT,
+  new_price     BIGINT,
+  old_compare_at_price BIGINT,
+  note          TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_discount_restore_batch ON discount_restore_log(batch_id);
+CREATE INDEX IF NOT EXISTS idx_discount_restore_at    ON discount_restore_log(restored_at DESC);
+
 COMMIT;

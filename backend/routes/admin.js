@@ -8,6 +8,7 @@ const attendance = require('../controllers/attendanceController');
 const attendanceBreaks = require('../controllers/attendanceBreakController');
 const customOrders = require('../controllers/adminCustomOrderController');
 const payouts = require('../controllers/payoutController');
+const discounts = require('../controllers/discountController');
 const { imageUpload, imageUploadLimit, validateUploadedImage } = require('../lib/upload');
 const { gatewayStatus } = require('../lib/otp');
 
@@ -82,6 +83,12 @@ router.patch('/attendance/breaks/:id', attendanceBreaks.correctBreak);
 
 // Site settings — discount popup promo config
 router.patch('/promo', c.updatePromo);
+
+// «إنهاء الخصومات» — read which products carry a «السعر قبل الخصم» and what it did to their
+// price, then put the prices back and clear it. GET writes nothing; POST writes only what the
+// caller sends back from that report. Why it is a screen and not a migration: lib/discountRestore.js.
+router.get('/discounts', discounts.report);
+router.post('/discounts/end', discounts.end);
 
 // Site settings — maintenance mode flag
 router.patch('/maintenance', c.updateMaintenance);
