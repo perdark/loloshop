@@ -1,0 +1,70 @@
+# Run «إنهاء الخصومات» on production, by hand, from the Actions tab.
+#
+# WHY THIS WORKFLOW EXISTS: ending a discount round is normally done in the browser at
+# /admin → الإعلانات والعروض → «إنهاء الخصومات». This is the fallback for when nobody has an
+# admin session in front of them (owner without a laptop, 2026-08-22). It runs
+# backend/scripts/end-discounts.js over the SAME SSH secrets the deploy job uses.
+#
+# ⚠️ DEFAULT MODE IS `report`, WHICH WRITES NOTHING. It prints every product carrying a
+# «السعر قبل الخصم», its current price and its old one, into the run log. Read that BEFORE
+# choosing a mode that writes — the database cannot tell a lowered price from a marketing
+# strike-through, and the two need opposite actions.
+#
+#   report      read only — what is discounted and by how much
+#   restore     the prices were lowered: put them back, clear the old price
+#   clear-only  the prices never moved: clear the old price, touch no price
+#
+# ⚠️ NEVER add a `push:` trigger to this file. It is manual on purpose — an automatic price
+# change is exactly the accident the /admin panel's confirmation step exists to prevent.
+# Every write lands in discount_restore_log (migration 085) keyed by batch_id, so any run is
+# reversible with one UPDATE. Orders are untouched: their prices are checkout snapshots.
+
+name: End discounts (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'report (safe, default) | restore | clear-only'
+        required: true
+        default: 'report'
+        type: choice
+        options: [report, restore, clear-only]
+      include_wholesaler:
+        description: 'Also restore سعر الجملة rows. Usually NO — a wholesale price is below the retail old price by the normal margin, discount or not.'
+        required: false
+        default: false
+        type: boolean
+      keep_promo:
+        description: 'Leave the promo banner switch alone (default: switch it off).'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  end-discounts:
+    name: End discounts on prod
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH run
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          command_timeout: 5m
+          script: |
+            set -euo pipefail
+            cd /var/www/loloshop/backend
+            FLAGS=""
+            case "${{ inputs.mode }}" in
+              restore)    FLAGS="--restore" ;;
+              clear-only) FLAGS="--clear-only" ;;
+              report)     FLAGS="" ;;
+              *) echo "unknown mode"; exit 1 ;;
+            esac
+            if [ "${{ inputs.include_wholesaler }}" = "true" ]; then FLAGS="$FLAGS --include-wholesaler"; fi
+            if [ "${{ inputs.keep_promo }}" = "true" ]; then FLAGS="$FLAGS --keep-promo"; fi
+            echo "==> node scripts/end-discounts.js $FLAGS"
+            NODE_ENV=production node scripts/end-discounts.js $FLAGS
