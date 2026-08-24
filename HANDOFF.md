@@ -30,7 +30,7 @@ last verified 2026-08-10 and are unchanged.
 | iOS | **1.0.4 (build 1786309948) SUBMITTED — «Waiting for Review»** (2026-08-10, ≤48h) |
 | Android push | ✅ working end to end |
 | iOS push | ✅ **APNs key installed and verified against Apple** — `push.configured()` → `{"android":true,"ios":true}` |
-| Backend tests | **471/472 on `fix/shelf-and-queue-price`** (2026-08-21 (e)). ⚠️ The one failure — `app-open: a ping inside the session window does NOT count a second open`, `test/adminConsole.test.js:371` — **reproduces on clean `main`**, verified by stashing. It is pre-existing and unrelated to that branch; don't let it read as a broken change. Older rows said 266/275 and 467/467; the suite keeps growing. ⚠️ Run from `backend/` as `node --test test/*.test.js` — see the landmine below; the old `test/` and bare forms both misbehave on Node 26. |
+| Backend tests | **479/479 on `main`** (2026-08-24, after the shelf/queue merge). The `app-open` failure the row below described now PASSES; it was flaky, not broken. Kept because it will likely flap again:  `app-open: a ping inside the session window does NOT count a second open`, `test/adminConsole.test.js:371`, failed on 2026-08-21 and **reproduced on clean `main`** — so if you see it fail, it is not your change. Older rows said 266/275 and 467/467; the suite keeps growing. ⚠️ Run from `backend/` as `node --test test/*.test.js` — see the landmine below; the old `test/` and bare forms both misbehave on Node 26. |
 | Prod DB backup | ✅ `~/Desktop/_private/loloshop-db/loloshop-prod-2026-08-14.dump` — restore-tested, row counts match live |
 
 **Both platforms are now on the same version (1.0.4) carrying the same three features.**
@@ -652,21 +652,18 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   the default applies.
   Full detail in the 2026-08-21 (d) PROGRESS entry.
 
-- **⚠️ `fix/shelf-and-queue-price` IS READY AND UNMERGED — 2026-08-21 (e).** Four owner asks:
-  the price on «الإنتاج والمتابعة» → جميع الطلبات · رف التجهيز refusing a second piece · the sash
-  bin limit · «السابق»/«التالي» for المجهز. **Carries migration 085**, which changes the وشاح
-  section to communal 20-per-خانة — see the landmine above and 085's own header before merging.
-  Off `main` (`c0e3c86`), no new dependency, 471/472 backend tests (the one failure reproduces on
-  clean `main`), `next build` clean, driven in a real browser as admin and as المجهز.
-  ⚠️ **Every push to `main` auto-deploys and `scripts/deploy.sh` runs `npm run migrate` first**,
-  so 085's UPDATEs (repeated in `db/schema.sql`, the 077/080 pattern) land with the code. On prod
-  that moves the وشاح section and NULLs the owner on its **two** open bins — B01 and B02, one
-  sash each, which is the whole live state of that shelf today.
-  ⚠️ **Phone width is STILL unseen — third session in a row.** `resize_window` is a no-op on this
-  window, the app's own `X-Frame-Options: DENY` refuses an iframe rig, and a sized popup lands
-  outside the MCP tab group. Measured instead at a forced 390px panel: no horizontal overflow,
-  44px nav buttons. Someone with a phone should look at the المجهز sheet's new nav row and the
-  shelf map's «١/٢٠ وشاح» labels.
+- ✅ **`fix/shelf-and-queue-price` MERGED & PUSHED 2026-08-24** (rebased onto `main` over the
+  discount-round commits), together with the staff-home instant search written the same day.
+  **Migration 085 rides this deploy** — `scripts/deploy.sh` runs `npm run migrate` first, so its
+  UPDATEs (repeated in `db/schema.sql`, the 077/080 pattern) move the وشاح section to communal
+  20-per-خانة and NULL the owner on its **two** open bins, B01 and B02, one sash each — the whole
+  live state of that shelf. Read the «ONE STUDENT PER خانة» landmine above before touching it.
+  Prod DB dumped first: `/root/loloshop-prod-2026-08-24.dump` on the box **and** copied to
+  `~/Desktop/_private/loloshop-db/` (5.0 MB, 69 tables, orders/users/shelf present).
+  ⚠️ **Phone width is STILL unseen — fourth session in a row.** `resize_window` is a no-op on
+  this window and `X-Frame-Options: DENY` refuses an iframe rig. Someone with a phone should look
+  at the المجهز sheet's nav row, the shelf map's «١/٢٠ وشاح» labels, and the new `/staff` search
+  box (`w-full` under `sm`, 44px tall — built for it, not measured on one).
 
 - **⚠️ `fix/admin-presence-panel` IS READY AND UNMERGED — 2026-08-15.** Closes the last two
   open bugs (**1**, and **8 parts 2·3·4**), so the eleven-bug board is finished in code.
