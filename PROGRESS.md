@@ -1,5 +1,39 @@
 # Progress
 
+## 2026-08-24 — 🔎 Instant search on the staff home queue (المصمم's first screen)
+
+Owner ask: the designer's first screen — «مراجعة التصاميم» at `/staff` — had the source
+(تجزئة / ممثل) and zone filters but no way to find one student in a 502-row queue. One box now
+sits above the tab switcher and filters as you type.
+
+**No new matcher was written.** `lib/queue-search.ts` already defines what "search" means for
+this app (`matchesQueueSearch` + `normalizeArabic`), and `/staff/queue` and المجهز's PrepConsole
+already call it. The staff home is now the third caller, so the three screens cannot disagree:
+every whitespace token must appear somewhere in student name · university · department · rep ·
+`search_text` (the التطريز the student typed), with أ/ا, ى/ي, ة/ه and tashkeel folded. Verified
+live: «احمد» and «أحمد» both return 29.
+
+**Filtering is CLIENT-side over what the source filter already fetched**, which is exactly the
+"auto filter" the owner asked for — «تجزئة» searches only retail rows, «ممثل» only rep students,
+and no request fires per keystroke. Measured in a real browser as مضر محمد (designer):
+· تجزئة + «احمد» → **29 من 335**, counter rendered.
+· ممثل + «احمد» → **39 من 502**, zero retail rows in the result, and the typed query survived
+  the source switch instead of resetting.
+· «احمد ديالى» (two tokens, AND) → **27 من 502**.
+· A query matching nothing → «لا توجد نتائج لـ «…»» rather than the queue's own empty state,
+  so "nothing matched" never reads as "the queue is empty".
+
+**One box serves BOTH tabs.** «مكتملة / أنجزتها» filters through the same matcher (6 completed
+rows, «احمد» → 0 → the same not-found message). The value joins `activeTab`/`sourceFilter`/
+`zoneFilter` in the existing `sessionStorage` mirror, so back-navigation from an order restores
+the query with the rest of the UI state.
+
+Completed rows come from `completed()`, which does NOT select `search_text` — so on that tab the
+match is name/university/department/rep only. Deliberate: the field is a queue-only index and
+adding it there is a separate query change, not part of this ask.
+
+tsc, eslint and `next build` clean. Frontend only — no backend change, no migration.
+
 ## 2026-08-22 (b) — ✅ THE DISCOUNT ROUND IS ENDED ON PROD — 51 retail prices back, 5 cells left alone
 
 Run 3 of «End discounts (manual)», batch **`12198690-d531-4683-b52a-9f69910f73c4`**, 17:46 UTC.

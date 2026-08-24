@@ -22,6 +22,7 @@ import {
 } from "@/lib/staff";
 import { addStaffBonus, addStaffDeduction } from "@/lib/admin";
 import { getApiErrorMessage } from "@/lib/api";
+import { matchesQueueSearch } from "@/lib/queue-search";
 import {
   ORDER_STATUS_LABELS,
   ORDER_SCOPE_LABELS,
@@ -121,7 +122,7 @@ function SourceFilterControl({ value, onChange }: SourceFilterProps) {
 
 // ─── Completed orders section (per-staff) ─────────────────────────────────────
 
-function CompletedSection() {
+function CompletedSection({ search }: { search: string }) {
   const [items, setItems] = useState<ProductionQueueItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [revertingId, setRevertingId] = useState<string | null>(null);
@@ -169,9 +170,16 @@ function CompletedSection() {
     return <EmptyState message="لا توجد طلبات منجزة بعد" />;
   }
 
+  // Same matcher the active queue and /staff/queue use — see lib/queue-search.ts.
+  const visible = items.filter((i) => matchesQueueSearch(i, search));
+
+  if (visible.length === 0) {
+    return <EmptyState message={`لا توجد نتائج لـ «${search.trim()}»`} />;
+  }
+
   return (
     <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-      {items.map((item) => (
+      {visible.map((item) => (
         <li key={item.id} className="relative">
           <OrderCard order={item} />
           <div className="mt-2 px-1">
@@ -208,6 +216,7 @@ interface StoredQueueState {
   activeTab?: Tab;
   sourceFilter?: SourceFilter;
   zoneFilter?: EmbroideryZone | "";
+  search?: string;
 }
 
 function readStoredQueue(): StoredQueueState {
@@ -237,6 +246,9 @@ function QueueView({
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>(
     stored.sourceFilter === "retail" || stored.sourceFilter === "wholesaler" ? stored.sourceFilter : "retail"
   );
+  const [search, setSearch] = useState<string>(
+    typeof stored.search === "string" ? stored.search : ""
+  );
   const [zoneFilter, setZoneFilter] = useState<EmbroideryZone | "">(
     stored.zoneFilter && EMBROIDERY_ZONE_ORDER.includes(stored.zoneFilter as EmbroideryZone)
       ? stored.zoneFilter
@@ -248,16 +260,21 @@ function QueueView({
     try {
       sessionStorage.setItem(
         QUEUE_STORAGE_KEY,
-        JSON.stringify({ activeTab, sourceFilter, zoneFilter })
+        JSON.stringify({ activeTab, sourceFilter, zoneFilter, search })
       );
     } catch {
       /* storage full/unavailable — persistence is best-effort */
     }
-  }, [activeTab, sourceFilter, zoneFilter]);
+  }, [activeTab, sourceFilter, zoneFilter, search]);
 
   // …and the scroll offset with it. Restoring the FILTERS but not the position still
   // dumped the worker at the top of a 100-row queue on every back-navigation.
   useScrollRestore(`staff-home:${activeTab}`, !loading);
+
+  // Student / university / department / rep AND the التطريز text, Arabic-normalised.
+  // Shared matcher so this screen, /staff/queue and المجهز's console cannot disagree about
+  // what "search" means. Plain derived value — the React Compiler memoizes it.
+  const visibleItems = items.filter((i) => matchesQueueSearch(i, search));
 
   const meta = QUEUE_META[staffType] ?? {
     title: "قائمة الطلبات",
@@ -329,6 +346,21 @@ function QueueView({
           ) : undefined
         }
       />
+
+      {/* Instant search — one box for both tabs. Filters CLIENT-side over the rows the
+          source/zone filters already fetched, so «تجزئة» searches only retail rows and
+          «ممثلين» only rep students, with no extra request per keystroke. */}
+      <div className="mb-3">
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="ابحث باسم الطالب أو الجامعة أو التطريز…"
+          aria-label="ابحث باسم الطالب أو الجامعة أو التطريز"
+          dir="rtl"
+          className="min-h-11 w-full rounded-full border border-line bg-surface px-4 py-1 text-sm text-ink placeholder:text-muted focus:border-orange-ink focus:outline-none sm:w-80"
+        />
+      </div>
 
       {/* Tab switcher */}
       <div className="mb-4 flex gap-1 rounded-full border border-line bg-surface-sink p-1 w-fit">
@@ -403,18 +435,27 @@ function QueueView({
             </div>
           ) : items.length === 0 ? (
             <EmptyState message={meta.empty} />
+          ) : visibleItems.length === 0 ? (
+            <EmptyState message={`لا توجد نتائج لـ «${search.trim()}»`} />
           ) : (
-            <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {items.map((item) => (
-                <li key={item.id}>
-                  <OrderCard order={item} />
-                </li>
-              ))}
-            </ul>
+            <>
+              {search.trim() && (
+                <p className="mb-2 text-xs text-ink-soft">
+                  {visibleItems.length} من {items.length} طلب
+                </p>
+              )}
+              <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {visibleItems.map((item) => (
+                  <li key={item.id}>
+                    <OrderCard order={item} />
+                  </li>
+                ))}
+              </ul>
+            </>
           )}
         </>
       ) : (
-        <CompletedSection />
+        <CompletedSection search={search} />
       )}
     </div>
   );
@@ -610,7 +651,7 @@ function MonitorDashboard({
       </div>
 
       {activeTab === "completed" ? (
-        <CompletedSection />
+        <CompletedSection search="" />
       ) : (
         <>
           {showSourceFilter && (
