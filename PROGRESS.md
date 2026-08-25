@@ -1,5 +1,120 @@
 # Progress
 
+## 2026-08-25 — 💸 Starting a discount round · 📱 /admin/app · 🔔 an admin-written push
+
+Branch `feat/discount-round-and-app-console`, two commits, **unmerged**. 505/505 backend tests
+(479 before), tsc + eslint + `next build` clean, all three verified in a real browser against
+the dev DB. Spec: `docs/superpowers/specs/2026-08-25-discount-round-and-app-console-design.md`.
+
+### 1. «ابدأ الخصومات» — the missing half of the discount tool
+
+Owner: «admin can't do خصومات without me, the prices aren't go down». «إنهاء الخصومات» shipped
+2026-08-22; **starting** a round never existed. Starting meant hand-editing each product on
+`/admin/products` — lower `base_price`, then retype the old price into «السعر قبل الخصم» — two
+edits × 51 products, no preview, no undo. So every round needed a developer.
+
+`lib/discountRound.js` is the mirror of `lib/discountRestore.js`. A round writes
+`compare_at_price ← the price a student pays now`, then lowers the selected cells by a fixed
+amount — exactly the shape ending a round reverses, so ending was not touched.
+
+**Three refusals, each one a live price:**
+- ⚠️ **A product already carrying a compare-at is REFUSED (`ERR_ALREADY_DISCOUNTED`), not
+  skipped.** This is the one loss no ledger can undo: a second round stores the *discounted*
+  price as «the old price», and the real one is gone from the database. The panel shows such
+  products disabled with «مخصوم أصلاً» rather than hiding them.
+- `amount >= price` refused — no free or negative products.
+- A stale price refuses the **whole** round (`ERR_STALE`), never half of it.
+
+⚠️ **Defaults tick the cell that IS the retail price** — the retail row when one exists, the
+product base when it doesn't — **never both**, and this was found by the round-trip test rather
+than reasoned out. Ending a round restores every selected cell to the single `compare_at_price`
+column, so a product whose base (30,000) sits above its retail (28,000) comes back from
+start→end with **both at 28,000**: the base silently, permanently lowered by a discount that was
+ended. `products.base_price` is what a rep-linked student pays when there is no wholesaler row,
+so that is real money. It is the same shape as the four cells the August round left stranded.
+The tick is still offered; it is just not the default. The behaviour is pinned in
+`test/discountRoundRoundTrip.test.js`, which drives start and end against a real database.
+
+**Migration 086** adds `discount_restore_log.direction` ('start' | 'end'). The `'end'` default
+backfills every existing row correctly — they were all written by «إنهاء الخصومات».
+
+UI (`DiscountStartPanel.tsx`, beside its sibling in **الإعلانات والعروض**): amount box defaulting
+to 5,000 (the uniform delta of every real round to date), four type chips, per-product ticks,
+live preview, سعر الجملة visible but unticked with the margin warning, «شغّل إعلان العروض» on by
+default. **This also lets the owner fix the four cells the August round stranded, without a dev.**
+
+Browser-verified: وشاح امريكي 25,000 → 20,000 → 25,000, ledger row written both directions,
+badge and promo correct at each step.
+
+### 2. `/admin/app` — إحصائيات التطبيق على المنصتين
+
+⚠️ **App usage was tracked for STAFF only.** Migration 084 covers staff; students and ممثلين —
+the two audiences the app was built for — had **no signal at all**. `device_tokens` is a FLOOR on
+installs (it needs an install AND a signed-in session AND the notification prompt granted), and
+`site_visits` is anonymous with no platform column.
+
+**Migration 087** adds `app_opens`, the all-roles twin of `staff_app_opens`, copying 084's
+session semantics exactly (opens count SESSIONS, >30 min gap, `work_date` from `lib/shopTime.js`)
+so the two read side by side.
+
+⚠️ **`staff_app_opens` was deliberately NOT widened.** The nightly staff report reads it and its
+«opening the app is not attendance» rule sits next to payroll; a stats dashboard must not be able
+to change what that table means. `StaffAppBeacon` → **`AppBeacon`**, fires for any signed-in
+user, and `POST /api/app/open` writes `app_opens` always plus `staff_app_opens` when the user is
+staff — so staff still cost exactly one request and 084 is untouched.
+
+⚠️ **Nothing is retroactive** — there is no source to backfill from. The page prints «القياس بدأ
+يوم X» instead of a flat zero line that reads as «nobody uses the app».
+⚠️ **iOS reads 0 everywhere** until someone installs 1.0.4 from TestFlight and grants the prompt.
+The panel used to say so in a banner; **the owner asked for that text removed** (2026-08-25), so
+the explanation now lives only in `AppStatsPanel.tsx`'s header comment. Do not read a zero iOS
+column as a broken pipeline without checking `device_tokens` first.
+
+### 3. «إرسال إشعار» — the first push a human writes
+
+Every push before this was emitted by code, so the upstream event bounded the audience. This one
+is typed, to الكل · a role · a university · a rep's students · one person — and **cannot be
+recalled**.
+
+It writes one `notifications` row per recipient and stops; `lib/pushOutbox.js` delivers them, so
+the flood guard, freshness window and dead-token handling apply unchanged **and every blast also
+lands in the in-app bell** — a push missed with the phone off is still readable later.
+
+**Three guards** (`lib/pushBroadcast.js`):
+- ⚠️ **`link` must be a relative in-app path from a CLOSED allowlist**, matched exactly or with
+  one id segment — never a prefix test (`/orders` and `/orders-evil` share a prefix). An
+  admin-composed push carrying an arbitrary URL is a phishing primitive wearing the shop's name,
+  aimed at 1,100+ accounts. Protocol-relative `//evil.com` is refused explicitly: it is a URL
+  despite starting with a slash. The UI is a picker, not a text box.
+- **«الكل» demands the recipient count typed back** — server-enforced, and asked for «الكل» only,
+  because asking every time trains the sender to type numbers without reading them.
+- **Migration 088 `push_broadcasts`** — written first, in the same transaction, so a half-failed
+  fan-out still leaves evidence of who pressed what.
+
+⚠️ The university audience matches **ILIKE '%…%'** on purpose: one university is spelled three
+ways on prod, and an exact match would reach a third of a cohort and look like it worked. The
+resolved count shown before sending is the only honest check that the spelling caught everyone.
+Deleted accounts (076 anonymises rather than row-deletes) are excluded everywhere.
+
+**Also: the admin header finally has a `<NotificationBell />`.** The backend has been writing
+admin notification rows for weeks — the assistant's budget warning, the nightly staff report —
+with no screen to read them on, so a missed push was a lost message.
+
+Browser-verified: «الكل» refused a wrong count and accepted the right one; a role send wrote 9
+rows at `push_state 'pending'` plus its audit row (dev test rows cleaned up afterwards).
+
+### Notes for whoever merges this
+- **Two migrations ride this branch: 087 and 088.** Both are in `db/schema.sql`, so the deploy's
+  `npm run migrate` covers them — the same ordering rule 077/078 already have.
+- ⚠️ **Two files are both numbered 085** (`085_discount_restore_log.sql` and
+  `085_sash_shelf_shared_bins.sql`). Harmless today because both are in `schema.sql`, but
+  `npm run migrate:file` on "085" is ambiguous. Left alone deliberately — both are applied to
+  prod, and renaming an applied migration makes prod's history match nothing.
+- **Phone width is still unseen** (fifth session). These are admin screens, which are
+  laptop-primary, so it matters less here than on the staff/rep surfaces.
+- Dev-only, not committed: the laptop dev DB had 54 products still carrying a `compare_at_price`
+  from before the August round ended on prod. They were cleared so dev matches prod.
+
 ## 2026-08-24 — 🔎 Instant search on the staff home queue (المصمم's first screen)
 
 Owner ask: the designer's first screen — «مراجعة التصاميم» at `/staff` — had the source
