@@ -477,6 +477,12 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   entitlements file is perfect and whose runtime `register()` still resolves `registrationError`
   — silently, with a green build and a successful App Store review. The other survivor is mass
   permission-denial, which 22-out-of-22 makes implausible.
+  ✅ **2026-08-26: the app now answers this itself — migration 090, deployed.**
+  `app_opens.app_version` (reported by the beacon) separates theory A from B, and
+  `push_register_errors` captures the reason a device gives instead of losing it to a console on
+  someone else's phone. Both render on `/admin/app` — «نسخة التطبيق المستعملة», and a red panel
+  that stays invisible until a device actually fails. **Read them before theorising again:** a
+  row naming iOS 1.0.3 is theory A, a row in the red panel is theory B and names the cause.
   ⚠️ **THE NEXT STEP IS A PHONE, NOT MORE READING.** One iPhone: install from the App Store, log
   in, accept the prompt, then check `SELECT * FROM device_tokens WHERE platform='ios'`. A row
   means the audience was simply declining; no row confirms the signing theory, and the fix is a
