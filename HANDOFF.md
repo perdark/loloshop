@@ -28,8 +28,8 @@ last verified 2026-08-10 and are unchanged.
 | Migration 078 | ⚠️ **applied to the DEV DB only** — the AI assistant's `ai_chat_messages`. It is in `db/schema.sql` too, so the next prod `npm run migrate` creates it. **Run it in the same deploy as the code:** until the table exists the cap check throws and both assistant endpoints 500 (the rest of the site is unaffected — nothing else reads that table). |
 | Android | **v1.0.4 (versionCode 5) IN PRODUCTION REVIEW** — deep links + GPS + push in one review |
 | iOS | **1.0.4 (build 1786309948) SUBMITTED — «Waiting for Review»** (2026-08-10, ≤48h) |
-| Android push | ✅ working end to end |
-| iOS push | ✅ **APNs key installed and verified against Apple** — `push.configured()` → `{"android":true,"ios":true}` |
+| Android push | ✅ working end to end — **145 device tokens on prod**, newest registered 2026-08-25 |
+| iOS push | 🔴 **BROKEN ON DEVICE — 0 tokens after 13 days live.** The credentials are fine (`push.configured()` → both true, key verified against Apple's production endpoint) and so is the repo: `codemagic.yaml` writes `aps-environment: production` and asserts it, `@capacitor/push-notifications` is a dependency, `npx cap sync ios` runs, and `PushRegistrar` is platform-agnostic — the identical path works on Android. See the 🔴 landmine below for the evidence and the next step. |
 | Backend tests | **508/508 on `main`** (2026-08-25, after the discount-round + app-console merge; 479 before it). The `app-open` failure the row below described now PASSES; it was flaky, not broken. Kept because it will likely flap again:  `app-open: a ping inside the session window does NOT count a second open`, `test/adminConsole.test.js:371`, failed on 2026-08-21 and **reproduced on clean `main`** — so if you see it fail, it is not your change. Older rows said 266/275 and 467/467; the suite keeps growing. ⚠️ Run from `backend/` as `node --test test/*.test.js` — see the landmine below; the old `test/` and bare forms both misbehave on Node 26. |
 | Prod DB backup | ✅ `~/Desktop/_private/loloshop-db/loloshop-prod-2026-08-25.dump` — 5.2 MB, taken before the 086-089 deploy, contents verified on the box. ⚠️ **Restore it ON THE SERVER**: it is pg_dump format v1.16 and the laptop's `pg_restore` refuses it («unsupported version (1.16) in file header»). The 08-14 and 08-24 dumps are still there. |
 
@@ -350,6 +350,14 @@ longer stranded on a branch · the laptop's loose credentials are filed in
    exactly as they are — they bound COST, Cloudflare bounds VOLUME. ⚠️ Check
    `/.well-known/assetlinks.json` still serves **200, `application/json`, zero redirects** on
    both hosts afterwards, or Android deep links break silently (see the cleared landmine below).
+0Y. ✅ **BOTH STORE VERSIONS ARE ALREADY PUBLISHED — verified in both consoles 2026-08-26.**
+   Android 1.0.4 went live **2026-08-11**, iOS 1.0.4 **2026-08-13**. Items 1 and 2 below said
+   for two weeks that each was waiting on a human press; **both were already pressed**, and that
+   stale pair is what made «why does the admin get no notifications» look like a release problem
+   for a whole session. They are kept below only for the traps they document, which are real and
+   will apply to the NEXT release. **Nothing is waiting on a press, and no new binary is needed
+   for anything currently on this board.**
+
 1. **⏳ Android 1.0.4 (versionCode 5) is IN PRODUCTION REVIEW** — submitted 2026-08-09 with
    deep links + GPS + push together, full rollout, exactly one queued change (the withdrawn
    versionCode 4 draft did NOT linger; verified before submitting).
@@ -446,6 +454,35 @@ longer stranded on a branch · the laptop's loose credentials are filed in
 ---
 
 ## 💣 LANDMINES
+
+- 🔴 **iOS PUSH REGISTERS NOTHING ON REAL DEVICES, AND IT IS NOT THE RELEASE OR THE CODE.**
+  Found 2026-08-26, and only findable because migration 087's beacon shipped the day before.
+  The evidence, all from prod:
+  · **iPhones are running the native app, signed in:** `app_opens` shows **26 opens by 22 iOS
+    users** on 2026-08-25 and 14 by 13 the next morning. The beacon only fires for a signed-in
+    user inside the shell, so these are real, authenticated iOS app sessions.
+  · **`device_tokens` holds 0 iOS rows** — against **145 Android**, newest the same day.
+  · iOS 1.0.4 has been **live on the App Store since 2026-08-13** (13 days), with 395 first-time
+    downloads and 70 updates in the trailing 30 days.
+  Ruled out already, so do not re-check them: the entitlement (`codemagic.yaml` writes
+  `aps-environment: production` and fails the build if it is missing — added 2026-08-09 in
+  `eb59e21`/`d9688a6`, *before* the 08-10 build) · the plugin (`@capacitor/push-notifications`
+  is in `package.json`, `npx cap sync ios` runs) · the client (`PushRegistrar` is
+  platform-agnostic and the identical path produces 145 Android tokens) · the APNs key (verified
+  against Apple's production endpoint) · platform detection (`nativeShellPlatform()` returns
+  `'ios'` — the beacon rows above prove it).
+  **What is left is what cannot be seen from here:** the *provisioning profile* the archive was
+  signed with. Push Notifications was enabled on the App ID on 2026-08-09; enabling a capability
+  does **not** regenerate an existing profile, so a cached profile would sign a build whose
+  entitlements file is perfect and whose runtime `register()` still resolves `registrationError`
+  — silently, with a green build and a successful App Store review. The other survivor is mass
+  permission-denial, which 22-out-of-22 makes implausible.
+  ⚠️ **THE NEXT STEP IS A PHONE, NOT MORE READING.** One iPhone: install from the App Store, log
+  in, accept the prompt, then check `SELECT * FROM device_tokens WHERE platform='ios'`. A row
+  means the audience was simply declining; no row confirms the signing theory, and the fix is a
+  fresh Codemagic build with the profile regenerated. `registrationError` is logged to the JS
+  console (`فشل تسجيل الإشعارات`), so a Safari Web Inspector session against the device would
+  name the cause outright.
 
 - **⛔ «بانتظار موافقة الممثل» IS NOT A QUEUE TO DRAIN — DO NOT TOUCH IT. Owner ruling 2026-08-14.**
   The ~471 rep orders parked in this state are sitting on **unresolved disputes between students and
