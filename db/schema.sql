@@ -1529,4 +1529,13 @@ CREATE TABLE IF NOT EXISTS discount_restore_log (
 CREATE INDEX IF NOT EXISTS idx_discount_restore_batch ON discount_restore_log(batch_id);
 CREATE INDEX IF NOT EXISTS idx_discount_restore_at    ON discount_restore_log(restored_at DESC);
 
+-- Migration 086 — `direction` tells the two halves of a round apart ('start' | 'end'). Rows
+-- written before this column existed were all «إنهاء الخصومات», which is exactly what the
+-- default backfills. Full reasoning in db/migrations/086_discount_round_direction.sql.
+ALTER TABLE discount_restore_log
+  ADD COLUMN IF NOT EXISTS direction TEXT NOT NULL DEFAULT 'end'
+  CHECK (direction IN ('start', 'end'));
+CREATE INDEX IF NOT EXISTS idx_discount_restore_direction
+  ON discount_restore_log(direction, restored_at DESC);
+
 COMMIT;

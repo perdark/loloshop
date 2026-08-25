@@ -90,6 +90,11 @@ router.patch('/promo', c.updatePromo);
 router.get('/discounts', discounts.report);
 router.post('/discounts/end', discounts.end);
 
+// «ابدأ الخصومات» — the mirror of the two above: read what a round could touch, then apply it.
+// Same read-then-write split, same reason (lib/discountRound.js).
+router.get('/discounts/candidates', discounts.candidates);
+router.post('/discounts/start', discounts.start);
+
 // Site settings — maintenance mode flag
 router.patch('/maintenance', c.updateMaintenance);
 

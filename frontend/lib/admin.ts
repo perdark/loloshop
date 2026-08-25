@@ -115,6 +115,81 @@ export async function endDiscounts(
   return data.data;
 }
 
+// ─── «ابدأ الخصومات» — starting a discount round ─────────────────────────────
+// The mirror of the block above (backend: lib/discountRound.js). A round sets
+// `compare_at_price` to the price a student pays right now, then lowers the selected cells by a
+// fixed amount — exactly the shape ending a round reverses.
+
+export interface DiscountCandidateCell {
+  scope: DiscountScope;
+  current_price: number;
+}
+
+export interface DiscountCandidate {
+  id: string;
+  name_ar: string;
+  type: string;
+  active: boolean;
+  /** Already carries a «السعر قبل الخصم» — a new round on it is refused, not skipped. */
+  already_discounted: boolean;
+  compare_at_price: number | null;
+  /** The EFFECTIVE retail price: the retail row when there is one, else the product's base. */
+  retail_price_now: number;
+  cells: DiscountCandidateCell[];
+  /** Ticked by default: the cell that IS the retail price. Never سعر الجملة. */
+  default_scopes: DiscountScope[];
+}
+
+export interface DiscountCandidates {
+  products: DiscountCandidate[];
+  summary: { products: number; available: number; already_discounted: number };
+  promo: DiscountReport["promo"];
+}
+
+export interface StartDiscountsPayload {
+  /** IQD off every selected cell. */
+  amount: number;
+  products: {
+    id: string;
+    /** Echoed back so the server can refuse if a price moved since it was displayed. */
+    expected_price: number;
+    scopes: DiscountScope[];
+  }[];
+  activate_promo?: boolean;
+  note?: string;
+}
+
+export interface StartDiscountsResult {
+  batch_id: string;
+  amount: number;
+  products_discounted: number;
+  prices_lowered: number;
+  written: {
+    product_id: string;
+    product_name: string;
+    scope: DiscountScope;
+    from: number;
+    to: number;
+  }[];
+}
+
+/** Admin-only, read-only: every active product a round could be applied to. */
+export async function getDiscountCandidates(): Promise<DiscountCandidates> {
+  const { data } = await api.get<{ data: DiscountCandidates }>("/admin/discounts/candidates");
+  return data.data;
+}
+
+/** Admin-only: lower the selected prices and stamp today's price as «السعر قبل الخصم». */
+export async function startDiscounts(
+  payload: StartDiscountsPayload
+): Promise<StartDiscountsResult> {
+  const { data } = await api.post<{ data: StartDiscountsResult }>(
+    "/admin/discounts/start",
+    payload
+  );
+  return data.data;
+}
+
 export type { MaintenanceConfig };
 
 /** Admin-only: toggle/save the maintenance-mode flag. */

@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { getAdminAnalytics, getAdminAccounting, getPendingApprovalCount, getVisitorStats, type VisitorStats } from "@/lib/admin";
 import { PromoControl } from "@/components/admin/PromoControl";
 import { DiscountRestorePanel } from "@/components/admin/DiscountRestorePanel";
+import { DiscountStartPanel } from "@/components/admin/DiscountStartPanel";
 import { MaintenanceControl } from "@/components/admin/MaintenanceControl";
 import { AnalyticsAsk } from "@/components/admin/AnalyticsAsk";
 import { OtpGatewayStatus } from "@/components/admin/OtpGatewayStatus";
@@ -646,8 +647,12 @@ export default function AdminDashboardPage() {
       <section className="mt-16">
         <SectionHead title="الإعلانات والعروض" />
         <PromoControl />
-        {/* Ending a round is a separate, heavier act than switching the banner off: it puts
-            real prices back. Same section because the two are always used together. */}
+        {/* Starting comes before ending, in the order a round is actually lived. Both are
+            heavier acts than switching the banner off — they write live prices — and both sit
+            in this section because the banner and the prices are always used together. */}
+        <div className="mt-6">
+          <DiscountStartPanel />
+        </div>
         <div className="mt-6">
           <DiscountRestorePanel />
         </div>
