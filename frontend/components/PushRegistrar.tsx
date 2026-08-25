@@ -148,13 +148,24 @@ export function PushRegistrar() {
       const current = await PushNotifications.checkPermissions();
       if (cancelled) return;
       let granted = current.receive === "granted";
+      let outcome = current.receive;
       if (!granted && current.receive !== "denied") {
         // 'prompt' / 'prompt-with-rationale' — never re-ask after a 'denied', the OS would
         // not show the sheet anyway.
         const asked = await PushNotifications.requestPermissions();
         granted = asked.receive === "granted";
+        outcome = asked.receive;
       }
-      if (cancelled || !granted) return;
+      if (cancelled) return;
+      if (!granted) {
+        // ⚠️ THIS RETURN USED TO BE COMPLETELY SILENT, and that silence cost a day. On
+        // 2026-08-26 iOS had 0 device tokens, 0 registration errors and confirmed 1.0.4
+        // users — a combination that is only possible if registration is never ATTEMPTED.
+        // A refused (or never-answered) permission is the ordinary reason for that, and it
+        // left no trace anywhere. Now it does.
+        void reportRegistrationFailure(`permission=${outcome}`);
+        return;
+      }
 
       // Fires the 'registration' listener above with the FCM/APNs token.
       await PushNotifications.register();
@@ -162,6 +173,10 @@ export function PushRegistrar() {
 
     const run = () => {
       void setup().catch((error) => {
+        // Same blind spot as the permission return above: this path only ever warned into a
+        // console on someone else's phone. A missing native plugin lands HERE, not in
+        // registrationError, so without this the two failures are indistinguishable.
+        void reportRegistrationFailure(`setup-failed: ${String(error?.message ?? error)}`);
         // Reached when the plugin is missing from the installed binary (a shell built before
         // `npx cap sync android` picked it up). Notifications simply stay in-app.
         // Re-open the gate so a transient failure gets another attempt on the next auth

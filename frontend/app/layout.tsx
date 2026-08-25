@@ -4,6 +4,7 @@ import { DeepLinkHandler } from "@/components/DeepLinkHandler";
 import { PwaRegistrar } from "@/components/PwaRegistrar";
 import { PushRegistrar } from "@/components/PushRegistrar";
 import { AppBeacon } from "@/components/AppBeacon";
+import { AppUpdateBanner } from "@/components/AppUpdateBanner";
 import { ToasterProvider } from "@/components/providers/ToasterProvider";
 import { APP_ONLY, buildGateScript } from "@/lib/app-gate";
 import "./globals.css";
@@ -151,6 +152,7 @@ export default function RootLayout({
           exactly the casual opens the daily report is asking about.
         */}
         <AppBeacon />
+        <AppUpdateBanner />
         {children}
         <ToasterProvider />
       </body>
