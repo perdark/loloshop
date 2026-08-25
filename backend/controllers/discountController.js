@@ -10,6 +10,8 @@
 
 const memoCache = require('../lib/memoCache');
 const restore = require('../lib/discountRestore');
+const round = require('../lib/discountRound');
+const { query } = require('../lib/db');
 
 // ---------- ADMIN: what is discounted right now ----------
 async function report(req, res) {
@@ -69,4 +71,84 @@ async function end(req, res) {
   });
 }
 
-module.exports = { report, end };
+// ---------- ADMIN: what a NEW round could be applied to ----------
+// The mirror of `report` above, and writes nothing for the same reason: the admin has to see
+// what a press would do to live prices before it happens.
+async function candidates(req, res) {
+  const [data, promo] = await Promise.all([round.buildCandidates(), restore.readPromo()]);
+  res.json({ data: { ...data, promo } });
+}
+
+// ---------- ADMIN: start a round ----------
+// body: {
+//   amount: 5000,                                        // IQD off every selected cell
+//   products: [{ id, expected_price, scopes: ['product'|'retail'|'wholesaler'] }],
+//   activate_promo?: boolean,   // default true — the site-wide badge switch
+//   note?: string
+// }
+// ⚠️ Unlike ending a round, an empty `scopes` is REFUSED here, not honoured — see planStart.
+async function start(req, res) {
+  const list = await round.buildCandidates();
+  const planned = round.planStart(req.body && req.body.products, list, {
+    amount: req.body && req.body.amount,
+  });
+  if (!planned.ok) {
+    const status =
+      planned.code === 'ERR_STALE' ? 409
+      : planned.code === 'ERR_ALREADY_DISCOUNTED' ? 409
+      : planned.code === 'ERR_NOT_FOUND' ? 404
+      : 400;
+    return res.status(status).json({ error: planned.error, code: planned.code });
+  }
+
+  const note = typeof req.body.note === 'string' ? req.body.note.trim().slice(0, 300) : null;
+  const result = await round.applyStart(planned.plan, {
+    adminId: req.user && req.user.id,
+    note,
+    amount: Number(req.body.amount),
+  });
+
+  // Default true: prices that dropped with no banner announcing it is a discount nobody sees.
+  let promo = null;
+  if (req.body.activate_promo !== false) {
+    promo = (await activatePromo()).promo;
+  } else {
+    promo = await restore.readPromo();
+  }
+
+  // Same pair `end` clears: both storefront reads bake the discount into a 120s cached payload,
+  // so without this the new prices are invisible for two minutes.
+  memoCache.del('settings:promo');
+  memoCache.del('cat:');
+
+  res.json({
+    data: {
+      batch_id: result.batch_id,
+      amount: result.amount,
+      products_discounted: planned.plan.length,
+      prices_lowered: result.written.length,
+      written: result.written,
+      promo,
+    },
+  });
+}
+
+/**
+ * Turn the site-wide promo ON, leaving its copy alone.
+ *
+ * The mirror of restore.deactivatePromo. It refuses to invent a config: if the admin has never
+ * written the popup's Arabic copy, flipping `active` would publish an empty banner, so an
+ * unconfigured promo is reported back untouched and the panel says so.
+ */
+async function activatePromo() {
+  const promo = await restore.readPromo();
+  if (!promo.configured) return { changed: false, promo };
+  await query(
+    `UPDATE site_settings
+        SET value = value || '{"active": true}'::jsonb, updated_at = now()
+      WHERE key = 'discount_popup'`
+  );
+  return { changed: !promo.active, promo: { ...promo, active: true, live: true } };
+}
+
+module.exports = { report, end, candidates, start };

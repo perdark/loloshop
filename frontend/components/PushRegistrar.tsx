@@ -111,6 +111,11 @@ export function PushRegistrar() {
       );
       track(action);
 
+      // ⚠️ THIS PROMPT BUYS TRANSACTIONAL NOTIFICATIONS ONLY — order status, rep approval,
+      // deadlines. It is NOT consent to marketing: Apple's guideline 4.5.4 wants promotional
+      // push opted into through consent language in the app's own UI, which is the «العروض
+      // والأخبار» switch in components/NotificationPrefs.tsx (default OFF, migration 089).
+      // Do not widen what this ask means without moving that consent somewhere a user reads.
       const current = await PushNotifications.checkPermissions();
       if (cancelled) return;
       let granted = current.receive === "granted";

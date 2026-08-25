@@ -25,6 +25,7 @@ const navItems: {
   { href: "/admin/packages", label: "باقات VIP", exact: false },
   { href: "/admin/calligraphy", label: "الخط العربي", exact: false },
   { href: "/admin/workshop", label: "الورشة", exact: false },
+  { href: "/admin/app", label: "التطبيق والإشعارات", exact: false },
   { href: "/staff", label: "الإنتاج ومتابعة الموظفين", exact: false },
 ];
 

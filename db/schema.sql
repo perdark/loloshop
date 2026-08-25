@@ -1501,6 +1501,62 @@ CREATE TABLE IF NOT EXISTS staff_app_opens (
 CREATE INDEX IF NOT EXISTS idx_staff_app_opens_date ON staff_app_opens(work_date DESC);
 
 -- =====================================================
+-- Migration 087 — the same question as 084, for EVERY role rather than staff.
+-- Students and ممثلين had no usage signal at all: device_tokens is a floor on installs (it
+-- needs push permission AND a signed-in install), and site_visits is anonymous with no
+-- platform column. staff_app_opens is deliberately NOT widened — it is read by the nightly
+-- staff report and sits next to payroll rules — so staff write both tables from one request.
+-- ⚠️ Nothing here is retroactive; there is no source to backfill from.
+-- Full reasoning in db/migrations/087_app_opens.sql.
+-- =====================================================
+CREATE TABLE IF NOT EXISTS app_opens (
+  user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  work_date     DATE NOT NULL,
+  first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  opens         INTEGER NOT NULL DEFAULT 1 CHECK (opens >= 0),
+  platform      TEXT,
+  PRIMARY KEY (user_id, work_date)
+);
+CREATE INDEX IF NOT EXISTS idx_app_opens_date ON app_opens(work_date DESC);
+CREATE INDEX IF NOT EXISTS idx_app_opens_date_platform ON app_opens(work_date DESC, platform);
+
+-- =====================================================
+-- Migration 088 — an audit trail for admin-composed pushes. Every other push has an upstream
+-- event explaining it; this one has only this row. NOT the queue — `notifications` is the queue
+-- (077); this is written first in the same transaction so a half-failed fan-out still leaves
+-- evidence of who pressed what. Full reasoning in db/migrations/088_push_broadcasts.sql.
+-- =====================================================
+CREATE TABLE IF NOT EXISTS push_broadcasts (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  sent_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  admin_id       UUID REFERENCES users(id) ON DELETE SET NULL,
+  audience_kind  TEXT NOT NULL,
+  audience_value TEXT,
+  title_ar       TEXT NOT NULL,
+  body_ar        TEXT,
+  link           TEXT,
+  people         INTEGER NOT NULL DEFAULT 0,
+  devices        INTEGER NOT NULL DEFAULT 0
+);
+-- Whether this was a PROMOTIONAL send. Recorded because Apple 4.5.4 treats the two kinds
+-- differently: a marketing push may only reach accounts that opted in (migration 089), and this
+-- column is the evidence of which rule each send was made under.
+ALTER TABLE push_broadcasts ADD COLUMN IF NOT EXISTS marketing BOOLEAN NOT NULL DEFAULT FALSE;
+CREATE INDEX IF NOT EXISTS idx_push_broadcasts_sent ON push_broadcasts(sent_at DESC);
+
+-- Migration 089 — transactional vs marketing notification preferences.
+-- ⚠️ A STORE REQUIREMENT: Apple 4.5.4 forbids promotional push without explicit in-app opt-in
+-- AND an opt-out; Play takes the same line. `marketing` DEFAULTS FALSE and must stay that way —
+-- defaulting it true would silently enrol every existing account. `orders` defaults true because
+-- that is what the app is for. Full reasoning in db/migrations/089_notification_prefs.sql.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_prefs JSONB NOT NULL
+  DEFAULT '{"orders": true, "marketing": false}'::jsonb;
+CREATE INDEX IF NOT EXISTS idx_users_marketing_optin
+  ON users ((notification_prefs->>'marketing'))
+  WHERE deleted_at IS NULL;
+
+-- =====================================================
 -- Migration 085 — an UNDO ledger for «إنهاء الخصومات» (ending a storefront discount round).
 -- Ending a discount is the one catalogue edit that RAISES a live price, and it touches many
 -- products in one press. A product's price is a single mutable column with no history, and the
@@ -1528,5 +1584,14 @@ CREATE TABLE IF NOT EXISTS discount_restore_log (
 );
 CREATE INDEX IF NOT EXISTS idx_discount_restore_batch ON discount_restore_log(batch_id);
 CREATE INDEX IF NOT EXISTS idx_discount_restore_at    ON discount_restore_log(restored_at DESC);
+
+-- Migration 086 — `direction` tells the two halves of a round apart ('start' | 'end'). Rows
+-- written before this column existed were all «إنهاء الخصومات», which is exactly what the
+-- default backfills. Full reasoning in db/migrations/086_discount_round_direction.sql.
+ALTER TABLE discount_restore_log
+  ADD COLUMN IF NOT EXISTS direction TEXT NOT NULL DEFAULT 'end'
+  CHECK (direction IN ('start', 'end'));
+CREATE INDEX IF NOT EXISTS idx_discount_restore_direction
+  ON discount_restore_log(direction, restored_at DESC);
 
 COMMIT;

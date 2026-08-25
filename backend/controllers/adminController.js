@@ -11,6 +11,8 @@ const counts = require('../lib/counts');
 const { moneyRevealOk, moneyGateConfigured, setMoneyGate, rankFor, RANKS } = require('./tvBoardController');
 const { assertPasswordOk } = require('../lib/password');
 const { revokeUserDevices } = require('../lib/trustedDevice');
+const appPresence = require('../lib/appPresence');
+const pushBroadcast = require('../lib/pushBroadcast');
 
 const SALT_ROUNDS = 10;
 
@@ -985,7 +987,78 @@ async function setMoneyGateSecret(req, res) {
   res.json({ data: { ok: true } });
 }
 
+/**
+ * GET /api/admin/app-stats — «إحصائيات التطبيق على المنصتين».
+ *
+ * ⚠️ Two sources that measure DIFFERENT things and are never summed: `device_tokens` is a floor
+ * on installs (it needs push permission and a signed-in install), `app_opens` is real usage but
+ * only since migration 087 deployed. lib/appPresence.js carries the full warning.
+ */
+async function appStats(req, res) {
+  const raw = Number(req.query.days);
+  const days = Number.isInteger(raw) && raw > 0 && raw <= 180 ? raw : 30;
+  const data = await appPresence.buildStats({ days });
+  res.json({ data });
+}
+
+/**
+ * GET /api/admin/push/audience — how far a message would reach, BEFORE it can be sent.
+ *
+ * Read-only. The two numbers are always shown together: someone with no device token still gets
+ * the in-app bell, so «٣١٢ شخص · ١٩٤ جهاز» is the honest reach, not an error.
+ */
+async function pushAudience(req, res) {
+  const resolved = await pushBroadcast.resolveAudience(
+    { kind: req.query.kind, value: req.query.value },
+    // ⚠️ A marketing preview must count only opted-in accounts, or the number the admin reads
+    // before pressing send is not the number that will receive it (Apple 4.5.4, migration 089).
+    { marketing: req.query.marketing === 'true' }
+  );
+  if (!resolved.ok) {
+    return res.status(400).json({ error: resolved.error, code: resolved.code });
+  }
+  res.json({ data: { people: resolved.people, devices: resolved.devices, label: resolved.label } });
+}
+
+/**
+ * POST /api/admin/push — send it.
+ *
+ * Writes `notifications` rows and stops; lib/pushOutbox.js delivers them, so this inherits the
+ * flood guard, the freshness window and dead-token handling rather than re-earning them.
+ * ⚠️ A push cannot be recalled — see the three guards at the top of lib/pushBroadcast.js.
+ */
+async function pushSend(req, res) {
+  const result = await pushBroadcast.send({
+    audience: (req.body && req.body.audience) || {},
+    titleAr: req.body && req.body.title_ar,
+    bodyAr: req.body && req.body.body_ar,
+    link: req.body && req.body.link,
+    confirmedCount: req.body && req.body.confirmed_count,
+    marketing: req.body ? req.body.marketing === true : false,
+    adminId: req.user && req.user.id,
+  });
+  if (!result.ok) {
+    const status = result.code === 'ERR_CONFIRM_COUNT' ? 409 : 400;
+    return res.status(status).json({ error: result.error, code: result.code });
+  }
+  res.json({ data: result });
+}
+
+/** The last broadcasts, newest first — the only record that a human-sent push happened. */
+async function pushHistory(req, res) {
+  const { rows } = await query(
+    `SELECT b.id, b.sent_at, b.audience_kind, b.audience_value, b.title_ar, b.body_ar,
+            b.link, b.people, b.devices, b.marketing, u.name AS admin_name
+       FROM push_broadcasts b
+       LEFT JOIN users u ON u.id = b.admin_id
+      ORDER BY b.sent_at DESC
+      LIMIT 20`
+  );
+  res.json({ data: { broadcasts: rows } });
+}
+
 module.exports = {
+  appStats, pushAudience, pushSend, pushHistory,
   analytics, accounting, updateOrderCost, updateCheckoutGroup,
   listWholesalers, createWholesaler, updateWholesaler, updateDeadline, updatePricing, deleteWholesaler,
   getWholesalerSashConfig, updateWholesalerSashConfig,

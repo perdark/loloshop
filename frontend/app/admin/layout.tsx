@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { AdminSidebar } from "@/components/AdminSidebar";
 import { BrandMark } from "@/components/ui/BrandLogo";
+import { NotificationBell } from "@/components/NotificationBell";
 import { PageLoader } from "@/components/ui/Spinner";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 
@@ -40,7 +41,19 @@ export default function AdminLayout({
           </button>
           <BrandMark size={32} />
           <span className="font-display text-base font-bold text-ink">لولو شوب</span>
+          {/* The admin bell was missing entirely: the backend already writes admin
+              `notifications` rows (the assistant's budget warning, the nightly staff report) and
+              there was no screen to read them on — so a missed push was a lost message. */}
+          <div className="ms-auto">
+            <NotificationBell />
+          </div>
         </header>
+
+        {/* Desktop has no header bar at all (the sidebar is the chrome), so the bell needs its
+            own anchor — admin is laptop-primary, which is exactly where it would be missed. */}
+        <div className="sticky top-0 z-20 hidden justify-end px-8 pt-4 lg:flex">
+          <NotificationBell />
+        </div>
 
         <main className="mx-auto w-full max-w-6xl p-4 lg:p-8 animate-fade-page-in">{children}</main>
       </div>

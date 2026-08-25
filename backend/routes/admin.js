@@ -1,4 +1,5 @@
 const router = require('express').Router();
+const rateLimit = require('express-rate-limit');
 const { authRequired, requireRole } = require('../middleware/auth');
 const c = require('../controllers/adminController');
 const orders = require('../controllers/orderController');
@@ -89,6 +90,27 @@ router.patch('/promo', c.updatePromo);
 // caller sends back from that report. Why it is a screen and not a migration: lib/discountRestore.js.
 router.get('/discounts', discounts.report);
 router.post('/discounts/end', discounts.end);
+
+// «ابدأ الخصومات» — the mirror of the two above: read what a round could touch, then apply it.
+// Same read-then-write split, same reason (lib/discountRound.js).
+// إحصائيات التطبيق — device_tokens (a FLOOR on installs) and app_opens (real usage since 087)
+// side by side. lib/appPresence.js explains why the two are never added together.
+router.get('/app-stats', c.appStats);
+
+// «إرسال إشعار» — a notification a HUMAN wrote. Read the reach first, then send; the send
+// writes `notifications` rows and lets lib/pushOutbox.js deliver them.
+// ⚠️ A push cannot be recalled. The three guards are in lib/pushBroadcast.js.
+const pushSendLimit = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  message: { error: 'وصلت للحد: ٥ إشعارات بالساعة', code: 'ERR_RATE_LIMIT' },
+});
+router.get('/push/audience', c.pushAudience);
+router.get('/push/history', c.pushHistory);
+router.post('/push', pushSendLimit, c.pushSend);
+
+router.get('/discounts/candidates', discounts.candidates);
+router.post('/discounts/start', discounts.start);
 
 // Site settings — maintenance mode flag
 router.patch('/maintenance', c.updateMaintenance);

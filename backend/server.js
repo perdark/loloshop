@@ -105,6 +105,9 @@ app.use('/api/production', require('./routes/production'));
 app.use('/api/cart', require('./routes/cart'));
 app.use('/api/wholesaler', require('./routes/wholesaler'));
 app.use('/api/notifications', require('./routes/notifications'));
+// The app-presence beacon (migration 087). Its own router because it is the one signal that
+// must reach EVERY signed-in role — /api/staff is role-locked, which is why 084 saw only staff.
+app.use('/api/app', require('./routes/app'));
 app.use('/api/products', require('./routes/products'));
 app.use('/api/catalog', require('./routes/catalog'));
 app.use('/api/designs', require('./routes/designs'));

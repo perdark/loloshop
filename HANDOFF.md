@@ -311,6 +311,8 @@ longer stranded on a branch · the laptop's loose credentials are filed in
    so restoring them would have raised real order prices by up to 20,000. **Owner question: are
    any of those four meant to be higher?** Set them by hand on `/admin/products` — the run log is
    now the only human-readable copy of those old prices, since the run cleared `compare_at_price`.
+   · **2026-08-25:** the owner can now set these themselves — `feat/discount-round-and-app-console`
+     adds «ابدأ الخصومات», so a round is a screen rather than a developer task.
    · **Undo** (all three statements are printed in the run log): `discount_restore_log` keyed by
    that `batch_id` holds every old value, including `old_compare_at_price` to bring the badges
    back. The rollback was rehearsed on a seeded copy before the live run.
@@ -664,6 +666,42 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   this window and `X-Frame-Options: DENY` refuses an iframe rig. Someone with a phone should look
   at the المجهز sheet's nav row, the shelf map's «١/٢٠ وشاح» labels, and the new `/staff` search
   box (`w-full` under `sm`, 44px tall — built for it, not measured on one).
+
+- **⚠️ `feat/discount-round-and-app-console` IS READY AND UNMERGED — 2026-08-25.** Three things
+  the admin could not do without a developer: **start** a discount round (only ending existed),
+  see app usage on either platform, and send a notification they wrote. Two commits, 505/505
+  backend tests, `next build` clean, all three driven in a browser against the dev DB.
+  · **Migrations 086, 087, 088 and 089 ride this branch** — all four are in `db/schema.sql`, so
+    the deploy's `npm run migrate` covers them (same ordering rule as 077/078).
+  · ⚠️ **`users.notification_prefs.marketing` DEFAULTS FALSE and must stay that way (089).**
+    It is what keeps promotional push inside **Apple's guideline 4.5.4**, which needs an in-app
+    opt-in AND an in-app opt-out. Consent cannot be inherited from a column default: flipping it
+    true would enrol all 1,100+ existing accounts at once and would look fine until a reviewer
+    checked. The gate lives in ONE place — `notificationPrefs.marketingFilterSql()`, applied by
+    `pushBroadcast.audienceSql()` — so never add a second path that sends promotional copy.
+  · ⚠️ **Starting a round refuses a product that already carries a «السعر قبل الخصم»** rather
+    than skipping it. A second round would store the *discounted* price as «the old price» and
+    the real one would be gone from the database — the one loss `discount_restore_log` cannot
+    undo, because the damage is in what was WRITTEN to it.
+  · ⚠️ **A round does NOT discount `products.base_price` when a retail row exists**, and that is
+    load-bearing, not tidiness: ending a round restores every selected cell to the single
+    `compare_at_price`, so discounting both leaves the base permanently lowered after a
+    start→end cycle — exactly the shape of the four cells the August round stranded, and
+    `products.base_price` is what a rep-linked student pays. Pinned by
+    `test/discountRoundRoundTrip.test.js`.
+  · ⚠️ **`staff_app_opens` (084) was NOT widened.** The new `app_opens` (087) is a second table;
+    the beacon writes both for staff, one request. Do not "deduplicate" them — 084 feeds the
+    nightly report and sits next to payroll rules.
+  · ⚠️ **An admin-composed push cannot be recalled.** `lib/pushBroadcast.js`'s link allowlist is
+    a CLOSED list matched exactly (never a prefix — `/orders` and `/orders-evil` share one), and
+    it is the thing standing between one compromised admin session and a phishing message
+    wearing the shop's name in front of 1,100+ accounts. Do not relax it to "any relative path".
+  · ⚠️ **App stats are not retroactive and iOS reads 0** until someone installs 1.0.4 from
+    TestFlight. The owner asked the on-page iOS explanation removed (2026-08-25), so that fact
+    now lives only in `AppStatsPanel.tsx`'s header comment.
+  · Two files are both numbered **085** (`_discount_restore_log` and `_sash_shelf_shared_bins`).
+    Harmless — both are in `schema.sql` — but `migrate:file 085` is ambiguous. Left alone on
+    purpose: both are applied to prod, and renaming an applied migration matches no history.
 
 - **⚠️ `fix/admin-presence-panel` IS READY AND UNMERGED — 2026-08-15.** Closes the last two
   open bugs (**1**, and **8 parts 2·3·4**), so the eleven-bug board is finished in code.
