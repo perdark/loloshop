@@ -1501,6 +1501,47 @@ CREATE TABLE IF NOT EXISTS staff_app_opens (
 CREATE INDEX IF NOT EXISTS idx_staff_app_opens_date ON staff_app_opens(work_date DESC);
 
 -- =====================================================
+-- Migration 087 — the same question as 084, for EVERY role rather than staff.
+-- Students and ممثلين had no usage signal at all: device_tokens is a floor on installs (it
+-- needs push permission AND a signed-in install), and site_visits is anonymous with no
+-- platform column. staff_app_opens is deliberately NOT widened — it is read by the nightly
+-- staff report and sits next to payroll rules — so staff write both tables from one request.
+-- ⚠️ Nothing here is retroactive; there is no source to backfill from.
+-- Full reasoning in db/migrations/087_app_opens.sql.
+-- =====================================================
+CREATE TABLE IF NOT EXISTS app_opens (
+  user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  work_date     DATE NOT NULL,
+  first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  opens         INTEGER NOT NULL DEFAULT 1 CHECK (opens >= 0),
+  platform      TEXT,
+  PRIMARY KEY (user_id, work_date)
+);
+CREATE INDEX IF NOT EXISTS idx_app_opens_date ON app_opens(work_date DESC);
+CREATE INDEX IF NOT EXISTS idx_app_opens_date_platform ON app_opens(work_date DESC, platform);
+
+-- =====================================================
+-- Migration 088 — an audit trail for admin-composed pushes. Every other push has an upstream
+-- event explaining it; this one has only this row. NOT the queue — `notifications` is the queue
+-- (077); this is written first in the same transaction so a half-failed fan-out still leaves
+-- evidence of who pressed what. Full reasoning in db/migrations/088_push_broadcasts.sql.
+-- =====================================================
+CREATE TABLE IF NOT EXISTS push_broadcasts (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  sent_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  admin_id       UUID REFERENCES users(id) ON DELETE SET NULL,
+  audience_kind  TEXT NOT NULL,
+  audience_value TEXT,
+  title_ar       TEXT NOT NULL,
+  body_ar        TEXT,
+  link           TEXT,
+  people         INTEGER NOT NULL DEFAULT 0,
+  devices        INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_push_broadcasts_sent ON push_broadcasts(sent_at DESC);
+
+-- =====================================================
 -- Migration 085 — an UNDO ledger for «إنهاء الخصومات» (ending a storefront discount round).
 -- Ending a discount is the one catalogue edit that RAISES a live price, and it touches many
 -- products in one press. A product's price is a single mutable column with no history, and the

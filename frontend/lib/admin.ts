@@ -190,6 +190,119 @@ export async function startDiscounts(
   return data.data;
 }
 
+// ─── إحصائيات التطبيق ────────────────────────────────────────────────────────
+// ⚠️ `devices` and `usage` measure DIFFERENT things and are never summed. A device row needs an
+// install AND a signed-in session AND the notification prompt granted, so it is a FLOOR on
+// installs; `usage` is real opens, but only since migration 087 deployed. See the backend's
+// lib/appPresence.js.
+
+export type AppPlatform = "android" | "ios";
+
+export interface AppDeviceCounts {
+  devices: number;
+  new_7d: number;
+  active_7d: number;
+  active_30d: number;
+}
+
+export interface AppStats {
+  window_days: number;
+  today: string;
+  devices: {
+    by_platform: Record<AppPlatform, AppDeviceCounts>;
+    trend: { day: string; platform: string; devices: number }[];
+    total: number;
+    /** Distinct people, not devices — one person can carry a phone and a tablet. */
+    people: number;
+  };
+  usage: {
+    daily: { day: string; platform: string; opens: number; users: number }[];
+    by_role: { role: string; users: number; opens: number }[];
+    active_users: number;
+    today_users: number;
+    today_opens: number;
+    /** NULL until the first ping ever lands — the page says «القياس بدأ يوم …» instead of
+     *  drawing an empty chart that reads as "nobody opens the app". */
+    tracking_since: string | null;
+  };
+}
+
+/** Admin-only: app usage and registered devices, both platforms. */
+export async function getAppStats(days = 30): Promise<AppStats> {
+  const { data } = await api.get<{ data: AppStats }>("/admin/app-stats", { params: { days } });
+  return data.data;
+}
+
+// ─── «إرسال إشعار» — an admin-composed push ──────────────────────────────────
+// ⚠️ It cannot be recalled. The server refuses external links, refuses «الكل» unless the
+// recipient count is typed back, and records every send. See backend/lib/pushBroadcast.js.
+
+export type PushAudienceKind = "all" | "role" | "university" | "wholesaler" | "user";
+
+export interface PushAudience {
+  kind: PushAudienceKind;
+  value?: string;
+}
+
+export interface PushReach {
+  people: number;
+  /** People who could receive an actual PUSH. The rest still get the in-app bell. */
+  devices: number;
+  label: string;
+}
+
+export interface SendPushPayload {
+  audience: PushAudience;
+  title_ar: string;
+  body_ar?: string;
+  /** Must be a relative in-app path from the server's allowlist. */
+  link?: string;
+  /** Required for «الكل» only: the recipient count, typed back. */
+  confirmed_count?: number;
+}
+
+export interface SendPushResult {
+  broadcast_id: string;
+  people: number;
+  devices: number;
+  label: string;
+}
+
+export interface PushBroadcastRow {
+  id: string;
+  sent_at: string;
+  audience_kind: PushAudienceKind;
+  audience_value: string | null;
+  title_ar: string;
+  body_ar: string | null;
+  link: string | null;
+  people: number;
+  devices: number;
+  admin_name: string | null;
+}
+
+/** Admin-only, read-only: how far a message would reach, before it can be sent. */
+export async function getPushReach(audience: PushAudience): Promise<PushReach> {
+  const { data } = await api.get<{ data: PushReach }>("/admin/push/audience", {
+    params: { kind: audience.kind, value: audience.value },
+  });
+  return data.data;
+}
+
+/** Admin-only: send it. There is no unsend. */
+export async function sendPush(payload: SendPushPayload): Promise<SendPushResult> {
+  const { data } = await api.post<{ data: SendPushResult }>("/admin/push", payload);
+  return data.data;
+}
+
+/** Admin-only: the last 20 human-sent pushes. */
+export async function getPushHistory(): Promise<PushBroadcastRow[]> {
+  const { data } = await api.get<{ data: { broadcasts: PushBroadcastRow[] } }>(
+    "/admin/push/history"
+  );
+  return data.data.broadcasts;
+}
+
 export type { MaintenanceConfig };
 
 /** Admin-only: toggle/save the maintenance-mode flag. */
