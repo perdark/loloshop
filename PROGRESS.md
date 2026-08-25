@@ -1,8 +1,8 @@
 # Progress
 
-## 2026-08-25 — 💸 Starting a discount round · 📱 /admin/app · 🔔 an admin-written push
+## 2026-08-25 — 💸 Starting a discount round · 📱 /admin/app · 🔔 an admin-written push · ✅ notification opt-in
 
-Branch `feat/discount-round-and-app-console`, two commits, **unmerged**. 505/505 backend tests
+Branch `feat/discount-round-and-app-console`, three commits, **unmerged**. 508/508 backend tests
 (479 before), tsc + eslint + `next build` clean, all three verified in a real browser against
 the dev DB. Spec: `docs/superpowers/specs/2026-08-25-discount-round-and-app-console-design.md`.
 
@@ -103,8 +103,41 @@ with no screen to read them on, so a missed push was a lost message.
 Browser-verified: «الكل» refused a wrong count and accepted the right one; a role send wrote 9
 rows at `push_state 'pending'` plus its audit row (dev test rows cleaned up afterwards).
 
+### 4. «الإشعارات» — opt-in for offers, opt-out for everything (Apple 4.5.4)
+
+The composer above is the first thing here that can send an **offer**, and that creates an
+obligation the shop did not have before. Apple's guideline **4.5.4** allows promotional push only
+when the user opted in through consent language **in the app** AND can opt out **from inside it**;
+Play takes the same line. The app had **neither** — the only way to stop a marketing push was to
+kill notifications at the OS level, which also kills «طلبك جاهز».
+
+**Migration 089** adds `users.notification_prefs` (`orders`, `marketing`).
+
+⚠️ **`marketing` DEFAULTS FALSE and must stay that way.** Consent cannot be inherited from a
+column default; defaulting it true would silently enrol all 1,100+ existing accounts and would be
+invisible right up until a reviewer looked at it. `orders` defaults true because that is what the
+app is for — still switchable, but turning it off is the student's deliberate act.
+
+⚠️ **The rule is enforced in ONE place** — `notificationPrefs.marketingFilterSql()`, applied by
+`pushBroadcast.audienceSql()` to any send flagged `marketing`. **Do not add a second path that
+sends promotional copy around it.** A marketing send is also typed `admin_marketing` in
+`notifications` and stamped on the audit row, so which rule each send was made under stays
+readable afterwards.
+
+⚠️ **The OS permission prompt buys TRANSACTIONAL notifications only.** The consent language for
+offers is the «العروض والأخبار» switch on `/account`; that split is documented at the ask site in
+`PushRegistrar.tsx` so the two cannot drift apart.
+
+`NotificationPrefs.tsx` sits on `/account` **above** the danger zone — a student looking for a way
+to stop notifications must find it before they find «حذف الحساب». Turning a switch off does not
+unregister the device: the other category keeps working and the in-app bell keeps everything.
+
+Browser-verified: defaults orders-on/marketing-off · ticking marketing persisted server-side ·
+the retail audience went **1,147 → 1** for a marketing send and stayed **1,147** transactional ·
+the composer's own «عرض أو خصم» switch showed the same 1,147 → 0 with the policy note.
+
 ### Notes for whoever merges this
-- **Two migrations ride this branch: 087 and 088.** Both are in `db/schema.sql`, so the deploy's
+- **Four migrations ride this branch: 086, 087, 088 and 089.** All are in `db/schema.sql`, so the deploy's
   `npm run migrate` covers them — the same ordering rule 077/078 already have.
 - ⚠️ **Two files are both numbered 085** (`085_discount_restore_log.sql` and
   `085_sash_shelf_shared_bins.sql`). Harmless today because both are in `schema.sql`, but

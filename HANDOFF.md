@@ -671,8 +671,14 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   the admin could not do without a developer: **start** a discount round (only ending existed),
   see app usage on either platform, and send a notification they wrote. Two commits, 505/505
   backend tests, `next build` clean, all three driven in a browser against the dev DB.
-  · **Migrations 086, 087, 088 ride this branch** — all three are in `db/schema.sql`, so the
-    deploy's `npm run migrate` covers them (same ordering rule as 077/078).
+  · **Migrations 086, 087, 088 and 089 ride this branch** — all four are in `db/schema.sql`, so
+    the deploy's `npm run migrate` covers them (same ordering rule as 077/078).
+  · ⚠️ **`users.notification_prefs.marketing` DEFAULTS FALSE and must stay that way (089).**
+    It is what keeps promotional push inside **Apple's guideline 4.5.4**, which needs an in-app
+    opt-in AND an in-app opt-out. Consent cannot be inherited from a column default: flipping it
+    true would enrol all 1,100+ existing accounts at once and would look fine until a reviewer
+    checked. The gate lives in ONE place — `notificationPrefs.marketingFilterSql()`, applied by
+    `pushBroadcast.audienceSql()` — so never add a second path that sends promotional copy.
   · ⚠️ **Starting a round refuses a product that already carries a «السعر قبل الخصم»** rather
     than skipping it. A second round would store the *discounted* price as «the old price» and
     the real one would be gone from the database — the one loss `discount_restore_log` cannot
