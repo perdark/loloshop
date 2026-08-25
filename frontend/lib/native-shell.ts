@@ -65,3 +65,25 @@ export function nativeShellPlatform(): NativePlatform | null {
   if (platform) return null;
   return window.androidBridge ? "android" : null;
 }
+
+/**
+ * The installed shell's version string ("1.0.4"), or null in a browser / when the bridge cannot
+ * answer.
+ *
+ * ⚠️ THIS EXISTS TO ANSWER ONE QUESTION: is a phone that never registers for push simply running
+ * an app too old to have the capability? `app_opens` records the PLATFORM, which cannot tell a
+ * pre-push 1.0.3 iPhone from a current one — and on 2026-08-26 that ambiguity was the entire
+ * reason «0 iOS device tokens against 145 Android» could not be explained.
+ *
+ * Dynamically imported and fully guarded: it must never be the reason a beacon fails.
+ */
+export async function nativeAppVersion(): Promise<string | null> {
+  if (!isNativeShell()) return null;
+  try {
+    const { App } = await import("@capacitor/app");
+    const info = await App.getInfo();
+    return info?.version ?? null;
+  } catch {
+    return null;
+  }
+}

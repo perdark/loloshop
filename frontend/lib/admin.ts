@@ -224,7 +224,20 @@ export interface AppStats {
     /** NULL until the first ping ever lands — the page says «القياس بدأ يوم …» instead of
      *  drawing an empty chart that reads as "nobody opens the app". */
     tracking_since: string | null;
+    /** Which app build each person is on. «أقدم من ٢٦ آب» = a client too old to report it. */
+    by_version: { platform: string; app_version: string; users: number }[];
   };
+  /**
+   * Devices that REFUSED to register for push, with the reason the OS gave (migration 090).
+   * Empty is the goal — a row here is the answer to «ليش ما يوصل إشعار».
+   */
+  register_errors: {
+    platform: string | null;
+    app_version: string | null;
+    message: string | null;
+    hits: number;
+    newest: string;
+  }[];
 }
 
 /** Admin-only: app usage and registered devices, both platforms. */

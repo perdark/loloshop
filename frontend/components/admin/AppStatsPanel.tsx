@@ -196,6 +196,32 @@ export function AppStatsPanel() {
               </div>
             </div>
 
+            {/* Which build people are actually on — the row that explains a platform with
+                zero device tokens. An app older than the version beacon reports nothing, and on
+                iOS that is itself the likely answer: a build before 1.0.4 cannot register for
+                push at all. */}
+            {stats.usage.by_version.length > 0 && (
+              <div className="mt-6">
+                <h3 className="mb-2 text-xs font-semibold text-ink/70">نسخة التطبيق المستعملة</h3>
+                <ul className="space-y-2">
+                  {stats.usage.by_version.map((v) => (
+                    <li
+                      key={`${v.platform}:${v.app_version}`}
+                      className="flex items-center justify-between gap-3 rounded-xl border border-ink/10 bg-white/60 px-4 py-2.5"
+                    >
+                      <span className="text-sm text-ink">
+                        {PLATFORM_LABEL[v.platform] ?? v.platform}
+                        <span className="ms-2 text-xs text-ink/50">{v.app_version}</span>
+                      </span>
+                      <span className="text-xs tabular-nums text-ink/60">
+                        {toArabicDigits(v.users)} شخص
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             {/* Who */}
             {stats.usage.by_role.length > 0 && (
               <ul className="mt-5 space-y-2">
@@ -215,6 +241,36 @@ export function AppStatsPanel() {
           </>
         )}
       </section>
+
+      {/* ── Registration failures ───────────────────────────────────────── */}
+      {stats.register_errors.length > 0 && (
+        <section className="rounded-2xl border border-danger/30 bg-danger/5 p-5 sm:p-7">
+          <h2 className="font-display text-xl font-bold tracking-tight text-ink">
+            أجهزة ما كدرت تسجّل للإشعارات
+          </h2>
+          <p className="mt-1.5 text-xs leading-relaxed text-ink/60">
+            هذا السبب اللي يعطيه التلفون نفسه. ظهور أي سطر هنا يعني الإشعارات ما توصل لهذاك
+            الجهاز، وسبب المشكلة مكتوب بالسطر.
+          </p>
+          <ul className="mt-4 space-y-2">
+            {stats.register_errors.map((e, i) => (
+              <li
+                key={`${e.platform}:${e.app_version}:${i}`}
+                className="rounded-xl border border-danger/20 bg-white/70 px-4 py-3"
+              >
+                <p className="text-xs font-semibold text-ink">
+                  {PLATFORM_LABEL[e.platform ?? "unknown"] ?? e.platform}
+                  {e.app_version ? ` · ${e.app_version}` : ""} ·{" "}
+                  {toArabicDigits(e.hits)} مرة
+                </p>
+                <p className="mt-1 break-words font-mono text-[11px] leading-relaxed text-danger">
+                  {e.message || "—"}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </div>
   );
 }

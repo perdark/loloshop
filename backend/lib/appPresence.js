@@ -40,22 +40,50 @@ function shopToday(now = new Date()) {
  * `platform` is COALESCEd, never overwritten with NULL: a client that stops sending one (an old
  * build, a web tab) must not erase the fact that this user is on Android.
  */
-async function recordOpen({ userId, platform = null, now = new Date() }) {
+async function recordOpen({ userId, platform = null, appVersion = null, now = new Date() }) {
   const plat = PLATFORMS.has(String(platform)) ? String(platform) : null;
+  // Capped here rather than in the schema: the value is client-supplied and only ever looks
+  // like "1.0.4", so anything longer is noise or an attack, not a version.
+  const version =
+    typeof appVersion === 'string' && appVersion.trim() ? appVersion.trim().slice(0, 32) : null;
   const { rows } = await query(
-    `INSERT INTO app_opens (user_id, work_date, first_seen_at, last_seen_at, opens, platform)
-     VALUES ($1, $2, $3, $3, 1, $4)
+    `INSERT INTO app_opens (user_id, work_date, first_seen_at, last_seen_at, opens, platform,
+                            app_version)
+     VALUES ($1, $2, $3, $3, 1, $4, $5)
      ON CONFLICT (user_id, work_date) DO UPDATE
        SET last_seen_at = GREATEST(app_opens.last_seen_at, EXCLUDED.last_seen_at),
            opens = app_opens.opens
                  + CASE WHEN EXCLUDED.last_seen_at - app_opens.last_seen_at
                              > INTERVAL '${SESSION_GAP_MINUTES} minutes'
                         THEN 1 ELSE 0 END,
-           platform = COALESCE(EXCLUDED.platform, app_opens.platform)
+           platform = COALESCE(EXCLUDED.platform, app_opens.platform),
+           -- Newest wins, unlike the platform column above: a person who UPDATES the app
+           -- mid-day must show the new version, and that transition is the whole reason this
+           -- column exists. (No backticks in here: this is inside a JS template literal.)
+           app_version = COALESCE(EXCLUDED.app_version, app_opens.app_version)
      RETURNING opens, first_seen_at, last_seen_at`,
-    [userId, shopToday(now), now, plat]
+    [userId, shopToday(now), now, plat, version]
   );
   return rows[0];
+}
+
+/**
+ * Record a device refusing to register for push.
+ *
+ * ⚠️ Written on a path that must never fail loudly: the caller is a fire-and-forget beacon on a
+ * student's phone. Everything is capped and the insert is best-effort.
+ */
+async function recordRegisterError({ userId, platform = null, appVersion = null, message = null }) {
+  await query(
+    `INSERT INTO push_register_errors (user_id, platform, app_version, message)
+     VALUES ($1, $2, $3, $4)`,
+    [
+      userId || null,
+      platform ? String(platform).slice(0, 16) : null,
+      appVersion ? String(appVersion).slice(0, 32) : null,
+      message ? String(message).slice(0, 500) : null,
+    ]
+  );
 }
 
 /**
@@ -72,7 +100,7 @@ async function recordOpen({ userId, platform = null, now = new Date() }) {
 async function buildStats({ days = 30, now = new Date() } = {}) {
   const today = shopToday(now);
 
-  const [devices, deviceTrend, daily, roles, totals] = await Promise.all([
+  const [devices, deviceTrend, daily, roles, totals, versions, regErrors] = await Promise.all([
     // Registered devices, split by platform. `last_seen_at` is refreshed by the push pipeline,
     // so "active" here means the token still works, not that the app was opened.
     query(
@@ -129,6 +157,28 @@ async function buildStats({ days = 30, now = new Date() } = {}) {
          (SELECT MIN(work_date) FROM app_opens) AS tracking_since`,
       [today, days]
     ),
+    // ⚠️ THE ROW THAT EXPLAINS «0 iOS TOKENS» (migration 090). A client older than 2026-08-26
+    // sends no version, so NULL means "an app too old to tell us" — which, on iOS, is itself
+    // the likely answer, because a build predating 1.0.4 cannot register for push at all.
+    query(
+      `SELECT COALESCE(platform, 'unknown') AS platform,
+              COALESCE(app_version, 'أقدم من ٢٦ آب') AS app_version,
+              COUNT(DISTINCT user_id)::int AS users
+         FROM app_opens
+        WHERE work_date > $1::date - ($2 || ' days')::interval
+        GROUP BY 1, 2
+        ORDER BY users DESC`,
+      [today, days]
+    ),
+    query(
+      `SELECT platform, app_version, message, COUNT(*)::int AS hits, MAX(created_at) AS newest
+         FROM push_register_errors
+        WHERE created_at > NOW() - ($1 || ' days')::interval
+        GROUP BY platform, app_version, message
+        ORDER BY newest DESC
+        LIMIT 20`,
+      [days]
+    ),
   ]);
 
   // Both keys always present, zeroed rather than absent: iOS genuinely has no devices yet, and
@@ -162,8 +212,18 @@ async function buildStats({ days = 30, now = new Date() } = {}) {
       // NULL until the first ping ever lands. The page uses this to say «القياس بدأ يوم X»
       // instead of drawing an empty chart that reads as "nobody opens the app".
       tracking_since: totals.rows[0].tracking_since,
+      by_version: versions.rows,
     },
+    // Empty is the goal. A row here names the reason a phone refused to register, which is
+    // otherwise only visible in a console on someone else's device.
+    register_errors: regErrors.rows,
   };
 }
 
-module.exports = { recordOpen, buildStats, shopToday, SESSION_GAP_MINUTES };
+module.exports = {
+  recordOpen,
+  recordRegisterError,
+  buildStats,
+  shopToday,
+  SESSION_GAP_MINUTES,
+};

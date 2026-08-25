@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { AUTH_CHANGED_EVENT, getToken } from "@/lib/auth";
-import { nativeShellPlatform } from "@/lib/native-shell";
+import { nativeAppVersion, nativeShellPlatform } from "@/lib/native-shell";
 
 /**
  * Asks for notification permission, registers the device, and routes a tapped notification.
@@ -44,6 +44,29 @@ export function PushRegistrar() {
       else removers.push(() => void handle.remove());
     };
 
+    /** Tell the backend why this device refused to register. Never throws. */
+    const reportRegistrationFailure = async (message: string) => {
+      try {
+        const token = getToken();
+        if (!token) return;
+        const base =
+          process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || "http://localhost:4000";
+        await fetch(`${base}/api/app/push-error`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            platform: nativeShellPlatform(),
+            app_version: await nativeAppVersion(),
+            message,
+          }),
+          keepalive: true,
+          cache: "no-store",
+        });
+      } catch {
+        /* a diagnostic that breaks the app is worse than no diagnostic */
+      }
+    };
+
     const setup = async () => {
       if (started) return;
       const platform = nativeShellPlatform();
@@ -76,6 +99,12 @@ export function PushRegistrar() {
           // The usual cause on Android is a missing google-services.json in the installed
           // binary; on iOS, a build whose profile lacks the aps-environment entitlement.
           console.warn("فشل تسجيل الإشعارات:", error);
+          // ⚠️ AND REPORT IT, because the line above is invisible. On 2026-08-26 prod had 145
+          // Android device tokens and ZERO iOS while signed-in iPhone users opened the app
+          // daily, and the one piece of evidence nobody could reach was this error — sitting in
+          // a console on someone else's phone. Best-effort: a diagnostic must never be the
+          // reason the app misbehaves, so every failure here is swallowed.
+          void reportRegistrationFailure(String(error?.error ?? error ?? "unknown"));
         }
       );
       track(registrationError);

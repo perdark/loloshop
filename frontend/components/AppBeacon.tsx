@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { AUTH_CHANGED_EVENT, getUser } from "@/lib/auth";
-import { nativeShellPlatform } from "@/lib/native-shell";
+import { nativeAppVersion, nativeShellPlatform } from "@/lib/native-shell";
 
 /**
  * «شكد ينفتح التطبيق، ومنو يفتحه» — the app-presence beacon (migrations 084 + 087).
@@ -55,6 +55,12 @@ export function AppBeacon() {
     let timer: ReturnType<typeof setInterval> | null = null;
     let lastPing = 0;
 
+    // Resolved once per mount and reused: it is a bridge round-trip, and the installed version
+    // cannot change without the app restarting. `null` in a browser and on any shell whose
+    // bridge cannot answer — the server treats that as "an app too old to tell us", which is
+    // itself the answer we are looking for on iOS.
+    let versionPromise: Promise<string | null> | null = null;
+
     function ping() {
       // Re-read on every ping, not once on mount: a logout/login between two pings must be
       // able to change the answer, and `getUser` is a localStorage read. Any signed-in role
@@ -69,16 +75,22 @@ export function AppBeacon() {
       if (!token) return;
 
       try {
-        void fetch(`${API_BASE}/api/app/open`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ platform: nativeShellPlatform() ?? "web" }),
-          keepalive: true,
-          cache: "no-store",
-        }).catch(() => {});
+        if (!versionPromise) versionPromise = nativeAppVersion();
+        void versionPromise.then((appVersion) =>
+          fetch(`${API_BASE}/api/app/open`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              platform: nativeShellPlatform() ?? "web",
+              app_version: appVersion,
+            }),
+            keepalive: true,
+            cache: "no-store",
+          }).catch(() => {})
+        );
       } catch {
         /* never break the app for a presence beacon */
       }

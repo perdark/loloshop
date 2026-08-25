@@ -1521,6 +1521,21 @@ CREATE TABLE IF NOT EXISTS app_opens (
 CREATE INDEX IF NOT EXISTS idx_app_opens_date ON app_opens(work_date DESC);
 CREATE INDEX IF NOT EXISTS idx_app_opens_date_platform ON app_opens(work_date DESC, platform);
 
+-- Migration 090 — the two facts needed to explain 0 iOS device tokens against 145 Android.
+-- `app_version` separates "still on a build with no push capability" from "on 1.0.4 and
+-- failing"; `push_register_errors` captures the reason iOS gives, which today dies in a console
+-- on a phone in Baghdad. Full reasoning in db/migrations/090_push_diagnostics.sql.
+ALTER TABLE app_opens ADD COLUMN IF NOT EXISTS app_version TEXT;
+CREATE TABLE IF NOT EXISTS push_register_errors (
+  id          BIGSERIAL PRIMARY KEY,
+  user_id     UUID REFERENCES users(id) ON DELETE SET NULL,
+  platform    TEXT,
+  app_version TEXT,
+  message     TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_push_register_errors_at ON push_register_errors(created_at DESC);
+
 -- =====================================================
 -- Migration 088 — an audit trail for admin-composed pushes. Every other push has an upstream
 -- event explaining it; this one has only this row. NOT the queue — `notifications` is the queue

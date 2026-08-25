@@ -16,7 +16,12 @@ require('dotenv').config();
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { query } = require('../lib/db');
-const { recordOpen, shopToday, SESSION_GAP_MINUTES } = require('../lib/appPresence');
+const {
+  recordOpen,
+  recordRegisterError,
+  shopToday,
+  SESSION_GAP_MINUTES,
+} = require('../lib/appPresence');
 
 async function makeUser(suffix) {
   const { rows } = await query(
@@ -29,7 +34,7 @@ async function makeUser(suffix) {
 
 async function row(userId) {
   const { rows } = await query(
-    `SELECT opens, platform, first_seen_at, last_seen_at FROM app_opens
+    `SELECT opens, platform, app_version, first_seen_at, last_seen_at FROM app_opens
       WHERE user_id = $1 AND work_date = $2`,
     [userId, shopToday()]
   );
@@ -99,4 +104,51 @@ test('last_seen_at only ever moves forward', async (t) => {
   const r = await row(id);
   assert.ok(r.last_seen_at.getTime() >= now.getTime() - 1000);
   assert.equal(r.opens, 1);
+});
+
+// ── the 2026-08-26 diagnostics (migration 090) ─────────────────────────────────────────────
+// Added because prod held 145 Android device tokens and ZERO iOS while signed-in iPhone users
+// opened the app daily, and nothing in the system could say WHY. Both columns exist to separate
+// "the app is too old to register" from "registration was attempted and refused".
+
+test('the app version is recorded, and a NEWER one replaces the old within the same day', async (t) => {
+  const id = await makeUser(5);
+  t.after(() => cleanup(id));
+
+  await recordOpen({ userId: id, platform: 'ios', appVersion: '1.0.3' });
+  assert.equal((await row(id)).app_version, '1.0.3');
+
+  // Unlike `platform`, the version must move: someone updating mid-day is exactly the event
+  // this column was added to observe.
+  await recordOpen({ userId: id, platform: 'ios', appVersion: '1.0.4' });
+  assert.equal((await row(id)).app_version, '1.0.4');
+
+  // A client that cannot report one must not erase what we already know.
+  await recordOpen({ userId: id, platform: 'ios', appVersion: null });
+  assert.equal((await row(id)).app_version, '1.0.4');
+});
+
+test('a registration failure is stored with its reason, capped', async (t) => {
+  const id = await makeUser(6);
+  t.after(async () => {
+    await query(`DELETE FROM push_register_errors WHERE user_id = $1`, [id]);
+    await cleanup(id);
+  });
+
+  await recordRegisterError({
+    userId: id,
+    platform: 'ios',
+    appVersion: '1.0.4',
+    // A hostile or buggy client must not be able to write an unbounded string.
+    message: 'x'.repeat(5000),
+  });
+
+  const { rows } = await query(
+    `SELECT platform, app_version, message FROM push_register_errors WHERE user_id = $1`,
+    [id]
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].platform, 'ios');
+  assert.equal(rows[0].app_version, '1.0.4');
+  assert.equal(rows[0].message.length, 500);
 });

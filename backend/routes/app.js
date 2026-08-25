@@ -34,14 +34,41 @@ const openLimit = rateLimit({
  */
 router.post('/open', openLimit, async (req, res) => {
   const platform = req.body && req.body.platform;
+  const appVersion = req.body && req.body.app_version;
   try {
-    await appPresence.recordOpen({ userId: req.user.id, platform });
+    await appPresence.recordOpen({ userId: req.user.id, platform, appVersion });
     if (req.user.role === 'staff') {
       // Kept in sync with 084 deliberately — see the header.
       await staffPresence.recordAppOpen({ userId: req.user.id, platform });
     }
   } catch (err) {
     console.error('app-open track failed:', err.message);
+  }
+  return res.status(204).end();
+});
+
+/**
+ * POST /api/app/push-error — «هذا الجهاز رفض يسجّل للإشعارات، وهذا السبب».
+ *
+ * ⚠️ WHY THIS ENDPOINT EXISTS. On 2026-08-26 prod held 145 Android device tokens and ZERO iOS,
+ * while signed-in iPhone users were opening the app every day. The plugin DOES report why a
+ * registration failed — but PushRegistrar could only `console.warn` it, on a phone in Baghdad,
+ * where nobody can read it. Everything checkable from the repo had already been ruled out, so
+ * the reason the device itself gives is the last unexamined evidence.
+ *
+ * ALWAYS 204, like the beacon above: a diagnostic must never surface an error to the person
+ * whose notifications are already not working.
+ */
+router.post('/push-error', openLimit, async (req, res) => {
+  try {
+    await appPresence.recordRegisterError({
+      userId: req.user.id,
+      platform: req.body && req.body.platform,
+      appVersion: req.body && req.body.app_version,
+      message: req.body && req.body.message,
+    });
+  } catch (err) {
+    console.error('push-error log failed:', err.message);
   }
   return res.status(204).end();
 });
