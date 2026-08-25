@@ -29,5 +29,9 @@ CREATE TABLE IF NOT EXISTS push_broadcasts (
   people         INTEGER NOT NULL DEFAULT 0,
   devices        INTEGER NOT NULL DEFAULT 0
 );
+-- Whether this was a PROMOTIONAL send. Recorded because Apple 4.5.4 treats the two kinds
+-- differently: a marketing push may only reach accounts that opted in (migration 089), and this
+-- column is the evidence of which rule each send was made under.
+ALTER TABLE push_broadcasts ADD COLUMN IF NOT EXISTS marketing BOOLEAN NOT NULL DEFAULT FALSE;
 
 CREATE INDEX IF NOT EXISTS idx_push_broadcasts_sent ON push_broadcasts(sent_at DESC);

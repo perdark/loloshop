@@ -31,6 +31,7 @@ import {
   GraduateMaleIcon,
 } from "@/components/student/GraduateIcons";
 import { firstName, getProfile, PROFILE_CHANGED_EVENT, type Gender } from "@/lib/profile";
+import { NotificationPrefs } from "@/components/NotificationPrefs";
 
 /** Row used for the account's navigation entries — icon · label · chevron. */
 function AccountRow({
@@ -337,6 +338,12 @@ export default function AccountPage() {
         </svg>
         تسجيل الخروج
       </button>
+
+      {/* «شنو تريد يوصلك؟» — sits ABOVE the danger zone deliberately: a student looking for a
+          way to stop notifications must find this before they find «حذف الحساب». Apple 4.5.4
+          requires the opt-out to exist in the app; putting it after account deletion would
+          satisfy the letter of that and none of its point. */}
+      <NotificationPrefs />
 
       {/* ---- Danger zone ---- */}
       <div className="mt-8 rounded-2xl border border-danger/30 bg-surface p-4">

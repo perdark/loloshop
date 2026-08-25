@@ -82,6 +82,11 @@ export function PushComposer() {
   const [confirming, setConfirming] = useState(false);
   const [typedCount, setTypedCount] = useState("");
   const [sending, setSending] = useState(false);
+  // ⚠️ Which RULE the send is made under, not a label. A marketing send is narrowed server-side
+  // to accounts that opted into «العروض» (Apple 4.5.4). Mis-flagging an offer as an update is
+  // the mistake this switch exists to make visible, so the reach number moves the moment it is
+  // toggled — the audience really is different.
+  const [marketing, setMarketing] = useState(false);
   const [history, setHistory] = useState<PushBroadcastRow[]>([]);
   const [reps, setReps] = useState<AdminWholesaler[]>([]);
 
@@ -119,7 +124,7 @@ export function PushComposer() {
     setReaching(true);
     const t = setTimeout(async () => {
       try {
-        const next = await getPushReach(audience);
+        const next = await getPushReach(audience, marketing);
         if (reqRef.current === id) setReach(next);
       } catch {
         if (reqRef.current === id) setReach(null);
@@ -128,7 +133,7 @@ export function PushComposer() {
       }
     }, 350);
     return () => clearTimeout(t);
-  }, [audience, kind, value]);
+  }, [audience, kind, value, marketing]);
 
   function switchKind(next: PushAudienceKind) {
     setKind(next);
@@ -144,6 +149,7 @@ export function PushComposer() {
         title_ar: title.trim(),
         body_ar: body.trim() || undefined,
         link: link || undefined,
+        marketing,
         confirmed_count: kind === "all" ? Number(typedCount) : undefined,
       });
       toast.success(
@@ -273,6 +279,44 @@ export function PushComposer() {
           )}
         </div>
 
+        {/* Which rule this send is made under */}
+        <fieldset>
+          <legend className="mb-2 text-xs font-semibold text-ink/70">نوع الرسالة</legend>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={() => setMarketing(false)}
+              className={`min-h-[56px] rounded-xl border px-4 py-2.5 text-start ${
+                !marketing ? "border-orange bg-orange/15" : "border-ink/10 bg-white/60"
+              }`}
+            >
+              <span className="block text-sm font-semibold text-ink">تحديث أو خبر مهم</span>
+              <span className="mt-0.5 block text-[11px] leading-snug text-ink/50">
+                موعد، حالة طلب، إعلان ضروري. يوصل لكل الجمهور المختار.
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setMarketing(true)}
+              className={`min-h-[56px] rounded-xl border px-4 py-2.5 text-start ${
+                marketing ? "border-orange bg-orange/15" : "border-ink/10 bg-white/60"
+              }`}
+            >
+              <span className="block text-sm font-semibold text-ink">عرض أو خصم</span>
+              <span className="mt-0.5 block text-[11px] leading-snug text-ink/50">
+                يوصل بس للي شغّلوا «العروض والأخبار» من حسابهم.
+              </span>
+            </button>
+          </div>
+          {marketing && (
+            <p className="mt-2 rounded-xl border border-orange/25 bg-orange/10 px-4 py-2.5 text-[11px] leading-relaxed text-ink/70">
+              قوانين آبل وقوقل تمنع إرسال العروض لأي شخص ما وافق عليها بنفسه، فالعدد فوق ينزل
+              لهذا السبب — مو خلل. أي رسالة تسويقية تنرسل بغير هذا الخيار ممكن تكلّفنا رفض
+              التطبيق من المتجر.
+            </p>
+          )}
+        </fieldset>
+
         {/* The message */}
         <div className="space-y-3">
           <div>
@@ -341,7 +385,14 @@ export function PushComposer() {
           <ul className="space-y-2">
             {history.slice(0, 6).map((b) => (
               <li key={b.id} className="rounded-xl border border-ink/10 bg-white/60 px-4 py-2.5">
-                <p className="text-sm font-medium text-ink">{b.title_ar}</p>
+                <p className="text-sm font-medium text-ink">
+                  {b.title_ar}
+                  {b.marketing && (
+                    <span className="ms-2 rounded-full bg-orange/20 px-2 py-0.5 text-[10px] font-semibold text-orange-ink">
+                      عرض
+                    </span>
+                  )}
+                </p>
                 <p className="mt-0.5 text-[11px] tabular-nums text-ink/50">
                   {KIND_LABEL[b.audience_kind]}
                   {b.audience_value ? ` · ${b.audience_value}` : ""} · {toArabicDigits(b.people)}{" "}

@@ -1008,10 +1008,12 @@ async function appStats(req, res) {
  * the in-app bell, so «٣١٢ شخص · ١٩٤ جهاز» is the honest reach, not an error.
  */
 async function pushAudience(req, res) {
-  const resolved = await pushBroadcast.resolveAudience({
-    kind: req.query.kind,
-    value: req.query.value,
-  });
+  const resolved = await pushBroadcast.resolveAudience(
+    { kind: req.query.kind, value: req.query.value },
+    // ⚠️ A marketing preview must count only opted-in accounts, or the number the admin reads
+    // before pressing send is not the number that will receive it (Apple 4.5.4, migration 089).
+    { marketing: req.query.marketing === 'true' }
+  );
   if (!resolved.ok) {
     return res.status(400).json({ error: resolved.error, code: resolved.code });
   }
@@ -1032,6 +1034,7 @@ async function pushSend(req, res) {
     bodyAr: req.body && req.body.body_ar,
     link: req.body && req.body.link,
     confirmedCount: req.body && req.body.confirmed_count,
+    marketing: req.body ? req.body.marketing === true : false,
     adminId: req.user && req.user.id,
   });
   if (!result.ok) {
@@ -1045,7 +1048,7 @@ async function pushSend(req, res) {
 async function pushHistory(req, res) {
   const { rows } = await query(
     `SELECT b.id, b.sent_at, b.audience_kind, b.audience_value, b.title_ar, b.body_ar,
-            b.link, b.people, b.devices, u.name AS admin_name
+            b.link, b.people, b.devices, b.marketing, u.name AS admin_name
        FROM push_broadcasts b
        LEFT JOIN users u ON u.id = b.admin_id
       ORDER BY b.sent_at DESC

@@ -34,6 +34,7 @@
 // each one widens the blast radius of a mistake; the owner asked to be able to send a message.
 
 const { query, tx } = require('./db');
+const prefs = require('./notificationPrefs');
 
 /**
  * In-app destinations a broadcast may point at.
@@ -98,22 +99,28 @@ const ROLES = new Set(['retail', 'wholesaler', 'staff', 'admin']);
  *
  * @returns {{ok: true, sql: string, params: Array, label: string}|{ok: false, error, code}}
  */
-function audienceSql(audience) {
+function audienceSql(audience, { marketing = false } = {}) {
   const kind = audience && audience.kind;
   const value = audience && audience.value;
 
+  // ⚠️ APPLE 4.5.4 IS ENFORCED HERE AND NOWHERE ELSE. A marketing send is narrowed to accounts
+  // that explicitly opted in; every account predating migration 089 takes the column default
+  // (false), so nobody is enrolled by history. `built()` appends it to whichever branch runs,
+  // which is why every branch below aliases `users` as `u`.
+  const gate = marketing ? ` AND ${prefs.marketingFilterSql('u')}` : '';
+  const built = (sql, params, label) => ({ ok: true, sql: sql + gate, params, label });
+
   if (kind === 'all') {
-    return { ok: true, sql: `SELECT id FROM users WHERE deleted_at IS NULL`, params: [], label: 'الكل' };
+    return built(`SELECT u.id FROM users u WHERE u.deleted_at IS NULL`, [], 'الكل');
   }
 
   if (kind === 'role') {
     if (!ROLES.has(value)) return { ok: false, error: 'دور غير معروف', code: 'ERR_VALIDATION' };
-    return {
-      ok: true,
-      sql: `SELECT id FROM users WHERE deleted_at IS NULL AND role = $1`,
-      params: [value],
-      label: `دور: ${value}`,
-    };
+    return built(
+      `SELECT u.id FROM users u WHERE u.deleted_at IS NULL AND u.role = $1`,
+      [value],
+      `دور: ${value}`
+    );
   }
 
   if (kind === 'wholesaler') {
@@ -121,14 +128,13 @@ function audienceSql(audience) {
     // are different messages, and folding them together means the rep gets a notice addressed
     // to their students.
     if (!value) return { ok: false, error: 'اختر ممثلاً', code: 'ERR_VALIDATION' };
-    return {
-      ok: true,
-      sql: `SELECT u.id FROM users u
-              JOIN students s ON s.user_id = u.id
-             WHERE u.deleted_at IS NULL AND s.wholesaler_id = $1`,
-      params: [value],
-      label: 'طلاب ممثل',
-    };
+    return built(
+      `SELECT u.id FROM users u
+         JOIN students s ON s.user_id = u.id
+        WHERE u.deleted_at IS NULL AND s.wholesaler_id = $1`,
+      [value],
+      'طلاب ممثل'
+    );
   }
 
   if (kind === 'university') {
@@ -137,24 +143,18 @@ function audienceSql(audience) {
     // HANDOFF). An exact match would silently miss two thirds of a cohort, so this matches
     // case-insensitively on a contained string and the caller is shown the resolved count
     // BEFORE sending — that count is the only honest check that the spelling caught everyone.
-    return {
-      ok: true,
-      sql: `SELECT u.id FROM users u
-              JOIN students s ON s.user_id = u.id
-             WHERE u.deleted_at IS NULL AND s.university_name ILIKE '%' || $1 || '%'`,
-      params: [String(value).trim()],
-      label: `جامعة: ${value}`,
-    };
+    return built(
+      `SELECT u.id FROM users u
+         JOIN students s ON s.user_id = u.id
+        WHERE u.deleted_at IS NULL AND s.university_name ILIKE '%' || $1 || '%'`,
+      [String(value).trim()],
+      `جامعة: ${value}`
+    );
   }
 
   if (kind === 'user') {
     if (!value) return { ok: false, error: 'اختر شخصاً', code: 'ERR_VALIDATION' };
-    return {
-      ok: true,
-      sql: `SELECT id FROM users WHERE deleted_at IS NULL AND id = $1`,
-      params: [value],
-      label: 'شخص واحد',
-    };
+    return built(`SELECT u.id FROM users u WHERE u.deleted_at IS NULL AND u.id = $1`, [value], 'شخص واحد');
   }
 
   return { ok: false, error: 'جمهور غير معروف', code: 'ERR_VALIDATION' };
@@ -167,8 +167,8 @@ function audienceSql(audience) {
  * token still gets the in-app bell, so «٣١٢ شخص · ١٩٤ جهاز» is not an error — it is the honest
  * reach of the message, and hiding the gap would make the bell look broken.
  */
-async function resolveAudience(audience) {
-  const built = audienceSql(audience);
+async function resolveAudience(audience, { marketing = false } = {}) {
+  const built = audienceSql(audience, { marketing });
   if (!built.ok) return built;
 
   const { rows } = await query(
@@ -193,7 +193,7 @@ const BODY_MAX = 300;
  * `push_state` is left at its 'pending' default — that IS the queue (migration 077), and the
  * outbox picks the rows up after commit.
  */
-async function send({ audience, titleAr, bodyAr, link, adminId, confirmedCount }) {
+async function send({ audience, titleAr, bodyAr, link, adminId, confirmedCount, marketing = false }) {
   const title = String(titleAr || '').trim();
   const body = String(bodyAr || '').trim();
   if (!title) return { ok: false, error: 'اكتب عنوان الإشعار', code: 'ERR_VALIDATION' };
@@ -204,10 +204,16 @@ async function send({ audience, titleAr, bodyAr, link, adminId, confirmedCount }
   const checked = checkLink(link);
   if (!checked.ok) return checked;
 
-  const resolved = await resolveAudience(audience);
+  const resolved = await resolveAudience(audience, { marketing });
   if (!resolved.ok) return resolved;
   if (resolved.people === 0) {
-    return { ok: false, error: 'ما في أحد بهذا الجمهور', code: 'ERR_EMPTY_AUDIENCE' };
+    return {
+      ok: false,
+      error: marketing
+        ? 'ما في أحد بهذا الجمهور موافق على إشعارات العروض'
+        : 'ما في أحد بهذا الجمهور',
+      code: 'ERR_EMPTY_AUDIENCE',
+    };
   }
 
   // Guard 2 — see the header. Only for «الكل»: demanding it on every send would train the
@@ -220,12 +226,13 @@ async function send({ audience, titleAr, bodyAr, link, adminId, confirmedCount }
     };
   }
 
-  const built = audienceSql(audience);
+  const built = audienceSql(audience, { marketing });
   const result = await tx(async (client) => {
     const { rows: logRows } = await client.query(
       `INSERT INTO push_broadcasts
-         (admin_id, audience_kind, audience_value, title_ar, body_ar, link, people, devices)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+         (admin_id, audience_kind, audience_value, title_ar, body_ar, link, people, devices,
+          marketing)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
       [
         adminId || null,
         audience.kind,
@@ -235,6 +242,7 @@ async function send({ audience, titleAr, bodyAr, link, adminId, confirmedCount }
         checked.link,
         resolved.people,
         resolved.devices,
+        marketing,
       ]
     );
     const broadcastId = logRows[0].id;
@@ -246,15 +254,17 @@ async function send({ audience, titleAr, bodyAr, link, adminId, confirmedCount }
     const n = built.params.length;
     const { rowCount } = await client.query(
       `INSERT INTO notifications (user_id, type, title_ar, body_ar, link)
-       SELECT id, 'admin_broadcast', $${n + 1}, $${n + 2}, $${n + 3}
+       SELECT id, $${n + 4}, $${n + 1}, $${n + 2}, $${n + 3}
          FROM (${built.sql}) AS aud`,
-      [...built.params, title, body || null, checked.link]
+      [...built.params, title, body || null, checked.link,
+       marketing ? 'admin_marketing' : 'admin_broadcast']
     );
     return { broadcastId, rowCount };
   });
 
   return {
     ok: true,
+    marketing,
     broadcast_id: result.broadcastId,
     people: result.rowCount,
     devices: resolved.devices,

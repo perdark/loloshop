@@ -1,4 +1,5 @@
 const { query } = require('../lib/db');
+const prefs = require('../lib/notificationPrefs');
 
 async function list(req, res) {
   const { unread } = req.query;
@@ -88,4 +89,32 @@ async function unregisterDevice(req, res) {
   res.json({ data: { removed: rowCount } });
 }
 
-module.exports = { list, markRead, markAllRead, registerDevice, unregisterDevice };
+// ── «شنو تريد يوصلك؟» — notification preferences (migration 089) ─────────────
+// ⚠️ These two endpoints are what keeps the app inside Apple's guideline 4.5.4: promotional
+// push needs an explicit in-app opt-in AND an in-app opt-out. See lib/notificationPrefs.js.
+
+/** GET /api/notifications/prefs */
+async function getPrefs(req, res) {
+  const { rows } = await query(`SELECT notification_prefs FROM users WHERE id = $1`, [req.user.id]);
+  res.json({ data: prefs.normalize(rows[0] && rows[0].notification_prefs) });
+}
+
+/**
+ * PATCH /api/notifications/prefs — body: { orders?: bool, marketing?: bool }
+ *
+ * Merged, not replaced: the client sends only the toggle that moved, so two settings screens
+ * open at once cannot silently reset each other's category.
+ */
+async function updatePrefs(req, res) {
+  const checked = prefs.validatePatch(req.body);
+  if (!checked.ok) return res.status(400).json({ error: checked.error, code: checked.code });
+
+  const { rows } = await query(
+    `UPDATE users SET notification_prefs = notification_prefs || $2::jsonb
+      WHERE id = $1 RETURNING notification_prefs`,
+    [req.user.id, JSON.stringify(checked.patch)]
+  );
+  res.json({ data: prefs.normalize(rows[0] && rows[0].notification_prefs) });
+}
+
+module.exports = { list, markRead, markAllRead, registerDevice, unregisterDevice, getPrefs, updatePrefs };

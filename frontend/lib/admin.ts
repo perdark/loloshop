@@ -253,6 +253,12 @@ export interface PushReach {
 
 export interface SendPushPayload {
   audience: PushAudience;
+  /**
+   * A promotional message. ⚠️ Narrows the audience to accounts that opted into «العروض» —
+   * Apple 4.5.4 forbids promotional push to anyone who did not. Never set it on an order
+   * update, and never leave it off on an offer.
+   */
+  marketing?: boolean;
   title_ar: string;
   body_ar?: string;
   /** Must be a relative in-app path from the server's allowlist. */
@@ -278,13 +284,17 @@ export interface PushBroadcastRow {
   link: string | null;
   people: number;
   devices: number;
+  marketing: boolean;
   admin_name: string | null;
 }
 
 /** Admin-only, read-only: how far a message would reach, before it can be sent. */
-export async function getPushReach(audience: PushAudience): Promise<PushReach> {
+export async function getPushReach(
+  audience: PushAudience,
+  marketing = false
+): Promise<PushReach> {
   const { data } = await api.get<{ data: PushReach }>("/admin/push/audience", {
-    params: { kind: audience.kind, value: audience.value },
+    params: { kind: audience.kind, value: audience.value, marketing },
   });
   return data.data;
 }

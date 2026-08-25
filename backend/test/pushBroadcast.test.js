@@ -166,3 +166,78 @@ test('an empty audience is refused rather than silently sending nothing', async 
   assert.equal(r.ok, false);
   assert.equal(r.code, 'ERR_EMPTY_AUDIENCE');
 });
+
+// ── the marketing opt-in gate (Apple 4.5.4) ────────────────────────────────────────────────
+// The single rule that keeps promotional push inside the App Store guidelines: an offer may
+// only reach accounts that explicitly asked for offers. Everything here is about the DEFAULT
+// falling the safe way, because that is what a reviewer checks and what silently enrols 1,100
+// people if it is wrong.
+
+test('a marketing send reaches nobody until they opt in — and a transactional one is unaffected', async (t) => {
+  const ids = [await makeStudent(807, 'ZZ جامعة التسويق'), await makeStudent(808, 'ZZ جامعة التسويق')];
+  t.after(() => cleanup(ids));
+
+  const audience = { kind: 'university', value: 'ZZ جامعة التسويق' };
+
+  // Fresh accounts take the column default. Nobody is enrolled by existing — this is the
+  // assertion that a future "sensible default" change would break loudly.
+  const promo = await push.resolveAudience(audience, { marketing: true });
+  assert.equal(promo.people, 0, 'marketing must be opt-IN');
+
+  const transactional = await push.resolveAudience(audience);
+  assert.equal(transactional.people, 2, 'order updates are not gated by the marketing toggle');
+
+  await query(
+    `UPDATE users SET notification_prefs = notification_prefs || '{"marketing": true}'::jsonb
+      WHERE id = $1`,
+    [ids[0]]
+  );
+
+  const after = await push.resolveAudience(audience, { marketing: true });
+  assert.equal(after.people, 1, 'only the person who opted in');
+});
+
+test('a marketing send is typed apart from a transactional one in the notifications it writes', async (t) => {
+  const ids = [await makeStudent(809, 'ZZ جامعة النوع')];
+  let broadcastId = null;
+  t.after(async () => {
+    if (broadcastId) await query(`DELETE FROM push_broadcasts WHERE id = $1`, [broadcastId]);
+    await cleanup(ids);
+  });
+  await query(
+    `UPDATE users SET notification_prefs = notification_prefs || '{"marketing": true}'::jsonb
+      WHERE id = $1`,
+    [ids[0]]
+  );
+
+  const r = await push.send({
+    audience: { kind: 'university', value: 'ZZ جامعة النوع' },
+    titleAr: 'خصم على الأوشحة',
+    marketing: true,
+    adminId: null,
+  });
+  assert.equal(r.ok, true, r.error);
+  broadcastId = r.broadcast_id;
+
+  const { rows } = await query(`SELECT type FROM notifications WHERE user_id = $1`, [ids[0]]);
+  assert.equal(rows[0].type, 'admin_marketing');
+
+  const { rows: log } = await query(`SELECT marketing FROM push_broadcasts WHERE id = $1`, [
+    broadcastId,
+  ]);
+  assert.equal(log[0].marketing, true, 'the audit row records which rule the send was made under');
+});
+
+test('an empty marketing audience says WHY it is empty', async () => {
+  const r = await push.send({
+    audience: { kind: 'role', value: 'retail' },
+    titleAr: 'عرض',
+    marketing: true,
+    adminId: null,
+  });
+  // No retail account has opted in on this database, so this is the message an admin will
+  // actually hit first — it must not read as "the audience is broken".
+  assert.equal(r.ok, false);
+  assert.equal(r.code, 'ERR_EMPTY_AUDIENCE');
+  assert.match(r.error, /العروض/);
+});

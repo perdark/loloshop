@@ -1539,7 +1539,22 @@ CREATE TABLE IF NOT EXISTS push_broadcasts (
   people         INTEGER NOT NULL DEFAULT 0,
   devices        INTEGER NOT NULL DEFAULT 0
 );
+-- Whether this was a PROMOTIONAL send. Recorded because Apple 4.5.4 treats the two kinds
+-- differently: a marketing push may only reach accounts that opted in (migration 089), and this
+-- column is the evidence of which rule each send was made under.
+ALTER TABLE push_broadcasts ADD COLUMN IF NOT EXISTS marketing BOOLEAN NOT NULL DEFAULT FALSE;
 CREATE INDEX IF NOT EXISTS idx_push_broadcasts_sent ON push_broadcasts(sent_at DESC);
+
+-- Migration 089 — transactional vs marketing notification preferences.
+-- ⚠️ A STORE REQUIREMENT: Apple 4.5.4 forbids promotional push without explicit in-app opt-in
+-- AND an opt-out; Play takes the same line. `marketing` DEFAULTS FALSE and must stay that way —
+-- defaulting it true would silently enrol every existing account. `orders` defaults true because
+-- that is what the app is for. Full reasoning in db/migrations/089_notification_prefs.sql.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_prefs JSONB NOT NULL
+  DEFAULT '{"orders": true, "marketing": false}'::jsonb;
+CREATE INDEX IF NOT EXISTS idx_users_marketing_optin
+  ON users ((notification_prefs->>'marketing'))
+  WHERE deleted_at IS NULL;
 
 -- =====================================================
 -- Migration 085 — an UNDO ledger for «إنهاء الخصومات» (ending a storefront discount round).
