@@ -21,7 +21,7 @@ last verified 2026-08-10 and are unchanged.
 | | |
 |---|---|
 | **Server** | 🚚 **MOVED to `169.58.114.255` (8 GB, shared with RevoArt) on 2026-08-16.** Fronted by RevoArt's `supabase-caddy`, not nginx. Old 2 GB box `142.93.110.202` is stopped-API + forwarder = the rollback. Full detail in the 2026-08-16 PROGRESS entry. |
-| `origin/main` | `08c7180` — pushed 2026-08-21, CI green on all three jobs, **auto-deployed** and verified live (migration 084 applied, nightly report scheduled, storefront assistant re-checked) |
+| `origin/main` | `6d97196` — pushed 2026-08-25, CI green on all three jobs, **auto-deployed** and verified live (migrations 086·087·088·089 applied, site + API 200, 0 marketing opt-ins as expected). Carries: «ابدأ الخصومات», `/admin/app` (app stats + push composer), the admin notification bell, and the student notification opt-in. |
 | Eleven-bug tracks | **ALL ELEVEN CLOSED IN CODE.** Deployed: 2·3 (C) · 9·10·11 (A) · 4·5·6 (B) · **7** · **8 part 1**. On `fix/admin-presence-panel`, **unmerged**: **bug 1** + **bug 8 parts 2·3·4**. *(This row said «1, 7, 8 NOT started» until 2026-08-15; 7 and 8-part-1 shipped on 2026-08-14.)* |
 | Migration 077 | ✅ applied to prod AND the dev DB — 3,311 prod rows retired to `skipped` |
 | Migration 080 | ✅ **applied to prod 2026-08-14** — 459 plates moved to their own column, **0** left in `customer_image_url`, 1,885 student photos intact |
@@ -30,8 +30,8 @@ last verified 2026-08-10 and are unchanged.
 | iOS | **1.0.4 (build 1786309948) SUBMITTED — «Waiting for Review»** (2026-08-10, ≤48h) |
 | Android push | ✅ working end to end |
 | iOS push | ✅ **APNs key installed and verified against Apple** — `push.configured()` → `{"android":true,"ios":true}` |
-| Backend tests | **479/479 on `main`** (2026-08-24, after the shelf/queue merge). The `app-open` failure the row below described now PASSES; it was flaky, not broken. Kept because it will likely flap again:  `app-open: a ping inside the session window does NOT count a second open`, `test/adminConsole.test.js:371`, failed on 2026-08-21 and **reproduced on clean `main`** — so if you see it fail, it is not your change. Older rows said 266/275 and 467/467; the suite keeps growing. ⚠️ Run from `backend/` as `node --test test/*.test.js` — see the landmine below; the old `test/` and bare forms both misbehave on Node 26. |
-| Prod DB backup | ✅ `~/Desktop/_private/loloshop-db/loloshop-prod-2026-08-14.dump` — restore-tested, row counts match live |
+| Backend tests | **508/508 on `main`** (2026-08-25, after the discount-round + app-console merge; 479 before it). The `app-open` failure the row below described now PASSES; it was flaky, not broken. Kept because it will likely flap again:  `app-open: a ping inside the session window does NOT count a second open`, `test/adminConsole.test.js:371`, failed on 2026-08-21 and **reproduced on clean `main`** — so if you see it fail, it is not your change. Older rows said 266/275 and 467/467; the suite keeps growing. ⚠️ Run from `backend/` as `node --test test/*.test.js` — see the landmine below; the old `test/` and bare forms both misbehave on Node 26. |
+| Prod DB backup | ✅ `~/Desktop/_private/loloshop-db/loloshop-prod-2026-08-25.dump` — 5.2 MB, taken before the 086-089 deploy, contents verified on the box. ⚠️ **Restore it ON THE SERVER**: it is pg_dump format v1.16 and the laptop's `pg_restore` refuses it («unsupported version (1.16) in file header»). The 08-14 and 08-24 dumps are still there. |
 
 **Both platforms are now on the same version (1.0.4) carrying the same three features.**
 
@@ -111,6 +111,10 @@ code side of this queue is closed.
   npm packages — `backend/lib/push.js` speaks FCM HTTP v1 and APNs HTTP/2 on Node's own `crypto`
   and `http2`. Keep it that way; `firebase-admin` would put ~40 transitive packages permanently
   inside the deploy gate.)*
+- **Nothing about the web half needs a store**, and that now covers the notification opt-in
+  too: «الإشعارات» on `/account` is web code inside the WebView shells, so it reached every
+  already-installed app the moment `6d97196` deployed. **No new binary was needed and none is
+  needed** — nothing in `AndroidManifest.xml` or the iOS entitlements changed.
 - **Nothing about the web half needs a store.** The shells are remote-URL WebViews, so `/join`,
   the rep directory and the `/get-app` copy reach *already-installed* apps the moment the site
   deploys. A student with the app can join via `/login` → «ادخل مع ممثلك» **today**. Only
@@ -311,8 +315,10 @@ longer stranded on a branch · the laptop's loose credentials are filed in
    so restoring them would have raised real order prices by up to 20,000. **Owner question: are
    any of those four meant to be higher?** Set them by hand on `/admin/products` — the run log is
    now the only human-readable copy of those old prices, since the run cleared `compare_at_price`.
-   · **2026-08-25:** the owner can now set these themselves — `feat/discount-round-and-app-console`
-     adds «ابدأ الخصومات», so a round is a screen rather than a developer task.
+   · ✅ **2026-08-25: the owner can now set these themselves.** «ابدأ الخصومات» is live on
+     `/admin` (deployed in `6d97196`), so running or fixing a round is a screen, not a developer
+     task. The four prices still need a human decision — the run log remains the only readable
+     copy of the old values — but nothing is blocked on a session any more.
    · **Undo** (all three statements are printed in the run log): `discount_restore_log` keyed by
    that `batch_id` holds every old value, including `old_compare_at_price` to bring the badges
    back. The rollback was rehearsed on a seeded copy before the live run.
@@ -350,6 +356,9 @@ longer stranded on a branch · the laptop's loose credentials are filed in
    ⚠️ **«النشر المُدار» (managed publishing) is ON, so approval does NOT publish it.** Someone
    must return to the publishing overview and press publish. It will look like "still in review"
    when it is actually approved and waiting. Check in a day or two.
+   ⚠️ **2026-08-25: this is now the top of the queue, not a formality.** The push composer is
+   live on `/admin/app`, so every day these two versions sit unpublished is a day the shop can
+   compose a notification that reaches nobody new.
 2. **⏳ iOS 1.0.4 is IN REVIEW** — submitted 2026-08-10, ≤48h, and set to **manual release**, so
    approval will not publish it either. Done in the same sitting: version 1.0.4 created, build
    attached, 6.9" screenshots uploaded (the page now reads *«Using 6.9" Display»*), Arabic
@@ -359,6 +368,13 @@ longer stranded on a branch · the laptop's loose credentials are filed in
    for the initial 1.0 release, so it is easy to hit once and never again.
    ⚠️ **In this ASC flow «Add for Review» submits immediately** — it is not a staging step and
    there is no second confirm.
+   ⚠️ **2026-08-25 — THIS IS WHY «THE ADMIN GETS NO NOTIFICATIONS ON HIS IPHONE».** He is on the
+   App Store build, which is 1.0.3 or older, and **push does not exist in it**: the
+   `aps-environment` entitlement was only added in 1.0.4. His app has never been able to ask for
+   permission, so there is no token and nothing can be delivered to him. Nothing is broken
+   server-side — the APNs key is installed and was verified against Apple's production endpoint.
+   Releasing 1.0.4 (or a TestFlight install) is the entire fix; **do not go looking for a bug in
+   `lib/push.js`.**
 3. **📱 Install iOS 1.0.4 from TestFlight and grant the notification prompt.** Internal group
    «Testers1», no review wait. This is the ONLY way a first iOS device token exists — until then
    iOS push is proven at the credential layer and nowhere else. While you are in there, tap a
@@ -368,7 +384,12 @@ longer stranded on a branch · the laptop's loose credentials are filed in
    **before** moving `verification_mode` off `'none'`. Wrong order 403s every بصمة for every
    worker on every platform.
 6. **Play Data Safety form + Apple privacy label:** declare location **and notifications** —
-   both are in the binary now.
+   both are in the binary now. Declare the **device token** too: it is an identifier tied to an
+   account (`device_tokens`).
+   ⚠️ **2026-08-25: the marketing question now has an honest answer, and it did not before.**
+   Promotional push is **opt-in, off by default, with an in-app opt-out** («العروض والأخبار» on
+   `/account`, migration 089) — which is what Apple's guideline 4.5.4 asks for. Answer the forms
+   to match that, and if the default ever flips to true the forms become false the same day.
 7. **Clean the 12 wholesaler `university_name` rows** — one university is spelled three ways
    («بلاد الرافدين» · «بلاد الرفدين» · «كلية بلاد الرافدين»), same for ديالى. The picker was built
    to survive this, but the list reads badly.
@@ -667,39 +688,41 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   at the المجهز sheet's nav row, the shelf map's «١/٢٠ وشاح» labels, and the new `/staff` search
   box (`w-full` under `sm`, 44px tall — built for it, not measured on one).
 
-- **⚠️ `feat/discount-round-and-app-console` IS READY AND UNMERGED — 2026-08-25.** Three things
-  the admin could not do without a developer: **start** a discount round (only ending existed),
-  see app usage on either platform, and send a notification they wrote. Two commits, 505/505
-  backend tests, `next build` clean, all three driven in a browser against the dev DB.
-  · **Migrations 086, 087, 088 and 089 ride this branch** — all four are in `db/schema.sql`, so
-    the deploy's `npm run migrate` covers them (same ordering rule as 077/078).
-  · ⚠️ **`users.notification_prefs.marketing` DEFAULTS FALSE and must stay that way (089).**
-    It is what keeps promotional push inside **Apple's guideline 4.5.4**, which needs an in-app
-    opt-in AND an in-app opt-out. Consent cannot be inherited from a column default: flipping it
-    true would enrol all 1,100+ existing accounts at once and would look fine until a reviewer
-    checked. The gate lives in ONE place — `notificationPrefs.marketingFilterSql()`, applied by
-    `pushBroadcast.audienceSql()` — so never add a second path that sends promotional copy.
-  · ⚠️ **Starting a round refuses a product that already carries a «السعر قبل الخصم»** rather
-    than skipping it. A second round would store the *discounted* price as «the old price» and
+- ✅ **`feat/discount-round-and-app-console` MERGED & DEPLOYED 2026-08-25, verified on prod**
+  (`6d97196`; migrations **086·087·088·089** applied, site + API 200). Four things the admin
+  could not do without a developer. Full detail in the 2026-08-25 PROGRESS entry; what stays
+  here is only what a future session can break:
+  · ⚠️ **A discount round does NOT touch `products.base_price` when a retail row exists**, and
+    that is load-bearing rather than tidiness. Ending a round restores every selected cell to
+    the single `compare_at_price` column, so discounting both leaves the base permanently
+    lowered after a start→end cycle — the exact shape of the four cells the August round
+    stranded, and `products.base_price` is what a REP-LINKED student pays. Pinned by
+    `test/discountRoundRoundTrip.test.js`; the tick is still offered, just never the default.
+  · ⚠️ **Starting a round REFUSES a product that already carries a «السعر قبل الخصم»** instead
+    of skipping it. A second round would write the *discounted* price in as «the old price» and
     the real one would be gone from the database — the one loss `discount_restore_log` cannot
     undo, because the damage is in what was WRITTEN to it.
-  · ⚠️ **A round does NOT discount `products.base_price` when a retail row exists**, and that is
-    load-bearing, not tidiness: ending a round restores every selected cell to the single
-    `compare_at_price`, so discounting both leaves the base permanently lowered after a
-    start→end cycle — exactly the shape of the four cells the August round stranded, and
-    `products.base_price` is what a rep-linked student pays. Pinned by
-    `test/discountRoundRoundTrip.test.js`.
-  · ⚠️ **`staff_app_opens` (084) was NOT widened.** The new `app_opens` (087) is a second table;
-    the beacon writes both for staff, one request. Do not "deduplicate" them — 084 feeds the
-    nightly report and sits next to payroll rules.
-  · ⚠️ **An admin-composed push cannot be recalled.** `lib/pushBroadcast.js`'s link allowlist is
-    a CLOSED list matched exactly (never a prefix — `/orders` and `/orders-evil` share one), and
-    it is the thing standing between one compromised admin session and a phishing message
-    wearing the shop's name in front of 1,100+ accounts. Do not relax it to "any relative path".
-  · ⚠️ **App stats are not retroactive and iOS reads 0** until someone installs 1.0.4 from
-    TestFlight. The owner asked the on-page iOS explanation removed (2026-08-25), so that fact
-    now lives only in `AppStatsPanel.tsx`'s header comment.
-  · Two files are both numbered **085** (`_discount_restore_log` and `_sash_shelf_shared_bins`).
+  · ⚠️ **`users.notification_prefs.marketing` DEFAULTS FALSE and must stay that way (089).** It
+    is what keeps promotional push inside **Apple's guideline 4.5.4** (in-app opt-in AND in-app
+    opt-out). Consent cannot be inherited from a column default: flipping it true enrols all
+    1,100+ existing accounts at once and looks fine until a reviewer checks. The gate lives in
+    ONE place — `notificationPrefs.marketingFilterSql()`, applied by `pushBroadcast.audienceSql()`
+    — so **never add a second path that sends promotional copy**. Measured on the dev DB: the
+    retail audience is 1,147 transactional and 1 marketing with one opt-in.
+  · ⚠️ **An admin-composed push cannot be recalled**, and `lib/pushBroadcast.js`'s link
+    allowlist is a CLOSED list matched exactly — never a prefix, since `/orders` and
+    `/orders-evil` share one. It is what stands between one compromised admin session and a
+    phishing message wearing the shop's name in front of 1,100+ accounts. Do not relax it to
+    "any relative path". «الكل» also demands the recipient count typed back.
+  · ⚠️ **`staff_app_opens` (084) was NOT widened.** `app_opens` (087) is a second table and the
+    beacon writes both for staff, in one request. Do not "deduplicate" them — 084 feeds the
+    nightly staff report and sits beside payroll rules.
+  · ⚠️ **App-usage figures start on 2026-08-25 and iOS reads 0.** Nothing recorded a student
+    opening the app before the deploy, and no iPhone has ever registered a token. The owner
+    asked the on-page iOS explanation removed, so that fact now lives only in
+    `AppStatsPanel.tsx`'s header — do not read a zero iOS column as a broken push pipeline
+    without checking `device_tokens` first.
+  · Two files are both numbered **085** (`_discount_restore_log`, `_sash_shelf_shared_bins`).
     Harmless — both are in `schema.sql` — but `migrate:file 085` is ambiguous. Left alone on
     purpose: both are applied to prod, and renaming an applied migration matches no history.
 

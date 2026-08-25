@@ -11,6 +11,47 @@ acting on any line in here.
 
 Work below is committed unless its own entry says otherwise. (The **2026-08-05 (b)** entry was
 written against an uncommitted tree; **(d)** committed it, so that caveat is discharged.)
+
+---
+
+## 2026-08-25 — 💸 starting a discount round · 📱 the app console · 🔔 an admin-written push · ✅ notification opt-in
+
+Merged and deployed in one go (`6d97196`, migrations **086·087·088·089**), prod dumped first.
+Four things the admin could not do without a developer. The measurements and the full reasoning
+are in the **2026-08-25 PROGRESS entry**; this is the short form.
+
+**The ask that started it** was «fix the خصومات», which turned out not to be a bug: «إنهاء
+الخصومات» shipped on 2026-08-22 but **starting** a round never existed, so every round meant
+hand-editing 51 products twice with no preview and no undo. `lib/discountRound.js` is the mirror
+of `lib/discountRestore.js`, and the two are now inverses over the same two columns.
+
+**The round-trip test earned its keep on the first run.** Discounting both `products.base_price`
+and the retail row does not survive start→end: ending restores every selected cell to the single
+`compare_at_price`, so a base sitting above retail comes back permanently lowered — the exact
+shape of the four cells the August round stranded, on the column a rep-linked student pays from.
+The default now ticks only the cell that IS the retail price. Nothing but a round-trip would have
+shown this; both halves look correct read on their own.
+
+**The app console exposed a second gap nobody had named:** app usage was tracked for staff only
+(084), so the two audiences the app was built for had no signal at all. `app_opens` (087) is the
+all-roles twin; `staff_app_opens` was deliberately left alone because the nightly report reads it
+and it sits beside payroll rules.
+
+**The push composer created its own obligation.** It is the first thing here that can send an
+offer, and Apple's guideline 4.5.4 wants promotional push opted into in-app with an in-app
+opt-out. The app had neither — the only way to stop a marketing push was to kill notifications at
+the OS level, which also kills «طلبك جاهز». Migration 089 + `/account` closed that in the same
+deploy, so the composer was never live without it.
+
+**A diagnosis worth keeping:** the owner reported that the admin's iPhone gets no notifications.
+Nothing is broken. He is on the App Store build (1.0.3 or older) and `aps-environment` was only
+added in **1.0.4**, which is still sitting unreleased — his app has never been able to ask for
+permission. Both store versions are approved-or-waiting behind a human press.
+
+**Left open:** the two store presses, the privacy forms, and a first iOS device token (there are
+still zero). Phone width remains unseen — fifth session — though these are admin screens, which
+are laptop-primary.
+
 *Committed is not deployed* — check the board in `HANDOFF.md` for what has actually reached
 `origin/main` and the VPS. Durable facts also live in PROGRESS.md, git history, and Claude's memory.
 
