@@ -121,6 +121,69 @@ workflows:
           echo "=== privacy keys present in Info.plist ==="
           plutil -p "$PLIST" | grep -E "NSCamera|NSPhotoLibrary|NSLocation|ITSAppUsesNonExempt"
 
+      - name: Forward the APNs token from AppDelegate (the plugin cannot see it otherwise)
+        script: |
+          set -e
+          APPDELEGATE="ios/App/App/AppDelegate.swift"
+
+          # ⚠️ THIS STEP IS THE REASON iOS PUSH SILENTLY REGISTERED NOTHING FOR TWO WEEKS.
+          #
+          # @capacitor/push-notifications does NOT receive the APNs device token by itself. iOS
+          # delivers it to the app delegate, and the plugin listens on NotificationCenter — so
+          # AppDelegate must forward it. Its own README says so ("add the following to your
+          # app's AppDelegate.swift"), and Capacitor's ios template does NOT include it.
+          #
+          # Without these two methods the failure is completely silent and looks like nothing at
+          # all: register() succeeds, iOS really does return a token, AppDelegate drops it, and
+          # the plugin fires NEITHER `registration` NOR `registrationError`. Measured on prod
+          # 2026-08-26 — 146 Android device tokens, 0 iOS, 0 registration errors, with confirmed
+          # 1.0.4 users opening the app. Android is unaffected because it needs no such wiring.
+          #
+          # Same regeneration trap as the privacy strings and the entitlements above: `npx cap
+          # add ios` rebuilds ios/ from the template on EVERY run, so this cannot be committed
+          # once — it must be re-injected here, after `cap sync`, on each build.
+          test -f "$APPDELEGATE" || { echo "FATAL: $APPDELEGATE missing"; exit 1; }
+
+          if grep -q "didRegisterForRemoteNotificationsWithDeviceToken" "$APPDELEGATE"; then
+            echo "AppDelegate already forwards the APNs token — template changed upstream?"
+          else
+            # Insert both methods immediately before the FINAL closing brace of the class.
+            # Matching the last `}` in the file is what keeps this independent of whatever else
+            # the template happens to contain.
+            python3 - "$APPDELEGATE" <<'PYEOF'
+          import sys
+          path = sys.argv[1]
+          src = open(path).read()
+          methods = """
+              func application(_ application: UIApplication,
+                               didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+                  NotificationCenter.default.post(
+                      name: .capacitorDidRegisterForRemoteNotifications, object: deviceToken)
+              }
+
+              func application(_ application: UIApplication,
+                               didFailToRegisterForRemoteNotificationsWithError error: Error) {
+                  NotificationCenter.default.post(
+                      name: .capacitorDidFailToRegisterForRemoteNotifications, object: error)
+              }
+          """
+          cut = src.rstrip().rfind("}")
+          if cut == -1:
+              raise SystemExit("FATAL: no closing brace in AppDelegate.swift")
+          open(path, "w").write(src[:cut] + methods + "\n}\n")
+          PYEOF
+          fi
+
+          # Both or fail the build. A missing forwarder is invisible until a real phone never
+          # receives a notification — which is exactly how this cost two weeks.
+          for SYM in didRegisterForRemoteNotificationsWithDeviceToken \
+                     didFailToRegisterForRemoteNotificationsWithError; do
+            grep -q "$SYM" "$APPDELEGATE" \
+              || { echo "FATAL: $SYM missing from $APPDELEGATE — iOS push would register nothing"; exit 1; }
+          done
+          echo "=== AppDelegate forwards APNs registration ==="
+          grep -n "capacitorDidRegister\|capacitorDidFailToRegister" "$APPDELEGATE"
+
       - name: Wire the App entitlements (Universal Links + Push Notifications)
         script: |
           set -e
@@ -277,7 +340,11 @@ workflows:
           # so one number across both platforms keeps "which version are you on?"
           # answerable. RAISE THIS for every new App Store submission; a repeat closes
           # the train again. Deliberately set AFTER agvtool, so nothing can clobber it.
-          MARKETING="1.0.4"
+          # ⚠️ 1.0.4 IS APPROVED AND LIVE (since 2026-08-13), so its version train is closed
+          # permanently — re-uploading it fails at publish with 90186 + 90062 AFTER a full
+          # successful build and sign, the most expensive place to find out. 1.0.5 carries the
+          # AppDelegate APNs forwarder, without which iOS push registers nothing at all.
+          MARKETING="1.0.5"
           PLIST="ios/App/App/Info.plist"
           PBXPROJ="ios/App/App.xcodeproj/project.pbxproj"
 
