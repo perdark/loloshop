@@ -422,10 +422,21 @@ longer stranded on a branch · the laptop's loose credentials are filed in
      class of incident. Needs Meta business verification + an approved auth template.
   · Cheap interim: only `ZENTRAMSG_DEVICE_UUID` is set, so the 4-device failover fleet has
   nothing to fail over to. Adding `ZENTRAMSG_DEVICE_UUID_2` would give it a spare.
-- **⚠️ The App Review demo-login bypass DIES 2026-08-21.** `DEMO_LOGIN_EXPIRES_AT` in the prod
-  `.env`; past that date `07700000000` hits the WhatsApp OTP wall and the submission fails. Push
-  the date forward + `pm2 restart loloshop-api --update-env`. Setting only `DEMO_LOGIN_PHONES`
-  looks configured and is **silently inert**.
+- **⚠️ The App Review demo-login bypass now DIES 2026-09-20** (extended 2026-08-26 for the 1.0.5
+  submission; `.env` backed up to `/root/.env.bak-2026-08-26`). `DEMO_LOGIN_EXPIRES_AT` in the
+  prod `.env`; past that date `07700000000` hits the WhatsApp OTP wall and the submission fails.
+  Push the date forward + `pm2 restart loloshop-api --update-env`. Setting only
+  `DEMO_LOGIN_PHONES` looks configured and is **silently inert**.
+  ⚠️ **THE DEADLINE IS CAPPED AT 30 DAYS OUT — a FURTHER date is not safer, it is INERT.**
+  `lib/otp.js:45-49` voids the allow-list when `remaining > 30 days`, so `2027-01-01` would
+  disable the very bypass it looks like it extends. Set something inside a month and verify with
+  `node -e "require('dotenv').config(); console.log(require('./lib/otp').isDemoLoginPhone('07700000000'))"`.
+  ⚠️ **It had ALREADY expired on 2026-08-21 and nobody noticed, because `OTP_DEGRADED_UNTIL=always`
+  was masking it** — the reviewer was getting in through the shop-wide OTP bypass instead. The
+  tell is `degraded_auth: true` in the login response: when the demo allow-list is doing the
+  work, that field is absent. **So fixing WhatsApp and turning degraded mode off would have
+  silently broken App Review**, on a path nothing tests. Verified 2026-08-26: the field is now
+  absent, i.e. the review login stands on its own again.
 - **iOS — the binary exists; what is left is the submission paperwork:** select build `1786309948`
   in ASC → reply to Apple with a physical-device screen recording of the deletion flow → tap the
   camera once on TestFlight. **After a reviewer walks deletion the demo account is really gone —
