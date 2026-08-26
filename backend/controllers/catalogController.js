@@ -138,24 +138,34 @@ async function buildProductFull(id, role, isPrivileged) {
     [id]
   );
 
+  // Migration 092: a group may be restricted to ONE price audience (NULL = everyone).
+  // Filtered in the QUERY, not after the fact, so a restricted group is invisible to
+  // everything downstream at once — the payload, the `required` check, and the locked map.
+  // ⚠️ Privileged callers (admin / production manager) see every group: the admin product
+  // editor reads this very endpoint, so filtering them too would hide the group from the one
+  // person who has to configure it. Same exemption `wholesaler_only`/`retail_only` get above.
+  // The cache key already carries both `role` and `isPrivileged`, so the two never mix.
+  const groupCols = `SELECT id, name_ar, input_type, sort, required, has_image, hint_ar, image_url,
+            max_select, gender_restriction, requires_customer_image, requires_customer_text,
+            customer_text_prompt_ar, customer_text_placeholder_ar, price_role_restriction
+     FROM option_groups WHERE product_id = $1 AND active = TRUE`;
+  const groupAudienceSql = isPrivileged
+    ? ''
+    : ' AND (price_role_restriction IS NULL OR price_role_restriction = $2::price_role)';
+  const groupArgs = (productId) => (isPrivileged ? [productId] : [productId, role]);
+
   // Load own groups
   const ownGroups = await query(
-    `SELECT id, name_ar, input_type, sort, required, has_image, hint_ar, image_url,
-            max_select, gender_restriction, requires_customer_image, requires_customer_text,
-            customer_text_prompt_ar, customer_text_placeholder_ar
-     FROM option_groups WHERE product_id = $1 AND active = TRUE ORDER BY sort, created_at`,
-    [id]
+    `${groupCols}${groupAudienceSql} ORDER BY sort, created_at`,
+    groupArgs(id)
   );
 
   // Load parent groups if this product has a parent
   let parentGroups = { rows: [] };
   if (row.parent_id) {
     parentGroups = await query(
-      `SELECT id, name_ar, input_type, sort, required, has_image, hint_ar, image_url,
-              max_select, gender_restriction, requires_customer_image, requires_customer_text,
-              customer_text_prompt_ar, customer_text_placeholder_ar
-       FROM option_groups WHERE product_id = $1 AND active = TRUE ORDER BY sort, created_at`,
-      [row.parent_id]
+      `${groupCols}${groupAudienceSql} ORDER BY sort, created_at`,
+      groupArgs(row.parent_id)
     );
   }
 
@@ -461,30 +471,42 @@ async function deleteProduct(req, res) {
 }
 
 // ---------- ADMIN: option groups ----------
+
+/** '' / undefined / anything unknown → NULL («كل الطلاب»). Only the two enum values pass. */
+function normalizeAudience(v) {
+  return v === 'retail' || v === 'wholesaler' ? v : null;
+}
+
 async function createGroup(req, res) {
   const { id } = req.params; // product id
   const {
     name_ar, input_type, sort, required, has_image, hint_ar, image_url,
-    max_select, gender_restriction, requires_customer_text,
+    max_select, gender_restriction, requires_customer_text, price_role_restriction,
   } = req.body;
   if (!name_ar) return res.status(400).json({ error: 'الاسم مطلوب', code: 'ERR_VALIDATION' });
   const { rows } = await query(
     `INSERT INTO option_groups
        (product_id, name_ar, input_type, sort, required, has_image, hint_ar, image_url,
-        max_select, gender_restriction, requires_customer_text)
+        max_select, gender_restriction, requires_customer_text, price_role_restriction)
      VALUES ($1,$2,COALESCE($3::option_input,'single_select'),COALESCE($4,0),COALESCE($5,FALSE),COALESCE($6,FALSE),$7,$8,
-             COALESCE($9,1),$10,COALESCE($11,FALSE))
+             COALESCE($9,1),$10,COALESCE($11,FALSE),$12::price_role)
      RETURNING id`,
     [id, name_ar, input_type, sort, required, has_image, hint_ar || null, image_url || null,
-     max_select, gender_restriction || null, requires_customer_text]
+     max_select, gender_restriction || null, requires_customer_text,
+     normalizeAudience(price_role_restriction)]
   );
   res.status(201).json({ data: { id: rows[0].id } });
 }
 
 async function updateGroup(req, res) {
+  // buildUpdate binds raw values, and Postgres rejects '' for an enum. An unset <select>
+  // posts '' meaning «كل الطلاب», so normalize it to NULL before it becomes a bind.
+  if (req.body.price_role_restriction !== undefined) {
+    req.body.price_role_restriction = normalizeAudience(req.body.price_role_restriction);
+  }
   const upd = buildUpdate(
     'option_groups',
-    ['name_ar', 'input_type', 'sort', 'required', 'has_image', 'hint_ar', 'image_url', 'max_select', 'gender_restriction', 'requires_customer_image', 'requires_customer_text', 'customer_text_prompt_ar', 'customer_text_placeholder_ar', 'active'],
+    ['name_ar', 'input_type', 'sort', 'required', 'has_image', 'hint_ar', 'image_url', 'max_select', 'gender_restriction', 'requires_customer_image', 'requires_customer_text', 'customer_text_prompt_ar', 'customer_text_placeholder_ar', 'price_role_restriction', 'active'],
     req.body, req.params.id
   );
   if (!upd) return res.status(400).json({ error: 'لا تغييرات', code: 'ERR_VALIDATION' });

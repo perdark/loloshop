@@ -21,6 +21,8 @@ router.use(authRequired, requireRole('admin', 'staff'));
 router.get('/me/salary', salary.getMySalary);
 router.get('/me/activity', salary.getMyActivity);
 router.get('/me/goal', salary.getMyGoal);
+// «راتبي ونشاطي» — the whole month in one call. See salaryController.getMySummary.
+router.get('/me/summary', salary.getMySummary);
 router.get('/me/payout-account', payouts.getMyAccount);
 router.put('/me/payout-account', payouts.saveMyAccount);
 router.get('/me/attendance/today', attendance.getToday);

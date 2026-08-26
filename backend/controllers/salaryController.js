@@ -5,6 +5,10 @@
  */
 
 const { query, tx } = require('../lib/db');
+const schedule = require('../lib/staffSchedule');
+const breaks = require('../lib/attendanceBreak');
+const attendance = require('./attendanceController');
+const { localParts, DEFAULT_TZ } = require('../lib/shopTime');
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -39,6 +43,18 @@ async function buildSalarySummary(userId) {
   const base_salary = salaryRow.rows.length ? Number(salaryRow.rows[0].base_salary) : 0;
 
   // transactions
+  //
+  // ⚠️ `source_type <> 'attendance'` MATCHES NOTHING and is not what it looks like. Measured
+  // 2026-08-27: no row in the table has ever carried that value. Break deductions are written
+  // with source_type **`'attendance_break'`** (lib/attendanceBreak.js:28), a different string,
+  // so they ARE listed here and ARE in the balance below — as they should be. The filter is a
+  // leftover from a lateness auto-deduction that was never built. It is left in place because
+  // removing it changes nothing today and the same predicate appears in payoutController's
+  // «المبلغ المقترح»; the two must keep agreeing, so they change together or not at all.
+  //
+  // Lateness itself never becomes a transaction: `staff_attendance_records.deduction_amount`
+  // is displayed and reported, and `deduction_transaction_id` is only ever cleared, never set.
+  // /payroll/me/summary shows it as its own section rather than pretending it is salary.
   const txRows = await query(
     `SELECT id, type, amount, reason_ar, source_type, source_id, created_by, created_at
      FROM staff_salary_transactions
@@ -414,6 +430,178 @@ async function getMyGoal(req, res) {
   res.json({ data: await buildGoalSummary(req.user.id) });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/payroll/me/summary?month=YYYY-MM — «راتبي ونشاطي», the whole month.
+//
+// One call, one screen. Owner request 2026-08-27: «الأيام يلي أنجز بيها والساعات وعدد
+// الفتحات وتقصيره والخصومات وليش والحوافز وليش وكلشي».
+//
+// THE RULE THIS PAGE IS BUILT ON: every number carries its own sentence. A deduction with no
+// reason next to it is the thing this page exists to remove, so anything that cannot explain
+// itself does not get a tile.
+//
+// ⚠️ Lateness and salary are DIFFERENT LEDGERS and are shown as such. `deduction_amount` on
+// an attendance record is never posted to `staff_salary_transactions` — nothing writes it,
+// and `deduction_transaction_id` is only ever cleared. Merging the two into one «رصيدك» would
+// invent a debt the shop has not actually charged. الحضور section says «معروض، ما انخصم».
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 'YYYY-MM' → { from, to } as inclusive date strings, plus the days in the month. */
+function monthRange(monthKey) {
+  const [y, m] = monthKey.split('-').map(Number);
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return {
+    from: `${monthKey}-01`,
+    to: `${monthKey}-${String(last).padStart(2, '0')}`,
+    days: last,
+  };
+}
+
+const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+async function getMySummary(req, res) {
+  const userId = req.user.id;
+  const settings = await attendance.loadEffectiveSettings(userId);
+  const timeZone = settings.timezone || DEFAULT_TZ;
+
+  // Default to the current month AT THE SHOP, never the server's UTC month — between 21:00
+  // and midnight Baghdad on the last of the month those are different months, and the page
+  // would open on an empty one. Same rule lib/shopTime.js exists for.
+  const requested = String(req.query.month || '');
+  const monthKey = MONTH_RE.test(requested)
+    ? requested
+    : localParts(new Date(), timeZone).date.slice(0, 7);
+  const { from, to } = monthRange(monthKey);
+
+  const [week, holidays, records, breakRows, salary, goal, work] = await Promise.all([
+    schedule.loadWeek(),
+    schedule.loadHolidays(from, to),
+    query(
+      `SELECT to_char(r.work_date, 'YYYY-MM-DD') AS work_date,
+              r.check_in_at, r.check_out_at,
+              to_char(r.expected_start_time, 'HH24:MI') AS expected_start_time,
+              to_char(r.expected_end_time,   'HH24:MI') AS expected_end_time,
+              r.late_minutes, r.deduction_amount, r.status, r.admin_note_ar,
+              (SELECT COALESCE(SUM(b.minutes), 0)::int
+                 FROM staff_attendance_breaks b
+                WHERE b.attendance_id = r.id AND b.state = 'returned') AS break_minutes
+         FROM staff_attendance_records r
+        WHERE r.user_id = $1 AND r.work_date BETWEEN $2::date AND $3::date
+        ORDER BY r.work_date`,
+      [userId, from, to]
+    ),
+    query(
+      `SELECT id, to_char(work_date, 'YYYY-MM-DD') AS work_date, reason_ar, minutes,
+              free_minutes, deducted_minutes, deduction_amount, approval, state,
+              left_without_approval, auto_closed, requested_at
+         FROM staff_attendance_breaks
+        WHERE user_id = $1 AND month_key = $2 AND state <> 'cancelled'
+        ORDER BY requested_at DESC`,
+      [userId, monthKey]
+    ),
+    buildSalarySummary(userId),
+    buildGoalSummary(userId),
+    query(
+      `SELECT to_char(created_at AT TIME ZONE 'UTC' AT TIME ZONE $3, 'YYYY-MM-DD') AS d,
+              COUNT(*)::int AS pieces
+         FROM staff_activity_log
+        WHERE user_id = $1
+          AND action IN ('advance', 'approve_design')
+          AND created_at >= ($2 || '-01')::date
+          AND created_at <  (($2 || '-01')::date + INTERVAL '1 month')
+        GROUP BY 1 ORDER BY 1`,
+      [userId, monthKey, timeZone]
+    ),
+  ]);
+
+  const recByDate = new Map(records.rows.map((r) => [r.work_date, r]));
+  const piecesByDate = new Map(work.rows.map((r) => [r.d, Number(r.pieces)]));
+
+  // Every calendar day of the month, present or not — «شنو صار بشهري» is a calendar
+  // question, and a list of only the days someone showed up cannot answer «وين غبت».
+  const days = [];
+  const totals = {
+    worked_days: 0, worked_minutes: 0, late_days: 0, late_minutes: 0,
+    late_amount_shown: 0, absent_days: 0, off_days: 0, holiday_days: 0, pieces: 0,
+  };
+  const today = localParts(new Date(), timeZone).date;
+
+  for (let i = 1; i <= monthRange(monthKey).days; i += 1) {
+    const date = `${monthKey}-${String(i).padStart(2, '0')}`;
+    const shift = schedule.shiftForDate(date, { week, settings, holidays });
+    const rec = recByDate.get(date) || null;
+    const pieces = piecesByDate.get(date) || 0;
+
+    const presentMinutes = rec?.check_in_at && rec?.check_out_at
+      ? Math.max(0, Math.floor((new Date(rec.check_out_at) - new Date(rec.check_in_at)) / 60000))
+      : 0;
+    const workedMinutes = Math.max(0, presentMinutes - Number(rec?.break_minutes || 0));
+
+    // A day is only «غياب» once it is in the past, the shop was open, and nothing was
+    // stamped. Today and the rest of the month are not absences yet.
+    const absent = !rec && shift.counts_lateness && date < today;
+
+    if (rec) {
+      totals.worked_days += 1;
+      totals.worked_minutes += workedMinutes;
+      if (Number(rec.late_minutes) > 0) {
+        totals.late_days += 1;
+        totals.late_minutes += Number(rec.late_minutes);
+        totals.late_amount_shown += Number(rec.deduction_amount);
+      }
+    }
+    if (absent) totals.absent_days += 1;
+    if (shift.holiday_ar) totals.holiday_days += 1;
+    else if (shift.is_off) totals.off_days += 1;
+    totals.pieces += pieces;
+
+    days.push({
+      date,
+      weekday_label_ar: shift.weekday_label_ar,
+      expected_start_time: rec?.expected_start_time || shift.start_time,
+      expected_end_time: rec?.expected_end_time || shift.end_time,
+      is_off: shift.is_off,
+      holiday_ar: shift.holiday_ar,
+      check_in_at: rec?.check_in_at || null,
+      check_out_at: rec?.check_out_at || null,
+      worked_minutes: workedMinutes,
+      break_minutes: Number(rec?.break_minutes || 0),
+      late_minutes: Number(rec?.late_minutes || 0),
+      // ⚠️ «معروض» not «مخصوم» — see the header. This never reached the salary ledger.
+      late_amount_shown: Number(rec?.deduction_amount || 0),
+      absent,
+      pieces,
+      note_ar: rec?.admin_note_ar || null,
+    });
+  }
+
+  const allowance = breaks.effectiveAllowance(settings);
+  const balance = await breaks.loadBalance({ query }, userId, monthKey, allowance);
+
+  return res.json({
+    data: {
+      month: monthKey,
+      timezone: timeZone,
+      schedule: week,
+      days,
+      totals,
+      breaks: {
+        ...balance,
+        allowance_minutes: allowance,
+        rows: breakRows.rows.map((b) => ({
+          ...b,
+          minutes: Number(b.minutes),
+          free_minutes: Number(b.free_minutes),
+          deducted_minutes: Number(b.deducted_minutes),
+          deduction_amount: Number(b.deduction_amount),
+        })),
+      },
+      salary,
+      goal,
+    },
+  });
+}
+
 module.exports = {
   getStaffSalary,
   setStaffSalary,
@@ -426,4 +614,5 @@ module.exports = {
   getMySalary,
   getMyActivity,
   getMyGoal,
+  getMySummary,
 };

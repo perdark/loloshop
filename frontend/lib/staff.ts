@@ -1189,6 +1189,100 @@ export async function getMyGoal(): Promise<StaffGoal | null> {
 }
 
 /** GET /payroll/me/activity — the logged-in staff member's own activity log. */
+// ─── «راتبي ونشاطي» — the whole month in one call (GET /payroll/me/summary) ───────────────
+
+export interface MySummaryDay {
+  date: string;
+  weekday_label_ar: string;
+  expected_start_time: string;
+  expected_end_time: string;
+  is_off: boolean;
+  holiday_ar: string | null;
+  check_in_at: string | null;
+  check_out_at: string | null;
+  worked_minutes: number;
+  break_minutes: number;
+  late_minutes: number;
+  /**
+   * ⚠️ SHOWN, NOT CHARGED. Lateness never becomes a salary transaction — nothing writes one,
+   * and `deduction_transaction_id` is only ever cleared. Rendering this inside the salary
+   * balance would invent a debt the shop has not charged, so it lives in its own section.
+   */
+  late_amount_shown: number;
+  absent: boolean;
+  pieces: number;
+  note_ar: string | null;
+}
+
+export interface MySummaryBreakRow {
+  id: string;
+  work_date: string;
+  reason_ar: string | null;
+  minutes: number;
+  free_minutes: number;
+  deducted_minutes: number;
+  deduction_amount: number;
+  approval: "pending" | "approved" | "rejected";
+  state: string;
+  left_without_approval: boolean;
+  auto_closed: boolean;
+}
+
+export interface MySummary {
+  month: string;
+  /** The shop's IANA zone. Timestamps are rendered at the SHOP's clock, never the phone's. */
+  timezone: string;
+  schedule: {
+    weekday: number;
+    label_ar: string;
+    start_time: string;
+    end_time: string;
+    is_off: boolean;
+  }[];
+  days: MySummaryDay[];
+  totals: {
+    worked_days: number;
+    worked_minutes: number;
+    late_days: number;
+    late_minutes: number;
+    late_amount_shown: number;
+    absent_days: number;
+    off_days: number;
+    holiday_days: number;
+    pieces: number;
+  };
+  breaks: {
+    allowance_minutes: number;
+    used_minutes: number;
+    remaining_minutes: number;
+    deducted_minutes: number;
+    deduction_amount: number;
+    break_count: number;
+    rows: MySummaryBreakRow[];
+  };
+  salary: {
+    base_salary: number;
+    balance: number;
+    transactions: {
+      id: string;
+      type: string;
+      amount: number;
+      reason_ar: string | null;
+      source_type: string | null;
+      created_at: string;
+    }[];
+  };
+  goal: unknown | null;
+}
+
+/** `month` is 'YYYY-MM'. Omit it and the server picks the current month AT THE SHOP. */
+export async function getMySummary(month?: string): Promise<MySummary> {
+  const { data } = await api.get<{ data: MySummary }>("/payroll/me/summary", {
+    params: month ? { month } : undefined,
+  });
+  return data.data;
+}
+
 export async function getMyActivity(): Promise<MyActivityRow[]> {
   const { data } = await api.get<{
     data: {

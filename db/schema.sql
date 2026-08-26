@@ -900,6 +900,42 @@ ALTER TABLE staff_attendance_user_settings
 CREATE INDEX IF NOT EXISTS idx_staff_attendance_user_settings_updated
   ON staff_attendance_user_settings(updated_at DESC);
 
+-- =====================================================
+-- Migration 093 — دوام الأسبوع + الإجازات.
+-- Before this, `staff_attendance_settings` held ONE start/end pair for all seven days and
+-- `checkIn` computed lateness against it every day, so every Friday check-in (the shop opens
+-- 3 م) was recorded ~6 hours late. Resolution order lives in ONE place, lib/staffSchedule.js.
+-- ⚠️ `weekday` is POSTGRES EXTRACT(DOW) numbering — 0 = الأحد … 6 = السبت, so الجمعة is 5.
+-- =====================================================
+CREATE TABLE IF NOT EXISTS staff_schedule_days (
+  weekday    SMALLINT PRIMARY KEY CHECK (weekday BETWEEN 0 AND 6),
+  start_time TIME NOT NULL,
+  end_time   TIME NOT NULL,
+  is_off     BOOLEAN NOT NULL DEFAULT FALSE,
+  updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+-- ⚠️ ON CONFLICT DO NOTHING is load-bearing. THIS file is what `npm run migrate` applies on
+-- every deploy (scripts/deploy.sh), so without the guard every deploy would silently undo the
+-- owner's edited hours. Do not "tidy" it out — same trap as 077's and 080's repeated backfill.
+INSERT INTO staff_schedule_days (weekday, start_time, end_time, is_off) VALUES
+  (0, '09:00', '22:00', FALSE),
+  (1, '09:00', '22:00', FALSE),
+  (2, '09:00', '22:00', FALSE),
+  (3, '09:00', '22:00', FALSE),
+  (4, '09:00', '22:00', FALSE),
+  (5, '15:00', '00:00', FALSE),   -- الجمعة — crosses midnight
+  (6, '09:00', '22:00', FALSE)
+ON CONFLICT (weekday) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS staff_holidays (
+  work_date  DATE PRIMARY KEY,
+  label_ar   TEXT NOT NULL,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_staff_holidays_date ON staff_holidays(work_date DESC);
+
 CREATE TABLE IF NOT EXISTS staff_attendance_records (
   id                         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id                    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -1034,6 +1070,12 @@ ALTER TABLE options       ADD COLUMN IF NOT EXISTS customer_text_prompt_ar TEXT;
 
 -- Migration 025: admin-editable placeholder (example) inside the customer text box.
 ALTER TABLE option_groups ADD COLUMN IF NOT EXISTS customer_text_placeholder_ar TEXT;
+
+-- Migration 092 — hide an option group from one price audience. NULL = everyone.
+-- ⚠️ A rep-linked student's price role is 'wholesaler' (priceRoleForUser), so 'retail' here
+-- means «الطلاب العاديين فقط». Enforced in TWO places on purpose — catalogController hides
+-- it, orderController refuses it — because hiding alone still accepts a hand-posted group_id.
+ALTER TABLE option_groups ADD COLUMN IF NOT EXISTS price_role_restriction price_role;
 ALTER TABLE options       ADD COLUMN IF NOT EXISTS customer_text_placeholder_ar TEXT;
 
 -- Migration 027: wholesaler carries جامعة/قسم; students inherit them on join.
@@ -1237,7 +1279,11 @@ VALUES
   ('cut','robe','retail',500), ('overlock','robe','retail',750), ('robe_sew','robe','retail',1500),
   ('cut','cap','retail',250), ('cap_sew','cap','retail',750),
   ('cut','shawl','retail',250), ('shawl_close','shawl','retail',500), ('american_shawl','shawl','retail',1000),
-  ('cut','sash','retail',250), ('shawl_close','sash','retail',500)
+  ('cut','sash','retail',250), ('shawl_close','sash','retail',500),
+  -- Migration 091 — «مسطرة», cap only. Seeded at 0 on purpose: an admin must type the real
+  -- wage at /admin/workshop → أسعار القطع. Both audiences are 0, so the retail-alignment
+  -- UPDATE below is a no-op for this pair rather than a silent misprice.
+  ('ruler','cap','wholesale',0), ('ruler','cap','retail',0)
 ON CONFLICT (operation, product, audience) DO NOTHING;
 
 -- A database that already held admin-edited wholesale rates when `audience` was added

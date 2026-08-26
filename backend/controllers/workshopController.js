@@ -7,17 +7,27 @@ const { assertPasswordOk } = require('../lib/password');
 
 const SALT_ROUNDS = 10;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const OPERATIONS = ['cut', 'overlock', 'cap_sew', 'robe_sew', 'shawl_close', 'american_shawl'];
+// ⚠️ The operation list is CODE, not a table. `workshop_piece_rates` stores an amount per
+// (operation, product, audience) but never the vocabulary itself, so adding a job means
+// editing all four constants below AND seeding its rate rows — in db/schema.sql (the file
+// `npm run migrate` actually applies) as well as a numbered migration. Miss the seed and the
+// job appears on the screen paying nothing; miss `PRODUCT_OPS` and `upsertRate` 400s on a
+// pair the rates screen just offered. Mirror `WorkshopOperation` in frontend/lib/workshop.ts
+// too — the Arabic labels come from here, so the frontend only needs the union widened.
+const OPERATIONS = ['cut', 'overlock', 'cap_sew', 'robe_sew', 'shawl_close', 'american_shawl', 'ruler'];
 const PRODUCTS = ['robe', 'cap', 'shawl', 'sash'];
 const PRODUCT_OPS = {
   robe: ['cut', 'overlock', 'robe_sew'],
-  cap: ['cut', 'cap_sew'],
+  // 'ruler' (مسطرة) is cap-only by owner decision 2026-08-26. It is not restricted to one
+  // worker: any active workshop worker may log it, exactly like every other operation.
+  cap: ['cut', 'cap_sew', 'ruler'],
   shawl: ['cut', 'shawl_close', 'american_shawl'],
   sash: ['cut', 'shawl_close'],
 };
 const OP_LABEL_AR = {
   cut: 'قص', overlock: 'أوفرلوك', cap_sew: 'خياطة القبعة',
   robe_sew: 'خياطة الروب', shawl_close: 'تسكير الشال', american_shawl: 'شال امريكي',
+  ruler: 'مسطرة',
 };
 const PRODUCT_LABEL_AR = { robe: 'روب', cap: 'قبعة', shawl: 'شال', sash: 'وشاح' };
 const AUDIENCES = ['wholesale', 'retail'];

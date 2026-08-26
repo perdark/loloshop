@@ -3,6 +3,8 @@ const { query, tx } = require('../lib/db');
 const breaks = require('../lib/attendanceBreak');
 
 const { localParts, DEFAULT_TZ } = require('../lib/shopTime');
+// The ONLY answer to "when was this person due, and on which day's shift". Migration 093.
+const schedule = require('../lib/staffSchedule');
 const VALID_MODES = new Set(['none', 'network', 'location', 'both', 'network_or_location']);
 
 /**
@@ -472,8 +474,27 @@ async function todayPayload(userId, settings, timeZone = settings.timezone || DE
        ) r`,
     [userId, today]
   );
+  // The shift this stamp would belong to right now — so the phone can say «دوام اليوم:
+  // ٣:٠٠ م – ١٢:٠٠ ص» instead of leaving الجمعة looking like every other day. Resolved by
+  // the same function checkIn uses, so the card and the recorded row can never disagree.
+  const week = await schedule.loadWeek();
+  const holidays = await schedule.loadHolidays(
+    schedule.shiftDate(today, -1), today
+  );
+  const shift = schedule.resolveStamp(new Date(), { week, settings, holidays, timeZone });
+
   return {
     settings: serializeSettings(settings),
+    shift: {
+      date: shift.date,
+      weekday_label_ar: shift.weekday_label_ar,
+      start_time: shift.start_time,
+      end_time: shift.end_time,
+      is_off: shift.is_off,
+      holiday_ar: shift.holiday_ar,
+      counts_lateness: shift.counts_lateness,
+      crosses_midnight: shift.crosses_midnight,
+    },
     record: serializeRecord(rows[0]),
     ...(await breakState(userId, settings, timeZone)),
   };
@@ -521,7 +542,8 @@ async function checkIn(req, res) {
       throw e;
     }
 
-    const local = localParts(now, settings.timezone || DEFAULT_TZ);
+    const timeZone = settings.timezone || DEFAULT_TZ;
+    const local = localParts(now, timeZone);
     const open = await client.query(
       `SELECT id FROM staff_attendance_records
         WHERE user_id = $1 AND check_in_at IS NOT NULL AND check_out_at IS NULL
@@ -536,8 +558,17 @@ async function checkIn(req, res) {
       e.code = 'ERR_OPEN_ATTENDANCE';
       throw e;
     }
-    const startMinutes = timeToMinutes(settings.start_time);
-    const lateMinutes = Math.max(0, local.minutes - startMinutes - Number(settings.grace_minutes));
+    // Migration 093 — the weekday schedule, the holiday list, and the midnight rule, all
+    // resolved in lib/staffSchedule.js so this controller holds no second copy of them.
+    // Both days are loaded because a stamp just after midnight belongs to YESTERDAY's shift
+    // (الجمعة runs 15:00 → 00:00) and must be filed under yesterday's date and hours.
+    const week = await schedule.loadWeek(client);
+    const holidays = await schedule.loadHolidays(
+      schedule.shiftDate(local.date, -1), local.date, client
+    );
+    const shift = schedule.resolveStamp(now, { week, settings, holidays, timeZone });
+    // 0 on a holiday or a closed day, always — `counts_lateness` carries that decision.
+    const lateMinutes = schedule.lateMinutesFor(shift, shift.minutes_now, settings.grace_minutes);
     const deduction = lateMinutes * Number(settings.deduction_per_minute || 0);
     const status = lateMinutes > 0 ? 'late' : 'present';
 
@@ -551,10 +582,12 @@ async function checkIn(req, res) {
        RETURNING *`,
       [
         req.user.id,
-        local.date,
+        // `shift.date`, not `local.date`: a 00:10 stamp on الجمعة's shift files under Friday.
+        shift.date,
         now.toISOString(),
-        settings.start_time,
-        settings.end_time,
+        // Frozen onto the row, so a later schedule edit never rewrites history.
+        shift.start_time,
+        shift.end_time,
         settings.grace_minutes,
         lateMinutes,
         deduction,
@@ -795,6 +828,99 @@ async function overrideRecord(req, res) {
   res.json({ data: serializeRecord(record) });
 }
 
+// ─── ADMIN: جدول الدوام الأسبوعي (migration 093) ─────────────────────────────────────────
+
+const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+async function getSchedule(req, res) {
+  const [week, holidays] = await Promise.all([
+    schedule.loadWeek(),
+    query(
+      `SELECT to_char(work_date, 'YYYY-MM-DD') AS work_date, label_ar, created_at
+         FROM staff_holidays ORDER BY work_date DESC LIMIT 200`
+    ),
+  ]);
+  res.json({ data: { week, holidays: holidays.rows } });
+}
+
+/**
+ * PUT /admin/attendance/schedule — the WHOLE week in one request.
+ *
+ * Deliberately all-or-nothing rather than a per-day PATCH: the seven rows are one decision
+ * («شنو دوام المحل»), and a half-applied week is a shape where الجمعة is right and السبت is
+ * still wrong — which is the bug this table exists to end.
+ */
+async function updateSchedule(req, res) {
+  const days = Array.isArray(req.body?.days) ? req.body.days : null;
+  if (!days || days.length !== 7) {
+    return res.status(400).json({ error: 'الجدول لازم يكون سبعة أيام', code: 'ERR_VALIDATION' });
+  }
+  const seen = new Set();
+  for (const d of days) {
+    const wd = Number(d.weekday);
+    if (!Number.isInteger(wd) || wd < 0 || wd > 6 || seen.has(wd)) {
+      return res.status(400).json({ error: 'أيام الأسبوع غير صحيحة', code: 'ERR_VALIDATION' });
+    }
+    seen.add(wd);
+    if (!HHMM_RE.test(String(d.start_time)) || !HHMM_RE.test(String(d.end_time))) {
+      return res.status(400).json({ error: 'صيغة الوقت غير صحيحة', code: 'ERR_VALIDATION' });
+    }
+    // A shift ending exactly when it starts is 24 hours under the midnight rule, which is
+    // never what an admin means. `end < start` IS allowed — that is الجمعة.
+    if (!d.is_off && String(d.start_time) === String(d.end_time)) {
+      return res.status(400).json({ error: 'وقت البداية والنهاية متطابقين', code: 'ERR_VALIDATION' });
+    }
+  }
+  await tx(async (client) => {
+    for (const d of days) {
+      await client.query(
+        `INSERT INTO staff_schedule_days (weekday, start_time, end_time, is_off, updated_by, updated_at)
+         VALUES ($1,$2,$3,$4,$5,NOW())
+         ON CONFLICT (weekday) DO UPDATE
+           SET start_time = EXCLUDED.start_time,
+               end_time   = EXCLUDED.end_time,
+               is_off     = EXCLUDED.is_off,
+               updated_by = EXCLUDED.updated_by,
+               updated_at = NOW()`,
+        [Number(d.weekday), d.start_time, d.end_time, d.is_off === true, req.user.id]
+      );
+    }
+  });
+  res.json({ data: { week: await schedule.loadWeek() } });
+}
+
+async function addHoliday(req, res) {
+  const date = String(req.body?.work_date || '');
+  const label = String(req.body?.label_ar || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return res.status(400).json({ error: 'التاريخ غير صحيح', code: 'ERR_VALIDATION' });
+  }
+  if (!label) return res.status(400).json({ error: 'اكتب سبب الإجازة', code: 'ERR_VALIDATION' });
+  const { rows } = await query(
+    `INSERT INTO staff_holidays (work_date, label_ar, created_by)
+     VALUES ($1::date, $2, $3)
+     ON CONFLICT (work_date) DO UPDATE SET label_ar = EXCLUDED.label_ar
+     RETURNING to_char(work_date, 'YYYY-MM-DD') AS work_date, label_ar, created_at`,
+    [date, label, req.user.id]
+  );
+  res.status(201).json({ data: rows[0] });
+}
+
+/**
+ * ⚠️ Deleting a holiday does NOT re-mark past رواتب rows as late. `late_minutes` is frozen
+ * onto `staff_attendance_records` at check-in time, on purpose — the schedule is what the
+ * shop intends from now on, never a lens that rewrites what already happened.
+ */
+async function deleteHoliday(req, res) {
+  const { rows } = await query(
+    `DELETE FROM staff_holidays WHERE work_date = $1::date
+     RETURNING to_char(work_date, 'YYYY-MM-DD') AS work_date`,
+    [req.params.date]
+  );
+  if (!rows.length) return res.status(404).json({ error: 'غير موجود', code: 'ERR_NOT_FOUND' });
+  res.json({ data: rows[0] });
+}
+
 module.exports = {
   getSettings,
   updateSettings,
@@ -807,6 +933,10 @@ module.exports = {
   listRecords,
   calendar,
   overrideRecord,
+  getSchedule,
+  updateSchedule,
+  addHoliday,
+  deleteHoliday,
   // shared with attendanceBreakController — one source for the effective schedule,
   // the shop timezone and the staff-role guard
   loadEffectiveSettings,

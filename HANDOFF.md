@@ -20,7 +20,7 @@ last verified 2026-08-10 and are unchanged.
 
 | | |
 |---|---|
-| **Server** | 🚚 **MOVED to `169.58.114.255` (8 GB, shared with RevoArt) on 2026-08-16.** Fronted by RevoArt's `supabase-caddy`, not nginx. Old 2 GB box `142.93.110.202` is stopped-API + forwarder = the rollback. Full detail in the 2026-08-16 PROGRESS entry. |
+| **Server** | 🚚 **MOVED to `169.58.114.255` (8 GB, shared with RevoArt) on 2026-08-16.** Fronted by RevoArt's `supabase-caddy`, not nginx. Full detail in the 2026-08-16 PROGRESS entry. ⚠️ **The old 2 GB box `142.93.110.202` is GONE as of 2026-08-27** — it still answers ICMP (provider edge) but 22/80/443 are all filtered: powered off or destroyed. **There is NO rollback box anymore.** Anything that box still served (the stale-DNS forwarder, ForMe on :3100) is down with it. Verified 2026-08-27: `lolo-shop96.com` site 200 + `/api/health` 200 on the new box, so production is unaffected. |
 | `origin/main` | `6d97196` — pushed 2026-08-25, CI green on all three jobs, **auto-deployed** and verified live (migrations 086·087·088·089 applied, site + API 200, 0 marketing opt-ins as expected). Carries: «ابدأ الخصومات», `/admin/app` (app stats + push composer), the admin notification bell, and the student notification opt-in. |
 | Eleven-bug tracks | **ALL ELEVEN CLOSED IN CODE.** Deployed: 2·3 (C) · 9·10·11 (A) · 4·5·6 (B) · **7** · **8 part 1**. On `fix/admin-presence-panel`, **unmerged**: **bug 1** + **bug 8 parts 2·3·4**. *(This row said «1, 7, 8 NOT started» until 2026-08-15; 7 and 8-part-1 shipped on 2026-08-14.)* |
 | Migration 077 | ✅ applied to prod AND the dev DB — 3,311 prod rows retired to `skipped` |
@@ -44,9 +44,9 @@ tokens**, so iOS push is proven only at the credential layer, not end to end.
 with **RevoArt**. ⚠️ That means the `revo` host in `~/.ssh/config` is the same machine, not a
 different project as this file said for months; RevoArt's Supabase stack and its `supabase-caddy`
 (which owns :80/:443 and fronts LoloShop) live there too, so a careless `docker`, `ufw` or
-Caddyfile change hits a second production site. **`142.93.110.202` is the OLD box**: its API and
-worker are stopped and its nginx now only FORWARDS to the new box for stale DNS. It is the
-rollback — leave it alone.
+Caddyfile change hits a second production site. ⚠️ **`142.93.110.202` IS GONE (verified 2026-08-27)** — powered off or
+destroyed. It pings but 22/80/443 are filtered. It is **no longer a rollback**, and the
+stale-DNS forwarder it ran is dead. Do not plan around it.
 ⚠️ The prod frontend has **no `.env`** — it reads **`.env.local`**; server-only vars
 there are read at request time, so `pm2 restart loloshop-web --update-env` is enough, **no
 rebuild** (unlike `NEXT_PUBLIC_*`, which is inlined at build time).
@@ -68,9 +68,9 @@ API key** (App Store Connect → Users and Access → Integrations) and has noth
 with **RevoArt**. ⚠️ That means the `revo` host in `~/.ssh/config` is the same machine, not a
 different project as this file said for months; RevoArt's Supabase stack and its `supabase-caddy`
 (which owns :80/:443 and fronts LoloShop) live there too, so a careless `docker`, `ufw` or
-Caddyfile change hits a second production site. **`142.93.110.202` is the OLD box**: its API and
-worker are stopped and its nginx now only FORWARDS to the new box for stale DNS. It is the
-rollback — leave it alone.
+Caddyfile change hits a second production site. ⚠️ **`142.93.110.202` IS GONE (verified 2026-08-27)** — powered off or
+destroyed. It pings but 22/80/443 are filtered. It is **no longer a rollback**, and the
+stale-DNS forwarder it ran is dead. Do not plan around it.
 ⚠️ The prod frontend has **no `.env`** — it reads **`.env.local`**; server-only vars
 there are read at request time, so `pm2 restart loloshop-web --update-env` is enough, **no
 rebuild** (unlike `NEXT_PUBLIC_*`, which is inlined at build time).
@@ -398,6 +398,20 @@ longer stranded on a branch · the laptop's loose credentials are filed in
    Promotional push is **opt-in, off by default, with an in-app opt-out** («العروض والأخبار» on
    `/account`, migration 089) — which is what Apple's guideline 4.5.4 asks for. Answer the forms
    to match that, and if the default ever flips to true the forms become false the same day.
+6b. **🗓️ CHECK جدول الدوام AND RUN THE FRIDAY REPORT — new 2026-08-27.**
+   `/admin/attendance` now opens on **جدول الدوام الأسبوعي**. It ships seeded السبت–الخميس
+   **9:00 ص – 10:00 م** and الجمعة **3:00 م – 12:00 ص** — confirm those are the real hours,
+   because every تأخير from now on is measured against them. Add any عيد to **أيام الإجازات**
+   *before* it arrives; a date there means no تأخير and no خصم, for everyone.
+   Then run **`npm run friday-deduction-report`** on prod. Read-only, changes nothing: it lists
+   every Friday بصمة recorded late against the OLD wrong opening, separated from the genuinely
+   late ones, with the salary-transaction id per row. Dev DB was 5 suspect / 3 genuine /
+   **0 charged**. Prod will differ — read it before deciding anything.
+
+6c. **📏 SET THE مسطرة RATE** at `/admin/workshop → أسعار القطع` — seeded at **0** on purpose —
+   **and create «إضافة إطار»** at `/admin/products` (الوشاح → toggle → «الطلاب العاديين فقط» →
+   سعر التجزئة 5,000). Both are data, not code; nothing is blocked on a session.
+
 7. **Clean the 12 wholesaler `university_name` rows** — one university is spelled three ways
    («بلاد الرافدين» · «بلاد الرفدين» · «كلية بلاد الرافدين»), same for ديالى. The picker was built
    to survive this, but the list reads badly.
@@ -465,6 +479,48 @@ longer stranded on a branch · the laptop's loose credentials are filed in
 ---
 
 ## 💣 LANDMINES
+
+- **⚠️ THE STAFF SCHEDULE LIVES IN ONE FILE AND MUST STAY THERE — `lib/staffSchedule.js`
+  (migration 093, 2026-08-27).** Before it, `checkIn` computed lateness against ONE global start
+  time on all seven days while the shop opens 3 م الجمعة, so every Friday بصمة was recorded ~6
+  hours late — for months, on a path nothing tested. A second copy of the resolution rule is
+  exactly how that happens again. Five things not to "tidy":
+  · **`weekday` is POSTGRES `EXTRACT(DOW)` numbering** — 0 = الأحد … 6 = السبت, **الجمعة is 5**.
+    JS `getUTCDay()` agrees; nothing else does.
+  · **The 7-row seed's `ON CONFLICT DO NOTHING` is load-bearing**, not tidiness. It is repeated
+    in `db/schema.sql`, which `scripts/deploy.sh` applies on EVERY deploy — remove the guard and
+    each deploy silently reverts the owner's edited hours. Same trap as 077's and 080's backfill.
+  · **الجمعة ends at EXACTLY 00:00, so it has no after-midnight window, and that is correct** —
+    a 00:10 stamp is a new السبت shift. `resolveStamp`'s midnight rule only fires while the
+    previous shift is still running; it starts mattering if an admin sets الجمعة to end at 01:00.
+    `scheduledMinutes` (adds 24h when `end <= start`) and `checkOut` (finds the open record by
+    `check_out_at IS NULL`, never by date) were already correct and were **not** changed.
+  · **`late_minutes` is frozen onto the record at check-in.** Editing the schedule or deleting a
+    holiday never rewrites history — deliberate, and `/staff/me` says so to the worker.
+  · The week saves **whole**; `updateSchedule` refuses anything but seven days on purpose.
+
+- **⚠️ LATENESS AND SALARY ARE TWO LEDGERS — never merge them.** `/payroll/me/summary` returns
+  `late_amount_shown` beside `salary.balance` and they must stay apart: lateness is never posted
+  to `staff_salary_transactions`, so folding it into the balance shows a worker a debt the shop
+  has not charged. Pinned by `test/payrollSummary.test.js`, and `/staff/me` states it in words.
+
+- **⚠️ THE WORKSHOP OPERATION LIST IS CODE, NOT A TABLE.** `workshop_piece_rates` stores an
+  amount per (operation, product, audience) but never the vocabulary. Adding a job means
+  `OPERATIONS` + `PRODUCT_OPS` + `OP_LABEL_AR` in `workshopController.js`, the
+  `WorkshopOperation` union in `frontend/lib/workshop.ts`, **and** the rate seed in
+  `db/schema.sql` (the file `npm run migrate` applies) as well as a numbered migration. Miss the
+  seed and the job appears on screen paying nothing; miss `PRODUCT_OPS` and `upsertRate` 400s on
+  a pair the rates screen just offered. مسطرة (migration 091) is the worked example.
+
+- **⚠️ `option_groups.price_role_restriction` IS ENFORCED IN TWO PLACES ON PURPOSE** (migration
+  092). `catalogController` hides a restricted group from the configurator; `orderController`
+  refuses it on the order path. Hiding alone still accepts a hand-posted `group_id`. Both filter
+  in the QUERY rather than rejecting afterwards, so a restricted group is invisible to the
+  `required` check too — otherwise a retail-only *required* group blocks every rep-linked
+  student's checkout. **Privileged callers see every group**, because the admin product editor
+  reads the same `/catalog/products/:id/full`. And the mechanism itself: a rep-linked student's
+  price role is **`'wholesaler'`** (`priceRoleForUser`), so `'retail'` here means «الطلاب
+  العاديين فقط» — that is not incidental. Covered by `test/optionGroupAudience.test.js`.
 
 - 🔴 **iOS PUSH REGISTERS NOTHING ON REAL DEVICES, AND IT IS NOT THE RELEASE OR THE CODE.**
   Found 2026-08-26, and only findable because migration 087's beacon shipped the day before.
@@ -805,8 +861,18 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   `settledMoney`). Full reasoning in the PROGRESS entry.
   ⚠️ The `ai-assistant` merge is **still not deployable** for the reasons the owner gave on
   2026-08-13; the branch is now *correct*, not *cleared*.
-- **Should lateness deductions reach the salary?** Today «مبلغ التأخير» is display-only, while break
-  deductions do hit it.
+- ✅ **ANSWERED 2026-08-27 — «should lateness deductions reach the salary?» They do NOT, and
+  never did.** `staff_attendance_records.deduction_transaction_id` is only ever *cleared*
+  (`attendanceController.js`), never set; the sole writer of an attendance salary transaction is
+  `lib/attendanceBreak.js`, for breaks. So «مبلغ التأخير» is a displayed figure a human then pays
+  from, which is why migration 093 mattered even though no money had moved.
+  ⚠️ **And `source_type <> 'attendance'` in `buildSalarySummary` MATCHES NOTHING** — measured, no
+  row has ever carried that value. Break deductions use **`'attendance_break'`**
+  (`lib/attendanceBreak.js:28`), so they ARE in the balance — the older claim above was right
+  about breaks and wrong about the filter. **Do not "clean up" that predicate:**
+  `payoutController`'s «المبلغ المقترح» carries the identical one and the two must keep agreeing.
+  What is left is a policy question for the owner: should lateness start charging? If it ever
+  does, `/staff/me`'s «معروض — ما انخصمت من راتبك» is the first sentence to change.
 - **Backfill the 54 existing 4–6 MB catalog photos?** Not a pure file job: re-encoding changes
   `.png` → `.jpg`, so it needs a matching `products.image_url` / `product_images.url` update in the
   same transaction. Delivery is already fixed for them by the optimizer.

@@ -53,6 +53,37 @@ export function formatDateShort(date: string | Date): string {
   return DATE_SHORT.format(d);
 }
 
+/**
+ * «09:00» → «٩:٠٠ ص»… no: «9:00 ص». Owner decision 2026-08-27 — the shop reads and writes
+ * hours in 12-hour ص/م, so every attendance surface prints them that way.
+ *
+ * Latin digits deliberately, matching `fmtShopDate`'s existing decision on the server: these
+ * are numbers a person checks against one in their head, and scanning speed is the whole job.
+ * The DATABASE keeps 24-hour `TIME` — this is a display shell and nothing else parses it back.
+ *
+ * ⚠️ Midnight is «12:00 ص», not «0:00 ص». الجمعة ends at 00:00 and would otherwise print a
+ * zero hour that reads as an unset field.
+ */
+export function formatTime12(value: string | null | undefined): string {
+  if (!value) return "—";
+  const [hRaw, mRaw] = String(value).split(":");
+  const h = Number(hRaw);
+  const m = Number(mRaw);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return "—";
+  const suffix = h < 12 ? "ص" : "م";
+  const hour12 = h % 12 === 0 ? 12 : h % 12;
+  return `${hour12}:${String(m).padStart(2, "0")} ${suffix}`;
+}
+
+/** «15:00 → 00:00» as one readable Arabic range, midnight included. */
+export function formatShiftRange(
+  start: string | null | undefined,
+  end: string | null | undefined
+): string {
+  if (!start || !end) return "—";
+  return `${formatTime12(start)} – ${formatTime12(end)}`;
+}
+
 export function getJoinUrl(referralCode: string): string {
   if (typeof window === "undefined") {
     return `/join/${referralCode}`;

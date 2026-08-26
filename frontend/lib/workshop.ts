@@ -1,6 +1,9 @@
 import { api } from "./api";
 
-export type WorkshopOperation = "cut" | "overlock" | "cap_sew" | "robe_sew" | "shawl_close" | "american_shawl";
+/* Mirrors OPERATIONS in backend/controllers/workshopController.js. The Arabic labels arrive
+   from the API (`operation_label_ar`), so this union is the only thing to widen here. */
+export type WorkshopOperation =
+  | "cut" | "overlock" | "cap_sew" | "robe_sew" | "shawl_close" | "american_shawl" | "ruler";
 export type WorkshopProduct = "robe" | "cap" | "shawl" | "sash";
 export type WorkshopAdjustmentKind = "bonus" | "deduction";
 /** Who the finished piece is for — decides which piece rate the worker is paid. */

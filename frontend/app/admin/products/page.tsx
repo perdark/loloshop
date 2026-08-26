@@ -151,6 +151,7 @@ export default function AdminProductsPage() {
   const [ngName, setNgName] = useState("");
   const [ngType, setNgType] = useState<CatalogInputType>("single_select");
   const [ngRequired, setNgRequired] = useState(false);
+  const [ngAudience, setNgAudience] = useState<"" | PriceRole>("");
 
   // Inline create-option form (per group)
   const [optionForGroup, setOptionForGroup] = useState<string | null>(null);
@@ -334,12 +335,14 @@ export default function AdminProductsPage() {
         name_ar: ngName.trim(),
         input_type: ngType,
         required: ngRequired,
+        price_role_restriction: ngAudience || null,
       });
       toast.success("تمت إضافة المجموعة");
       setGroupOpen(false);
       setNgName("");
       setNgType("single_select");
       setNgRequired(false);
+      setNgAudience("");
       await Promise.all([reloadProduct(), loadList()]);
     } catch (e) {
       toast.error(getApiErrorMessage(e, "تعذر إضافة المجموعة"));
@@ -956,6 +959,17 @@ export default function AdminProductsPage() {
                           </option>
                         ))}
                       </select>
+                      <select
+                        value={ngAudience}
+                        onChange={(e) =>
+                          setNgAudience(e.target.value as "" | PriceRole)
+                        }
+                        className={fieldCls}
+                      >
+                        <option value="">يظهر لكل الطلاب</option>
+                        <option value="retail">الطلاب العاديين فقط</option>
+                        <option value="wholesaler">طلاب الممثلين فقط</option>
+                      </select>
                       <CheckRow checked={ngRequired} onChange={setNgRequired}>
                         مطلوب
                       </CheckRow>
@@ -1444,6 +1458,26 @@ function GroupBlock({
           >
             كتابة مطلوبة من الزبون
           </CheckRow>
+
+          {/* Who may see and buy this group. «طلاب الممثلين» is not a separate role — a
+              student linked to a ممثل is priced as `wholesaler`, so «الطلاب العاديين فقط»
+              is literally price_role_restriction = 'retail'. The server enforces it on the
+              order path as well, so this is a real gate and not just a display filter. */}
+          <label className="flex items-center gap-2 text-sm text-ink-soft">
+            <span className="font-medium">يظهر لـ</span>
+            <select
+              value={group.priceRoleRestriction ?? ""}
+              disabled={busy}
+              onChange={(e) =>
+                onPersistGroup({ price_role_restriction: e.target.value || null })
+              }
+              className={fieldCls}
+            >
+              <option value="">كل الطلاب</option>
+              <option value="retail">الطلاب العاديين فقط</option>
+              <option value="wholesaler">طلاب الممثلين فقط</option>
+            </select>
+          </label>
           {/* «صورة توضيحية» (group hint image) controls removed per request. */}
 
           {/* What the customer must type — admin controls the title + the in-box example. */}

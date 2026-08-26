@@ -14,9 +14,23 @@ const BASE = [
 
 const NEG = 'No underlines, no quotation marks, no frames, no borders, no boxes, no numbering, no Latin text, no watermark.';
 
+// Owner decision 2026-08-26: the sash FRONT is now as plain as the back. It used to carry
+// «add small floated decorative ornaments» while the back was told to use less than half of
+// that — two panels of one sash that did not look like a set. They now share ONE string, so
+// they cannot drift apart again, and the back's old wording (which described itself relative
+// to «the front») is gone: once both are minimal, a comparison to the other panel means
+// nothing and would only give the model something to over-read.
+//
+// ⚠️ `cap` deliberately KEEPS the ornaments — the cap is a separate garment, not the other
+// half of the sash. `cap_side` never reaches this table: calligraphyEngine.js:16 maps it to
+// `cap` first. So front/back/cap are the only three keys that can ever be looked up here.
+const MINIMAL =
+  'Use minimal ornamentation — at most one or two tiny floated ornaments total; keep it mostly ' +
+  'clean plain letters with no decorative filler around the words.';
+
 const ORNAMENT = {
-  front: 'Add small floated decorative ornaments around the words.',
-  back:  'Use minimal ornamentation — at most one or two tiny floated ornaments total, clearly LESS THAN HALF the decoration of the front; keep it mostly clean plain letters. Use the exact same Thuluth letterforms, proportions and pen style as the front (only the amount of decoration is reduced).',
+  front: MINIMAL,
+  back:  MINIMAL,
   cap:   'Add small floated decorative ornaments around the words.',
 };
 

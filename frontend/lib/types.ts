@@ -552,6 +552,13 @@ export interface CatalogOptionGroup {
   inherited?: boolean;
   /** Admin locked this group to a single fixed option (student can't change it). */
   lockedOptionId?: string | null;
+  /**
+   * Migration 092 — the ONLY price audience allowed to see and buy this group.
+   * `null` = everyone. ⚠️ A rep-linked student's price role is `"wholesaler"`, so
+   * `"retail"` here means «الطلاب العاديين فقط» — that is the whole mechanism behind
+   * options like «إضافة إطار». Enforced server-side in orderController, not just hidden.
+   */
+  priceRoleRestriction?: PriceRole | null;
 }
 
 export interface ProductImage {

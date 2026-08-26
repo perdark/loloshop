@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { PayoutAccountPanel } from "@/components/payments/PayoutAccountPanel";
+import { MyMonthPanel } from "@/components/staff/MyMonthPanel";
 import {
   getMyActivity,
   getMyGoal,
@@ -129,7 +130,10 @@ export default function StaffMePage() {
 
   return (
     <div className="animate-step-in" dir="rtl">
-      <PageHeader title="راتبي ونشاطي" subtitle="راتبك الحالي وسجل عملك" />
+      <PageHeader
+        title="راتبي ونشاطي"
+        subtitle="دوامك وساعاتك وفتحاتك وخصوماتك وحوافزك — بالتفصيل"
+      />
 
       {loading ? (
         <p className="text-sm text-ink-soft">جارٍ التحميل…</p>
@@ -148,6 +152,11 @@ export default function StaffMePage() {
         <div className="space-y-6">
           {/* Incentive goal + progress */}
           {goal && <GoalCard goal={goal} />}
+
+          {/* The month: attendance, hours, breaks, lateness, pieces. Its own fetch and its
+              own error state on purpose — a failure here must not blank the salary card,
+              which is the one number a person opens this page for. */}
+          <MyMonthPanel />
 
           {/* Salary summary */}
           <section className="grid gap-3 sm:grid-cols-2">
@@ -183,7 +192,13 @@ export default function StaffMePage() {
 
           {/* Ledger */}
           <section className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
-            <h2 className="mb-3 font-display text-base font-semibold text-ink">سجل الراتب</h2>
+            <h2 className="font-display text-base font-semibold text-ink">سجل الراتب</h2>
+            {/* This list IS the balance above — every deduction and bonus that actually
+                moved money, each with its reason. Lateness is not here because it never
+                becomes a transaction; it has its own section in the month panel. */}
+            <p className="mb-3 mt-1 text-xs text-muted">
+              كل خصم وحافز أثّر على رصيدك، مع سببه.
+            </p>
             {(salary?.transactions.length ?? 0) === 0 ? (
               <p className="text-sm text-ink-soft">لا توجد حركات بعد.</p>
             ) : (

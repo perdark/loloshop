@@ -433,11 +433,22 @@ async function priceSelections({ productId, role, selections, studentGender }) {
   const groupProductIds = prod.rows[0].parent_id
     ? [productId, prod.rows[0].parent_id]
     : [productId];
+  // Migration 092 — the group audience filter, and this is the half that ENFORCES it.
+  // catalogController hides a restricted group from the configurator; hiding alone still
+  // accepts a hand-posted `group_id`, so the price path must refuse it independently.
+  // Filtering here (rather than rejecting later) also means a retail-only group that is
+  // `required` cannot block a rep-linked student's checkout: the group simply does not
+  // exist for them, exactly like a group on another product.
+  // ⚠️ `role` is the PRICE role — a rep-linked student resolves to 'wholesaler'
+  // (priceRoleForUser), and this path always derives it from the user, never from a
+  // `?role=` query param. That is what makes 'retail' mean «الطلاب العاديين فقط» here.
   const groups = await query(
     `SELECT id, name_ar, required, max_select, input_type, gender_restriction,
             requires_customer_image, requires_customer_text
-     FROM option_groups WHERE product_id = ANY($1::uuid[]) AND active = TRUE`,
-    [groupProductIds]
+     FROM option_groups
+      WHERE product_id = ANY($1::uuid[]) AND active = TRUE
+        AND (price_role_restriction IS NULL OR price_role_restriction = $2::price_role)`,
+    [groupProductIds, role]
   );
   const groupMap = new Map(groups.rows.map((g) => [g.id, g]));
   const sel = Array.isArray(selections) ? selections : [];

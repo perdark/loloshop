@@ -70,6 +70,12 @@ router.patch('/attendance/settings', attendance.updateSettings);
 router.get('/attendance/staff-settings', attendance.listUserSettings);
 router.put('/attendance/staff-settings/:userId', attendance.setUserSettings);
 router.delete('/attendance/staff-settings/:userId', attendance.deleteUserSettings);
+// جدول الدوام الأسبوعي + الإجازات (migration 093). The week is written whole — see
+// attendanceController.updateSchedule for why a per-day PATCH is deliberately not offered.
+router.get('/attendance/schedule', attendance.getSchedule);
+router.put('/attendance/schedule', attendance.updateSchedule);
+router.post('/attendance/holidays', attendance.addHoliday);
+router.delete('/attendance/holidays/:date', attendance.deleteHoliday);
 router.get('/attendance/calendar', attendance.calendar);
 router.get('/attendance/records', attendance.listRecords);
 router.patch('/attendance/records/:id/override', attendance.overrideRecord);

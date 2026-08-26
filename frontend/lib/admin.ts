@@ -1489,6 +1489,62 @@ export async function deleteAttendanceUserSettings(userId: string): Promise<void
   await api.delete(`/admin/attendance/staff-settings/${userId}`);
 }
 
+// ─── جدول الدوام الأسبوعي + الإجازات (migration 093) ─────────────────────────────────────
+
+/** ⚠️ `weekday` is POSTGRES EXTRACT(DOW) numbering — 0 = الأحد … 6 = السبت, so الجمعة is 5. */
+export interface ScheduleDay {
+  weekday: number;
+  label_ar: string;
+  start_time: string;
+  end_time: string;
+  is_off: boolean;
+  crosses_midnight: boolean;
+}
+
+export interface Holiday {
+  work_date: string;
+  label_ar: string;
+}
+
+export async function getStaffSchedule(): Promise<{ week: ScheduleDay[]; holidays: Holiday[] }> {
+  const { data } = await api.get<{ data: { week: ScheduleDay[]; holidays: Holiday[] } }>(
+    "/admin/attendance/schedule"
+  );
+  return data.data;
+}
+
+/**
+ * The WHOLE week in one request — the server refuses anything but seven days. Seven rows are
+ * one decision («شنو دوام المحل»), and a half-applied week is the shape where الجمعة is right
+ * and السبت is still wrong, which is the bug the table exists to end.
+ */
+export async function saveStaffSchedule(days: ScheduleDay[]): Promise<ScheduleDay[]> {
+  const { data } = await api.put<{ data: { week: ScheduleDay[] } }>(
+    "/admin/attendance/schedule",
+    {
+      days: days.map((d) => ({
+        weekday: d.weekday,
+        start_time: d.start_time,
+        end_time: d.end_time,
+        is_off: d.is_off,
+      })),
+    }
+  );
+  return data.data.week;
+}
+
+export async function addHoliday(workDate: string, labelAr: string): Promise<Holiday> {
+  const { data } = await api.post<{ data: Holiday }>("/admin/attendance/holidays", {
+    work_date: workDate,
+    label_ar: labelAr,
+  });
+  return data.data;
+}
+
+export async function deleteHoliday(workDate: string): Promise<void> {
+  await api.delete(`/admin/attendance/holidays/${workDate}`);
+}
+
 // ─── الخروج المؤقت (admin side) ──────────────────────────────────────────────
 
 interface ApiAdminBreak {

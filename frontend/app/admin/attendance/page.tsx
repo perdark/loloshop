@@ -34,6 +34,7 @@ import { Select } from "@/components/ui/Select";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Modal } from "@/components/ui/Modal";
 import { CalculationDetails } from "@/components/admin/CalculationDetails";
+import { WeeklySchedulePanel } from "@/components/admin/WeeklySchedulePanel";
 
 const MODE_OPTIONS: { value: AttendanceVerificationMode; label: string }[] = [
   { value: "none", label: "بدون تحقق" },
@@ -314,9 +315,16 @@ export default function AdminAttendancePage() {
         </div>
       )}
 
+      {/* The weekly schedule comes FIRST: it is what actually decides lateness now, and the
+          single «الدوام الافتراضي» pair below it is only the fallback for a day with no row. */}
+      <WeeklySchedulePanel />
+
       {settings && (
         <section className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
-          <h2 className="mb-3 font-display-ar text-base font-bold text-ink">الدوام الافتراضي</h2>
+          <h2 className="mb-1 font-display-ar text-base font-bold text-ink">الدوام الافتراضي</h2>
+          <p className="mb-3 text-xs text-muted">
+            احتياطي فقط — يُستعمل لو يوم ما عنده صف بجدول الأسبوع فوق.
+          </p>
           <div className="grid gap-3 md:grid-cols-4">
             <Input
               label="وقت الحضور"

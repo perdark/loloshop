@@ -79,6 +79,10 @@ function mapGroup(
       (raw.locked_option_id as string | null) ??
       (raw.lockedOptionId as string | null) ??
       null,
+    priceRoleRestriction:
+      (raw.price_role_restriction as CatalogOptionGroup["priceRoleRestriction"]) ??
+      (raw.priceRoleRestriction as CatalogOptionGroup["priceRoleRestriction"]) ??
+      null,
     options: opts.map(mapOption),
   };
 }
@@ -241,6 +245,8 @@ export async function createCatalogGroup(
     input_type?: CatalogInputType;
     required?: boolean;
     max_select?: number | null;
+    /** null / omitted = every audience. See CatalogOptionGroup.priceRoleRestriction. */
+    price_role_restriction?: PriceRole | null;
   }
 ): Promise<{ id: string }> {
   const { data } = await api.post<{ data: { id: string } }>(

@@ -1,5 +1,211 @@
 # Progress
 
+## 2026-08-27 (b) — 🗓️ دوام الأسبوع + الإجازات (migration 093) · 💵 «راتبي ونشاطي» بالتفصيل
+
+**540/540 backend tests** (516 before), `tsc --noEmit` + eslint + `next build` clean, and both
+new screens driven in a real browser against the dev DB — including a real save round-trip.
+Spec: `docs/superpowers/specs/2026-08-27-staff-schedule-and-payroll-design.md`.
+
+### 1. The Friday bug — the concept did not exist, not just the value
+
+`staff_attendance_settings` held ONE `start_time`/`end_time` for all seven days and `checkIn`
+computed lateness against it every day. The shop opens **3 م الجمعة**, so every Friday بصمة was
+recorded ~6 hours late. A grep for `getDay` / `day_of_week` / `friday` / `جمعة` across
+`backend/` returned **nothing** — there was no weekday logic anywhere.
+
+**Migration 093** adds `staff_schedule_days` (7 rows, seeded السبت–الخميس 09:00–22:00،
+الجمعة 15:00–00:00) and `staff_holidays` (a date everyone is off).
+
+⚠️ **`weekday` is POSTGRES `EXTRACT(DOW)` numbering — 0 = الأحد … 6 = السبت, so الجمعة is 5.**
+Chosen so a query joins on it with no translation table; JS `getUTCDay()` agrees, which is why
+`dayOfWeek()` needs no date library.
+
+⚠️ **The seed's `ON CONFLICT DO NOTHING` is load-bearing.** It is repeated in `db/schema.sql`,
+which `scripts/deploy.sh` applies on EVERY deploy — without the guard each deploy would
+silently undo the owner's edited hours. Same trap, same reason, as 077's and 080's backfills.
+
+**`lib/staffSchedule.js` is the only place the rule lives**, the way `lib/shopTime.js` owns
+"what date is it at the shop" and `lib/counts.js` owns "what is money". A second copy is
+exactly how this bug happened. Resolution order: holiday → per-user override → weekday row →
+the pre-093 single pair (kept as the last resort so a DB missing a row behaves as before).
+
+⚠️ **الجمعة ends at EXACTLY 00:00, so it has no after-midnight window — and that is correct.**
+A 00:10 stamp is a new السبت shift. The midnight rule in `resolveStamp` only fires when the
+previous day's shift is still running, which starts mattering the moment an admin edits الجمعة
+to end at 01:00 (the screen allows it, and a test pins it). Two things were checked and are
+**already right, unchanged**: `scheduledMinutes` adds 24h when `end <= start`, and `checkOut`
+finds the open record by `check_out_at IS NULL`, never by date — so stamping out after midnight
+always closes the right row.
+
+⚠️ **`late_minutes` is frozen onto the record at check-in.** Editing the schedule or deleting a
+holiday never rewrites history, and the staff screen says so in as many words.
+
+### 2. Nothing was ever deducted for it — and this corrects HANDOFF
+
+**«Should lateness deductions reach the salary?» — they do not, and never did.**
+`staff_attendance_records.deduction_transaction_id` is only ever *cleared*
+(`attendanceController.js`), never set. So the Friday damage was a **record**, not a payment:
+`status='late'`, a wrong `late_minutes`, and a `deduction_amount` that /staff/me and the admin
+reports display and a human then pays from.
+
+⚠️ **`source_type <> 'attendance'` in `buildSalarySummary` MATCHES NOTHING.** Measured: no row
+in `staff_salary_transactions` has ever carried that value. Break deductions use
+**`'attendance_break'`** (`lib/attendanceBreak.js:28`), a different string — they ARE listed and
+ARE in the balance, as they should be. The filter is a leftover from a lateness auto-deduction
+that was never built. **Left in place on purpose**: removing it changes nothing today, and
+`payoutController`'s «المبلغ المقترح» carries the identical predicate — the two must keep
+agreeing, so they change together or not at all. Documented in the code beside both.
+
+`npm run friday-deduction-report` — READ-ONLY, writes nothing. It splits the rows: those
+measured against a wrong opening (the damage) from those already measured against 15:00
+(genuinely late, left alone), and prints the salary-transaction id per row so a reader can
+verify the "nothing was charged" claim instead of trusting it. Dev DB: 5 suspect, 3 genuine,
+**0 linked to any transaction**.
+
+### 3. `/admin/attendance` — جدول الدوام + الإجازات
+
+⚠️ **The week saves WHOLE, never a day at a time**, enforced server-side (`updateSchedule`
+refuses anything but seven days). Seven rows are one decision; a half-applied week is the shape
+where الجمعة is right and السبت is still wrong. `end < start` IS allowed — that is الجمعة, and
+the row shows «يمتد بعد منتصف الليل». `start == end` is refused.
+
+`formatTime12` / `formatShiftRange` in `frontend/lib/format.ts` render ص/م (Latin digits, the
+`fmtShopDate` convention). The DB keeps 24-hour `TIME`; nothing parses the display back.
+⚠️ Midnight is «12:00 ص», not «0:00 ص» — a zero hour reads as an unset field.
+
+### 4. `/staff/me` — «راتبي ونشاطي», the whole month in one call
+
+`GET /payroll/me/summary?month=YYYY-MM` (defaults to the current month **at the shop**, not
+UTC). Returns the schedule, every calendar day (present, absent, off, holiday — «وين غبت» is a
+calendar question), hours net of breaks, lateness, the breaks ledger with free/deducted/
+remaining, salary transactions with reasons, the goal, and pieces per day.
+
+⚠️ **THE INVARIANT `test/payrollSummary.test.js` PINS: lateness and salary are two ledgers and
+the payload must never merge them.** Folding `late_amount_shown` into `salary.balance` would
+show the staff a debt the shop has not charged. The التأخير section says «معروض — ما انخصمت من
+راتبك» in as many words, and a test asserts the amount appears in no salary transaction.
+
+A day is only «غياب» once it is in the past, the shop was open, and nothing was stamped —
+today and the rest of the month are not absences yet.
+
+### Verified in a browser (dev DB, prod build)
+
+Admin: all 7 days render, الجمعة «3:00 م – 12:00 ص» + the midnight badge, edited الجمعة to
+01:00 → saved → **confirmed in the DB** → restored to 00:00; added and listed a holiday, then
+deleted it. Staff: تموز 2026 shows 20 أيام دوام · 225 س · 5 أيام تأخير, the التأخير section
+lists each date with its expected time, actual check-in and minutes, and the الفتحات and دوام
+الأسبوع sections render. `hOverflow = 0`, month-picker tap targets exactly **44px**.
+⚠️ **True 390px is STILL unverified — fifth session running.** `resize_window` reports success
+and the viewport stays 977px, and `Page.captureScreenshot` timed out once. Overflow and tap
+targets were measured in the DOM instead, which is real evidence but not the same as eyes on a
+phone. No table was used anywhere in either screen precisely because of this.
+
+## 2026-08-27 — ✍️ سادة front · 🖼️ «إضافة إطار» retail-only · 📏 مسطرة · 📄 two specs
+
+Uncommitted on `main`. **516/516 backend tests** (510 before; the two `app-open` flakes HANDOFF
+documents passed on the full run), `tsc --noEmit` clean. Three small pieces shipped in code, two
+specs written for the larger work. Owner conversation 2026-08-26/27 decomposed seven asks into
+six pieces; 1·2·3 are these, 4·5·6 are the specs.
+
+### 1. Calligraphy — the sash front is now as plain as the back
+
+Owner: «قلل الزخارف للجهة الامامية خليها نفس الظهر». `lib/calligraphyPrompt.js` had `front:
+'Add small floated decorative ornaments around the words.'` while `back` was told to use
+«clearly LESS THAN HALF the decoration of the front» — two panels of one sash that did not read
+as a set. Both now share ONE `MINIMAL` string, so they cannot drift apart again, and the back's
+self-referential wording is gone: once both are minimal, a comparison to the other panel means
+nothing and only gives the model something to over-read.
+
+⚠️ **`cap` deliberately keeps its ornaments** — a cap is a separate garment, not the other half
+of a sash. `cap_side` never reaches that table (`calligraphyEngine.js:16` maps it to `cap`
+first), so front/back/cap are the only three keys that can ever be looked up. Affects newly
+generated plates only; existing plates are files on disk and unchanged.
+
+*Still open: the owner also asked «can we make it better too?» — that needs eyes on real output,
+not a prompt guess. Generate a few plates and decide from them.*
+
+### 2. «إضافة إطار» — migration 092, an option group restricted to one price audience
+
+Owner: a 5,000 IQD toggle on the sash for a plain retail student and **never** for a student who
+joined through a ممثل. No such mechanism existed: groups had `gender_restriction` and products
+had `wholesaler_only`/`retail_only`, but a group could not be hidden by audience.
+
+`option_groups.price_role_restriction price_role` (NULL = everyone). The mechanism is that
+`catalogController.priceRoleForUser` resolves a `students` row carrying a `wholesaler_id` to
+**`'wholesaler'`** — so `price_role_restriction = 'retail'` *is* «الطلاب العاديين فقط». That is
+not incidental and must not be tidied.
+
+⚠️ **Enforced in TWO places on purpose.** `catalogController` hides the group from the
+configurator; `orderController.priceSelections` refuses it on the order path. Hiding alone still
+accepts a hand-posted `group_id`. Both filter in the QUERY rather than rejecting afterwards, so
+a restricted group is invisible to `required` as well — otherwise a retail-only *required* group
+would block every rep-linked student's checkout.
+
+⚠️ **Privileged callers (admin / production manager) see every group.** The admin product editor
+reads the same `/catalog/products/:id/full` endpoint, so filtering them too would hide the group
+from the one person who has to configure it. The 120s memo key already carries both `role` and
+`isPrivileged`, so the two audiences never share a cached payload.
+
+`test/optionGroupAudience.test.js` — 6 tests covering retail sees / rep-linked does not /
+anonymous is retail / admin sees all / **a hand-posted restricted group is refused** / the right
+student can buy it at 35,000. The enforcement test was **red/green verified**: neutering the
+`orderController` filter fails that test alone and nothing else.
+
+**Owner action:** the group itself is data, not code — create it on `/admin/products`: الوشاح →
+«إضافة إطار» · نوع `toggle` · يظهر لـ «الطلاب العاديين فقط» · سعر التجزئة 5,000.
+
+### 3. مسطرة — migration 091, a new workshop operation on the cap
+
+⚠️ **The operation list is CODE, not a table.** `workshop_piece_rates` stores an amount per
+(operation, product, audience) but never the vocabulary, so adding a job means editing
+`OPERATIONS`, `PRODUCT_OPS`, `OP_LABEL_AR` in `workshopController.js`, widening
+`WorkshopOperation` in `frontend/lib/workshop.ts`, **and** seeding the rate rows in
+`db/schema.sql` — the file `npm run migrate` actually applies — as well as in the numbered
+migration. Miss the seed and the job appears on screen paying nothing; miss `PRODUCT_OPS` and
+`upsertRate` 400s on a pair the rates screen just offered.
+
+Cap-only, and **not** locked to حمزة: any active workshop worker may log it, like every other
+operation. The station's dropdown is built from the server's rate matrix, so it appeared with no
+frontend change beyond the type.
+
+⚠️ **Seeded at 0 on purpose** — a wrong wage that looks entered is worse than an obvious zero.
+**Owner action: set the real rate** at `/admin/workshop → أسعار القطع`. `updated_by` stays NULL
+so `schema.sql`'s retail-alignment UPDATE keeps treating it as unset (a no-op here, both are 0).
+
+### 4. Two specs written, no code
+
+- `docs/superpowers/specs/2026-08-27-staff-schedule-and-payroll-design.md` — the weekly
+  schedule (السبت–الخميس 09:00–22:00، الجمعة 15:00–00:00)، الإجازات، and the rebuilt
+  «راتبي ونشاطي».
+- `docs/superpowers/specs/2026-08-27-admin-ai-console-design.md` — «لولو الإدارة».
+
+### Two findings that correct standing claims
+
+⚠️ **THE FRIDAY BUG IS NOT FIXED, AND THE CONCEPT DOES NOT EXIST.** There is no weekday logic
+anywhere in `backend/` — a grep for `getDay`, `day_of_week`, `friday`, `جمعة` returns nothing.
+`staff_attendance_settings` holds ONE `start_time`/`end_time` (`db/schema.sql:862`), and
+`checkIn` computes lateness against it every day (`attendanceController.js:540`). The shop opens
+**3 م الجمعة**, so every Friday check-in records ~6 hours late. There is no holiday concept
+either: `attendance_required` is per-*user*, not per-*date*.
+
+⚠️ **But nothing was ever deducted for it, and this answers a question standing open in
+HANDOFF.** «Should lateness deductions reach the salary?» — they do not, today.
+`staff_attendance_records.deduction_transaction_id` is only ever *cleared*
+(`attendanceController.js:783`), never set; the sole writer of an attendance salary transaction
+is `lib/attendanceBreak.js`, for breaks. So the Friday damage is a **record**, not a payment:
+every Friday row carries `status='late'`, wrong `late_minutes`, and a `deduction_amount` that
+both the staff page and the admin reports display and a human then pays from. Wrong data a
+person acts on, not money already taken — which decides the shape of the retro fix (a read-only
+report, owner decides; spec §7).
+
+⚠️ **«لولو الإدارة» already has history, and the widget that lies is a DIFFERENT surface.**
+There are two admin AI controllers. The console (`/admin/assistant`) loads and renders the last
+15 turns (`getAdminChatHistory(15)`, `assistant/page.tsx:142`) and its refusal text is accurate.
+The stale sentence naming 8 of 21 metrics is the OLDER `/admin` widget
+(`adminAnalyticsChatController.js:105`). What the console genuinely lacks is **memory**: both
+model calls get `system + the current question` only (lines 139, 195) and `sessionKey` is
+`null`, so the screen shows a thread the model has never seen. Spec §2.3.
+
 ## 2026-08-25 — 💸 Starting a discount round · 📱 /admin/app · 🔔 an admin-written push · ✅ notification opt-in
 
 Branch `feat/discount-round-and-app-console`, three commits, **unmerged**. 508/508 backend tests
