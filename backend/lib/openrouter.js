@@ -10,11 +10,40 @@ const MODELS = {
   premium:  'google/gemini-3-pro-image', // optional: bolder Thuluth, ~$0.24/image @4K
 };
 
-function tagged(message, status, code) {
-  const e = new Error(message); e.status = status; e.expose = true; e.code = code; return e;
+function tagged(message, status, code, extra = {}) {
+  const e = new Error(message); e.status = status; e.expose = true; e.code = code;
+  return Object.assign(e, extra);
 }
 
-async function generateImage({ model, prompt, resolution = '2K', aspectRatio = '9:16' }) {
+// ⚠️ THE THREE UPSTREAM FAILURES ARE NOT INTERCHANGEABLE — added 2026-08-28 after a day when
+// all three wore the same code and the shop could not tell "we are out of money" from "the
+// model hiccuped". Each one needs a different response, so each gets its own code:
+//
+//   ERR_OPENROUTER_CREDIT   402. Nothing to retry — retrying just fails twice. The plates are
+//                           blameless, so callers leave them PENDING and tell the admin.
+//   ERR_OPENROUTER_NO_IMAGE Gemini finished with no image at all (finish_reason STOP,
+//                           block_reason null) — 10 times in the logs by 2026-08-28. Nothing
+//                           is billed for that response and the SAME prompt usually succeeds
+//                           on a fresh call, so it is the one failure worth retrying here.
+//   ERR_OPENROUTER          everything else. Unchanged behaviour, unchanged code, so every
+//                           existing caller and test keeps its old meaning.
+const NO_IMAGE_RE = /no image data|could not generate an image/i;
+const MAX_ATTEMPTS = 2; // one retry, and ONLY for ERR_OPENROUTER_NO_IMAGE. Each retry is free
+                        // (no image was billed) but a loop against a broken model is not.
+
+function errorFor(status, detail) {
+  if (status === 402) {
+    return tagged('انتهى رصيد توليد صور الخط — أضِف رصيداً في OpenRouter ليعود التوليد',
+      402, 'ERR_OPENROUTER_CREDIT');
+  }
+  if (NO_IMAGE_RE.test(detail || '')) {
+    return tagged('المولّد رجّع بلا صورة — أعد المحاولة', 502, 'ERR_OPENROUTER_NO_IMAGE',
+      { retriable: true });
+  }
+  return tagged('فشل توليد صورة الخط', 502, 'ERR_OPENROUTER');
+}
+
+async function attemptImage({ model, prompt, resolution, aspectRatio }) {
   const key = process.env.OPENROUTER_API_KEY;
   if (!key) throw tagged('مفتاح OpenRouter غير مهيأ', 500, 'ERR_OPENROUTER_KEY');
 
@@ -39,7 +68,7 @@ async function generateImage({ model, prompt, resolution = '2K', aspectRatio = '
     let detail = '';
     try { detail = JSON.stringify(await resp.json()); } catch { /* ignore */ }
     console.error('OpenRouter non-200:', resp.status, detail.slice(0, 500));
-    throw tagged('فشل توليد صورة الخط', 502, 'ERR_OPENROUTER');
+    throw errorFor(resp.status, detail);
   }
 
   const data = await resp.json();
@@ -50,6 +79,20 @@ async function generateImage({ model, prompt, resolution = '2K', aspectRatio = '
   }
   const cost = Number((data.usage && data.usage.cost) || 0);
   return { buffer: Buffer.from(b64, 'base64'), cost };
+}
+
+async function generateImage({ model, prompt, resolution = '2K', aspectRatio = '9:16' }) {
+  let last;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      return await attemptImage({ model, prompt, resolution, aspectRatio });
+    } catch (err) {
+      last = err;
+      if (!err.retriable || attempt === MAX_ATTEMPTS) throw err;
+      console.warn(`OpenRouter ${err.code} — retrying (${attempt}/${MAX_ATTEMPTS})`);
+    }
+  }
+  throw last;
 }
 
 module.exports = { generateImage, MODELS, OPENROUTER_URL };

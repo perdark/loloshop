@@ -1,5 +1,112 @@
 # Progress
 
+## 2026-08-28 — 🖌️ الخط: توفير 17% فوراً + ثلاث إصلاحات لما يفشل التوليد
+
+**547/547 backend tests** (540 before — 7 new in `backend/test/calligraphyResilience.test.js`).
+No migration, no new dependency, no frontend change. Uncommitted at the time of writing.
+
+### What started this: «الخط ما يشتغل — أظن الرصيد خلص»
+
+Measured on prod, not guessed. OpenRouter answered **402 Insufficient credits** five times to
+the API and twice to the worker on 2026-08-28 between **17:49 and 18:01 (+02)**; the last paid
+image before that was **17:33**. Nine plates were marked `failed`, all nine real student names.
+By ~18:35 the account read `total_credits 112 / total_usage 91.22` (≈ $20.7 available) and a
+real generation through the live code path succeeded (2.4 MB PNG, $0.1021) — so credit was back.
+`total_credits` did not move across two reads, so the top-up (if that is what it was) happened
+before the first read; a transient OpenRouter accounting fault is the other candidate and cannot
+be separated from here. **The daily ceiling was NOT the cause**: `CALLIG_DAILY_USD_MAX` is $10
+and that day spent $1.55.
+
+### The cost picture (the ledger's first honest 10 days)
+
+`calligraphy_spend_log` starts 2026-08-18, so «30 days» of it is really 10: **$21.93**, i.e.
+**$2.19/day ≈ $66/month**, for 333 plates = **$0.066 per name**. Sheets $17.73 (81%), rerolls
+$4.19 (19%). The distribution is where the money is:
+
+| names on the sheet | sheets | cost | per name |
+|---|---|---|---|
+| **1** | **110** | **$11.14** | **$0.101** |
+| 2 | 33 | $3.34 | $0.050 |
+| 3–9 | 31 | ~$3.10 | ~$0.02 |
+| 10 | 1 | $0.10 | **$0.010** |
+
+**63% of all sheet money bought one name at ten times the per-name price of a full sheet.** The
+cross-job top-up written on 2026-08-18 is working as designed; it simply finds nothing, because
+a designer pressing «توليد» for one student is usually the only pending plate in the shop at
+that second.
+
+### 1. A batch of one stops buying the ten-name canvas — ~$11/month, 17%
+
+`processNextBatch` always bought `2K 9:16` even when the batch held a single name.
+`sheetBatch.length === 1` now buys **`1K 1:1` with `buildSinglePrompt`** — byte-for-byte what
+`reroll` has bought since 2026-08-18 across 62 accepted presses ($0.067 vs $0.101).
+**Resolution does not drop, it rises:** a 2K sheet gives each of ten stacked bands ~200px of
+height; a 1K 1:1 canvas gives one name up to 1024px. `buildSheetPrompt` was also the wrong
+prompt for one name — it orders the model to «spread them out to fill the whole height».
+
+⚠️ **The crop path is deliberately NOT shortcut for solo.** `reroll` may fall back to the
+uncropped canvas because `matchPlateGeometry` reframes it onto the original band afterwards;
+nothing on the batch path does, so an uncropped plate would reach `order_items.plate_image_url`
+full of white margin and be stitched that way. A solo crop mismatch takes the same paid retry
+and the same manual review a ten-name sheet takes. (This was written, reviewed, and removed
+before it shipped — don't re-add it.)
+
+### 2. The three upstream failures stopped wearing one code
+
+`lib/openrouter.js` returned `ERR_OPENROUTER` for everything, so «we are out of money», «the
+model hiccuped» and «the wire is down» were indistinguishable to every caller:
+· **`ERR_OPENROUTER_CREDIT`** (402) — never retried; retrying only fails twice.
+· **`ERR_OPENROUTER_NO_IMAGE`** — Gemini finishing with no image (`finish_reason: STOP`,
+  `block_reason: null`), **10 times in the logs by 2026-08-28**. Nothing is billed for that
+  reply and the same prompt usually lands on a fresh call, so it is the one failure worth
+  retrying — **once**, bounded in `generateImage` (`MAX_ATTEMPTS = 2`), never a loop.
+· **`ERR_OPENROUTER`** — everything else, unchanged code and unchanged meaning, so every
+  existing caller and test keeps working.
+
+### 3. An outage no longer burns the plates
+
+The catch in `processNextBatch` marked the batch `failed` for **any** error — which is how one
+402 retired nine students' names on 2026-08-28. Codes in `INFRA_CODES`
+(`ERR_OPENROUTER_CREDIT` · `_NET` · `_KEY`) now leave the plates **`pending`**, exactly as the
+daily-ceiling branch a few lines above has always done for the identical "cannot buy right now"
+situation. Pending is self-healing: the workbench's «معالجة» press or any later job's top-up
+picks them straight back up. A genuine generation failure still fails the plate — leaving those
+pending forever would hide a broken name behind an endless retry, and
+`calligraphyResilience.test.js` pins both sides of that branch.
+
+### 4. Running out of credit now reaches a human
+
+`notifyCreditExhausted()` (`lib/calligraphySpend.js`) writes the admins one `notifications` row
+— which the push outbox turns into a phone push for free — deduped 6h in SQL plus a 30-minute
+in-process memo. Called from all three paid paths (batch, reroll, element). **Awaited, not
+fired and forgotten:** it is a rare error path where latency costs nothing, and the worker may
+be recycled by pg-boss the moment it returns, so a detached insert is the notification that
+never arrives. Dedupe is 6h rather than the spend warning's 24h because this one is actionable
+and the shop is down until someone acts.
+
+⚠️ Deliberately a **second** notification type (`calligraphy_credit_exhausted`), not a reuse of
+`calligraphy_budget_warning`. They are opposite events: the ceiling is the shop choosing to
+stop and clears itself when the 24h window rolls; a 402 is generation being off until a human
+buys credit, and nothing in the app can clear it.
+
+### What the designer sees now
+
+Unchanged frontend. On a 402 the plates stay pending, so `CalligraphyTool`'s poll no longer
+reads the job as finished; after its stall window it falls to the browser loop, which surfaces
+the server's Arabic message via `getApiErrorMessage` — «انتهى رصيد توليد صور الخط». **Before
+this, the plates went `failed`, the poll saw "finished", and the screen said nothing at all.**
+
+### Not done — the bigger half of the saving
+
+**Batching is untouched and is where the other ~$30/month is.** Turning those 110 solo presses
+into ~11 full sheets needs a «ولّد كل المعلّق» press (or a timed sweep), and it costs something
+real: the plate stops appearing immediately. That is an owner decision, not a code one, and it
+was explicitly deferred this session. With both, $0.066 → ~$0.030 per name.
+
+Also still unmeasured: **how often a crop mismatch buys a second full image.** `MAX_CROP_TRIES`
+is 2 and the attempt count is not stored on the plate, so the retry share of those 175 images
+is unknown. Writing `attempts` onto the row would answer it within a day.
+
 ## 2026-08-27 (b) — 🗓️ دوام الأسبوع + الإجازات (migration 093) · 💵 «راتبي ونشاطي» بالتفصيل
 
 **540/540 backend tests** (516 before), `tsc --noEmit` + eslint + `next build` clean, and both

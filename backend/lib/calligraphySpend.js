@@ -98,4 +98,45 @@ async function maybeWarnSpend(spent, { warnUsd, maxUsd } = caps()) {
   }
 }
 
-module.exports = { checkBudget, budgetError, logSpend, maybeWarnSpend, spentLast24h };
+// In-process guard, same shape as the spend warning's.
+let creditMemoUntil = 0;
+
+/**
+ * OpenRouter answered 402 — the ACCOUNT is out of money, which is a different event from this
+ * file's own ceiling and needs the opposite reaction. The ceiling is the shop choosing to stop
+ * (raise it, or wait for the window); a 402 is generation being off until a human buys credit,
+ * and nothing in the app can clear it.
+ *
+ * Added 2026-08-28: on that day generation died at 17:49, nine plates were marked failed, and
+ * the owner found out by asking. The 402 was logged to a file on the server and reached nobody.
+ * Dedupe is 6h, not the warning's 24h — this one is actionable and the shop is down until it
+ * is acted on. Best-effort: never let telling the admin break the caller's own error path.
+ */
+async function notifyCreditExhausted() {
+  if (Date.now() < creditMemoUntil) return;
+  try {
+    const { rowCount } = await query(
+      `INSERT INTO notifications (user_id, type, title_ar, body_ar, link)
+       SELECT u.id, 'calligraphy_credit_exhausted', $1, $2, '/admin/calligraphy'
+         FROM users u
+        WHERE u.role = 'admin' AND u.deleted_at IS NULL
+          AND NOT EXISTS (
+                SELECT 1 FROM notifications
+                 WHERE type = 'calligraphy_credit_exhausted'
+                   AND created_at > NOW() - INTERVAL '6 hours')`,
+      [
+        'توقف توليد الخط: انتهى الرصيد',
+        'رفض OpenRouter الطلب لانتهاء الرصيد، وتوليد الخط متوقف الآن. الأسماء المعلّقة محفوظة '
+          + 'وتُولَّد تلقائياً بعد إضافة الرصيد — لا حاجة لإعادة إدخالها.',
+      ]
+    );
+    if (rowCount > 0) console.error('calligraphy: OPENROUTER CREDIT EXHAUSTED — admins notified');
+    creditMemoUntil = Date.now() + 30 * 60 * 1000;
+  } catch (e) {
+    console.error('calligraphy credit notification failed:', e.message);
+  }
+}
+
+module.exports = {
+  checkBudget, budgetError, logSpend, maybeWarnSpend, spentLast24h, notifyCreditExhausted,
+};

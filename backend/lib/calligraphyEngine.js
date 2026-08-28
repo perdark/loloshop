@@ -6,12 +6,15 @@
 const { query } = require('./db');
 const { generateImage, MODELS } = require('./openrouter');
 const { cropSheet } = require('./sheetCrop');
-const { buildSheetPrompt } = require('./calligraphyPrompt');
+const { buildSheetPrompt, buildSinglePrompt } = require('./calligraphyPrompt');
 const { saveBufferToUploads } = require('./upload');
 const { looksLikeInstruction } = require('./calligraphyText');
-const { checkBudget, budgetError, logSpend } = require('./calligraphySpend');
+const { checkBudget, budgetError, logSpend, notifyCreditExhausted } = require('./calligraphySpend');
 
 const BATCH = 10;
+// Upstream failures that are about the SHOP's account or the wire, never about these names.
+// Callers must not retire a plate for one — see the catch in processNextBatch.
+const INFRA_CODES = new Set(['ERR_OPENROUTER_CREDIT', 'ERR_OPENROUTER_NET', 'ERR_OPENROUTER_KEY']);
 // The prompt library only knows front/back/cap styles — cap_side renders with the cap style.
 const promptVariant = (v) => (v === 'cap_side' ? 'cap' : v);
 
@@ -180,6 +183,24 @@ async function processNextBatch(jobId, req = null) {
   // cost (each retry is a full paid image). Flag for manual review only if every
   // attempt mismatches (never mis-slice — §11).
   const MAX_CROP_TRIES = 2;
+  // A BATCH OF ONE IS NOT A SHEET — buy what a reroll buys (2026-08-28 cost audit). Measured on
+  // prod over the 10 days the ledger existed: 110 of 175 paid images carried a single name, at
+  // $0.101 each, which is 63% of all sheet money bought at TEN TIMES the per-name price of a
+  // full sheet ($0.010). The 2K 9:16 canvas exists to stack ten bands with croppable gaps; one
+  // name uses none of that and the band is normalized to the sibling geometry afterwards
+  // anyway. This is byte-for-byte the configuration `reroll` has used since 2026-08-18 —
+  // 1K 1:1, buildSinglePrompt, ~$0.067 — across 62 accepted presses, so it is proven artwork,
+  // not a new experiment. Resolution does not drop, it RISES: a 2K 9:16 sheet gives each of ten
+  // stacked bands ~200px of height, while a 1K 1:1 canvas gives this one name up to 1024px.
+  // buildSheetPrompt is wrong here for a second reason — it would order the model to "spread
+  // them out to fill the whole height" with a single line to spread.
+  //
+  // ⚠️ The crop path below is deliberately NOT shortcut for solo. `reroll` may fall back to the
+  // uncropped canvas because matchPlateGeometry reframes it onto the original band afterwards;
+  // nothing on THIS path does, so an uncropped plate would reach order_items.plate_image_url
+  // full of white margin and be stitched that way. A solo crop mismatch takes the same paid
+  // retry, then the same manual review, that a ten-name sheet takes.
+  const solo = sheetBatch.length === 1;
   let plates = null;
   let sheet = null;
   let totalCost = 0;
@@ -189,10 +210,36 @@ async function processNextBatch(jobId, req = null) {
     attemptsUsed = attempt;
     let gen;
     try {
-      gen = await generateImage({ model, prompt: buildSheetPrompt(names, promptVariant(variant), style) });
+      gen = solo
+        ? await generateImage({
+            model,
+            prompt: buildSinglePrompt(sheetBatch[0].render_text, promptVariant(variant),
+              sheetBatch[0].element_text || null, style),
+            resolution: '1K',
+            aspectRatio: '1:1',
+          })
+        : await generateImage({ model, prompt: buildSheetPrompt(names, promptVariant(variant), style) });
     } catch (err) {
-      // Only the requesting job's plates fail — nothing was paid for THIS attempt, and a
-      // hitchhiker left pending simply rides its own job's next batch instead.
+      // ⚠️ AN OUTAGE IS NOT THE PLATE'S FAULT — do not burn the work for it (2026-08-28).
+      // Out of credit or the network down says nothing about these names: the same batch will
+      // generate perfectly once money or connectivity returns. Marking them `failed` threw
+      // that away — on 2026-08-28 nine real students' plates were retired by one 402 — while
+      // the ceiling in checkBudget above, for the very same "cannot buy right now" situation,
+      // has always left them PENDING. These now agree. Pending is also self-healing: the
+      // workbench's «معالجة» press or ANY later job's top-up picks them straight back up.
+      if (INFRA_CODES.has(err.code)) {
+        // AWAITED, not fired and forgotten: this is a rare error path where latency costs
+        // nothing, and the worker may be recycled by pg-boss the moment we return — a
+        // detached insert would be the notification that never arrives.
+        if (err.code === 'ERR_OPENROUTER_CREDIT') await notifyCreditExhausted();
+        const c = await jobCounts(jobId);
+        return {
+          error: { status: err.status || 502, message: err.message, code: err.code },
+          data: { processed: 0, ...c, remaining: c.pending, job_cost: await jobCost(jobId), plates: [] },
+        };
+      }
+      // A real generation failure. Only the requesting job's plates fail — nothing was paid for
+      // THIS attempt, and a hitchhiker left pending simply rides its own job's next batch.
       await query(`UPDATE calligraphy_plates SET status='failed', error=$2 WHERE id = ANY($1)`,
         [batch.map((b) => b.id), err.code || 'ERR_OPENROUTER']);
       const c = await jobCounts(jobId);

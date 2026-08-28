@@ -8,7 +8,7 @@ const { ZipArchive } = require('archiver');
 const sharp = require('sharp');
 const { query } = require('../lib/db');
 const { generateImage, MODELS } = require('../lib/openrouter');
-const { checkBudget, budgetError, logSpend } = require('../lib/calligraphySpend');
+const { checkBudget, budgetError, logSpend, notifyCreditExhausted } = require('../lib/calligraphySpend');
 const { cropSheet } = require('../lib/sheetCrop');
 const { buildSheetPrompt, buildSinglePrompt } = require('../lib/calligraphyPrompt');
 const { saveBufferToUploads } = require('../lib/upload');
@@ -544,7 +544,12 @@ async function reroll(req, res) {
   // images (2026-08-18 audit). 1:1 keeps the canvas ~1024px wide so long teacher names don't
   // cramp or wrap the way they would on a 1K 9:16 portrait (~576px wide).
   try { gen = await generateImage({ model, prompt: buildSinglePrompt(renderText, promptVariant(variant), elementText, style), resolution: '1K', aspectRatio: '1:1' }); }
-  catch (err) { return res.status(err.status || 502).json({ error: err.message, code: err.code || 'ERR_OPENROUTER' }); }
+  catch (err) {
+    // A 402 means the shop is out of credit, not that this name is bad — tell the admin, since
+    // until 2026-08-28 the only record of it was a line in a log file on the server.
+    if (err.code === 'ERR_OPENROUTER_CREDIT') await notifyCreditExhausted();
+    return res.status(err.status || 502).json({ error: err.message, code: err.code || 'ERR_OPENROUTER' });
+  }
   await logSpend('reroll', gen.cost);
   // single-name image: trim to one band (expected 1); fall back to full image
   let plateBuf = gen.buffer;
@@ -803,6 +808,7 @@ async function generateElement(req, res) {
   try {
     gen = await generateImage({ model: MODELS.standard, prompt: buildElementPrompt(word), resolution: '1K', aspectRatio: '1:1' });
   } catch (err) {
+    if (err.code === 'ERR_OPENROUTER_CREDIT') await notifyCreditExhausted();
     return res.status(err.status || 502).json({ error: err.message || 'فشل التوليد', code: err.code || 'ERR_OPENROUTER' });
   }
   await logSpend('element', gen.cost);
