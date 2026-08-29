@@ -1,5 +1,87 @@
 # Progress
 
+## 2026-08-29 (b) — 📲 iOS push works, and the K40 talks to us on real hardware
+
+Two things that had never been proven on a physical device, both proven tonight.
+
+### iOS push: 0 tokens in 13 days → delivered end to end
+
+The 🔴 landmine is CLOSED. `1.0.5` shipped from the other session's `cb91f8d` (Capacitor's iOS
+template ships no `didRegisterForRemoteNotificationsWithDeviceToken`, so AppDelegate took the
+APNs token from iOS and dropped it — `register()` succeeded and the plugin fired NEITHER
+`registration` NOR `registrationError`, which is why `push_register_errors` was empty). Neither
+the entitlement, nor the APNs key, nor the provisioning profile was ever the problem.
+
+Measured on prod as it happened: **0 iOS tokens → 5 in half an hour**, and only two of them are
+the owner's — two real students (هدير, ريام) and two staff (محمد عماد, محمد عادل) registered on
+their own once `b8b0ba0` re-pointed the update banner at 1.0.5. A test notification to the admin
+account was accepted by APNs at 21:57:41 and **arrived on the phone**.
+
+⚠️ **Reach, not delivery, is now the limit.** A 2,249-recipient broadcast at 21:33 drained in
+under four minutes: **151 sent, 2,102 skipped, 5 failed, 0 pending**. `skipped` means that user
+has no device token — push can physically reach ~7% of the shop (165 tokens / 2,249 retail).
+Nothing is stuck and the drain is healthy; the number to move is installs, not code.
+
+### The K40 answered on real hardware — and four things the plan could not have known
+
+1. **The shop's Zain Fi (Huawei B530-937) does not bridge its LAN port to WiFi.** The device sat
+   at 192.168.0.177 with a valid lease, visible in the router's own client list, and this laptop
+   could not even ARP it. The router exposes no isolation setting to change it, and the laptop
+   has no Ethernet port. **A LAN test is impossible in that shop** — do not plan one again.
+2. **«Enable Domain Name» was ON**, so the device ignored the IP/port pair entirely.
+3. **The device speaks TLS by default.** Visible only in a packet capture: a TLS ClientHello
+   arriving on our plain-HTTP port, answered `400 Bad Request`, retried every 15s forever. That
+   also means production can serve it over **Caddy on 443 with a real certificate** — the device
+   supports both HTTPS and domain names, so no extra open port is needed.
+4. **The parser was right first time**: the real ATTLOG line
+   `1\t2026-08-29 21:39:32\t0\t1\t…` gave `stored=1 rejected=0`, and `punch_reject` stayed empty.
+
+Proven against the real unit over an SSH reverse tunnel (VPS:8090 → laptop): handshake, ATTLOG
+upload, PIN claim + replay, attendance derivation, **and the command channel** — a
+`DATA UPDATE USERINFO` name push was acknowledged `Return=0` and the Arabic name rendered.
+
+⚠️ **RUNNING THE TEST SUITE WHILE A REAL DEVICE IS ATTACHED WRITES TO THE DEVICE.** The fixtures
+queue `device_commands`, and the physical K40 executed them — it created and deleted a user
+`PIN=54971` named `ZZTEST-…` on the shop's screen. Harmless here; do not run the suite against a
+database a live device is polling.
+
+### Owner decisions, implemented (commit `ffcb0ce`, UNMERGED)
+
+- **دخول/خروج/خروج مؤقت all come from the device's own status keys.** Only status 2 and 3 are
+  special; every other value falls through to the forgiving first-in/last-out derivation,
+  because most workers press no key and their day must still be right.
+- **إذن الادمن is removed from الخروج المؤقت, in behaviour and in money.** `leaveBreak` no longer
+  409s an unapproved request, and `computeCharge` lost its `approved` argument: free while the
+  monthly allowance lasts, charged beyond it. ⚠️ **Retroactive by construction** —
+  `recomputeMonth` re-prices the whole month, so deploying forgives current-month deductions
+  that existed only for want of an approval.
+- **A break nobody returned from** is closed by the next punch of any kind, flagged
+  `auto_closed`, and the admin is notified; a punch on a LATER day closes it at its own shift's
+  end instead of billing the night.
+
+**601/601 backend tests** (591 before). Five tests encoding the OLD approval policy were
+rewritten to assert the new one. Found while testing: **`pg` parses a DATE into a JS Date at
+LOCAL midnight**, so `toISOString()` reports the previous day in Baghdad — every same-day break
+looked cross-day and clamped to 0 minutes. Caught by tests, not by reading.
+
+### Corrections to this file
+
+⚠️ **The 2026-08-29 (a) entry below says the K40 work is «deliberately not deployed». That is no
+longer true** — it merged and auto-deployed at 16:58 UTC. `origin/main` carries it, prod is
+checked out there, migration 094 is applied and all five tables exist (empty). The device half is
+inert on prod only because no serial is registered.
+
+### Still open
+
+- `ffcb0ce` is unmerged — it moves real salary numbers, so it wants a deploy someone is watching.
+- Prod transport undecided: Caddy on 443 (now known to be possible) vs the `DEVICE_PORT`
+  listener added in that commit, which serves `/iclock` and 404s everything else.
+- ⚠️ **Temporary VPS changes still in place from the tunnel test:** `ufw allow 8090/tcp` and
+  `GatewayPorts clientspecified` in `/etc/ssh/sshd_config` (backup: `/root/sshd_config.bak-2026-08-29`).
+  Revert both once the device is on its real endpoint.
+- Prod DB backup taken first: `/root/loloshop-prod-2026-08-29.dump` (5.7 MB, 79 tables verified).
+
+
 ## 2026-08-29 — 👆 جهاز البصمة ZKTeco K40 Pro عبر ADMS — كود كامل، ما انزل بعد
 
 **591/591 backend tests.** Migration **094**, zero new npm dependencies, one new frontend

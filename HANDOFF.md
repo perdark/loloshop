@@ -28,17 +28,17 @@ last verified 2026-08-10 and are unchanged.
 | Migration 078 | ⚠️ **applied to the DEV DB only** — the AI assistant's `ai_chat_messages`. It is in `db/schema.sql` too, so the next prod `npm run migrate` creates it. **Run it in the same deploy as the code:** until the table exists the cap check throws and both assistant endpoints 500 (the rest of the site is unaffected — nothing else reads that table). |
 | Android | **v1.0.4 (versionCode 5) IN PRODUCTION REVIEW** — deep links + GPS + push in one review |
 | iOS | **1.0.4 (build 1786309948) SUBMITTED — «Waiting for Review»** (2026-08-10, ≤48h) |
-| Android push | ✅ working end to end — **145 device tokens on prod**, newest registered 2026-08-25 |
-| iOS push | 🔴 **BROKEN ON DEVICE — 0 tokens after 13 days live.** The credentials are fine (`push.configured()` → both true, key verified against Apple's production endpoint) and so is the repo: `codemagic.yaml` writes `aps-environment: production` and asserts it, `@capacitor/push-notifications` is a dependency, `npx cap sync ios` runs, and `PushRegistrar` is platform-agnostic — the identical path works on Android. See the 🔴 landmine below for the evidence and the next step. |
+| Android push | ✅ working end to end — **160 device tokens on prod** |
+| K40 / ADMS | ⚠️ **ALREADY ON `main` AND DEPLOYED** since 2026-08-29 16:58 UTC (`4f8bb3f`), migration 094 applied, all five tables live and EMPTY. Inert only because no serial is registered. `PROGRESS.md`'s older entry still says "deliberately not deployed" — it is stale. Proven against the real K40 on 2026-08-29 over a temporary tunnel; what is NOT deployed is `ffcb0ce` (status keys + the break-policy change). |
+| iOS push | ✅ **WORKS END TO END — proven on a real iPhone 2026-08-29 21:57.** The cause was never the entitlement, the APNs key or the provisioning profile: Capacitor's iOS template ships no `didRegisterForRemoteNotificationsWithDeviceToken`, so AppDelegate took the APNs token and dropped it — `register()` succeeded and the plugin fired NEITHER `registration` NOR `registrationError`, which is why `push_register_errors` was empty. Fixed by `cb91f8d`, shipped as **1.0.5**. Tokens went **0 → 5 in half an hour**, including two real students who updated on their own. ⚠️ What limits push now is REACH, not delivery: 165 tokens against 2,249 retail accounts, so a broadcast physically reaches ~7%. |
 | Backend tests | **508/508 on `main`** (2026-08-25, after the discount-round + app-console merge; 479 before it). The `app-open` failure the row below described now PASSES; it was flaky, not broken. Kept because it will likely flap again:  `app-open: a ping inside the session window does NOT count a second open`, `test/adminConsole.test.js:371`, failed on 2026-08-21 and **reproduced on clean `main`** — so if you see it fail, it is not your change. Older rows said 266/275 and 467/467; the suite keeps growing. ⚠️ Run from `backend/` as `node --test test/*.test.js` — see the landmine below; the old `test/` and bare forms both misbehave on Node 26. |
 | Prod DB backup | ✅ `~/Desktop/_private/loloshop-db/loloshop-prod-2026-08-25.dump` — 5.2 MB, taken before the 086-089 deploy, contents verified on the box. ⚠️ **Restore it ON THE SERVER**: it is pg_dump format v1.16 and the laptop's `pg_restore` refuses it («unsupported version (1.16) in file header»). The 08-14 and 08-24 dumps are still there. |
 
 **Both platforms are now on the same version (1.0.4) carrying the same three features.**
 
-⚠️ **Neither store build has been opened on a real phone yet.** Android 1.0.4 is in review;
-iOS 1.0.4 is installable from TestFlight *now* (internal group «Testers1», no review needed).
-Until someone installs it and grants the notification prompt there are **zero iOS device
-tokens**, so iOS push is proven only at the credential layer, not end to end.
+✅ **Both are live on the store, and iOS push is proven on a real phone (2026-08-29).** iOS
+**1.0.5** is the build that matters — 1.0.4 carried the entitlement and still could not register.
+This paragraph previously said no store build had been opened on a phone; that is finished.
 
 **Prod VPS is `169.58.114.255` since 2026-08-16** — the 8 GB box, which LoloShop now SHARES
 with **RevoArt**. ⚠️ That means the `revo` host in `~/.ssh/config` is the same machine, not a
@@ -383,11 +383,10 @@ longer stranded on a branch · the laptop's loose credentials are filed in
    server-side — the APNs key is installed and was verified against Apple's production endpoint.
    Releasing 1.0.4 (or a TestFlight install) is the entire fix; **do not go looking for a bug in
    `lib/push.js`.**
-3. **📱 Install iOS 1.0.4 from TestFlight and grant the notification prompt.** Internal group
-   «Testers1», no review wait. This is the ONLY way a first iOS device token exists — until then
-   iOS push is proven at the credential layer and nowhere else. While you are in there, tap a
-   `/join/` WhatsApp link and confirm it opens the app rather than Safari. **The owner has no
-   iPhone** — a TestFlight invite to anyone with one closes this.
+3. ✅ **DONE 2026-08-29 — iOS push is proven on a real iPhone.** 1.0.5 installed from the App
+   Store, token registered, and a test notification arrived. Do not re-run this. What remains
+   from the original item is the deep-link half: tap a `/join/` WhatsApp link on an iPhone and
+   confirm it opens the app rather than Safari.
 5. **⚠️ Enter the shop coordinates** at `/admin/attendance` (خط العرض · خط الطول · نطاق الموقع)
    **before** moving `verification_mode` off `'none'`. Wrong order 403s every بصمة for every
    worker on every platform.
@@ -522,40 +521,19 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   price role is **`'wholesaler'`** (`priceRoleForUser`), so `'retail'` here means «الطلاب
   العاديين فقط» — that is not incidental. Covered by `test/optionGroupAudience.test.js`.
 
-- 🔴 **iOS PUSH REGISTERS NOTHING ON REAL DEVICES, AND IT IS NOT THE RELEASE OR THE CODE.**
-  Found 2026-08-26, and only findable because migration 087's beacon shipped the day before.
-  The evidence, all from prod:
-  · **iPhones are running the native app, signed in:** `app_opens` shows **26 opens by 22 iOS
-    users** on 2026-08-25 and 14 by 13 the next morning. The beacon only fires for a signed-in
-    user inside the shell, so these are real, authenticated iOS app sessions.
-  · **`device_tokens` holds 0 iOS rows** — against **145 Android**, newest the same day.
-  · iOS 1.0.4 has been **live on the App Store since 2026-08-13** (13 days), with 395 first-time
-    downloads and 70 updates in the trailing 30 days.
-  Ruled out already, so do not re-check them: the entitlement (`codemagic.yaml` writes
-  `aps-environment: production` and fails the build if it is missing — added 2026-08-09 in
-  `eb59e21`/`d9688a6`, *before* the 08-10 build) · the plugin (`@capacitor/push-notifications`
-  is in `package.json`, `npx cap sync ios` runs) · the client (`PushRegistrar` is
-  platform-agnostic and the identical path produces 145 Android tokens) · the APNs key (verified
-  against Apple's production endpoint) · platform detection (`nativeShellPlatform()` returns
-  `'ios'` — the beacon rows above prove it).
-  **What is left is what cannot be seen from here:** the *provisioning profile* the archive was
-  signed with. Push Notifications was enabled on the App ID on 2026-08-09; enabling a capability
-  does **not** regenerate an existing profile, so a cached profile would sign a build whose
-  entitlements file is perfect and whose runtime `register()` still resolves `registrationError`
-  — silently, with a green build and a successful App Store review. The other survivor is mass
-  permission-denial, which 22-out-of-22 makes implausible.
-  ✅ **2026-08-26: the app now answers this itself — migration 090, deployed.**
-  `app_opens.app_version` (reported by the beacon) separates theory A from B, and
-  `push_register_errors` captures the reason a device gives instead of losing it to a console on
-  someone else's phone. Both render on `/admin/app` — «نسخة التطبيق المستعملة», and a red panel
-  that stays invisible until a device actually fails. **Read them before theorising again:** a
-  row naming iOS 1.0.3 is theory A, a row in the red panel is theory B and names the cause.
-  ⚠️ **THE NEXT STEP IS A PHONE, NOT MORE READING.** One iPhone: install from the App Store, log
-  in, accept the prompt, then check `SELECT * FROM device_tokens WHERE platform='ios'`. A row
-  means the audience was simply declining; no row confirms the signing theory, and the fix is a
-  fresh Codemagic build with the profile regenerated. `registrationError` is logged to the JS
-  console (`فشل تسجيل الإشعارات`), so a Safari Web Inspector session against the device would
-  name the cause outright.
+- ✅ **CLOSED 2026-08-29 — iOS push delivers. The landmine that stood here for 13 days named
+  the wrong suspects, and its list of "ruled out already" was right about every one of them.**
+  The answer was in neither the entitlement, the plugin registration, the APNs key, the platform
+  detection nor the provisioning profile: **Capacitor's iOS template ships no
+  `didRegisterForRemoteNotificationsWithDeviceToken`**, so AppDelegate received the token from
+  iOS and dropped it on the floor. `register()` resolved, and the plugin fired NEITHER
+  `registration` NOR `registrationError` — which is exactly why `push_register_errors` was empty
+  and why every phone looked healthy from every angle. Fixed by `cb91f8d`, shipped as **1.0.5**,
+  and `b8b0ba0` re-pointed the update banner at it (it had been pinned to 1.0.4 — a version every
+  iPhone in the field already had, so it rendered to nobody).
+  **The lesson worth keeping: an empty error table is evidence of a DROPPED token, not of a
+  refused permission.** Two days of theorising went into a signing story that a one-line
+  AppDelegate gap explains completely.
 
 - **⛔ «بانتظار موافقة الممثل» IS NOT A QUEUE TO DRAIN — DO NOT TOUCH IT. Owner ruling 2026-08-14.**
   The ~471 rep orders parked in this state are sitting on **unresolved disputes between students and
