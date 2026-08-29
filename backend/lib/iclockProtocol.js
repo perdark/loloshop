@@ -31,8 +31,14 @@ function zonedToUtc(localStr, timeZone = DEFAULT_TZ) {
   const [Y, M, D] = d.split('-').map(Number);
   const [h, m, s = 0] = t.split(':').map(Number);
   const guess = Date.UTC(Y, M - 1, D, h, m, s);
-  // Two passes: the offset is evaluated at the guessed instant, which is at most
-  // one offset-width away from the true one. A second pass settles it.
+  // Two passes: the offset is evaluated at the guessed instant, which is at most one
+  // offset-width away from the true one, so a second pass settles it.
+  // ⚠️ For Asia/Baghdad the second pass changes NOTHING and no test here can prove it does —
+  // the zone has been a constant UTC+3 with no DST since 2016, so tzOffsetMs returns the same
+  // value whichever instant you hand it. It is kept because it costs nothing and it is what
+  // makes this function correct if it is ever pointed at a zone that observes DST, where a
+  // one-pass version is wrong for the hour either side of a transition. Do not read the
+  // midnight test below as evidence for it.
   const once = new Date(guess - tzOffsetMs(new Date(guess), timeZone));
   return new Date(guess - tzOffsetMs(once, timeZone));
 }
