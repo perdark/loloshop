@@ -59,6 +59,11 @@ app.use(
     credentials: true,
   })
 );
+// ⚠️ MOUNTED BEFORE express.json() AND AT THE ROOT, both deliberately. The fingerprint
+// device's paths (/iclock/*) are fixed in its firmware, so they cannot live under /api, and
+// its bodies are tab-separated text/plain that this app's JSON parser must never see.
+app.use(require('./routes/iclock'));
+
 app.use(express.json({ limit: '5mb' }));
 app.use(
   '/uploads',
