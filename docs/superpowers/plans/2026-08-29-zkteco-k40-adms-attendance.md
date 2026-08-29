@@ -422,8 +422,14 @@ Cases, one test each:
 // 4. A third punch BETWEEN them changes nothing ('ignored').
 // 5. A punch earlier than an existing check_in_at moves the check-in back AND
 //    recomputes late_minutes downward ('moved_in').
-// 6. A punch at 00:10 on الجمعة's shift files under Friday's work_date, not Saturday.
-//    (Seed staff_schedule_days weekday 5 = 15:00 → 00:00 and assert work_date.)
+// 6. ⚠️ CORRECTED DURING IMPLEMENTATION — this originally read "a punch at 00:10 on
+//    الجمعة's shift files under Friday" and that is WRONG. الجمعة ends at exactly 00:00,
+//    so it has NO after-midnight window: a 00:10 stamp is a new السبت shift. Split into
+//    three cases instead:
+//      6a. a punch on الجمعة's own calendar date files under that date (no rollover)
+//      6b. a stamp just after midnight is a new Saturday shift, NOT Friday's
+//      6c. a shift that genuinely crosses midnight (22:00 → 02:00) DOES roll a
+//          post-midnight punch back to the previous day — this is where the rule applies
 // 7. A punch on a date in staff_holidays records late_minutes = 0.
 // 8. A punch from a PIN with no staff_device_pins row → 'unmapped', user_id NULL,
 //    and zero new staff_attendance_records rows.
