@@ -1545,6 +1545,151 @@ export async function deleteHoliday(workDate: string): Promise<void> {
   await api.delete(`/admin/attendance/holidays/${workDate}`);
 }
 
+// ─── جهاز البصمة (ZKTeco K40 عبر ADMS) — migration 094 ────────────────────────────────────
+
+export type DevicePushState = "pending" | "sent" | "confirmed" | "failed";
+
+export const DEVICE_PUSH_STATE_AR: Record<DevicePushState, string> = {
+  pending: "بالانتظار",
+  sent: "انرسل",
+  confirmed: "تأكد",
+  failed: "فشل",
+};
+
+export interface AttendanceDevice {
+  serial_number: string;
+  label_ar: string;
+  active: boolean;
+  /** null = «لم يتصل بعد» — the device has never dialled in. */
+  last_seen_at: string | null;
+  last_ip: string | null;
+  firmware_note: string | null;
+  created_at: string;
+  today_punches: number;
+  queued_commands: number;
+}
+
+export interface StaffDevicePin {
+  user_id: string;
+  staff_name: string;
+  pin: number | null;
+  pushed_name: string | null;
+  push_state: DevicePushState | null;
+  enrolled_at: string | null;
+  punch_count: number;
+}
+
+/** A number that has punched but belongs to nobody yet — «أرقام جهاز بلا اسم». */
+export interface UnmappedPin {
+  device_pin: string;
+  punch_count: number;
+  first_seen_at: string;
+  last_seen_at: string;
+  first_device_ts: string;
+  last_device_ts: string;
+  device_sn: string | null;
+  mapped_user_id: string | null;
+  mapped_staff_name: string | null;
+}
+
+export interface PunchReject {
+  id: number;
+  device_sn: string | null;
+  raw_line: string | null;
+  reason: string;
+  at: string;
+}
+
+/** What the replay did when a pin was linked. `created` is «كم يوم ظهر للموظف». */
+export interface PinLinkMeta {
+  replayed: number;
+  derived: { created: number; extended: number; moved_in: number; ignored: number; unmapped: number };
+  queued: number;
+}
+
+export async function getAttendanceDevices(): Promise<AttendanceDevice[]> {
+  const { data } = await api.get<{ data: AttendanceDevice[] }>("/admin/attendance/devices");
+  return data.data || [];
+}
+
+export async function registerAttendanceDevice(
+  serialNumber: string,
+  labelAr?: string
+): Promise<AttendanceDevice> {
+  const { data } = await api.post<{ data: AttendanceDevice }>("/admin/attendance/devices", {
+    serial_number: serialNumber,
+    label_ar: labelAr,
+  });
+  return data.data;
+}
+
+export async function updateAttendanceDevice(
+  serialNumber: string,
+  patch: { labelAr?: string; active?: boolean; firmwareNote?: string | null }
+): Promise<AttendanceDevice> {
+  const { data } = await api.patch<{ data: AttendanceDevice }>(
+    `/admin/attendance/devices/${encodeURIComponent(serialNumber)}`,
+    {
+      label_ar: patch.labelAr,
+      active: patch.active,
+      firmware_note: patch.firmwareNote,
+    }
+  );
+  return data.data;
+}
+
+export async function getDevicePins(): Promise<StaffDevicePin[]> {
+  const { data } = await api.get<{ data: StaffDevicePin[] }>("/admin/attendance/pins");
+  return data.data || [];
+}
+
+/**
+ * Set a pin, or leave `pin` undefined to let the server allocate the lowest free number —
+ * an admin standing next to the device should not have to remember what is already in it.
+ */
+export async function setDevicePin(
+  userId: string,
+  input: { pin?: number | null; pushedName?: string } = {}
+): Promise<{ row: StaffDevicePin; meta: PinLinkMeta }> {
+  const { data } = await api.put<{ data: StaffDevicePin; meta: PinLinkMeta }>(
+    `/admin/attendance/pins/${userId}`,
+    { pin: input.pin ?? null, pushed_name: input.pushedName }
+  );
+  return { row: data.data, meta: data.meta };
+}
+
+export async function deleteDevicePin(userId: string): Promise<void> {
+  await api.delete(`/admin/attendance/pins/${userId}`);
+}
+
+export async function getUnmappedPins(): Promise<UnmappedPin[]> {
+  const { data } = await api.get<{ data: UnmappedPin[] }>("/admin/attendance/unmapped");
+  return data.data || [];
+}
+
+/**
+ * «اربط بموظف» — links the number AND replays every punch it already made, so a worker who
+ * has been touching the device unnamed for a week gets that week of attendance at once.
+ * `meta.derived.created` is how many days appeared.
+ */
+export async function assignUnmappedPin(
+  pin: string,
+  userId: string
+): Promise<{ row: StaffDevicePin; meta: PinLinkMeta }> {
+  const { data } = await api.post<{ data: StaffDevicePin; meta: PinLinkMeta }>(
+    `/admin/attendance/unmapped/${encodeURIComponent(pin)}/assign`,
+    { user_id: userId }
+  );
+  return { row: data.data, meta: data.meta };
+}
+
+export async function getPunchRejects(limit = 50): Promise<PunchReject[]> {
+  const { data } = await api.get<{ data: PunchReject[] }>("/admin/attendance/rejects", {
+    params: { limit },
+  });
+  return data.data || [];
+}
+
 // ─── الخروج المؤقت (admin side) ──────────────────────────────────────────────
 
 interface ApiAdminBreak {

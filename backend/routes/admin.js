@@ -7,6 +7,7 @@ const salary = require('../controllers/salaryController');
 const staff = require('../controllers/staffController');
 const attendance = require('../controllers/attendanceController');
 const attendanceBreaks = require('../controllers/attendanceBreakController');
+const devices = require('../controllers/attendanceDeviceController');
 const customOrders = require('../controllers/adminCustomOrderController');
 const payouts = require('../controllers/payoutController');
 const discounts = require('../controllers/discountController');
@@ -87,6 +88,20 @@ router.get('/attendance/breaks', attendanceBreaks.listBreaks);
 router.post('/attendance/breaks/:id/approve', attendanceBreaks.approveBreak);
 router.post('/attendance/breaks/:id/reject', attendanceBreaks.rejectBreak);
 router.patch('/attendance/breaks/:id', attendanceBreaks.correctBreak);
+
+// جهاز البصمة (ZKTeco K40 عبر ADMS) — migration 094. Registering a serial is a PREREQUISITE:
+// routes/iclock.js drops an unregistered serial silently, so nothing lands until this screen
+// has been used once. `/unmapped/:pin/assign` is the one that also replays that pin's stored
+// punches — see the header of attendanceDeviceController.js.
+router.get('/attendance/devices', devices.listDevices);
+router.post('/attendance/devices', devices.registerDevice);
+router.patch('/attendance/devices/:sn', devices.updateDevice);
+router.get('/attendance/pins', devices.listPins);
+router.put('/attendance/pins/:userId', devices.setPin);
+router.delete('/attendance/pins/:userId', devices.deletePin);
+router.get('/attendance/unmapped', devices.listUnmapped);
+router.post('/attendance/unmapped/:pin/assign', devices.assignUnmapped);
+router.get('/attendance/rejects', devices.listRejects);
 
 // Site settings — discount popup promo config
 router.patch('/promo', c.updatePromo);

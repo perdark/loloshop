@@ -35,6 +35,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { Modal } from "@/components/ui/Modal";
 import { CalculationDetails } from "@/components/admin/CalculationDetails";
 import { WeeklySchedulePanel } from "@/components/admin/WeeklySchedulePanel";
+import { AttendanceDevicePanel } from "@/components/admin/AttendanceDevicePanel";
 
 const MODE_OPTIONS: { value: AttendanceVerificationMode; label: string }[] = [
   { value: "none", label: "بدون تحقق" },
@@ -103,6 +104,11 @@ type AttendanceConfirm =
   | { kind: "reset-schedule"; row: StaffAttendanceUserSetting };
 
 export default function AdminAttendancePage() {
+  // Two surfaces, one screen. «جهاز البصمة» is a separate tab rather than another stacked
+  // section because it is opened for a different reason (standing next to the hardware) and
+  // its own lists are long; mounting it only when picked also keeps its four fetches off the
+  // load of the page everybody else opens.
+  const [tab, setTab] = useState<"attendance" | "device">("attendance");
   const [settings, setSettings] = useState<StaffAttendanceSettings | null>(null);
   const [userSettings, setUserSettings] = useState<StaffAttendanceUserSetting[]>([]);
   const [drafts, setDrafts] = useState<Record<string, StaffAttendanceUserSetting>>({});
@@ -304,6 +310,38 @@ export default function AdminAttendancePage() {
         subtitle="إعداد وقت الحضور والانصراف ومتابعة التأخير بمعزل عن الراتب"
         action={<Button onClick={load} variant="ghost" loading={loading}>تحديث</Button>}
       />
+
+      {/* Deliberately aria-pressed toggles, not role="tablist": the device panel and the
+          attendance half are siblings rather than one tabpanel, and a tablist without real
+          tabpanels reads as a broken widget to a screen reader. */}
+      <div role="group" aria-label="أقسام البصمة" className="flex flex-wrap gap-2">
+        {([
+          { id: "attendance", label: "الحضور والدوام" },
+          { id: "device", label: "جهاز البصمة" },
+        ] as const).map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            aria-pressed={tab === t.id}
+            onClick={() => setTab(t.id)}
+            className={`min-h-11 rounded-full px-4 text-sm font-semibold transition-colors ${
+              tab === t.id
+                ? "bg-orange-ink text-white"
+                : "border border-line bg-beige text-ink hover:border-orange/40 hover:text-orange-ink"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "device" && <AttendanceDevicePanel />}
+
+      {/* The attendance half stays MOUNTED while the device tab is open — it holds a month of
+          loaded records and a set of unsaved per-worker drafts, and re-fetching them (or
+          discarding an edit in progress) every time somebody glances at the device is worse
+          than the hidden subtree. */}
+      <div className={tab === "attendance" ? "space-y-6" : "hidden"}>
 
       {loadError && (
         <div className="rounded-2xl border border-danger/25 bg-surface px-6 py-8 text-center" role="alert">
@@ -1007,6 +1045,7 @@ export default function AdminAttendancePage() {
           </p>
         )}
       </Modal>
+      </div>
     </div>
   );
 }
