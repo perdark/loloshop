@@ -479,6 +479,43 @@ longer stranded on a branch · the laptop's loose credentials are filed in
 
 ## 💣 LANDMINES
 
+- **⚠️ THE iOS UPDATE MESSAGE IS A WALL NOW (`components/AppUpdateGate.tsx`, 2026-08-29), so
+  `MIN_IOS_VERSION` IS A RELEASE EVENT AND NOT AN EDIT.** It blocks the whole app — students,
+  reps, staff and the admin alike — on any iOS shell older than the constant. Point it at a
+  version that is approved but still sitting behind «Manually release this version» and the shop
+  is shut for every iPhone at once, with no way back that does not need a deploy. Three
+  conditions must ALL hold before anything is blocked (iOS shell · a parseable version · genuinely
+  older); every unknown resolves to "let them through", and that asymmetry is the safety. Android
+  is deliberately not gated. The old dismissible banner's reasoning («it asks, it does not
+  block») is preserved in the new file's header — it was overruled by the owner, not forgotten.
+
+- **⚠️ THE PERMISSION CARD'S ARABIC COPY IS A LEGAL ARTEFACT, NOT UI TEXT**
+  (`components/NotificationPermissionPrompt.tsx`). Apple 4.5.4 permits promotional push only
+  behind consent language shown in the app's own UI; the OS sheet carries none and never will,
+  so that paragraph — the one naming العروض والخصومات beside the order updates — IS the opt-in.
+  Trim it to just order updates and every consent collected afterwards is retroactively
+  unfounded. Two more rules around it: it is the **only** caller of `requestPermissions()` in
+  the app (iOS grants one sheet per install; a second caller spends it silently), and both
+  opt-out paths must call `setMarketingConsent(false)`, or the next launch re-asserts the cached
+  consent and quietly undoes the opt-out.
+
+- **⚠️ THE TWO MARKETING-CONSENT COLUMNS ARE OPPOSITE SUBJECTS AND MUST NEVER BE MERGED**
+  (migration 095). `users.notification_prefs.marketing` (089) belongs to a PERSON and has to
+  follow them onto their next phone, so it cannot live on a device row;
+  `device_tokens.marketing_opt_in` (095) belongs to a HANDSET with nobody behind it, so it has
+  no user row to live on. `lib/pushBroadcast.js` applies exactly one per recipient — never both,
+  never neither — split by `user_id IS NULL`. They look like duplicates, which is why a future
+  tidy-up will want to fold them together. Same shape of trap as the two answer guards.
+  · `device_tokens.user_id` IS NULLABLE ON PURPOSE. Restoring `NOT NULL` throws away every
+    token from a phone that granted permission before it had an account — the thing an iOS
+    install can only grant once.
+  · The device endpoints sit **above** `router.use(authRequired)` in `routes/notifications.js`
+    on `optionalAuth`. Moving them below re-breaks anonymous push with a 401 and no other sign.
+  · `device_notifications` (095) is drained by its OWN pass, `pushOutbox.drainDevicesOnce()`.
+    Do not fold it into the user pass: that one fans one notification out to all of a person's
+    handsets and calls it sent if any took it, while here the row IS the handset.
+  · A registration may only ever RAISE consent. An omitted flag is not a withdrawal.
+
 - **⚠️ THE STAFF SCHEDULE LIVES IN ONE FILE AND MUST STAY THERE — `lib/staffSchedule.js`
   (migration 093, 2026-08-27).** Before it, `checkIn` computed lateness against ONE global start
   time on all seven days while the shop opens 3 م الجمعة, so every Friday بصمة was recorded ~6

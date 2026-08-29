@@ -22,6 +22,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { getApiErrorMessage } from "@/lib/api";
+import { setMarketingConsent } from "@/lib/push";
 import {
   getNotificationPrefs,
   updateNotificationPrefs,
@@ -85,6 +86,12 @@ export function NotificationPrefs() {
     setBusy(true);
     try {
       setPrefs(await updateNotificationPrefs({ [key]: next }));
+      // ⚠️ THE LOCAL CONSENT CACHE HAS TO MOVE WITH THIS SWITCH, or turning «العروض» off here
+      // is undone on the next app launch: `registerPushToken` re-asserts the cached consent on
+      // every registration, and the server raises `notification_prefs.marketing` back to true
+      // when it sees it. An opt-out that silently expires is worse than no opt-out at all —
+      // it is the exact thing Apple 4.5.4 checks for.
+      if (key === "marketing") setMarketingConsent(next);
     } catch (err) {
       setPrefs(previous);
       toast.error(getApiErrorMessage(err, "تعذر حفظ الإعداد"));

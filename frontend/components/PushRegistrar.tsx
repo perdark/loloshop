@@ -4,18 +4,27 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { AUTH_CHANGED_EVENT, getToken } from "@/lib/auth";
+import { PUSH_PERMISSION_CHANGED_EVENT } from "@/lib/push";
 import { nativeAppVersion, nativeShellPlatform } from "@/lib/native-shell";
 
 /**
- * Asks for notification permission, registers the device, and routes a tapped notification.
- * Renders nothing and is completely inert in a browser.
+ * Registers the device for push and routes a tapped notification. Renders nothing and is
+ * completely inert in a browser.
  *
- * ⚠️ IT ONLY RUNS WHILE SIGNED IN, AND THAT IS DELIBERATE. A device token is worthless before
- * we know whose it is — the backend binds it to `req.user` — and iOS shows the permission
- * sheet exactly once per install. Spending that one prompt on a student who is still browsing
- * the shop, with nothing to notify them about, burns it: a «رفض» can only be undone in the
- * system Settings, which nobody does. So the ask happens after login, when the app has
- * something real to say (طلبك، الموافقة، الموعد النهائي).
+ * ⚠️ IT NO LONGER ASKS FOR PERMISSION — `NotificationPermissionPrompt` does, and it is now the
+ * ONLY caller of `requestPermissions()` in the app. iOS shows its permission sheet exactly
+ * once per install, so two independent callers is how that one sheet gets spent on a student
+ * who was not looking at a reason. This component checks the permission and registers when it
+ * is already granted; when the prompt wins a grant it fires
+ * `PUSH_PERMISSION_CHANGED_EVENT` and the registration below runs immediately rather than
+ * waiting for the next launch.
+ *
+ * ⚠️ IT REGISTERS SIGNED OUT TOO, SINCE MIGRATION 095. A token used to be discarded until
+ * someone logged in, on the reasoning that the backend binds it to `req.user` — which meant a
+ * phone that had already granted permission, the one thing an iOS install can only be granted
+ * once, bought nothing at all. `device_tokens.user_id` is nullable now: the row is stored with
+ * no owner and the upsert on `token` promotes it to a personal device the moment that handset
+ * signs in. Nothing about a signed-in registration changed.
  *
  * ⚠️ ANDROID 13+ NEEDS `POST_NOTIFICATIONS` IN THE MANIFEST. It is not in the plugin's own
  * manifest — the plugin only declares it as a Capacitor `@Permission` alias, which is a
@@ -30,12 +39,20 @@ export function PushRegistrar() {
   useEffect(() => {
     let cancelled = false;
     /**
-     * One successful setup per mount. `run` fires again on every AUTH_CHANGED_EVENT — which is
-     * what makes a sign-in trigger the permission ask — and without this a logout/login cycle
-     * would attach a second full set of listeners, so one tapped notification would navigate
-     * twice and one foreground message would raise two toasts.
+     * ⚠️ ONE SET OF LISTENERS PER MOUNT, AND THIS FLAG IS THE ONLY THING ENFORCING IT. `run`
+     * fires again on every AUTH_CHANGED_EVENT and on every permission grant; without this a
+     * logout/login cycle would attach a second full set, so one tapped notification would
+     * navigate twice and one foreground message would raise two toasts.
+     *
+     * ⚠️ IT GUARDS THE LISTENERS ONLY — NOT THE WHOLE SETUP — and that separation is load-
+     * bearing. Listeners are attached BEFORE the permission is read (a cold start can deliver
+     * the token, and the tap that launched the app, before the next await resolves), so a pass
+     * that finds permission not yet granted still leaves them attached. If this flag also
+     * gated the register step, the grant that arrives a second later could never register the
+     * device, and re-opening the flag to allow it would attach the listeners twice. It is one
+     * or the other; it is this.
      */
-    let started = false;
+    let listenersReady = false;
     const removers: Array<() => void> = [];
 
     /** Attach a listener, or drop it immediately if the component unmounted mid-await. */
@@ -68,95 +85,99 @@ export function PushRegistrar() {
     };
 
     const setup = async () => {
-      if (started) return;
       const platform = nativeShellPlatform();
       if (!platform) return;
-      if (!getToken()) return; // signed out — see the header
-      started = true;
 
       // Both dynamic: lib/push pulls in axios, and this component sits in the ROOT layout.
       // A static import would put the whole API client in the first chunk of every page,
       // including the SSR storefront that deliberately does not need it.
-      const [{ PushNotifications }, { registerPushToken }] = await Promise.all([
+      const [{ PushNotifications }, { registerPushToken, hasMarketingConsent }] = await Promise.all([
         import("@capacitor/push-notifications"),
         import("@/lib/push"),
       ]);
       if (cancelled) return;
 
       // Listeners BEFORE register(): on a cold start the OS can deliver the token, and the
-      // tap that launched the app, before the next await resolves.
-      const registration = await PushNotifications.addListener("registration", (token) => {
-        void registerPushToken(token.value, platform).catch((error) => {
-          // A failed hand-off just means no push until the next launch, which retries.
-          console.warn("تعذر تسجيل جهاز الإشعارات:", error);
-        });
-      });
-      track(registration);
-
-      const registrationError = await PushNotifications.addListener(
-        "registrationError",
-        (error) => {
-          // The usual cause on Android is a missing google-services.json in the installed
-          // binary; on iOS, a build whose profile lacks the aps-environment entitlement.
-          console.warn("فشل تسجيل الإشعارات:", error);
-          // ⚠️ AND REPORT IT, because the line above is invisible. On 2026-08-26 prod had 145
-          // Android device tokens and ZERO iOS while signed-in iPhone users opened the app
-          // daily, and the one piece of evidence nobody could reach was this error — sitting in
-          // a console on someone else's phone. Best-effort: a diagnostic must never be the
-          // reason the app misbehaves, so every failure here is swallowed.
-          void reportRegistrationFailure(String(error?.error ?? error ?? "unknown"));
-        }
-      );
-      track(registrationError);
-
-      // Foreground arrival. Android does NOT draw a system notification while the app is in
-      // the foreground, so without this the message would simply vanish.
-      const received = await PushNotifications.addListener(
-        "pushNotificationReceived",
-        (notification) => {
-          const title = notification.title || "إشعار جديد";
-          const link = typeof notification.data?.link === "string" ? notification.data.link : "";
-          toast(title, {
-            description: notification.body || undefined,
-            action: link.startsWith("/")
-              ? { label: "عرض", onClick: () => router.push(link) }
-              : undefined,
+      // tap that launched the app, before the next await resolves. Attached once — see
+      // `listenersReady` above.
+      if (!listenersReady) {
+        listenersReady = true;
+        const registration = await PushNotifications.addListener("registration", (token) => {
+          // The consent flag rides along on every registration, not only the first: it is OR'd
+          // server-side and can only ever RAISE the flag, so re-asserting it is safe, and it is
+          // what carries an anonymous handset's «العروض» consent onto the account it later signs
+          // into. Withdrawing consent clears the flag (lib/push.ts), so an opt-out is not undone
+          // by the next launch.
+          void registerPushToken(token.value, platform, {
+            marketingOptIn: hasMarketingConsent(),
+          }).catch((error) => {
+            // A failed hand-off just means no push until the next launch, which retries.
+            console.warn("تعذر تسجيل جهاز الإشعارات:", error);
           });
-        }
-      );
-      track(received);
+        });
+        track(registration);
 
-      // The tap. `link` is whatever the notification row carried ('/wholesaler', '/staff', …).
-      const action = await PushNotifications.addListener(
-        "pushNotificationActionPerformed",
-        (event) => {
-          const link = event.notification?.data?.link;
-          // Same-origin path only. The value round-trips through FCM/APNs, so treat it as
-          // untrusted input rather than something we wrote — "//evil.com" is a valid URL.
-          if (typeof link === "string" && link.startsWith("/") && !link.startsWith("//")) {
-            router.push(link);
+        const registrationError = await PushNotifications.addListener(
+          "registrationError",
+          (error) => {
+            // The usual cause on Android is a missing google-services.json in the installed
+            // binary; on iOS, a build whose profile lacks the aps-environment entitlement.
+            console.warn("فشل تسجيل الإشعارات:", error);
+            // ⚠️ AND REPORT IT, because the line above is invisible. On 2026-08-26 prod had 145
+            // Android device tokens and ZERO iOS while signed-in iPhone users opened the app
+            // daily, and the one piece of evidence nobody could reach was this error — sitting in
+            // a console on someone else's phone. Best-effort: a diagnostic must never be the
+            // reason the app misbehaves, so every failure here is swallowed.
+            void reportRegistrationFailure(String(error?.error ?? error ?? "unknown"));
           }
-        }
-      );
-      track(action);
+        );
+        track(registrationError);
 
-      // ⚠️ THIS PROMPT BUYS TRANSACTIONAL NOTIFICATIONS ONLY — order status, rep approval,
-      // deadlines. It is NOT consent to marketing: Apple's guideline 4.5.4 wants promotional
-      // push opted into through consent language in the app's own UI, which is the «العروض
-      // والأخبار» switch in components/NotificationPrefs.tsx (default OFF, migration 089).
-      // Do not widen what this ask means without moving that consent somewhere a user reads.
+        // Foreground arrival. Android does NOT draw a system notification while the app is in
+        // the foreground, so without this the message would simply vanish.
+        const received = await PushNotifications.addListener(
+          "pushNotificationReceived",
+          (notification) => {
+            const title = notification.title || "إشعار جديد";
+            const link = typeof notification.data?.link === "string" ? notification.data.link : "";
+            toast(title, {
+              description: notification.body || undefined,
+              action: link.startsWith("/")
+                ? { label: "عرض", onClick: () => router.push(link) }
+                : undefined,
+            });
+          }
+        );
+        track(received);
+
+        // The tap. `link` is whatever the notification row carried ('/wholesaler', '/staff', …).
+        const action = await PushNotifications.addListener(
+          "pushNotificationActionPerformed",
+          (event) => {
+            const link = event.notification?.data?.link;
+            // Same-origin path only. The value round-trips through FCM/APNs, so treat it as
+            // untrusted input rather than something we wrote — "//evil.com" is a valid URL.
+            if (typeof link === "string" && link.startsWith("/") && !link.startsWith("//")) {
+              router.push(link);
+            }
+          }
+        );
+        track(action);
+      }
+
+      // ⚠️ NO `requestPermissions()` HERE — NotificationPermissionPrompt owns the ask (see the
+      // header). This only reads the answer.
+      //
+      // ⚠️ AND THE OS PERMISSION IS NOT CONSENT TO MARKETING. Apple's guideline 4.5.4 wants
+      // promotional push opted into through consent language in the app's own UI; the OS sheet
+      // carries no such language and never will. The consent is the tap on the card in
+      // NotificationPermissionPrompt, recorded separately and withdrawable from
+      // NotificationPrefs / DeviceNotificationPrefs (defaults OFF — migrations 089 and 095).
+      // Do not treat a granted permission as an opted-in recipient anywhere.
       const current = await PushNotifications.checkPermissions();
       if (cancelled) return;
-      let granted = current.receive === "granted";
-      let outcome = current.receive;
-      if (!granted && current.receive !== "denied") {
-        // 'prompt' / 'prompt-with-rationale' — never re-ask after a 'denied', the OS would
-        // not show the sheet anyway.
-        const asked = await PushNotifications.requestPermissions();
-        granted = asked.receive === "granted";
-        outcome = asked.receive;
-      }
-      if (cancelled) return;
+      const granted = current.receive === "granted";
+      const outcome = current.receive;
       if (!granted) {
         // ⚠️ THIS RETURN USED TO BE COMPLETELY SILENT, and that silence cost a day. On
         // 2026-08-26 iOS had 0 device tokens, 0 registration errors and confirmed 1.0.4
@@ -180,18 +201,27 @@ export function PushRegistrar() {
         // Reached when the plugin is missing from the installed binary (a shell built before
         // `npx cap sync android` picked it up). Notifications simply stay in-app.
         // Re-open the gate so a transient failure gets another attempt on the next auth
-        // change, rather than staying dead until the app is restarted.
-        started = false;
+        // change, rather than staying dead until the app is restarted. Anything attached
+        // before the throw is dropped first, so the retry cannot end up with two of them.
+        removers.splice(0).forEach((remove) => remove());
+        listenersReady = false;
         console.warn("الإشعارات غير متاحة على هذا الجهاز:", error);
       });
     };
 
     run();
-    // A student signs in AFTER the layout mounts, which is precisely when we want to ask.
+    // A student signs in AFTER the layout mounts, which is precisely when the anonymous device
+    // row should gain its owner.
     window.addEventListener(AUTH_CHANGED_EVENT, run);
+    // The grant NotificationPermissionPrompt just won. Re-running `setup` is all this needs:
+    // the listeners are already attached and stay attached, and the second pass simply gets a
+    // 'granted' out of checkPermissions() and calls register(). Without it the device would not
+    // register until the app was next launched — the exact delay the prompt exists to remove.
+    window.addEventListener(PUSH_PERMISSION_CHANGED_EVENT, run);
     return () => {
       cancelled = true;
       window.removeEventListener(AUTH_CHANGED_EVENT, run);
+      window.removeEventListener(PUSH_PERMISSION_CHANGED_EVENT, run);
       removers.forEach((remove) => remove());
     };
   }, [router]);

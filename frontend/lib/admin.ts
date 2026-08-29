@@ -250,7 +250,15 @@ export async function getAppStats(days = 30): Promise<AppStats> {
 // ⚠️ It cannot be recalled. The server refuses external links, refuses «الكل» unless the
 // recipient count is typed back, and records every send. See backend/lib/pushBroadcast.js.
 
-export type PushAudienceKind = "all" | "role" | "university" | "wholesaler" | "user";
+// ⚠️ `devices` IS «الكل» PLUS THE PHONES WITH NO ACCOUNT (migration 095), and it is the only
+// audience whose reach is not a number of people. See PushReach.anon_devices.
+export type PushAudienceKind =
+  | "all"
+  | "devices"
+  | "role"
+  | "university"
+  | "wholesaler"
+  | "user";
 
 export interface PushAudience {
   kind: PushAudienceKind;
@@ -261,6 +269,14 @@ export interface PushReach {
   people: number;
   /** People who could receive an actual PUSH. The rest still get the in-app bell. */
   devices: number;
+  /**
+   * Installed handsets with NO account behind them (migration 095). 0 for every audience
+   * except «كل الأجهزة».
+   *
+   * ⚠️ NOT ADDABLE TO `people`. Nobody knows how many humans are behind those phones, and they
+   * have no in-app bell to fall back on — a push they miss is simply gone.
+   */
+  anon_devices: number;
   label: string;
 }
 
@@ -276,7 +292,7 @@ export interface SendPushPayload {
   body_ar?: string;
   /** Must be a relative in-app path from the server's allowlist. */
   link?: string;
-  /** Required for «الكل» only: the recipient count, typed back. */
+  /** Required for «الكل» and «كل الأجهزة»: the recipient count, typed back. */
   confirmed_count?: number;
 }
 
@@ -284,6 +300,8 @@ export interface SendPushResult {
   broadcast_id: string;
   people: number;
   devices: number;
+  /** How many of `devices` were accountless handsets. */
+  anon_devices?: number;
   label: string;
 }
 

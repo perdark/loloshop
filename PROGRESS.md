@@ -1,5 +1,110 @@
 # Progress
 
+## 2026-08-29 (c) — 🔔 The update wall, the permission card, and push for phones with no account
+
+Three owner instructions, one theme: **reach**. Yesterday's measurement was that push works and
+reaches ~7% of the shop. Everything below attacks that 7%.
+
+### 1. The iOS update message is now a WALL, not a banner
+
+`components/AppUpdateBanner.tsx` is gone; `components/AppUpdateGate.tsx` replaces it. Same
+version test (`isOlderThan`, still numeric-per-segment so 1.0.10 does not sort under 1.0.4),
+same `MIN_IOS_VERSION = "1.0.5"`, same iOS-only scope — but the card is now shaped like the
+«الخصومات» popup and **cannot be dismissed**: no close button, no Escape, no backdrop tap, no
+«لاحقاً», and `body` scroll is locked behind it. The only control is «حدّث الآن».
+
+⚠️ **Three things must be true before anything is blocked**, because a false positive walls
+every iPhone at once: we are in the iOS shell, the bridge answered with a parseable version, and
+that version is older. `nativeAppVersion()` returns null on any failure and `isOlderThan(null,…)`
+is false, so every unknown lets the user through. **Raising `MIN_IOS_VERSION` is now a release
+event, not an edit** — point it at a build that is approved-but-unreleased and the shop is shut
+for every iPhone.
+
+⚠️ This reverses the old component's own reasoning («IT ASKS, IT DOES NOT BLOCK»), on the
+owner's instruction. The reasoning is kept in the new file's header so the trade stays a
+decision rather than an accident: a staff member or admin on 1.0.4 is walled too.
+
+### 2. «خلي الإشعارات مفتوحة» — the permission card, both platforms, every app open
+
+New `components/NotificationPermissionPrompt.tsx`. It shows once per app open until permission
+is granted, on **Android and iOS**, signed in or not.
+
+⚠️ **It is now the ONLY caller of `requestPermissions()` in the app**, and `PushRegistrar` no
+longer asks at all. iOS shows its permission sheet exactly once per install, so two independent
+callers is how that one sheet gets spent on someone who was not looking at a reason. The card is
+the reason; the OS sheet opens only after «فعّل الإشعارات». «مو هسه» costs nothing — the OS was
+never asked, so the ask survives to the next open. A grant fires
+`PUSH_PERMISSION_CHANGED_EVENT` and PushRegistrar registers immediately instead of waiting for
+the next launch.
+
+What "every app open" means, deliberately bounded so it is not nagging: a cold launch
+(`sessionStorage` dies with the app) **or** a foreground return after 30 minutes — the same
+session window `AppBeacon`/`lib/appPresence.js` already use. Alt-tabbing to WhatsApp and back
+does not re-ask. It also never stacks: it waits for the splash, waits for any open dialog, and
+refuses to appear at all while the update wall is up. On a phone the OS will no longer prompt
+(`denied`), the card switches to platform-specific Settings directions instead of offering a
+button that can never work.
+
+⚠️ `PushRegistrar`'s listener guard was split from its register step (`listenersReady`). The two
+had to separate: listeners attach BEFORE the permission is read, so a pass that finds permission
+ungranted still leaves them attached — re-running setup on a later grant with a single combined
+flag would attach a second set and every notification would navigate twice.
+
+### 3. Push now reaches phones with NO ACCOUNT — migration 095
+
+Owner: «we will make a lot of promotion on notifications». So a token is no longer thrown away
+because nobody has logged in yet.
+
+- `device_tokens.user_id` is **nullable**; `POST /api/notifications/devices` moved to
+  `optionalAuth` (⚠️ **above** `router.use(authRequired)` — moving it back silently re-breaks
+  this). The upsert on `token` **promotes** an anonymous row to a personal one the moment that
+  handset signs in: one row, no duplicate, no second prompt.
+- `device_notifications` (new table) is the queue for a push with no `notifications` row behind
+  it — an anonymous phone has no in-app bell. Same five states, drained by a **second pass** in
+  `lib/pushOutbox.js` (`drainDevicesOnce`) under the same freshness window and dead-token rules.
+  ⚠️ It is a separate pass on purpose: the user pass fans one notification out to all of a
+  person's handsets and calls it sent if ANY took it; here the row IS the handset.
+- New audience **«كل الأجهزة»** in the composer = every account + every unowned handset. Its
+  reach line reports them separately (`anon_devices`) because nobody knows how many humans are
+  behind those phones, and the typed confirm count is now people **+** handsets.
+
+⚠️ **TWO CONSENT COLUMNS, AND THEY MUST NEVER BE MERGED.**
+`users.notification_prefs.marketing` (089) belongs to a PERSON and follows them onto their next
+phone; `device_tokens.marketing_opt_in` (095) belongs to a HANDSET with nobody behind it. The
+server applies exactly one per recipient, decided by whether the device row has an owner. Both
+default FALSE. The opt-in is the tap on the consent card — whose Arabic copy names العروض out
+loud beside the order updates, because **that wording IS the 4.5.4 artefact**; trimming it to
+just order updates silently invalidates every consent collected afterwards. The opt-out is
+`NotificationPrefs` for an account and the new `DeviceNotificationPrefs` for a handset without
+one (rendered on `/account`'s signed-out branch — 4.5.4 wants a way out reachable by someone who
+has no account to sign into).
+
+⚠️ **A registration can only ever RAISE consent, never lower it**, and both opt-out paths clear
+the local cache (`setMarketingConsent(false)`). Without that, turning «العروض» off would be
+undone by the next app launch re-asserting the cached flag — an opt-out that silently expires is
+exactly what 4.5.4 checks for.
+
+### Verified
+
+- **603/603 backend tests** (was 590; +13 in the new `test/anonymousDevicePush.test.js`). The
+  2 `appPresence` app-open failures are the **documented pre-existing flake** — reproduced on a
+  stashed, clean tree before claiming that.
+- `tsc --noEmit` clean, `eslint` clean, `next build` clean.
+- Migration 095 applied to the **dev DB** and exercised by the new tests end to end (register →
+  audience → queue → drain), with the provider stubbed.
+
+### Not done / needs a human
+
+- ⚠️ **Nothing here has been opened on a real phone or at phone width.** The update wall, the
+  permission card and the new device switch are all phone-only surfaces and Chrome still refuses
+  to resize this window (fifth session).
+- ⚠️ **Migration 095 must ride the same deploy as the code.** It is in `db/schema.sql` too, so
+  `scripts/deploy.sh`'s `npm run migrate` (which runs first) covers it — same rule as 077/078/079.
+  Against a DB without the column, every device registration 500s.
+- Play Data Safety / Apple privacy answers: promotional push is still opt-in with an in-app
+  opt-out, and that is now true for accountless devices as well.
+
+
 ## 2026-08-29 (b) — 📲 iOS push works, and the K40 talks to us on real hardware
 
 Two things that had never been proven on a physical device, both proven tonight.

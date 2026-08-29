@@ -62,3 +62,36 @@ export async function updateNotificationPrefs(
   const { data } = await api.patch<{ data: NotificationPrefs }>("/notifications/prefs", patch);
   return data.data;
 }
+
+// ─── The handset's own «العروض» switch (migration 095) ───────────────────────
+// ⚠️ A SECOND, SEPARATE CONSENT — not a duplicate of the two above, and the two must never be
+// folded together. `NotificationPrefs` belongs to a PERSON and follows them onto their next
+// phone; this belongs to a HANDSET that has no account behind it, and there is nowhere else to
+// put its consent. Exactly one of the two applies to any given recipient server-side.
+//
+// Both endpoints take the device token as the identity, because an anonymous phone has no
+// other. See the backend controller for why that trade is safe: the worst a leaked token buys
+// is turning someone's offers OFF.
+
+/** Reads this handset's flag. `null` when the device was never registered (nothing to show). */
+export async function getDeviceMarketing(token: string): Promise<boolean | null> {
+  try {
+    const { data } = await api.get<{ data: { marketing: boolean } }>(
+      "/notifications/devices/prefs",
+      { params: { token } }
+    );
+    return data.data.marketing;
+  } catch {
+    // 404 = this phone has no row yet (permission never granted). The caller hides the switch
+    // rather than showing a control that saves nowhere.
+    return null;
+  }
+}
+
+export async function setDeviceMarketing(token: string, marketing: boolean): Promise<boolean> {
+  const { data } = await api.patch<{ data: { marketing: boolean } }>(
+    "/notifications/devices/prefs",
+    { token, marketing }
+  );
+  return data.data.marketing;
+}

@@ -32,6 +32,7 @@ import {
 } from "@/components/student/GraduateIcons";
 import { firstName, getProfile, PROFILE_CHANGED_EVENT, type Gender } from "@/lib/profile";
 import { NotificationPrefs } from "@/components/NotificationPrefs";
+import { DeviceNotificationPrefs } from "@/components/DeviceNotificationPrefs";
 
 /** Row used for the account's navigation entries — icon · label · chevron. */
 function AccountRow({
@@ -244,6 +245,13 @@ export default function AccountPage() {
         </div>
 
         <ProfilePreferences />
+
+        {/* ⚠️ THE SIGNED-OUT OPT-OUT, AND IT IS A STORE REQUIREMENT (migration 095). Since a
+            handset can receive promotional push without ever having an account, Apple 4.5.4's
+            «a way to opt out from inside the app» has to be reachable by someone who has no
+            account to sign into. It renders nothing unless this phone actually has a device
+            row, so a browser sees no stray switch. */}
+        <DeviceNotificationPrefs />
       </section>
     );
   }

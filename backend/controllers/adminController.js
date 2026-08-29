@@ -1017,7 +1017,17 @@ async function pushAudience(req, res) {
   if (!resolved.ok) {
     return res.status(400).json({ error: resolved.error, code: resolved.code });
   }
-  res.json({ data: { people: resolved.people, devices: resolved.devices, label: resolved.label } });
+  // `anon_devices` is a DEVICE count with no people behind it (migration 095) and is reported
+  // separately for exactly that reason: adding it to `people` would put a number of humans on
+  // the screen that nobody can vouch for. It is 0 for every audience except «كل الأجهزة».
+  res.json({
+    data: {
+      people: resolved.people,
+      devices: resolved.devices,
+      anon_devices: resolved.anonDevices || 0,
+      label: resolved.label,
+    },
+  });
 }
 
 /**

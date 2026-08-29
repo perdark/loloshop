@@ -40,6 +40,11 @@ const KINDS: { key: PushAudienceKind; label: string; hint: string }[] = [
   { key: "university", label: "حسب الجامعة", hint: "كل طلاب جامعة معيّنة." },
   { key: "wholesaler", label: "طلاب ممثل", hint: "طلاب ممثل واحد — بدون الممثل نفسه." },
   { key: "all", label: "الكل", hint: "كل من عنده حساب. ما تنرجع بعد الإرسال." },
+  {
+    key: "devices",
+    label: "كل الأجهزة",
+    hint: "كل من عنده حساب + كل تلفون نزّل التطبيق وقبل الإشعارات بدون ما يسجّل.",
+  },
 ];
 
 const ROLES: { key: string; label: string }[] = [
@@ -65,6 +70,7 @@ const BODY_MAX = 300;
 
 const KIND_LABEL: Record<PushAudienceKind, string> = {
   all: "الكل",
+  devices: "كل الأجهزة",
   role: "دور",
   university: "جامعة",
   wholesaler: "طلاب ممثل",
@@ -94,7 +100,7 @@ export function PushComposer() {
   const reqRef = useRef(0);
 
   const audience = useMemo(
-    () => ({ kind, value: kind === "all" ? undefined : value }),
+    () => ({ kind, value: kind === "all" || kind === "devices" ? undefined : value }),
     [kind, value]
   );
 
@@ -150,7 +156,7 @@ export function PushComposer() {
         body_ar: body.trim() || undefined,
         link: link || undefined,
         marketing,
-        confirmed_count: kind === "all" ? Number(typedCount) : undefined,
+        confirmed_count: shopWide ? Number(typedCount) : undefined,
       });
       toast.success(
         `انرسل — ${toArabicDigits(result.people)} شخص، ${toArabicDigits(result.devices)} جهاز`
@@ -167,10 +173,25 @@ export function PushComposer() {
     }
   }
 
-  const needsValue = kind !== "all";
-  const countOk = kind !== "all" || Number(typedCount) === reach?.people;
+  /**
+   * ⚠️ THE NUMBER TO CONFIRM IS PEOPLE + ACCOUNTLESS HANDSETS, and the server computes the same
+   * sum. Confirming `people` alone for «كل الأجهزة» would ask the sender to vouch for a smaller
+   * audience than the one that buzzes — and the send would be rejected anyway.
+   */
+  const shopWide = kind === "all" || kind === "devices";
+  // Neither shop-wide audience takes a value — «كل الأجهزة» would otherwise sit permanently
+  // disabled behind a picker it never shows.
+  const needsValue = !shopWide;
+  const confirmTarget = (reach?.people ?? 0) + (reach?.anon_devices ?? 0);
+  const countOk = !shopWide || Number(typedCount) === confirmTarget;
   const blocked =
-    !title.trim() || (needsValue && !value) || !reach || reach.people === 0 || sending;
+    !title.trim() ||
+    (needsValue && !value) ||
+    !reach ||
+    // ⚠️ `people === 0` alone would block the one send «كل الأجهزة» exists for: a shop whose
+    // accounts all opted out of offers can still have opted-in phones that never registered.
+    (reach.people === 0 && (reach.anon_devices ?? 0) === 0) ||
+    sending;
 
   return (
     <section dir="rtl" lang="ar" className="rounded-2xl border border-ink/10 bg-beige p-5 sm:p-7">
@@ -259,7 +280,7 @@ export function PushComposer() {
         {/* Reach */}
         <div
           className={`rounded-xl border px-4 py-3 ${
-            kind === "all" ? "border-danger/30 bg-danger/5" : "border-orange/25 bg-orange/10"
+            shopWide ? "border-danger/30 bg-danger/5" : "border-orange/25 bg-orange/10"
           }`}
         >
           {reaching ? (
@@ -270,11 +291,21 @@ export function PushComposer() {
             <>
               <p className="text-sm font-semibold tabular-nums text-ink">
                 {toArabicDigits(reach.people)} شخص · {toArabicDigits(reach.devices)} جهاز
+                {reach.anon_devices > 0
+                  ? ` + ${toArabicDigits(reach.anon_devices)} تلفون بدون حساب`
+                  : ""}
               </p>
               <p className="mt-1 text-[11px] leading-relaxed text-ink/60">
                 {toArabicDigits(reach.devices)} منهم يوصلهم إشعار على التلفون هسه. الباقي يشوفون
                 الرسالة بجرس الإشعارات أول ما يفتحون التطبيق.
               </p>
+              {reach.anon_devices > 0 && (
+                /* ⚠️ Said out loud because it is the one audience with no safety net: an
+                   accountless phone has no in-app bell, so a push it misses is simply gone. */
+                <p className="mt-1 text-[11px] leading-relaxed text-ink/60">
+                  التلفونات بدون حساب توصلهم الرسالة إشعار بس — ما عندهم جرس داخل التطبيق.
+                </p>
+              )}
             </>
           )}
         </div>
@@ -412,7 +443,7 @@ export function PushComposer() {
         footer={
           <>
             <Button
-              variant={kind === "all" ? "danger" : "primary"}
+              variant={shopWide ? "danger" : "primary"}
               fullWidth
               loading={sending}
               disabled={!countOk}
@@ -429,17 +460,25 @@ export function PushComposer() {
         <div dir="rtl" className="space-y-3 text-sm text-ink">
           <p>
             راح يوصل لـ<b>{toArabicDigits(reach?.people ?? 0)}</b> شخص (
-            {toArabicDigits(reach?.devices ?? 0)} جهاز يستلم إشعار هسه).
+            {toArabicDigits(reach?.devices ?? 0)} جهاز يستلم إشعار هسه)
+            {(reach?.anon_devices ?? 0) > 0 && (
+              <>
+                {" "}
+                + <b>{toArabicDigits(reach?.anon_devices ?? 0)}</b> تلفون بدون حساب
+              </>
+            )}
+            .
           </p>
           <div className="rounded-xl bg-white/60 p-3">
             <p className="font-semibold">{title}</p>
             {body && <p className="mt-1 text-xs text-ink/70">{body}</p>}
           </div>
-          {kind === "all" && (
+          {shopWide && (
             <div className="rounded-xl border border-danger/30 bg-danger/5 p-3">
               <p className="text-xs leading-relaxed text-danger">
-                هذا يوصل <b>كل</b> من عنده حساب، وما ينلغى. اكتب عدد المستلمين (
-                {toArabicDigits(reach?.people ?? 0)}) حتى تتأكد.
+                هذا يوصل <b>كل</b>{" "}
+                {kind === "devices" ? "من عنده حساب وكل تلفون نزّل التطبيق" : "من عنده حساب"}، وما
+                ينلغى. اكتب عدد المستلمين ({toArabicDigits(confirmTarget)}) حتى تتأكد.
               </p>
               <input
                 inputMode="numeric"

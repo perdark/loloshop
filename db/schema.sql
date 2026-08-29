@@ -403,15 +403,34 @@ CREATE INDEX IF NOT EXISTS idx_notifications_push_pending
 -- and re-sold here, and the provider reissues the SAME token to the next person who signs in.
 -- The upsert in notificationController.registerDevice therefore MOVES the device to its new
 -- owner instead of leaving the previous account subscribed to it.
+--
+-- ⚠️ `user_id` IS NULLABLE SINCE MIGRATION 095: a NULL owner is an anonymous handset that
+-- granted notification permission before it ever had an account. Do not restore NOT NULL —
+-- see the migration's header for the measurement (165 tokens against 2,249 accounts, and
+-- zero for everyone who installed the app without registering).
 CREATE TABLE IF NOT EXISTS device_tokens (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id      UUID REFERENCES users(id) ON DELETE CASCADE,
   token        TEXT NOT NULL UNIQUE,
   platform     TEXT NOT NULL CHECK (platform IN ('android', 'ios')),
+  -- The ANONYMOUS half of Apple 4.5.4. NOT a duplicate of users.notification_prefs.marketing
+  -- (089): that one belongs to a person and follows them onto a new phone, this one belongs to
+  -- a handset with no person behind it. lib/pushBroadcast.js applies exactly one per recipient.
+  marketing_opt_in BOOLEAN NOT NULL DEFAULT FALSE,
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_device_tokens_user ON device_tokens(user_id);
+
+-- ⚠️ REPEATED FROM MIGRATION 095 ON PURPOSE, the 077/080 pattern: `CREATE TABLE IF NOT EXISTS`
+-- does nothing to a database that already HAS device_tokens, and every deployed database does.
+-- Without these two lines `npm run migrate` leaves prod on the old NOT NULL shape and every
+-- anonymous registration 500s. Do not tidy them out.
+ALTER TABLE device_tokens ALTER COLUMN user_id DROP NOT NULL;
+ALTER TABLE device_tokens
+  ADD COLUMN IF NOT EXISTS marketing_opt_in BOOLEAN NOT NULL DEFAULT FALSE;
+CREATE INDEX IF NOT EXISTS idx_device_tokens_anon
+  ON device_tokens(last_seen_at) WHERE user_id IS NULL;
 
 -- =====================================================
 -- TEMPLATES — pre-made designs per university (P3, scaffold now)
@@ -1616,6 +1635,34 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_prefs JSONB NOT NULL
 CREATE INDEX IF NOT EXISTS idx_users_marketing_optin
   ON users ((notification_prefs->>'marketing'))
   WHERE deleted_at IS NULL;
+
+-- =====================================================
+-- Migration 095 — the queue for a push aimed at a HANDSET rather than a person.
+--
+-- `notifications` (077) is the in-app bell and is keyed to a user, so an anonymous device — one
+-- that granted permission before it ever had an account — has nowhere to put a message. This
+-- table is deliberately the same shape: the same five push_state values, drained by the same
+-- lib/pushOutbox.js pass under the same 15-minute freshness window, with the same dead-token
+-- cleanup. ⚠️ Do NOT let a second delivery path grow here; it would have to re-earn all of it.
+-- Only an admin broadcast aimed at «كل الأجهزة» ever writes this table.
+-- Full reasoning in db/migrations/095_anonymous_device_push.sql.
+-- =====================================================
+CREATE TABLE IF NOT EXISTS device_notifications (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id    UUID NOT NULL REFERENCES device_tokens(id) ON DELETE CASCADE,
+  broadcast_id UUID REFERENCES push_broadcasts(id) ON DELETE SET NULL,
+  type         TEXT NOT NULL,
+  title_ar     TEXT NOT NULL,
+  body_ar      TEXT,
+  link         TEXT,
+  push_state   TEXT NOT NULL DEFAULT 'pending'
+                 CHECK (push_state IN ('pending', 'sending', 'sent', 'failed', 'skipped')),
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  pushed_at    TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_device_notifications_pending
+  ON device_notifications(created_at)
+  WHERE push_state IN ('pending', 'sending');
 
 -- =====================================================
 -- Migration 085 — an UNDO ledger for «إنهاء الخصومات» (ending a storefront discount round).

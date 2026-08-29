@@ -38,15 +38,63 @@ export function getStoredPushToken(): string | null {
 }
 
 /**
- * Hand a device token to the backend. Called on EVERY app launch while signed in, not just the
- * first: FCM and APNs rotate tokens on their own schedule (restore from backup, app update, or
- * no visible reason at all) and a stale token fails silently forever.
+ * Where this handset's «العروض» consent is remembered between launches.
+ *
+ * ⚠️ IT IS A CACHE OF A SERVER FACT, NOT THE FACT. The server owns consent —
+ * `users.notification_prefs.marketing` for an account (089), `device_tokens.marketing_opt_in`
+ * for an anonymous handset (095). This only exists so that a token which rotates, or a phone
+ * that signs in months after it granted permission, can re-assert the consent it already gave
+ * instead of silently losing it. The server ORs it in and never lowers it from a registration,
+ * so a stale `true` cannot re-enrol somebody — but a stale one after an opt-out could, which is
+ * exactly why `setMarketingConsent(false)` is called by every opt-out path.
+ */
+const MARKETING_CONSENT_KEY = "loloshop_push_marketing_consent";
+
+/** True when this phone has tapped the consent card and not opted out since. */
+export function hasMarketingConsent(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return localStorage.getItem(MARKETING_CONSENT_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** Record (or clear) the consent this phone gave. Never throws — private mode is not an error. */
+export function setMarketingConsent(on: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (on) localStorage.setItem(MARKETING_CONSENT_KEY, "1");
+    else localStorage.removeItem(MARKETING_CONSENT_KEY);
+  } catch {
+    /* the server still holds the real answer */
+  }
+}
+
+/**
+ * Hand a device token to the backend. Called on EVERY app launch, not just the first: FCM and
+ * APNs rotate tokens on their own schedule (restore from backup, app update, or no visible
+ * reason at all) and a stale token fails silently forever.
+ *
+ * ⚠️ NO LONGER GATED ON BEING SIGNED IN (migration 095). `device_tokens.user_id` is nullable,
+ * so a phone that granted permission before it had an account registers with no owner and the
+ * upsert on `token` promotes it the moment that handset signs in. Discarding those tokens was
+ * why the shop could reach 165 phones out of 2,249 accounts and none of the installs that never
+ * registered.
+ *
+ * `marketingOptIn` may only ever RAISE the flag server-side; it is never how consent is
+ * withdrawn (see `setMarketingConsent`).
  */
 export async function registerPushToken(
   token: string,
-  platform: PushPlatform
+  platform: PushPlatform,
+  { marketingOptIn = false }: { marketingOptIn?: boolean } = {}
 ): Promise<void> {
-  await api.post("/notifications/devices", { token, platform });
+  await api.post("/notifications/devices", {
+    token,
+    platform,
+    marketing_opt_in: marketingOptIn,
+  });
   try {
     localStorage.setItem(STORED_TOKEN_KEY, token);
   } catch {
@@ -88,3 +136,16 @@ export async function unregisterPushToken(jwt: string): Promise<void> {
     // Not in a shell, or the plugin is unavailable — nothing to detach.
   }
 }
+
+/**
+ * Fired by NotificationPermissionPrompt the moment the student grants permission, so
+ * PushRegistrar can attach its listeners and call `register()` in the same breath instead of
+ * waiting for the next launch.
+ *
+ * ⚠️ THE TWO COMPONENTS SPLIT ONE JOB AND MUST NOT BE MERGED BACK. The prompt owns the ASK —
+ * it is the only caller of `requestPermissions()`, because iOS gives an install exactly one
+ * permission sheet and two callers is how it gets spent silently. PushRegistrar owns the
+ * REGISTRATION — it needs `req.user`, so it can only run while signed in, which is far too
+ * late to be the only moment the app ever asks.
+ */
+export const PUSH_PERMISSION_CHANGED_EVENT = "loloshop:push-permission-changed";

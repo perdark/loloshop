@@ -114,6 +114,14 @@ function audienceSql(audience, { marketing = false } = {}) {
     return built(`SELECT u.id FROM users u WHERE u.deleted_at IS NULL`, [], 'الكل');
   }
 
+  // «كل الأجهزة» (migration 095) — every account, PLUS every installed handset that granted
+  // notification permission without ever registering. The user half is identical to 'all'; the
+  // anonymous half has no user row at all and is resolved separately by `anonDeviceSql` below,
+  // because it cannot be expressed as a SELECT over `users`.
+  if (kind === 'devices') {
+    return built(`SELECT u.id FROM users u WHERE u.deleted_at IS NULL`, [], 'كل الأجهزة');
+  }
+
   if (kind === 'role') {
     if (!ROLES.has(value)) return { ok: false, error: 'دور غير معروف', code: 'ERR_VALIDATION' };
     return built(
@@ -171,14 +179,45 @@ async function resolveAudience(audience, { marketing = false } = {}) {
   const built = audienceSql(audience, { marketing });
   if (!built.ok) return built;
 
+  // The anonymous slice is counted only for the one audience that includes it. `anon` is a
+  // DEVICE count, not a people count — nobody knows how many humans are behind those handsets,
+  // and pretending otherwise would put a made-up number in front of the confirm box.
+  const wantsAnon = audience && audience.kind === 'devices';
+  const anonSql = wantsAnon ? anonDeviceSql({ marketing }) : null;
+
   const { rows } = await query(
     `WITH aud AS (${built.sql})
      SELECT (SELECT COUNT(*)::int FROM aud) AS people,
             (SELECT COUNT(DISTINCT d.user_id)::int FROM device_tokens d
-              WHERE d.user_id IN (SELECT id FROM aud)) AS devices`,
+              WHERE d.user_id IN (SELECT id FROM aud)) AS devices,
+            ${anonSql ? `(SELECT COUNT(*)::int FROM (${anonSql}) AS anon)` : '0'} AS anon_devices`,
     built.params
   );
-  return { ok: true, ...built, people: rows[0].people, devices: rows[0].devices };
+  return {
+    ok: true,
+    ...built,
+    people: rows[0].people,
+    devices: rows[0].devices,
+    anonDevices: rows[0].anon_devices,
+  };
+}
+
+/**
+ * The anonymous half of the «كل الأجهزة» audience: handsets with no owner.
+ *
+ * ⚠️ THE MARKETING GATE HERE IS A DIFFERENT COLUMN FROM THE ONE `audienceSql` USES, and that is
+ * not duplication. A person's consent lives on `users.notification_prefs` (089) so it follows
+ * them onto their next phone; a handset with nobody behind it has no account to hang consent
+ * on, so its consent lives on the device row (`marketing_opt_in`, 095). Exactly one of the two
+ * applies to any given recipient — never both, never neither. Both default FALSE, so a
+ * promotional send reaches only what was explicitly opted in, whichever kind of recipient it is.
+ *
+ * `user_id IS NULL` is what keeps the two halves disjoint: the moment a handset signs in its
+ * row gains an owner and it is counted — once — through the user half instead.
+ */
+function anonDeviceSql({ marketing = false } = {}) {
+  const gate = marketing ? ' AND d.marketing_opt_in = TRUE' : '';
+  return `SELECT d.id FROM device_tokens d WHERE d.user_id IS NULL${gate}`;
 }
 
 const TITLE_MAX = 80;
@@ -206,7 +245,11 @@ async function send({ audience, titleAr, bodyAr, link, adminId, confirmedCount, 
 
   const resolved = await resolveAudience(audience, { marketing });
   if (!resolved.ok) return resolved;
-  if (resolved.people === 0) {
+  const anonCount = resolved.anonDevices || 0;
+  // ⚠️ «كل الأجهزة» can be a legitimate send with ZERO people behind it — a shop whose accounts
+  // all opted out of offers may still have opted-in handsets that have never registered. Testing
+  // `people === 0` alone would refuse exactly the send this audience exists for.
+  if (resolved.people === 0 && anonCount === 0) {
     return {
       ok: false,
       error: marketing
@@ -216,12 +259,16 @@ async function send({ audience, titleAr, bodyAr, link, adminId, confirmedCount, 
     };
   }
 
-  // Guard 2 — see the header. Only for «الكل»: demanding it on every send would train the
-  // sender to type numbers without reading them, which is worse than not asking.
-  if (audience.kind === 'all' && Number(confirmedCount) !== resolved.people) {
+  // Guard 2 — see the header. Only for the two shop-wide audiences: demanding it on every send
+  // would train the sender to type numbers without reading them, which is worse than not asking.
+  // For «كل الأجهزة» the number to confirm is people PLUS the unowned handsets, because that is
+  // what will actually buzz.
+  const confirmTarget = resolved.people + anonCount;
+  const needsConfirm = audience.kind === 'all' || audience.kind === 'devices';
+  if (needsConfirm && Number(confirmedCount) !== confirmTarget) {
     return {
       ok: false,
-      error: `اكتب عدد المستلمين (${resolved.people}) للتأكيد`,
+      error: `اكتب عدد المستلمين (${confirmTarget}) للتأكيد`,
       code: 'ERR_CONFIRM_COUNT',
     };
   }
@@ -241,7 +288,7 @@ async function send({ audience, titleAr, bodyAr, link, adminId, confirmedCount, 
         body || null,
         checked.link,
         resolved.people,
-        resolved.devices,
+        resolved.devices + anonCount,
         marketing,
       ]
     );
@@ -252,14 +299,28 @@ async function send({ audience, titleAr, bodyAr, link, adminId, confirmedCount, 
     // collide with it — and the collision is silent: the audience filter would receive the
     // notification title as its parameter and match nobody, or match the wrong people.
     const n = built.params.length;
+    const type = marketing ? 'admin_marketing' : 'admin_broadcast';
     const { rowCount } = await client.query(
       `INSERT INTO notifications (user_id, type, title_ar, body_ar, link)
        SELECT id, $${n + 4}, $${n + 1}, $${n + 2}, $${n + 3}
          FROM (${built.sql}) AS aud`,
-      [...built.params, title, body || null, checked.link,
-       marketing ? 'admin_marketing' : 'admin_broadcast']
+      [...built.params, title, body || null, checked.link, type]
     );
-    return { broadcastId, rowCount };
+
+    // The anonymous handsets, into their own queue (095). Same statement shape, same
+    // transaction, same audit row — but `device_notifications`, because there is no user to
+    // hang a `notifications` row on and no in-app bell for it to appear in.
+    let anonRows = 0;
+    if (anonCount > 0) {
+      const anonSql = anonDeviceSql({ marketing });
+      const { rowCount: queued } = await client.query(
+        `INSERT INTO device_notifications (device_id, broadcast_id, type, title_ar, body_ar, link)
+         SELECT id, $1, $5, $2, $3, $4 FROM (${anonSql}) AS anon`,
+        [broadcastId, title, body || null, checked.link, type]
+      );
+      anonRows = queued;
+    }
+    return { broadcastId, rowCount, anonRows };
   });
 
   return {
@@ -267,7 +328,8 @@ async function send({ audience, titleAr, bodyAr, link, adminId, confirmedCount, 
     marketing,
     broadcast_id: result.broadcastId,
     people: result.rowCount,
-    devices: resolved.devices,
+    devices: resolved.devices + result.anonRows,
+    anon_devices: result.anonRows,
     label: resolved.label,
   };
 }
@@ -277,6 +339,7 @@ module.exports = {
   resolveAudience,
   checkLink,
   audienceSql,
+  anonDeviceSql,
   LINK_ALLOWLIST,
   TITLE_MAX,
   BODY_MAX,

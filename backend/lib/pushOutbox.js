@@ -71,7 +71,20 @@ async function retireStale({ limit = 500 } = {}) {
       )`,
     [limit]
   );
-  return rowCount;
+  // The anonymous queue (095) needs the same sweep for the same reason: its index is partial on
+  // the unfinished states, so a row nobody ever drained would sit in it forever.
+  const { rowCount: devices } = await query(
+    `UPDATE device_notifications SET push_state = 'skipped'
+      WHERE id IN (
+        SELECT id FROM device_notifications
+         WHERE push_state IN ('pending', 'sending')
+           AND created_at < now() - INTERVAL '${FRESH_WINDOW}'
+         ORDER BY created_at
+         LIMIT $1
+      )`,
+    [limit]
+  );
+  return rowCount + devices;
 }
 
 /**
@@ -187,14 +200,117 @@ async function drainOnce({ limit = CLAIM_LIMIT } = {}) {
   return { claimed: claimed.length, sent: sent.length, skipped: skipped.length, failed: failed.length, dropped };
 }
 
+/**
+ * The anonymous pass (migration 095): one push per `device_notifications` row.
+ *
+ * ⚠️ IT IS A SEPARATE PASS, NOT A WIDENING OF THE ONE ABOVE, and the two must not be folded
+ * together. The user pass fans ONE notification out to ALL of that person's handsets and marks
+ * it sent if ANY of them took it — «one phone reached is a delivered notification». Here the
+ * row IS the handset: there is no person to satisfy, no other device to fall back to, and a
+ * failure means exactly one refusal. Same states, same freshness window, same dead-token
+ * cleanup, different unit.
+ *
+ * A device that signs in between the queue write and the drain is skipped on purpose: the join
+ * requires `user_id IS NULL`, so its owner will be reached through the user queue instead and
+ * a promoted handset never gets the message twice.
+ */
+async function drainDevicesOnce({ limit = CLAIM_LIMIT } = {}) {
+  const empty = { claimed: 0, sent: 0, skipped: 0, failed: 0, dropped: 0 };
+  const reachable = push.configured();
+  if (!reachable.android && !reachable.ios) return empty;
+
+  const { rows: claimed } = await query(
+    `UPDATE device_notifications SET push_state = 'sending', pushed_at = now()
+      WHERE id IN (
+        SELECT id FROM device_notifications
+         WHERE push_state IN ('pending', 'sending')
+           AND created_at > now() - INTERVAL '${FRESH_WINDOW}'
+           AND (push_state = 'pending' OR pushed_at < now() - INTERVAL '${STUCK_AFTER}')
+         ORDER BY created_at
+         LIMIT $1
+         FOR UPDATE SKIP LOCKED
+      )
+      RETURNING id, device_id, type, title_ar, body_ar, link`,
+    [limit]
+  );
+  if (!claimed.length) return empty;
+
+  const deviceIds = [...new Set(claimed.map((r) => r.device_id))];
+  const { rows: devices } = await query(
+    `SELECT id, user_id, token, platform FROM device_tokens
+      WHERE id = ANY($1::uuid[]) AND user_id IS NULL`,
+    [deviceIds]
+  );
+  const byId = new Map(devices.map((d) => [d.id, d]));
+
+  const sent = [];
+  const failed = [];
+  const skipped = [];
+  const deadTokens = new Set();
+
+  for (const row of claimed) {
+    const device = byId.get(row.device_id);
+    // Gone, or no longer anonymous, or a platform this process has no credentials for. None of
+    // those is a failure — nothing was refused, there was simply nothing to send to.
+    if (!device || !reachable[device.platform]) {
+      skipped.push(row.id);
+      continue;
+    }
+    const result = await push.sendToDevice(device, {
+      id: row.id,
+      title: row.title_ar,
+      body: row.body_ar,
+      link: row.link,
+      type: row.type,
+    });
+    if (result.ok) sent.push(row.id);
+    else {
+      if (result.dead) deadTokens.add(device.token);
+      failed.push(row.id);
+    }
+  }
+
+  const mark = async (ids, state) => {
+    if (!ids.length) return;
+    await query(
+      `UPDATE device_notifications SET push_state = $2, pushed_at = now() WHERE id = ANY($1::uuid[])`,
+      [ids, state]
+    );
+  };
+  await mark(sent, 'sent');
+  await mark(skipped, 'skipped');
+  await mark(failed, 'failed');
+
+  let dropped = 0;
+  if (deadTokens.size) {
+    // Same rule as the user pass: only an explicit provider verdict deletes a device row.
+    // `device_notifications.device_id` is ON DELETE CASCADE, so the rows just marked 'failed'
+    // for that token go with it — which is correct, they can never be delivered.
+    const { rowCount } = await query(`DELETE FROM device_tokens WHERE token = ANY($1::text[])`, [
+      [...deadTokens],
+    ]);
+    dropped = rowCount;
+  }
+
+  return { claimed: claimed.length, sent: sent.length, skipped: skipped.length, failed: failed.length, dropped };
+}
+
 async function tick() {
   if (running) return; // a slow provider must not stack passes on top of each other
   running = true;
   try {
-    const out = await drainOnce();
+    const users = await drainOnce();
+    const anon = await drainDevicesOnce();
+    const out = {
+      sent: users.sent + anon.sent,
+      failed: users.failed + anon.failed,
+      skipped: users.skipped + anon.skipped,
+      dropped: users.dropped + anon.dropped,
+    };
     if (out.sent || out.failed || out.dropped) {
       console.log(
-        `push: sent=${out.sent} failed=${out.failed} skipped=${out.skipped} dropped_tokens=${out.dropped}`
+        `push: sent=${out.sent} failed=${out.failed} skipped=${out.skipped} dropped_tokens=${out.dropped}` +
+          (anon.claimed ? ` (anon: sent=${anon.sent} failed=${anon.failed})` : '')
       );
     }
     if (ticks++ % RETIRE_EVERY_TICKS === 0) await retireStale();
@@ -217,4 +333,4 @@ function stop() {
   timer = null;
 }
 
-module.exports = { drainOnce, retireStale, start, stop, POLL_MS, FRESH_WINDOW };
+module.exports = { drainOnce, drainDevicesOnce, retireStale, start, stop, POLL_MS, FRESH_WINDOW };

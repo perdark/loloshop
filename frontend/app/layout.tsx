@@ -4,8 +4,10 @@ import { DeepLinkHandler } from "@/components/DeepLinkHandler";
 import { PwaRegistrar } from "@/components/PwaRegistrar";
 import { PushRegistrar } from "@/components/PushRegistrar";
 import { AppBeacon } from "@/components/AppBeacon";
-import { AppUpdateBanner } from "@/components/AppUpdateBanner";
+import { AppUpdateGate } from "@/components/AppUpdateGate";
+import { NotificationPermissionPrompt } from "@/components/NotificationPermissionPrompt";
 import { ToasterProvider } from "@/components/providers/ToasterProvider";
+import Script from "next/script";
 import { APP_ONLY, buildGateScript } from "@/lib/app-gate";
 import "./globals.css";
 
@@ -132,6 +134,29 @@ export default function RootLayout({
         {APP_ONLY && (
           <script dangerouslySetInnerHTML={{ __html: buildGateScript() }} />
         )}
+        {/*
+          Android's long-press context menu ("open image in new tab / copy link address")
+          and the iOS drag-out-an-image gesture. NEITHER IS BLOCKABLE IN CSS — the
+          `.app-chrome` rules in globals.css stop the iOS selection callout and that is all
+          they can do. Android's menu is a browser affordance with no CSS switch, and iOS
+          image lift is a system drag that fires the standard `dragstart` event, so
+          `preventDefault()` on the event is the only lever for either.
+
+          ⚠️ SCOPED TO `.app-chrome`, NOT GLOBAL, AND THAT IS THE WHOLE POINT. The listener
+          lives on `document` (one delegated pair for the app, surviving every client-side
+          navigation), so without the containment check it would strip right-click and
+          image-save from /admin, /staff and /wholesaler too. Those are laptop and iPad
+          tools, and leaving them alone is a recorded owner decision — see the long comment
+          above `.app-chrome` in globals.css. Adding a surface to the app feel therefore
+          means adding the CLASS, never widening this listener.
+
+          ⚠️ The exemption list is a VERBATIM copy of the `.app-chrome input, textarea,
+          [contenteditable]` block in globals.css. If one changes, change both: a field the
+          CSS lets you select but this blocks the menu on is a field you cannot paste into.
+        */}
+        <Script id="lolo-no-contextmenu" strategy="afterInteractive">
+          {`try{var s='input,textarea,[contenteditable="true"]';var g=function(e){var t=e.target;if(!t||!t.closest)return;if(!t.closest('.app-chrome'))return;if(t.closest(s))return;e.preventDefault()};document.addEventListener('contextmenu',g,false);document.addEventListener('dragstart',g,false)}catch(e){}`}
+        </Script>
         <PwaRegistrar />
         {/*
           Deep-link router for the native shells. Renders nothing; inert in a browser.
@@ -152,7 +177,20 @@ export default function RootLayout({
           exactly the casual opens the daily report is asking about.
         */}
         <AppBeacon />
-        <AppUpdateBanner />
+        {/*
+          The BLOCKING update wall (iOS only, versions below the one that can register for
+          push). Mounted before everything else that can draw an overlay so nothing stacks on
+          top of it — and the notification card below explicitly refuses to appear while it is
+          up. ⚠️ It renders nothing in a browser and nothing on a readable, current version.
+        */}
+        <AppUpdateGate />
+        {/*
+          «خلي الإشعارات مفتوحة» — the in-app permission ask, on both platforms, shown once per
+          app open until it is granted. Root layout because a student who opens the app lands
+          anywhere; gating it to the storefront would never ask a rep or a staff member.
+          Inert in a browser.
+        */}
+        <NotificationPermissionPrompt />
         {children}
         <ToasterProvider />
       </body>
