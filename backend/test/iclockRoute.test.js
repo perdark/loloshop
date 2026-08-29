@@ -39,8 +39,11 @@ function request(method, path, body) {
 test.before(async () => {
   const app = express();
   app.set('trust proxy', 'loopback');
-  app.use(require('../routes/iclock'));
+  // Mounted EXACTLY as server.js does — a test that mounts it differently proves nothing
+  // about the app.
+  app.use('/iclock', require('../routes/iclock'));
   app.use(express.json());
+  app.post('/api/canary', (req, res) => res.json({ kind: typeof req.body }));
   ctx.server = http.createServer(app);
   await new Promise((r) => ctx.server.listen(0, '127.0.0.1', r));
   ctx.base = `http://127.0.0.1:${ctx.server.address().port}`;
@@ -163,4 +166,20 @@ test('a command the device rejected is marked failed, not done', async () => {
   const row = await query(`SELECT state, result_code FROM device_commands WHERE id = $1`, [id]);
   assert.equal(row.rows[0].state, 'failed');
   assert.equal(row.rows[0].result_code, '-1');
+});
+
+test('the device router does not eat the rest of the app\'s JSON bodies', async () => {
+  // The regression this exists for: mounted at the root, this router's express.text({type:'*/*'})
+  // consumed every request body in the shop, so req.body arrived as a STRING on every POST —
+  // login, checkout, orders, all of it. Scoping the mount to '/iclock' is the fix; this is the
+  // proof, and it belongs here because no unit test of a controller can see it.
+  const res = await new Promise((resolve, reject) => {
+    const req = http.request(`${ctx.base}/api/canary`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' } },
+      (r) => { let d = ''; r.on('data', (c) => { d += c; }); r.on('end', () => resolve(d)); });
+    req.on('error', reject);
+    req.write(JSON.stringify({ hello: 'world' }));
+    req.end();
+  });
+  assert.equal(JSON.parse(res).kind, 'object');
 });

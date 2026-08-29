@@ -62,7 +62,11 @@ app.use(
 // ⚠️ MOUNTED BEFORE express.json() AND AT THE ROOT, both deliberately. The fingerprint
 // device's paths (/iclock/*) are fixed in its firmware, so they cannot live under /api, and
 // its bodies are tab-separated text/plain that this app's JSON parser must never see.
-app.use(require('./routes/iclock'));
+// ⚠️ MOUNTED ON THE /iclock PATH, NOT THE ROOT. A bare app.use(router) runs this router's
+// middleware for EVERY request in the app — and it installs express.text({type:'*/*'}),
+// which would consume every JSON body before express.json() ever sees it, leaving req.body a
+// STRING on every POST in the shop. Measured, not theorised. Do not "simplify" this back.
+app.use('/iclock', require('./routes/iclock'));
 
 app.use(express.json({ limit: '5mb' }));
 app.use(

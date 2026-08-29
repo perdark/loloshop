@@ -6,9 +6,13 @@
 // machine. The paths below are fixed in firmware — we do not get to choose them, which is
 // why this router mounts at the ROOT of the app and not under /api.
 //
-// ⚠️ MOUNTED BEFORE express.json() ON PURPOSE (server.js). These bodies are tab-separated
-// text/plain. Mounting after would work today only because express.json ignores a non-JSON
-// content-type, and would break silently the day a firmware sends application/json.
+// ⚠️ MOUNTED BEFORE express.json() AND ON THE '/iclock' PATH (server.js). Both matter, for
+// opposite reasons. Before, because these bodies are tab-separated text/plain and mounting
+// after would work today only because express.json ignores a non-JSON content-type — it would
+// break silently the day a firmware sends application/json. On the PATH, because this router
+// installs express.text({type:'*/*'}), and a root mount runs that for every request in the
+// app: it swallows every JSON body and req.body arrives as a STRING on every POST the shop
+// makes. That shipped once and is what iclockRoute.test.js's last test now guards.
 //
 // ⚠️ AN UNKNOWN SERIAL GETS 200 WITH AN EMPTY BODY, NEVER 403. Some firmware retries a 4xx
 // forever with no backoff, so one mistyped serial becomes a self-inflicted flood against our
@@ -73,14 +77,14 @@ const text = (res, body) => res.status(200).type('text/plain').send(body);
 // ─── Handshake ───────────────────────────────────────────────────────────────────────────
 // The device asks for its operating config on boot and will not upload anything until it
 // gets one.
-router.get('/iclock/cdata', async (req, res) => {
+router.get('/cdata', async (req, res) => {
   const sn = await device(req);
   if (!sn) return text(res, '');
   return text(res, handshakeBody(sn));
 });
 
 // ─── The punches ─────────────────────────────────────────────────────────────────────────
-router.post('/iclock/cdata', async (req, res) => {
+router.post('/cdata', async (req, res) => {
   const sn = await device(req);
   if (!sn) return text(res, 'OK');
 
@@ -104,7 +108,7 @@ router.post('/iclock/cdata', async (req, res) => {
 // ─── Our channel TO the device ───────────────────────────────────────────────────────────
 // One command per poll, by design: the device acknowledges them one at a time, and handing
 // out two means the second's result can never be matched to it.
-router.get('/iclock/getrequest', async (req, res) => {
+router.get('/getrequest', async (req, res) => {
   const sn = await device(req);
   if (!sn) return text(res, 'OK');
   const { rows } = await query(
@@ -124,7 +128,7 @@ router.get('/iclock/getrequest', async (req, res) => {
 });
 
 // ─── The device reporting how a command went ─────────────────────────────────────────────
-router.post('/iclock/devicecmd', async (req, res) => {
+router.post('/devicecmd', async (req, res) => {
   const sn = await device(req);
   if (!sn) return text(res, 'OK');
   // Body looks like: ID=12&Return=0&CMD=DATA
