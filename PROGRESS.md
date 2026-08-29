@@ -1,5 +1,82 @@
 # Progress
 
+## 2026-08-29 — 👆 جهاز البصمة ZKTeco K40 Pro عبر ADMS — كود كامل، ما انزل بعد
+
+**591/591 backend tests.** Migration **094**, zero new npm dependencies, one new frontend
+panel. All on `feat/zkteco-adms-attendance`, **unmerged** — merging auto-deploys.
+
+### What started this
+
+بصمة today is a button on the worker's phone. Identity is their JWT; the "are you at the shop"
+proof is `verificationEvidence()` — IP range and/or GPS. On prod `verification_mode` is
+`'none'` and `shop_latitude/longitude` are NULL, so **nothing is verified**: any worker can
+stamp from home, on time, every day. A K40 Pro is being installed, and standing at the sensor
+is strictly stronger proof than a GPS check that was never switched on.
+
+### Why ADMS and not a bridge
+
+The QR the device shows on first boot — `{"ip":"192.168.1.201","port":"4370"}` — is the
+**pull** protocol, LAN-only and useless from the VPS. ADMS is the **push** half: the device
+dials out to a server address we choose. No port forward on the shop router, no static IP, no
+always-on PC at the shop.
+
+⚠️ `~/Desktop/active/grand` has a working K40 integration (live 2026-08-13, proven on real
+hardware 2026-08-15: 193 punches, 0 duplicates). Its **bridge** half is the pull protocol and
+is exactly what ADMS makes unnecessary — do not copy it. Its **server** half was ported:
+append-only raw punches, the `NULLS NOT DISTINCT` dedupe index, and a reject quarantine.
+
+### The one thing that did NOT port
+
+grandlayan's `attendance_day` is a cache that may be wiped and rebuilt. **LoloShop's
+`staff_attendance_records` is not** — it carries `late_minutes` frozen at write time, admin
+overrides, and `staff_attendance_breaks.attendance_id` pointing at it. So the derivation
+UPSERTs, never DELETEs, and never touches a row with `status = 'overridden'`.
+
+### What shipped
+
+| | |
+|---|---|
+| Migration 094 | `punch_raw` (append-only) · `punch_reject` · `attendance_devices` · `staff_device_pins` · `device_commands` |
+| `lib/iclockProtocol.js` | parses tab-separated ATTLOG; quarantines bad lines instead of failing the batch |
+| `lib/attendanceDevice.js` | punches → `staff_attendance_records`; savepoint per punch |
+| `routes/iclock.js` | the endpoint the device dials out to; mounted at root, before `express.json()` |
+| `AttendanceDevicePanel.tsx` | «جهاز البصمة» on `/admin/attendance` — register, map PINs, claim unmapped |
+
+### Three decisions a future session will want to undo, and must not
+
+- **Lateness is computed from the punch's own timestamp, never `now()`.** The device buffers
+  during an internet outage and dumps hours later; arrival time would mark a whole outage's
+  worth of people late.
+- **An unregistered serial gets `200` with an empty body, never `403`.** Some firmware retries
+  a 4xx forever with no backoff, so one mistyped serial becomes a self-inflicted flood against
+  our own API. It looks like a missing guard and is the opposite of one.
+- **`punch_raw_dedupe_ux` carries `NULLS NOT DISTINCT`.** `raw_status` arrives NULL from some
+  firmware, and under the default every NULL is distinct — so the device's next buffer dump
+  would write the same punch a second time and double someone's day.
+
+### A wrong assertion the plan carried, caught by implementing it
+
+The plan's Task 3 case 6 said a 00:10 punch files under الجمعة. It does not: الجمعة ends at
+**exactly 00:00**, so it has no after-midnight window and 00:10 is a new السبت shift — which is
+what `HANDOFF.md`'s own schedule landmine already said. Rewritten as three cases (الجمعة's own
+date · the post-midnight Saturday · a shift that genuinely crosses midnight, 22:00→02:00, which
+is where the rollover rule really applies). `lib/staffSchedule.js` was **not** touched to make
+the wrong assertion pass.
+
+### Not done, on purpose
+
+- **Nothing is deployed.** Merging auto-deploys to the box shared with RevoArt.
+- **The phone بصمة is still live.** The owner asked for it removed the same day; it is gated on
+  watching a full day of real punches first, because `late_minutes` is frozen at write time and
+  a day with no rows cannot be repaired by a later backfill. It ships in the same commit as
+  admin hand-entry — `overrideRecord` can only edit a row that exists, so without hand-entry a
+  dead device means no attendance at all.
+- **The admin panel has never been opened in a browser.** Typechecks and builds; nobody has
+  looked at it at 390px. Fifth session in a row this is true of an admin surface here.
+- **The device's real ADMS dialect is unknown.** Everything is written against the documented
+  ZKTeco Push SDK. If the unit differs, `punch_reject.raw_line` names exactly how.
+
+
 ## 2026-08-28 — 🖌️ الخط: توفير 17% فوراً + ثلاث إصلاحات لما يفشل التوليد
 
 **547/547 backend tests** (540 before — 7 new in `backend/test/calligraphyResilience.test.js`).
