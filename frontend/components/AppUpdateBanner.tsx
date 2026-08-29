@@ -6,11 +6,19 @@
  * ⚠️ WHY THIS EXISTS, AND WHY iOS ONLY. A remote-URL WebView shell gives its users no reason to
  * ever update: the site changes underneath them, so the app appears to improve on its own and
  * the App Store update sits there ignored. That is fine until something lives in the BINARY —
- * and push notifications do. iOS 1.0.4 is the first build carrying `aps-environment`, so a
- * phone on 1.0.3 cannot register for notifications no matter what the server does, and nothing
- * on the web side can fix it. As of 2026-08-26 prod had 145 Android device tokens and zero iOS
- * while iPhone users opened the app daily; Apple reports only ~70 updates against ~400
- * downloads, which is what "no reason to update" looks like in a chart.
+ * and push notifications do. iOS **1.0.5** is the first build that can register for them at
+ * all, and nothing on the web side can substitute for it.
+ *
+ * ⚠️ 1.0.4 IS NOT GOOD ENOUGH, EVEN THOUGH IT CARRIES `aps-environment`. That entitlement was
+ * necessary and not sufficient: Capacitor's iOS template ships no
+ * `didRegisterForRemoteNotificationsWithDeviceToken`, so AppDelegate received the APNs token
+ * from iOS and dropped it on the floor. `register()` succeeded, the plugin fired NEITHER
+ * `registration` NOR `registrationError`, and the phone looked healthy from every angle.
+ * Fixed in the build pipeline by `cb91f8d` and shipped as 1.0.5.
+ * Measured on prod 2026-08-29, which is what this constant is really pinned to: **166 Android
+ * device tokens against 0 iOS**, while 240 signed-in iPhones opened the app that week — every
+ * one of them reporting 1.0.4, with an empty `push_register_errors` table underneath. Until
+ * those phones update, the shop cannot reach a single iOS user.
  *
  * Android is deliberately NOT shown a banner: Play auto-updates far more aggressively and its
  * users are already registering tokens. Adding a platform here means proving it has the same
@@ -26,11 +34,17 @@ import { useEffect, useState } from "react";
 import { nativeAppVersion, nativeShellPlatform } from "@/lib/native-shell";
 
 /**
- * The first iOS build with the push entitlement. Bump it only when a NEW capability lands in
- * the binary and the web cannot work without it — never for a web-only change, which every
- * install already receives.
+ * The first iOS build that actually registers for push. Bump it only when a NEW capability
+ * lands in the binary and the web cannot work without it — never for a web-only change, which
+ * every install already receives.
+ *
+ * ⚠️ DO NOT RAISE THIS BEFORE THE BUILD IS DOWNLOADABLE. It is the version on the App Store,
+ * not the version in `codemagic.yaml`: an iOS release can be approved and still sit unreleased
+ * behind «Manually release this version», and a banner pointing at a build nobody can install
+ * is a dead end shown to every iPhone at once. 1.0.5 was verified live before this was raised
+ * (`itunes.apple.com/lookup?id=6793976053` → version 1.0.5, released 2026-08-29 18:49 UTC).
  */
-const MIN_IOS_VERSION = "1.0.4";
+const MIN_IOS_VERSION = "1.0.5";
 
 const APP_STORE_URL = "https://apps.apple.com/app/id6793976053";
 
