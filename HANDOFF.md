@@ -29,7 +29,7 @@ last verified 2026-08-10 and are unchanged.
 | Android | **v1.0.4 (versionCode 5) IN PRODUCTION REVIEW** — deep links + GPS + push in one review |
 | iOS | **1.0.4 (build 1786309948) SUBMITTED — «Waiting for Review»** (2026-08-10, ≤48h) |
 | Android push | ✅ working end to end — **160 device tokens on prod** |
-| K40 / ADMS | ⚠️ **ALREADY ON `main` AND DEPLOYED** since 2026-08-29 16:58 UTC (`4f8bb3f`), migration 094 applied, all five tables live and EMPTY. Inert only because no serial is registered. `PROGRESS.md`'s older entry still says "deliberately not deployed" — it is stale. Proven against the real K40 on 2026-08-29 over a temporary tunnel; what is NOT deployed is `ffcb0ce` (status keys + the break-policy change). |
+| K40 / ADMS | ⚠️ **ALREADY ON `main` AND DEPLOYED** since 2026-08-29 16:58 UTC (`4f8bb3f`), migration 094 applied, all five tables live and EMPTY. ✅ **The proxy now routes `/iclock/*` to the API (2026-08-30) — until that day it 404'd into Next.js and five workers fingerprinted into nothing.** Still inert because **no serial is registered**, which is now the only remaining blocker on the code side. `PROGRESS.md`'s older entry still says "deliberately not deployed" — it is stale. Proven against the real K40 on 2026-08-29 over a temporary tunnel; what is NOT deployed is `ffcb0ce` (status keys + the break-policy change). |
 | iOS push | ✅ **WORKS END TO END — proven on a real iPhone 2026-08-29 21:57.** The cause was never the entitlement, the APNs key or the provisioning profile: Capacitor's iOS template ships no `didRegisterForRemoteNotificationsWithDeviceToken`, so AppDelegate took the APNs token and dropped it — `register()` succeeded and the plugin fired NEITHER `registration` NOR `registrationError`, which is why `push_register_errors` was empty. Fixed by `cb91f8d`, shipped as **1.0.5**. Tokens went **0 → 5 in half an hour**, including two real students who updated on their own. ⚠️ What limits push now is REACH, not delivery: 165 tokens against 2,249 retail accounts, so a broadcast physically reaches ~7%. |
 | Backend tests | **508/508 on `main`** (2026-08-25, after the discount-round + app-console merge; 479 before it). The `app-open` failure the row below described now PASSES; it was flaky, not broken. Kept because it will likely flap again:  `app-open: a ping inside the session window does NOT count a second open`, `test/adminConsole.test.js:371`, failed on 2026-08-21 and **reproduced on clean `main`** — so if you see it fail, it is not your change. Older rows said 266/275 and 467/467; the suite keeps growing. ⚠️ Run from `backend/` as `node --test test/*.test.js` — see the landmine below; the old `test/` and bare forms both misbehave on Node 26. |
 | Prod DB backup | ✅ `~/Desktop/_private/loloshop-db/loloshop-prod-2026-08-25.dump` — 5.2 MB, taken before the 086-089 deploy, contents verified on the box. ⚠️ **Restore it ON THE SERVER**: it is pg_dump format v1.16 and the laptop's `pg_restore` refuses it («unsupported version (1.16) in file header»). The 08-14 and 08-24 dumps are still there. |
@@ -411,6 +411,22 @@ longer stranded on a branch · the laptop's loose credentials are filed in
    **and create «إضافة إطار»** at `/admin/products` (الوشاح → toggle → «الطلاب العاديين فقط» →
    سعر التجزئة 5,000). Both are data, not code; nothing is blocked on a session.
 
+6d. ✅ **THE K40 IS LIVE — serial `GED7251600256` registered, 7 PINs mapped, punches landing
+   (2026-08-30).** The device dials the **bare IP `169.58.114.255` port 80** (its keypad
+   cannot type letters, so the Caddyfile carries an IP host block for `/iclock/*` — see the
+   proxy landmine). Nothing was lost after all: the K40 held its buffer and replayed back to
+   08-29 22:52 the moment it could reach us.
+   **Three small things still open, all data, none blocking:**
+   · **PINs 1, 7 and 8 have 6 unclaimed punches** on «أرقام جهاز بلا اسم». There is no
+     «تجاهل» button — `assignUnmapped` is the only action on that list — so dismissing them
+     needs a small endpoint + button. Harmless until then.
+   · **The Arabic names have never been pushed to the device**: all 7 PINs sit at
+     `push_state = 'pending'` with **zero** rows in `device_commands`, because
+     `queueOnActiveDevices` had no active device when they were saved. **Re-save one PIN now
+     that the device is online** and they queue.
+   · **مضر محمد's shift is set to 22:16 → 10:15**, which is why a 10:19 دخول scores 708
+     minutes late. The arithmetic is right; `22:16` looks mistyped.
+
 7. **Clean the 12 wholesaler `university_name` rows** — one university is spelled three ways
    («بلاد الرافدين» · «بلاد الرفدين» · «كلية بلاد الرافدين»), same for ديالى. The picker was built
    to survive this, but the list reads badly.
@@ -478,6 +494,60 @@ longer stranded on a branch · the laptop's loose credentials are filed in
 ---
 
 ## 💣 LANDMINES
+
+- **⚠️ THE SERVER CLOCK STAMPS A PUNCH, AND THAT REVERSED `c494dc9` ON PURPOSE (2026-08-30).**
+  `punched_at` is the instant the punch REACHED the API; `device_ts` keeps the K40's own
+  reading. The owner ordered it after the device's wall clock was found wrong on site — a
+  wrong clock mis-marks every تأخير and nothing on any screen reveals it. **The cost is not
+  hypothetical:** punches buffered through an internet outage all arrive in one batch and all
+  get that batch's arrival time, so a worker who came at 9:00 and one who came at 10:30 land
+  on the same minute. The 2026-08-30 backlog would have collapsed onto 20:55 under this rule
+  instead of replaying across the day. After any outage the repair is
+  `PATCH /admin/attendance/records/:id/override`, reading `device_ts` as the evidence.
+  · **`device_ts` is still the dedupe key** (`punch_raw_dedupe_ux`), which is the only reason
+    this change was safe — a re-sent batch is still recognised as the same punches. Never
+    move that index onto `punched_at`.
+  · The contract is asserted in `test/attendanceDevice.test.js` test 1 and in
+    `test/iclockRoute.test.js`. **Nine tests used to assert the opposite**; if anyone flips it
+    back, flip this landmine and `ingestPunches`' header with it.
+  · Shift-math tests use the file's `replay()` helper, not `ingest()`, because ingest now
+    overwrites any time you hand it. That is not a shortcut — `assignUnmapped` replays stored
+    punches the same way.
+
+- **⚠️ THE PHONE CAN NO LONGER PUNCH, BUT الخروج المؤقت IS STILL A PHONE ACTION (2026-08-30).**
+  `check-in`/`check-out` are gone from `routes/staff.js` AND `routes/payroll.js` — there were
+  two doors onto the same controller, and removing one would have left the other working with
+  nothing on screen to explain it. `attendanceController.checkIn`/`checkOut` are deliberately
+  KEPT and unrouted (breaks and tests call them); re-exposing them is a route line, so do not
+  delete the controller half as dead code. Breaks stay on the phone because the device's break
+  keys are on **`ffcb0ce`, still unmerged** — merge that before removing the break UI, or
+  workers have no way to record one. If the device dies, only an admin can fix a day
+  (`PATCH /admin/attendance/records/:id/override`); there is no worker-facing fallback, by
+  design.
+
+- **⚠️ ONLY THREE PATH PREFIXES REACH EXPRESS. THE PROXY IS NOT IN THIS REPO, AND A NEW
+  NON-`/api` ROUTE IS INVISIBLE UNTIL SOMEONE EDITS IT** — `/opt/revoart/supabase/volumes/proxy/caddy/Caddyfile`
+  on the box, mounted into the `supabase-caddy` container. The LoloShop block forwards
+  `/uploads/*`, `/api/*` and (since 2026-08-30) `/iclock/*` to `172.18.0.1:4000`; **everything
+  else goes to Next.js on :3000**. So a backend route that cannot live under `/api` — the K40's
+  paths are fixed in firmware — mounts fine in `server.js`, passes its tests, deploys, and then
+  answers **404 from the frontend**. The failure is silent from every angle a developer checks:
+  nothing in the API log, because the request never reaches Express. That is exactly how the
+  fingerprint device sat dead from 2026-08-29 to 2026-08-30 while five workers used it; it had
+  been "proven" over a temporary tunnel that bypassed the proxy entirely.
+  · **The `http://lolo-shop96.com` block is the shop's one cleartext door and exists only for
+    the K40**, which has no TLS stack. ⚠️ **Declaring `http://` for a host REPLACES Caddy's
+    automatic http→https redirect**, so that block re-creates it by hand — with **308, not
+    `permanent`/301**, because only 308 preserves a POST's method and body. Delete the second
+    `handle` and every plain-HTTP visitor gets a 404 instead of being upgraded to TLS.
+    Nothing carrying a session, a token or a price may ever be added to the cleartext handle.
+  · ⚠️ **Reload it with the startup shell, never a bare `caddy reload`:**
+    `docker exec supabase-caddy sh -c 'PROXY_AUTH_PASSWORD=$(caddy hash-password --plaintext "$PROXY_AUTH_PASSWORD") && caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile'`.
+    The container hashes that password at boot; a plain reload re-adapts the file with the
+    plaintext still in the container env and breaks Studio's basic_auth on `api.revo-art.com`.
+  · That one file fronts **three production sites** — LoloShop, RevoArt and Grand-Layan. Always
+    `caddy validate` a candidate copy first, and re-check all three plus `/api/health` and both
+    `/.well-known/assetlinks.json` after (a redirect there silently kills Android deep links).
 
 - **⚠️ THE iOS UPDATE MESSAGE IS A WALL NOW (`components/AppUpdateGate.tsx`, 2026-08-29), so
   `MIN_IOS_VERSION` IS A RELEASE EVENT AND NOT AN EDIT.** It blocks the whole app — students,

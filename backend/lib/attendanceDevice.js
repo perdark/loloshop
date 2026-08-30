@@ -230,7 +230,32 @@ async function applyPunch(client, punch) {
  * instead of poisoning the whole batch's Postgres transaction (a single failed statement
  * aborts everything after it until ROLLBACK, which SAVEPOINT scopes down to just that punch).
  */
+/**
+ * ⚠️ THE SERVER CLOCK STAMPS THE PUNCH, NOT THE DEVICE — owner decision 2026-08-30.
+ *
+ * The K40's wall clock was wrong on site, and it is the thing every تأخير is measured
+ * against, so the owner asked for Baghdad time to come from our own code instead. What the
+ * device says is NOT thrown away: `device_ts` keeps its verbatim reading (and is still the
+ * dedupe key, so a re-sent batch is still recognised as the same punch), while `punched_at`
+ * — the column every derivation, report and تأخير reads — is now the instant the punch
+ * REACHED US.
+ *
+ * ⚠️ THE PRICE, AND IT IS REAL: a punch is only as accurate as the connection. `Realtime=1`
+ * in the handshake makes the device push within seconds, so in normal operation the two are
+ * the same to the second. But if the shop's internet drops for two hours, every punch made
+ * in those two hours arrives in one batch and they ALL get that batch's arrival time — the
+ * worker who came at 9:00 and the one who came at 10:30 land on the same minute. That is
+ * exactly what happened to the 2026-08-30 backlog, and under this rule the whole day would
+ * have collapsed onto 20:55 instead of replaying correctly.
+ *
+ * So: if an outage is ever longer than a few minutes, the honest repair is the admin's
+ * `PATCH /admin/attendance/records/:id/override`, using `device_ts` on the punch — which is
+ * still there for exactly this — as the evidence of what the finger actually did.
+ */
 async function ingestPunches(client, deviceSn, punches = [], rejects = []) {
+  // One instant for the whole batch: two punches in the same POST arrived together, and
+  // giving them microsecond-apart times would invent a precision this rule does not have.
+  const receivedAt = new Date();
   let stored = 0;
   let duplicate = 0;
   let rejected = 0;
@@ -257,7 +282,7 @@ async function ingestPunches(client, deviceSn, punches = [], rejects = []) {
           deviceSn,
           punch.device_pin,
           punch.device_ts,
-          punch.punched_at,
+          receivedAt,
           punch.raw_status ?? null,
           punch.raw_verify ?? null,
           punch.raw_line ?? null,
@@ -267,7 +292,10 @@ async function ingestPunches(client, deviceSn, punches = [], rejects = []) {
         duplicate += 1;
       } else {
         stored += 1;
-        const action = await applyPunch(client, { ...punch, id: rows[0].id });
+        // `punched_at` is overridden here too, not just in the INSERT: applyPunch resolves
+        // the shift and the تأخير from it, so handing it the device's reading would derive
+        // the day from a clock we just decided not to trust.
+        const action = await applyPunch(client, { ...punch, id: rows[0].id, punched_at: receivedAt });
         derived[action] = (derived[action] || 0) + 1;
       }
       await client.query('RELEASE SAVEPOINT punch_ingest_sp');

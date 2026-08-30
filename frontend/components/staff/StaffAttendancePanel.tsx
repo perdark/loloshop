@@ -10,10 +10,7 @@ import { getApiErrorMessage } from "@/lib/api";
 import { usePolling } from "@/lib/hooks/usePolling";
 import {
   cancelBreakRequest,
-  checkInAttendance,
-  checkOutAttendance,
   endBreak,
-  getBrowserAttendanceLocation,
   getMyAttendanceToday,
   requestBreak,
   startBreak,
@@ -31,7 +28,7 @@ export function StaffAttendancePanel({
   const compactMode = compact || pathname === "/staff";
   const [attendance, setAttendance] = useState<MyAttendanceToday | null>(null);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
+  // There is no `busy` any more: the only mutation left on this panel is الخروج المؤقت.
   const [breakBusy, setBreakBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -56,28 +53,14 @@ export function StaffAttendancePanel({
    */
   const hasLiveBreak = attendance?.break != null;
   const refresh = useCallback(() => {
-    if (busy || breakBusy) return;
+    if (breakBusy) return;
     getMyAttendanceToday()
       .then(setAttendance)
       .catch(() => {
         /* transient — the next tick retries */
       });
-  }, [busy, breakBusy]);
+  }, [breakBusy]);
   usePolling(refresh, 20000, hasLiveBreak, 5000);
-
-  async function submitAttendance(kind: "in" | "out") {
-    setBusy(true);
-    try {
-      const location = await getBrowserAttendanceLocation();
-      const next = kind === "in" ? await checkInAttendance(location) : await checkOutAttendance(location);
-      setAttendance(next);
-      toast.success(kind === "in" ? "تم تسجيل بصمة الدخول" : "تم تسجيل بصمة الخروج");
-    } catch (err) {
-      toast.error(getApiErrorMessage(err, "تعذر تسجيل البصمة"));
-    } finally {
-      setBusy(false);
-    }
-  }
 
   /** Every break action returns the same payload, so one runner covers all four. */
   async function runBreak(action: () => Promise<MyAttendanceToday>, success: string) {
@@ -138,16 +121,14 @@ export function StaffAttendancePanel({
     return (
       <div className={`flex flex-col gap-2 ${className}`}>
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            size="sm"
-            variant={needsCheckout ? "ghost" : "primary"}
-            onClick={() => submitAttendance(needsCheckout ? "out" : "in")}
-            loading={busy}
-            disabled={busy}
-          >
-            {needsCheckout ? "بصمة خروج" : "بصمة دخول"}
-          </Button>
+          {/* The punch button that used to lead this row is gone (2026-08-30): the K40 is the
+              only thing that records دخول/خروج now. What is left is the state, which the
+              worker still needs to read at a glance, plus الخروج المؤقت. */}
+          {!needsCheckout && (
+            <span className="rounded-full border border-orange-ink/30 bg-orange-ink/8 px-3 py-1 text-xs font-bold text-orange-ink">
+              ما مسجّل دخول — بصّم على الجهاز
+            </span>
+          )}
           {/* الخروج المؤقت only makes sense inside an open shift */}
           {needsCheckout && !attendance.break && (
             <StaffBreakControl
@@ -186,9 +167,6 @@ export function StaffAttendancePanel({
       className={className}
       settings={attendance.settings}
       record={attendance.record}
-      busy={busy}
-      onCheckIn={() => submitAttendance("in")}
-      onCheckOut={() => submitAttendance("out")}
       breakSlot={attendance.record?.checkInAt && !attendance.record.checkOutAt ? breakControl : null}
     />
   );

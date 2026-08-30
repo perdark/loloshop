@@ -17,6 +17,38 @@ async function ingest(punches, rejects = []) {
   return tx((client) => device.ingestPunches(client, DEVICE_SN, punches, rejects));
 }
 
+/**
+ * Derive punches AT THE TIMES THEY CARRY, bypassing ingestPunches' server-clock stamp.
+ *
+ * ⚠️ Why this helper exists, 2026-08-30: `ingestPunches` now stamps `punched_at` with the
+ * moment the batch ARRIVED, not the device's reading (owner decision — the K40's wall clock
+ * was wrong on site; see the function's header). That makes it useless for testing the SHIFT
+ * MATH, which is about a punch landing at 09:04 or 23:40 or five past midnight — every one of
+ * those tests would otherwise be asserting against "now".
+ *
+ * So the two concerns are tested apart: test 1 pins the ingest contract (the stamp is the
+ * arrival), and everything below pins `applyPunch`'s resolution against a chosen instant.
+ * This mirrors the real replay path — `assignUnmapped` also applies STORED punches rather
+ * than freshly-arrived ones — so it is not a synthetic shortcut.
+ */
+async function replay(punches) {
+  return tx(async (client) => {
+    const actions = [];
+    for (const p of punches) {
+      const { rows } = await client.query(
+        `INSERT INTO punch_raw
+           (device_sn, device_pin, device_ts, punched_at, raw_status, raw_verify, raw_line)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (device_sn, device_pin, device_ts, raw_status) DO NOTHING
+         RETURNING id`,
+        [DEVICE_SN, p.device_pin, p.device_ts, p.punched_at, p.raw_status, p.raw_verify, p.raw_line]
+      );
+      if (rows.length) actions.push(await device.applyPunch(client, { ...p, id: rows[0].id }));
+    }
+    return { stored: actions.length, actions };
+  });
+}
+
 const TAG = `ZZTEST-adev-${crypto.randomUUID().slice(0, 8)}`;
 const DEVICE_SN = `${TAG}-SN`;
 const fx = { users: [], pins: [], holidays: [] };
@@ -92,25 +124,45 @@ test.after(async () => {
   assert.equal(left.rows[0].n, 0, 'fixture rows left behind');
 });
 
-test('1. a punch creates the day\'s record with lateness from the PUNCH time, not now()', async () => {
+/**
+ * ⚠️ THIS TEST WAS INVERTED ON 2026-08-30 AND THAT IS THE POINT OF IT.
+ *
+ * It used to be «lateness from the PUNCH time, not now()», and it drove the whole ingest
+ * design: a batch buffered through an internet outage replayed at the times the fingers
+ * actually touched the sensor. The owner overruled that after the K40's own clock was found
+ * wrong on site — a wrong clock silently mis-marks every تأخير, and there is no way for
+ * anyone to notice from the screen. Baghdad time now comes from OUR server.
+ *
+ * The cost is stated plainly in `ingestPunches`' header and is not hypothetical: punches that
+ * arrive in one batch after an outage all get that batch's arrival time. If this test is ever
+ * flipped back, flip the header comment and the HANDOFF landmine with it — do not leave the
+ * code claiming one rule and the suite asserting the other.
+ */
+test('1. the stamp is the ARRIVAL time, not the device\'s clock — and lateness follows it', async () => {
   const userId = await mkStaff({ start: '09:00', grace: 0, rate: 100 });
   const pin = await mkPin(userId);
 
-  // "3 hours ago" relative to a fixed instant, expressed as the device's own local clock.
-  const now = new Date();
-  const punchedAt = new Date(now.getTime() - 3 * 60 * 60 * 1000);
-  const local = new Intl.DateTimeFormat('en-CA', {
+  // A device whose clock is three hours slow. Under the old rule this punch would have been
+  // filed three hours ago; under the new one the device's opinion changes nothing.
+  const nowLocal = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Baghdad', year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
-  }).formatToParts(punchedAt).reduce((a, p) => { a[p.type] = p.value; return a; }, {});
-  const localStr = `${local.year}-${local.month}-${local.day} ${local.hour}:${local.minute}:${local.second}`;
-  // Expected lateness is whatever "3 hours before test-run time" actually is on the clock,
-  // vs the 09:00 start — NOT a fixed 180, which only holds if the suite happens to run at
-  // noon Baghdad time. This is exactly why lateness must come from the punch, not now().
-  const expectedLate = Math.max(0, Number(local.hour) * 60 + Number(local.minute) - 9 * 60);
+  }).formatToParts(new Date()).reduce((a, p) => { a[p.type] = p.value; return a; }, {});
+  const wrongClock = new Date(Date.now() - 3 * 60 * 60 * 1000);
+  const wrongLocal = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Baghdad', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  }).formatToParts(wrongClock).reduce((a, p) => { a[p.type] = p.value; return a; }, {});
+  const localStr = `${wrongLocal.year}-${wrongLocal.month}-${wrongLocal.day} ${wrongLocal.hour}:${wrongLocal.minute}:${wrongLocal.second}`;
 
+  // Lateness is measured from NOW against the 09:00 start — the device's three-hour error
+  // must not appear in it.
+  const expectedLate = Math.max(0, Number(nowLocal.hour) * 60 + Number(nowLocal.minute) - 9 * 60);
+
+  const before = Date.now();
   const punch = mkPunch(pin, localStr);
   const result = await ingest([punch]);
+  const after = Date.now();
   assert.equal(result.stored, 1);
   assert.equal(result.duplicate, 0);
 
@@ -119,10 +171,24 @@ test('1. a punch creates the day\'s record with lateness from the PUNCH time, no
   );
   assert.equal(rows.length, 1);
   const rec = rows[0];
-  assert.equal(new Date(rec.check_in_at).getTime(), punch.punched_at.getTime());
-  // Lateness must come from the 3-hours-ago punch time, never from "now".
+  const stamped = new Date(rec.check_in_at).getTime();
+  assert.ok(stamped >= before && stamped <= after,
+    `check_in_at must be the arrival instant, got ${rec.check_in_at}`);
+  assert.notEqual(stamped, punch.punched_at.getTime(), 'the device clock must not have been used');
   assert.ok(Math.abs(rec.late_minutes - expectedLate) <= 1,
-    `expected ~${expectedLate} late minutes (punch time vs 09:00), got ${rec.late_minutes}`);
+    `expected ~${expectedLate} late minutes (arrival vs 09:00), got ${rec.late_minutes}`);
+
+  // The device's own reading survives as evidence — it is what an admin overriding a record
+  // after an outage has to work from, and it is still the dedupe key.
+  // `device_ts` is a timestamp column, not text, so it comes back as a Date — read it back
+  // formatted in Baghdad, which is the zone it was written in.
+  const { rows: raw } = await query(
+    `SELECT to_char(device_ts AT TIME ZONE 'Asia/Baghdad', 'YYYY-MM-DD HH24:MI:SS') AS ts
+       FROM punch_raw WHERE device_sn = $1 AND device_pin = $2`,
+    [DEVICE_SN, String(pin)]
+  );
+  assert.equal(raw.length, 1);
+  assert.equal(raw[0].ts, localStr);
 });
 
 test('2. re-ingesting the identical batch stores 0 and duplicates N', async () => {
@@ -145,7 +211,7 @@ test('3. two punches in one shift produce one record, check_out_at = the later p
   const p1 = mkPunch(pin, '2027-01-12 09:04:00');
   const p2 = mkPunch(pin, '2027-01-12 18:10:00');
 
-  await ingest([p1, p2]);
+  await replay([p1, p2]);
 
   const { rows } = await query(`SELECT * FROM staff_attendance_records WHERE user_id = $1`, [userId]);
   assert.equal(rows.length, 1);
@@ -160,10 +226,10 @@ test('4. a third punch BETWEEN check-in and check-out changes nothing', async ()
   const p2 = mkPunch(pin, '2027-01-13 18:10:00');
   const p3 = mkPunch(pin, '2027-01-13 13:00:00');
 
-  await ingest([p1, p2]);
+  await replay([p1, p2]);
   const before = (await query(`SELECT * FROM staff_attendance_records WHERE user_id = $1`, [userId])).rows[0];
 
-  const result = await ingest([p3]);
+  const result = await replay([p3]);
   assert.equal(result.stored, 1);
 
   const after = (await query(`SELECT * FROM staff_attendance_records WHERE user_id = $1`, [userId])).rows[0];
@@ -185,11 +251,11 @@ test('5. a punch earlier than check_in_at moves check-in back and recomputes lat
   const late = mkPunch(pin, '2027-01-14 10:00:00'); // 60 min late
   const earlier = mkPunch(pin, '2027-01-14 09:10:00'); // 10 min late
 
-  await ingest([late]);
+  await replay([late]);
   const before = (await query(`SELECT * FROM staff_attendance_records WHERE user_id = $1`, [userId])).rows[0];
   assert.ok(Math.abs(before.late_minutes - 60) <= 1);
 
-  await ingest([earlier]);
+  await replay([earlier]);
   const after = (await query(`SELECT * FROM staff_attendance_records WHERE user_id = $1`, [userId])).rows[0];
   assert.equal(new Date(after.check_in_at).getTime(), earlier.punched_at.getTime());
   assert.ok(Math.abs(after.late_minutes - 10) <= 1, `expected ~10 late minutes, got ${after.late_minutes}`);
@@ -214,7 +280,7 @@ test('6a. a punch on الجمعة\'s own calendar date files under that date (no
   const pin = await mkPin(userId);
   const friday = nextFriday();
   const punch = mkPunch(pin, `${friday} 23:40:00`);
-  await ingest([punch]);
+  await replay([punch]);
 
   const { rows } = await query(
     `SELECT to_char(work_date, 'YYYY-MM-DD') AS d FROM staff_attendance_records WHERE user_id = $1`,
@@ -232,7 +298,7 @@ test('6b. a stamp just after midnight on الجمعة\'s OWN calendar date is a 
   saturdayCalendarDate.setUTCDate(saturdayCalendarDate.getUTCDate() + 1);
   const saturdayStr = saturdayCalendarDate.toISOString().slice(0, 10);
   const rollover = mkPunch(pin, `${saturdayStr} 00:10:00`);
-  await ingest([rollover]);
+  await replay([rollover]);
 
   const { rows } = await query(
     `SELECT to_char(work_date, 'YYYY-MM-DD') AS d FROM staff_attendance_records WHERE user_id = $1`,
@@ -256,8 +322,8 @@ test('6c. a shift that genuinely crosses midnight (22:00→02:00) rolls a post-m
 
   const checkIn = mkPunch(pin, `${day1} 22:10:00`);
   const postMidnight = mkPunch(pin, `${day2} 01:00:00`); // before the 02:00 end — still "tonight"
-  await ingest([checkIn]);
-  await ingest([postMidnight]);
+  await replay([checkIn]);
+  await replay([postMidnight]);
 
   const { rows } = await query(
     `SELECT to_char(work_date, 'YYYY-MM-DD') AS d, check_in_at, check_out_at
@@ -280,7 +346,7 @@ test('7. a punch on a date in staff_holidays records late_minutes = 0', async ()
   );
 
   const punch = mkPunch(pin, `${holidayDate} 14:00:00`); // hours after 09:00, would normally be late
-  await ingest([punch]);
+  await replay([punch]);
 
   const { rows } = await query(`SELECT * FROM staff_attendance_records WHERE user_id = $1`, [userId]);
   assert.equal(rows.length, 1);

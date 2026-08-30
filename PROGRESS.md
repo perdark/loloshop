@@ -1,5 +1,95 @@
 # Progress
 
+## 2026-08-30 — 🖐️ The fingerprint device was punching into a 404
+
+Owner report: five workers had put their fingers on the K40 (2 محمد عادل · 3 علي · 4 محمد
+هيثم · 5 محمد عماد · 6 انس) and **nothing appeared for the admin**. Three stacked causes, none
+of them in the application code, each a prerequisite for the next.
+
+**1. `/iclock/*` never reached Express.** The box is fronted by RevoArt's `supabase-caddy`, and
+the LoloShop block forwarded only `/uploads/*` and `/api/*` to `172.18.0.1:4000` — everything
+else fell to the catch-all and Next.js answered **404**. Measured both sides:
+`https://lolo-shop96.com/iclock/cdata?SN=…` → 404 with a 24 KB HTML body, while
+`http://127.0.0.1:4000/iclock/…` on the box → 200 empty, i.e. the backend was correct all along.
+The device was proven on 2026-08-29 **over a temporary tunnel**, which is precisely what hid this.
+
+**2. The K40 speaks cleartext and `:80` was a redirect.** Caddy's automatic http→https 308 is
+not something ZKTeco firmware follows, and the device has no TLS stack at all — so even a fixed
+route on :443 would have been unreachable.
+
+**3. No serial is registered.** `attendance_devices` is empty, and `routes/iclock.js` drops an
+unregistered serial silently by design. This one is still open — see owner action 6d.
+
+**The evidence that all three were live:** `punch_raw` **0 rows**, `device_commands` **0 rows**,
+and **not one `[iclock]` line in the PM2 logs** — not even the «unregistered serial» warning the
+router emits, which is the tell that the request never arrived rather than that it was refused.
+
+**Fixed** in the proxy (not in this repo — `/opt/revoart/supabase/volumes/proxy/caddy/Caddyfile`,
+backed up first, validated as a candidate, reloaded not restarted): a `handle /iclock/*` above
+the Next.js catch-all, plus a new `http://lolo-shop96.com, http://www.lolo-shop96.com` block
+serving **only** that path in cleartext and re-creating the redirect for everything else.
+
+⚠️ **That redirect had to be `308`, not `permanent`.** The first apply used `permanent` and the
+post-check caught it as a **301** where Caddy's automatic one had been a 308 — only 308
+preserves a POST's method and body. Re-applied. This is the whole reason the check block prints
+the redirect code rather than assuming it.
+
+**Verified after the reload:** `/iclock/cdata` → **200, empty body over plain HTTP** on apex and
+www (correct for an unregistered serial) · site 200 · `/api/health` 200 · both
+`assetlinks.json` 200 `application/json` **0 redirects** · `http://` → 308 · RevoArt and
+Grand-Layan unchanged. Three production sites share that file, hence checking all of them.
+
+### The device is now the ONLY thing that records دخول/خروج
+
+Two owner decisions once the punches were landing.
+
+**1. The phone بصمة is gone.** `POST /staff/attendance/check-in|check-out` and the second pair
+on `/payroll/me/attendance/*` are removed, along with the card buttons, the queue button and
+`checkInAttendance`/`checkOutAttendance` in `lib/staff.ts`. A worker still SEES their day —
+`getToday` stays — they just cannot punch it. ⚠️ **الخروج المؤقت deliberately stays on the
+phone**: the device's break keys live on `ffcb0ce`, still unmerged, so removing it too would
+have left no way to record a break at all. The escape hatch when the device is down is the
+admin's `PATCH /admin/attendance/records/:id/override`, which is admin-only on purpose.
+
+**2. The SERVER clock stamps the punch, not the device.** The K40's wall clock was wrong on
+site and it is what every تأخير is measured against, so `punched_at` is now the instant the
+punch reached the API. `device_ts` keeps the device's verbatim reading — as evidence for a
+dispute, and because it is still the dedupe key, so a re-sent batch is still recognised.
+
+⚠️ **This reverses `c494dc9`'s «timed by the finger not the upload», and the cost is real:**
+punches that arrive in one batch after an internet outage all get that batch's arrival time.
+Today's own backlog would have collapsed onto 20:55 instead of replaying across the day. The
+repair, when it happens, is the admin override using `device_ts`. **Nine tests asserted the
+old rule** — test 1 was literally named «lateness from the PUNCH time, not now()». It is
+inverted and carries the reasoning; the seven shift-math tests now drive `applyPunch` through
+a new `replay()` helper, which is what the real `assignUnmapped` path does anyway.
+
+**Verified:** 605/605 backend tests · `tsc --noEmit` clean · lint clean · `next build` clean.
+
+### The enrollment replay, cleaned up
+
+⚠️ **The first cleanup script was WRONG and its dry run is what caught it** — it deleted any
+record an enrollment punch had touched, which included two GENUINE phone shifts from 08-29
+(محمد عادل 10:12→23:15, محمد عماد 10:15→23:49, both تأخير 0): the late tap had merely attached
+itself to an already-open day, `applyPunch`'s documented "a punch between check-in and
+check-out changes nothing" branch. The rule had to be **«the دخول itself came from an
+enrollment punch»**. Never run the loose version.
+
+Applied after a backup (`/root/loloshop-prod-2026-08-30-pre-enrollment-fix.dump`, 6.0 MB):
+19 punches marked `enrollment-test-2026-08-29` (marked, **not deleted** — punch_raw is
+append-only truth), 5 ghost records deleted, and the two real morning punches the ghosts had
+swallowed replayed into proper دخول (محمد عادل 10:09 تأخير 0 · علي مهند 10:18 تأخير 3).
+
+**Left for the owner:** مضر محمد's personal shift is set to **22:16 → 10:15**, so his 10:19
+دخول scores 708 minutes late and the arithmetic is correct. `22:16` looks mistyped; it is data
+on `/admin/attendance`, not code.
+
+**Also found:** only **three** of the five workers have a `staff_device_pins` row — 3 (علي) and
+6 (انس) were never mapped — and all three that exist sit at `push_state = 'pending'` with zero
+queued commands, so no Arabic name has ever been pushed to the device. Both are admin-screen
+work, recorded as owner action 6d. Nothing punched before today is recoverable: it was never
+stored, because it never arrived.
+
 ## 2026-08-29 (c) — 🔔 The update wall, the permission card, and push for phones with no account
 
 Three owner instructions, one theme: **reach**. Yesterday's measurement was that push works and
