@@ -1,0 +1,429 @@
+<!doctype html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="utf-8">
+<title>لولو شوب — «شنو يصير بالتطبيق» · إعلان التطبيق</title>
+<link rel="stylesheet" href="../shared/lolo.css">
+<link rel="stylesheet" href="../shared/device.css">
+<style>
+/* ============================================================================
+   «شنو يصير بالتطبيق» — an APP ADVERTISEMENT, not a brand film.
+
+   Three things this is built to fix, each measured on the previous three reels:
+
+   1. THE DEVICE IS BIG ENOUGH TO READ.  All three older reels drew the phone at
+      --dw 360 or smaller, which put the captured app UI at ~0.8x its own capture
+      scale — legible to nobody. Here --dw is 700 and the phone runs off the bottom
+      edge, so the screen is 722px wide in a 1080 frame: 1.64x the 440pt capture.
+      An app ad whose app cannot be read is not an app ad.
+
+   2. IT IS BRIGHT.  Reel A measured mean luma 57/255 with 57% of pixels crushed
+      below 40 — a black rectangle on a phone in Iraqi daylight. The app itself is
+      cream and orange; this reel is graded on --paper, not --night.
+
+   3. IT MOVES EVERY BEAT.  100 BPM, beat 0.6s, 25 beats, EIGHT scenes. The old
+      reels held single frames for 2.5-4s (reel C: 11 of 31 half-seconds static).
+      Meta's own number is that the scroll-or-stay decision lands around 3.1s, so
+      the first cut here is at 1.20s and nothing holds longer than 2.4s.
+
+   SAFE ZONES — measured, not guessed. Instagram Reels overlays the right 120px
+   (action buttons), the bottom ~320px (caption + handle) and the top 108px.
+   PIPELINE.md only ever documented top/bottom; the RIGHT edge was undocumented and
+   two older reels put their biggest element in it. In an RTL reel the right edge is
+   where every Arabic line STARTS, so it matters more here than in a Latin one.
+   --M is 148px on the right for exactly that reason.
+   ========================================================================== */
+:root{
+  --M:148px;            /* right margin — clears the 120px action-button column */
+  --ML:104px;           /* left margin  — clears the 60px left gutter           */
+  --dw:620px;
+  /* devTop CLEARS THE CAPTION. The caption block is kick(50) + margin(14) + two
+     92px lines at 1.34 (246) = 310px from its top at 236 -> it ends at 546.
+     At 415 the phone ate the second line of every caption; measured on probe 1. */
+  --devTop:648px;
+}
+#stage{background:var(--paper)}
+
+/* the ground: warm paper with a slow light move, never a flat fill */
+#ground{position:absolute;inset:0;background:
+  radial-gradient(120% 78% at 50% 8%, #FFF6EA 0%, var(--paper) 52%, #F3EADC 100%)}
+#warm{position:absolute;inset:0;background:
+  radial-gradient(58% 40% at 50% 30%, rgba(244,123,66,.16) 0%, rgba(244,123,66,0) 70%);
+  mix-blend-mode:multiply;opacity:.55}
+
+/* ---------------- caption block: lives ABOVE the phone, inside the safe band */
+.cap{position:absolute;right:var(--M);left:var(--ML);top:236px;text-align:right;opacity:0}
+.cap .kick{font-family:'Cairo',sans-serif;font-weight:600;font-size:31px;
+  letter-spacing:0;color:var(--muted);line-height:1.6;margin-bottom:14px}
+.cap .ln{display:block;font-family:'Amiri',serif;font-weight:700;font-size:92px;
+  line-height:1.34;color:var(--ink)}
+.cap .ln em{font-style:normal;color:var(--orange-ink)}
+/* price/number chip — tabular, Arabic-Indic, matching the app */
+.cap .num{font-family:'Cairo',sans-serif;font-weight:700;font-variant-numeric:tabular-nums}
+
+/* ---------------- the phone ---------------- */
+#dev{position:absolute;left:50%;top:var(--devTop);margin-left:calc(var(--dw) * -0.5);
+  filter:drop-shadow(0 40px 90px rgba(26,26,26,.28))}
+/* every screen image is stacked in the aperture and cross-faded by seek() */
+#devApp{overflow:hidden}
+#devApp img{position:absolute;left:50%;top:0;
+  width:calc(var(--dw) * 1.0317);margin-left:calc(var(--dw) * -0.5159);
+  height:auto;display:block;opacity:0}
+/* the two tall strips scroll instead of cutting */
+#devApp img.strip{height:auto}
+
+/* the finger: a soft disc that lands on a tap, never a cursor arrow */
+#tapdot{position:absolute;width:96px;height:96px;border-radius:50%;
+  background:radial-gradient(circle,rgba(26,26,26,.20) 0%,rgba(26,26,26,.07) 60%,rgba(26,26,26,0) 72%);
+  opacity:0;pointer-events:none}
+#tapring{position:absolute;width:96px;height:96px;border-radius:50%;
+  border:3px solid rgba(244,123,66,.55);opacity:0;pointer-events:none}
+
+/* ---------------- the one earned orange rule ---------------- */
+#rule{position:absolute;height:3px;background:var(--orange);transform:scaleX(0);
+  border-radius:3px;right:var(--M);left:var(--ML);top:196px;transform-origin:right center}
+
+/* ---------------- the ask ---------------- */
+#cta{position:absolute;inset:0;opacity:0}
+#ctaIcon{position:absolute;left:50%;top:404px;margin-left:-125px;width:250px;height:250px;
+  border-radius:57px;display:block;box-shadow:0 26px 60px rgba(26,26,26,.30);opacity:0}
+#ctaLine{position:absolute;left:0;right:0;top:706px;text-align:center;
+  font-family:'Amiri',serif;font-weight:700;font-size:112px;color:var(--ink);opacity:0}
+#ctaSub{position:absolute;left:0;right:0;top:864px;text-align:center;
+  font-family:'Cairo',sans-serif;font-weight:600;font-size:38px;color:var(--muted);opacity:0}
+#badges{position:absolute;left:0;right:0;top:972px;display:flex;justify-content:center;
+  gap:26px;direction:ltr}
+/* THE END CARD CARRIES THE PRODUCT. Build 2 measured 5.6% ink here — an icon and
+   two lines on a cream field, the thinnest frame in the reel. The sash is what the
+   app is for, so it closes the ad: the ask sits on top of the thing being asked
+   for, instead of floating on paper. Masked at both ends so it reads as a band of
+   light rather than a photo pasted at the bottom. */
+#ctaShot{position:absolute;left:0;right:0;top:1136px;height:424px;overflow:hidden;opacity:0;
+  -webkit-mask-image:linear-gradient(180deg,rgba(0,0,0,0) 0%,#000 26%,#000 74%,rgba(0,0,0,0) 100%);
+          mask-image:linear-gradient(180deg,rgba(0,0,0,0) 0%,#000 26%,#000 74%,rgba(0,0,0,0) 100%)}
+#ctaShot img{position:absolute;left:50%;top:50%;width:1240px;margin-left:-620px;
+  transform:translateY(-50%);display:block}
+.badge{display:flex;align-items:center;gap:15px;padding:19px 32px;border-radius:9999px;
+  background:var(--ink);box-shadow:0 20px 44px rgba(26,26,26,.30);opacity:0}
+.badge svg{width:40px;height:40px;fill:var(--paper);flex:0 0 auto}
+.badge .t{text-align:left;line-height:1}
+.badge .t i{display:block;font-style:normal;font-weight:600;font-size:17px;
+  letter-spacing:.10em;color:rgba(250,244,234,.62);text-transform:uppercase}
+.badge .t b{display:block;font-family:'Playfair',serif;font-weight:600;font-size:33px;
+  color:var(--paper);margin-top:5px}
+#hand{position:absolute;left:0;right:0;top:1092px;text-align:center;
+  font-family:'Cairo',sans-serif;font-weight:600;font-size:30px;letter-spacing:.02em;
+  color:var(--muted);direction:ltr;opacity:0}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="ground"></div>
+  <div id="warm"></div>
+
+  <div id="rule"></div>
+
+  <!-- ========================= captions ========================= -->
+  <div class="cap" id="c0">
+    <div class="kick">تطبيق لولو شوب</div>
+    <span class="ln"><em class="num">٥٤</em> موديل تخرّج</span><span class="ln">بجيبك</span>
+  </div>
+  <div class="cap" id="c1">
+    <div class="kick">أوشحة · روبات · قبعات · شالات</div>
+    <span class="ln">تصفّحها كلها</span><span class="ln">من التلفون</span>
+  </div>
+  <div class="cap" id="c2">
+    <div class="kick">وشاح ملكي — <span class="num">٣٠٬٠٠٠</span> د.ع</div>
+    <span class="ln">اختار لونك</span><span class="ln">وشكلك</span>
+  </div>
+  <div class="cap" id="c3">
+    <div class="kick">تكتبه إنت — ونطرّزه إحنا</div>
+    <span class="ln">اكتب اسمك</span><span class="ln">بالخط العربي</span>
+  </div>
+  <div class="cap" id="c4">
+    <div class="kick">تسأل، وتجاوبك على طول</div>
+    <span class="ln">و<em>لولو</em> وياك</span><span class="ln">بالتطبيق</span>
+  </div>
+  <div class="cap" id="c5">
+    <div class="kick">ما تدفع ولا دينار هسه</div>
+    <span class="ln">الدفع نقداً</span><span class="ln">عند التسليم</span>
+  </div>
+  <div class="cap" id="c6">
+    <div class="kick"><span class="num">٢٬١٠١</span> طالب وطالبة سجّلوا معنا</div>
+    <span class="ln">ودفعتك كلها</span><span class="ln">تقدر تطلب سوية</span>
+  </div>
+
+  <!-- ========================= the phone ========================= -->
+  <div class="device dev-ti" id="dev" style="--app-top:#FBF4EA;--app-fg:#1A1A1A">
+    <div class="d-frame">
+      <div class="d-screen">
+        <div class="d-app" id="devApp">
+          <img id="s_home"  src="../shared/app/home.jpg" alt="">
+          <img id="s_shop"  class="strip" src="../shared/app/strip-shop.jpg" alt="">
+          <img id="s_prod"  src="../shared/app/product.jpg" alt="">
+          <img id="s_opts"  src="../shared/app/product-opts.jpg" alt="">
+          <img id="s_t00" src="../shared/walk/type-00.jpg" alt="">
+          <img id="s_t04" src="../shared/walk/type-04.jpg" alt="">
+          <img id="s_t08" src="../shared/walk/type-08.jpg" alt="">
+          <img id="s_t13" src="../shared/walk/type-13.jpg" alt="">
+          <img id="s_l00" src="../shared/walk-lolo/l-000.jpg" alt="">
+          <img id="s_l02" src="../shared/walk-lolo/l-002.jpg" alt="">
+          <img id="s_l06" src="../shared/walk-lolo/l-006.jpg" alt="">
+          <img id="s_cart" src="../shared/app/cart.jpg" alt="">
+          <img id="s_why"  src="../shared/app/why.jpg" alt="">
+        </div>
+        <div class="d-status">
+          <span class="d-time">٩:٤١</span>
+          <span class="d-sig">
+            <svg width="19" height="13" viewBox="0 0 19 13"><rect x="0" y="9" width="3" height="4" rx="1"/><rect x="5" y="6.4" width="3" height="6.6" rx="1"/><rect x="10" y="3.4" width="3" height="9.6" rx="1"/><rect x="15" y="0" width="3" height="13" rx="1"/></svg>
+            <svg width="17" height="13" viewBox="0 0 17 13"><path d="M8.5 12.4 6.2 9.9a3.3 3.3 0 0 1 4.6 0zM3.6 7.3 1.9 5.5a9.6 9.6 0 0 1 13.2 0l-1.7 1.8a7.2 7.2 0 0 0-9.8 0zm2.1 2.2L4 7.7a6 6 0 0 1 9 0l-1.7 1.8a3.7 3.7 0 0 0-5.6 0z"/></svg>
+            <svg width="26" height="13" viewBox="0 0 26 13"><rect x="0.6" y="0.6" width="21" height="11.8" rx="3.4" fill="none" stroke="currentColor" stroke-opacity=".38" stroke-width="1.2"/><rect x="2.3" y="2.3" width="15.6" height="8.4" rx="2.2"/><path d="M23.2 4.3c1.4.5 1.4 3.9 0 4.4z"/></svg>
+          </span>
+        </div>
+        <div class="d-island"><i class="d-lens"></i></div>
+        <div class="d-home"></div>
+        <div class="d-gloss" id="devGloss"></div>
+      </div>
+    </div>
+    <i class="d-btn d-act"></i><i class="d-btn d-vup"></i><i class="d-btn d-vdn"></i>
+    <i class="d-btn d-pwr"></i><i class="d-btn d-cam"></i>
+  </div>
+
+  <div id="tapdot"></div>
+  <div id="tapring"></div>
+
+  <!-- ========================= the ask ========================= -->
+  <div id="cta">
+    <img id="ctaIcon" src="../shared/assets/app-icon.png" alt="">
+    <div id="ctaLine">حمّل تطبيق لولو شوب</div>
+    <div id="ctaSub">واسمك يوصلك مطرّز بالخيط</div>
+    <div id="badges">
+      <span class="badge" id="bIos">
+        <svg viewBox="0 0 24 24"><path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.53 4.08zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"/></svg>
+        <span class="t"><i>Download on</i><b>App&nbsp;Store</b></span>
+      </span>
+      <span class="badge" id="bAnd">
+        <svg viewBox="0 0 24 24"><path d="M4.4 2.3c-.3.25-.5.66-.5 1.2v17c0 .54.2.95.5 1.2L14 12 4.4 2.3z"/><path d="M15.3 13.3l-2.3-2.3 2.3-2.3 3.2 1.85c1 .58 1 1.72 0 2.3l-3.2 1.85z"/><path d="M5.6 22.2 14.2 13.6l2.2 2.2-8.5 4.9c-.85.5-1.65.42-2.3-.5z" opacity=".92"/><path d="M5.6 1.8 14.2 10.4l2.2-2.2L7.9 3.3c-.85-.5-1.65-.42-2.3.5z" opacity=".72"/></svg>
+        <span class="t"><i>Get it on</i><b>Google&nbsp;Play</b></span>
+      </span>
+    </div>
+    <div id="hand"><bdi>@lolo_shop96</bdi> · <bdi>lolo-shop96.com</bdi></div>
+    <div id="ctaShot"><img src="../shared/assets/p-sash-plain.jpg" alt=""></div>
+  </div>
+
+  <div class="grain" id="grain"></div>
+</div>
+
+<script src="../shared/timeline.js"></script>
+<script>
+/* ===================== «شنو يصير بالتطبيق» — pure f(t) =====================
+   100 BPM · beat 0.60s · 25 beats · 15.000s.
+   Authored freehand against SC_A and remapped onto SC_B, the beat grid:
+   2-3-3-4-3-3-3-4 beats. music.py carries the same map as g().            */
+const DUR = 15.0, FPS = 30;
+const SC_A = [0, 1.26, 3.06, 4.74, 7.32, 9.06, 10.74, 12.54, 15.00];  /* authored */
+const SC_B = [0, 1.20, 3.00, 4.80, 7.20, 9.00, 10.80, 12.60, 15.00];  /* on the beat */
+const grid = makeGrid(SC_A, SC_B);
+const CUT  = SC_A;
+
+/* ---- screen swapping ------------------------------------------------------
+   Every app screenshot is stacked in the aperture. `screenAt` fades exactly one
+   in, and holds the previous one at full until the new one covers it — the same
+   A/B dissolve rule the film reel uses, so the aperture is never empty. */
+function show(id, o){ const e = $(id); if (e) e.style.opacity = o; }
+function clearScreens(){
+  ['s_home','s_shop','s_prod','s_opts','s_t00','s_t04','s_t08','s_t13',
+   's_l00','s_l02','s_l06','s_cart','s_why'].forEach(i => show(i, 0));
+}
+/* KEN BURNS FOR SCREENSHOTS.  Measured on build 1: 15 of 31 half-seconds were
+   static (Δ<6) — MORE static than the reels this one was built to beat, because a
+   screenshot held for 1.8s with only the phone drifting is a slideshow with a
+   phone on it. Every screen now travels slowly through its own scene, starting
+   before it arrives and ending after it leaves, so it is still moving through both
+   of its dissolves. Same rule the film reel's kb() uses. */
+function ken(id, t, k, y0, y1, s0, s1){
+  const e = $(id); if (!e) return;
+  const a = CUT[k] - 0.5, b = CUT[k+1] + 0.5;
+  const p = clamp((t - a) / (b - a), 0, 1), q = p*p*(3-2*p);
+  e.style.transform = `translateY(${y0 + (y1-y0)*q}px) scale(${s0 + (s1-s0)*q})`;
+}
+
+/* the flipbook: pick the frame whose window contains t, no interpolation */
+function flip(t, t0, t1, ids){
+  const p = clamp((t - t0) / (t1 - t0), 0, 1);
+  const i = Math.min(ids.length - 1, Math.floor(p * ids.length));
+  return ids[i];
+}
+
+function capIn(id, t, k, offs){
+  const el = $(id), lns = [...el.children];
+  /* Scene 0 starts BEFORE zero. Frame 0 is the Instagram cover thumbnail and the
+     autoplay first frame; reel A's was its darkest frame and this one was blank,
+     because the reveal had not begun. Starting scene 0 at -0.30 means t=0 already
+     carries the phone and most of the first line, and the move still continues. */
+  const inAt = (k === 0 ? -0.30 : CUT[k] + 0.20);
+  lns.forEach((n, i) => {
+    const e = eSoft(clamp((t - (inAt + offs[i])) / 0.62, 0, 1));
+    n.style.clipPath  = `inset(${(1-e)*100}% 0 -32% 0)`;
+    n.style.transform = `translateY(${(1-e)*14}px)`;
+  });
+  el.style.opacity = tw(t, CUT[k+1] - 0.40, CUT[k+1] - 0.08, 1, 0, eInOut)
+                   * tw(t, inAt - 0.02, inAt + 0.02, 0, 1, eLin);
+  el.style.transform = `translateY(${tw(t, inAt, CUT[k+1], 0, -11, eLin)}px)`;
+}
+
+/* a finger tap: the disc lands, the ring expands once and dies */
+function tapAt(t, at, x, y){
+  const on = hit(t, at - 0.16, 0.16, 0.30);
+  const d = $('tapdot'), r = $('tapring');
+  d.style.left = (x - 48) + 'px'; d.style.top = (y - 48) + 'px';
+  r.style.left = (x - 48) + 'px'; r.style.top = (y - 48) + 'px';
+  d.style.opacity = on;
+  d.style.transform = `scale(${tw(t, at - 0.16, at, 1.25, 0.92, eOut)})`;
+  const rp = clamp((t - at) / 0.46, 0, 1);
+  r.style.opacity = (1 - rp) * (rp > 0 ? 0.9 : 0);
+  r.style.transform = `scale(${0.7 + rp * 1.5})`;
+}
+
+function seek(tIn){
+  const tReal = clamp(tIn, 0, DUR);
+  const t = grid(tReal);
+
+  clearScreens();
+  $('tapdot').style.opacity = 0; $('tapring').style.opacity = 0;
+
+  /* ---------- the phone: rises once at the top, then never fully settles ---- */
+  const devY = tw(t, -0.42, 1.20, 210, 0, eSoft) + drift(t, 0.13, 5.0, 0.4);
+  const devS = tw(t, -0.42, 1.20, 0.955, 1, eSoft) * tw(t, 1.20, CUT[7], 1.000, 1.022, eLin);
+  /* HANDOVER. Build 1 left frames 26-27 near-empty (3% ink): the phone had gone and
+   the ask had not yet arrived. PIPELINE.md names that exact gap as this pipeline's
+   commonest defect. The phone now leaves LATER and slower, and the ask starts
+   BEFORE it goes, so the two overlap for ~0.5s and the frame is never empty. */
+const devOut = tw(t, CUT[7] + 0.26, CUT[7] + 1.06, 0, 1, eInOut);
+  $('dev').style.transform = `translateY(${devY + devOut * 320}px) scale(${devS * (1 - devOut * 0.06)})`;
+  $('dev').style.opacity   = 1 - devOut;
+
+  /* the glass catches light once, early, so the phone reads as glass not a picture */
+  $('devGloss').style.opacity   = vis(t, 0.85, 1.15, 1.85, 2.20) * 0.80;
+  $('devGloss').style.transform = `translateX(${tw(t, 0.85, 2.20, -760, 760, eInOut)}px)`;
+
+  /* ---------- scene 0 · 0.00-1.26 — the app opens on home ------------------ */
+  if (t < CUT[1] + 0.30){
+    show('s_home', tw(t, -0.30, 0.34, 0, 1, eOut));
+    ken('s_home', t, 0, 0, -74, 1.000, 1.030);
+  }
+
+  /* ---------- scene 1 · 1.26-3.06 — the catalogue genuinely scrolls -------- */
+  if (t > CUT[1] - 0.30 && t < CUT[2] + 0.30){
+    show('s_shop', tw(t, CUT[1] - 0.10, CUT[1] + 0.34, 0, 1, eOut)
+                 * tw(t, CUT[2] + 0.10, CUT[2] + 0.30, 1, 0, eLin));
+    /* strip-shop.jpg is 4800px tall at 880 wide; in the 722px aperture that is
+       3938px of image over a 1467px screen, so this is a real scroll, not a pan */
+    const sy = tw(t, CUT[1], CUT[2] + 0.20, 0, -1180, eInOut);
+    $('s_shop').style.transform = `translateY(${sy}px)`;
+    tapAt(t, CUT[1] + 0.10, 540, 1160);
+  }
+
+  /* ---------- scene 2 · 3.06-4.74 — a product, then its options ------------ */
+  if (t > CUT[2] - 0.30 && t < CUT[3] + 0.30){
+    const toOpts = t > CUT[2] + 0.92;
+    show('s_prod', tw(t, CUT[2] - 0.06, CUT[2] + 0.30, 0, 1, eOut)
+                 * (toOpts ? tw(t, CUT[2] + 0.92, CUT[2] + 1.12, 1, 0, eLin) : 1));
+    if (toOpts) show('s_opts', tw(t, CUT[2] + 0.92, CUT[2] + 1.18, 0, 1, eOut)
+                             * tw(t, CUT[3] + 0.10, CUT[3] + 0.30, 1, 0, eLin));
+    ken('s_prod', t, 2, 6, -58, 1.000, 1.034);
+    ken('s_opts', t, 2, 40, -46, 1.012, 1.000);
+    tapAt(t, CUT[2] + 0.92, 560, 1300);
+  }
+
+  /* ---------- scene 3 · 4.74-7.32 — THE NAME IS TYPED ---------------------- */
+  if (t > CUT[3] - 0.30 && t < CUT[4] + 0.30){
+    const id = flip(t, CUT[3] + 0.20, CUT[4] - 0.10, ['s_t00','s_t04','s_t08','s_t13']);
+    show(id, tw(t, CUT[3] - 0.06, CUT[3] + 0.30, 0, 1, eOut)
+           * tw(t, CUT[4] + 0.10, CUT[4] + 0.30, 1, 0, eLin));
+    /* the typing frames are near-identical at this scale, so the move carries the
+       scene: a slow push INTO the field while the letters land. */
+    ['s_t00','s_t04','s_t08','s_t13'].forEach(i => ken(i, t, 3, 30, -34, 1.000, 1.055));
+    tapAt(t, CUT[3] + 0.18, 560, 1180);
+  }
+
+  /* ---------- scene 4 · 7.32-9.06 — لولو answers -------------------------- */
+  if (t > CUT[4] - 0.30 && t < CUT[5] + 0.30){
+    const id = flip(t, CUT[4] + 0.10, CUT[5] - 0.10, ['s_l00','s_l02','s_l06','s_l06']);
+    show(id, tw(t, CUT[4] - 0.06, CUT[4] + 0.30, 0, 1, eOut)
+           * tw(t, CUT[5] + 0.10, CUT[5] + 0.30, 1, 0, eLin));
+    /* لولو's answer sits in the top third and the rest of that screen is empty
+       white — push in so the bubble fills more of the aperture as it lands. */
+    ['s_l00','s_l02','s_l06'].forEach(i => ken(i, t, 4, 44, -96, 1.010, 1.090));
+    tapAt(t, CUT[4] + 0.34, 470, 1230);
+  }
+
+  /* ---------- scene 5 · 9.06-10.74 — the cart / cash on delivery ----------- */
+  /* why.jpg, NOT cart.jpg: the cart is empty for a signed-out capture and shows
+     «سجّل دخولك لإكمال طلبك» — a login wall under the words «الدفع نقداً عند التسليم»
+     is the opposite of the promise. why.jpg carries that exact line as its own copy. */
+  if (t > CUT[5] - 0.30 && t < CUT[6] + 0.30)
+    show('s_why', tw(t, CUT[5] - 0.06, CUT[5] + 0.30, 0, 1, eOut)
+                * tw(t, CUT[6] + 0.10, CUT[6] + 0.30, 1, 0, eLin));
+    ken('s_why', t, 5, 20, -150, 1.000, 1.026);
+
+  /* ---------- scene 6 · 10.74-12.54 — the cohort, and why ------------------ */
+  if (t > CUT[6] - 0.30 && t < CUT[7] + 0.40){
+    show('s_home', tw(t, CUT[6] - 0.06, CUT[6] + 0.30, 0, 1, eOut));
+    /* the hero itself scrolls a little so the 2,101 line rides up into view */
+    ken('s_home', t, 6, 0, -180, 1.000, 1.028);
+  }
+
+  /* ---------- captions ---------------------------------------------------- */
+  capIn('c0', t, 0, [0.00, 0.13]);
+  capIn('c1', t, 1, [0.00, 0.13]);
+  capIn('c2', t, 2, [0.00, 0.13]);
+  capIn('c3', t, 3, [0.00, 0.13]);
+  capIn('c4', t, 4, [0.00, 0.13]);
+  capIn('c5', t, 5, [0.00, 0.13]);
+  capIn('c6', t, 6, [0.00, 0.13]);
+
+  /* ---------- the orange rule: redraws out of every cut -------------------- */
+  let rs = tw(t, 0.30, 1.05, 0, 1, eSoft), ro = 'right center';
+  for (let k = 1; k <= 6; k++){
+    const c = CUT[k];
+    if (t > c - 0.34 && t <= c)     { rs = tw(t, c - 0.34, c - 0.02, 1, 0, eInOut); ro = 'left center'; }
+    else if (t > c && t < c + 0.80) { rs = tw(t, c + 0.04, c + 0.70, 0, 1, eSoft);  ro = 'right center'; }
+    else if (t >= c + 0.80)         { rs = 1; ro = 'right center'; }
+  }
+  if (t > CUT[7]) rs = tw(t, CUT[7], CUT[7] + 0.30, 1, 0, eInOut);
+  const rl = $('rule');
+  rl.style.transformOrigin = ro;
+  rl.style.transform = `scaleX(${rs})`;
+
+  /* ---------- the ask · 12.54-15.00 --------------------------------------- */
+  const C7 = CUT[7];
+  $('cta').style.opacity = tw(t, C7 - 0.16, C7 + 0.18, 0, 1, eOut);
+  const ic = C7 - 0.10;
+  $('ctaIcon').style.opacity   = tw(t, ic, ic + 0.36, 0, 1, eOut);
+  $('ctaIcon').style.transform = `translateY(${tw(t, ic, ic + 0.86, 44, 0, eSoft)}px) scale(${tw(t, ic, ic + 0.86, 0.86, 1, eSoft)})`;
+  $('ctaLine').style.opacity   = tw(t, ic + 0.22, ic + 0.60, 0, 1, eOut);
+  $('ctaLine').style.transform = `translateY(${tw(t, ic + 0.22, ic + 0.98, 30, 0, eSoft)}px)`;
+  $('ctaSub').style.opacity    = tw(t, ic + 0.44, ic + 0.82, 0, 1, eOut);
+  $('ctaSub').style.transform  = `translateY(${tw(t, ic + 0.44, ic + 1.16, 26, 0, eSoft)}px)`;
+  ['bIos','bAnd'].forEach((id, i) => {
+    const s = ic + 0.66 + i * 0.12;
+    $(id).style.opacity   = tw(t, s, s + 0.32, 0, 1, eOut);
+    $(id).style.transform = `translateY(${tw(t, s, s + 0.70, 28, 0, eSoft)}px) scale(${tw(t, s, s + 0.70, 0.94, 1, eSoft)})`;
+  });
+  $('ctaShot').style.opacity   = tw(t, ic + 0.50, ic + 1.10, 0, 1, eOut);
+  $('ctaShot').style.transform = `scale(${tw(t, ic + 0.50, 15.0, 1.00, 1.05, eLin)})`;
+  $('hand').style.opacity   = tw(t, ic + 1.00, ic + 1.38, 0, 1, eOut);
+  $('hand').style.transform = `translateY(${tw(t, ic + 1.00, ic + 1.58, 16, 0, eSoft)}px)`;
+
+  /* ---------- the ground breathes so nothing is ever perfectly still ------- */
+  $('warm').style.opacity = 0.48 + 0.10 * Math.sin(t * 0.52);
+  $('warm').style.transform = `translate(${drift(t, 0.07, 22, 0)}px,${drift(t, 0.05, 16, 1.2)}px)`;
+
+  grainAt($('grain'), Math.round(tReal * FPS));
+}
+
+publish(seek, { dur: DUR, fps: FPS });
+</script>
+</body>
+</html>

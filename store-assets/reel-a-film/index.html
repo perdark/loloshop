@@ -1,0 +1,378 @@
+<!doctype html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="utf-8">
+<title>لولو شوب — «الوعد» · فيلم</title>
+<link rel="stylesheet" href="../shared/lolo.css">
+<link rel="stylesheet" href="../shared/device.css">
+<style>
+/* ============================================================================
+   «الوعد» — an editorial fashion-house film. Dark, slow, photographic.
+   Grade: ink base (--night), full-bleed photographs under an ink scrim, a soft
+   halation bloom on highlights, a ±0.6px gate weave. Type is Amiri at 98px,
+   right-aligned on the film's own margin, revealed by a clip-path wipe.
+   Orange is EARNED: one 2px hairline at each plate change, then the CTA.
+   Six plates on a 0.75s (80 BPM) grid: 4-3-3-3-3-4 beats = 20 beats = 15.0s.
+   ========================================================================== */
+:root{
+  /* paper at reduced alpha — the dark register's version of --muted / --line.
+     Not new colours: --paper (#FAF4EA) with alpha, so the palette stays closed. */
+  --p88:rgba(250,244,234,.88); --p66:rgba(250,244,234,.66);
+  --p60:rgba(250,244,234,.60); --p46:rgba(250,244,234,.46);
+  --M:88px;                                   /* the film's right/left margin */
+}
+#stage{background:var(--night)}
+#ink{position:absolute;inset:0;background:var(--night)}
+
+/* ---------------- the photographic layer (the gate weaves this, not the type) */
+#gate{position:absolute;inset:0}
+.plate{position:absolute;inset:0;overflow:hidden;background:var(--night);opacity:0}
+.plate .ph,.plate .bl{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
+  display:block;transform-origin:50% 50%}
+/* halation: the same frame, blurred and contrast-crushed so only highlights
+   survive the screen blend — light blooming in the lens, not a glow filter */
+/* the second brightness() is a THRESHOLD: everything under it is crushed to black by
+   the contrast() that follows, so only genuine highlights survive the screen blend.
+   A high-key still life has no halation, which is why p1/p4 barely bloom at all. */
+.plate .bl{mix-blend-mode:screen;opacity:.30;
+  filter:blur(28px) brightness(.60) contrast(4.0) saturate(.45) brightness(1.60)}
+/* the scrim: transparent through the top third, ink by the bottom, so type
+   always sits on darkness however bright the photograph is */
+.plate .scrim{position:absolute;inset:0;background:
+  radial-gradient(74% 58% at 50% 42%,rgba(14,12,11,0) 38%,
+    rgba(14,12,11,calc(var(--vg,.26)*.50)) 70%,rgba(14,12,11,var(--vg,.26)) 100%),
+  linear-gradient(180deg,rgba(14,12,11,var(--ta,.28)) 0%,rgba(14,12,11,0) 24%,
+    rgba(14,12,11,0) var(--s1,34%),rgba(14,12,11,calc(var(--sa,.90)*.42)) 58%,
+    rgba(14,12,11,calc(var(--sa,.90)*.80)) 76%,rgba(14,12,11,var(--sa,.90)) 92%,
+    rgba(14,12,11,calc(var(--sa,.90)*1.02)) 100%)}
+
+#p0 .ph{object-position:50% 34%;filter:saturate(.55) contrast(1.17) brightness(.68)}
+#p0 .bl{object-position:50% 34%;opacity:.30;filter:blur(28px) brightness(.62) contrast(4.0) saturate(.45) brightness(1.55)}
+#p1 .ph{object-position:44% 46%;filter:saturate(.42) contrast(1.34) brightness(.80)}
+#p1 .bl{object-position:44% 46%;opacity:.10;filter:blur(30px) brightness(.86) contrast(6.0) saturate(.30) brightness(1.30)}
+#p3 .ph{object-position:50% 40%;filter:saturate(.74) contrast(1.11) brightness(.92)}
+#p3 .bl{object-position:50% 40%;opacity:.38;filter:blur(26px) brightness(.58) contrast(4.4) saturate(.62) brightness(1.70)}
+#p4 .ph{object-position:40% 46%;filter:saturate(.40) contrast(1.36) brightness(.78)}
+#p4 .bl{object-position:40% 46%;opacity:.10;filter:blur(30px) brightness(.86) contrast(6.0) saturate(.30) brightness(1.30)}
+#p5 .ph{object-position:46% 48%;filter:saturate(.30) contrast(1.26) brightness(.36) blur(22px);opacity:.32}
+
+/* plate 2 is anamorphic: the cohort is a landscape negative, so it is printed as
+   a wide band on ink instead of being cropped to 18% of its own width */
+#p2 .band{position:absolute;left:50%;top:316px;width:1270px;height:721px;margin-left:-635px;
+  overflow:hidden}
+#p2 .band img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;
+  object-position:50% 44%;transform-origin:50% 50%;filter:saturate(.50) contrast(1.26) brightness(.68)}
+#p2 .band img.bl{mix-blend-mode:screen;opacity:.22;
+  filter:blur(24px) brightness(.66) contrast(4.0) saturate(.45) brightness(1.55)}
+#p2 .band::after{content:'';position:absolute;inset:0;pointer-events:none;background:
+  linear-gradient(180deg,rgba(14,12,11,.42) 0%,rgba(14,12,11,0) 22%,
+    rgba(14,12,11,0) 62%,rgba(14,12,11,.66) 100%)}
+
+/* ---------------- grade layers ---------------- */
+#lift{position:absolute;inset:0;background:#1E2838;mix-blend-mode:screen;opacity:.055;pointer-events:none}
+#vig{position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(80% 64% at 50% 44%,rgba(14,12,11,0) 44%,rgba(14,12,11,.20) 78%,rgba(14,12,11,.48) 100%)}
+#riseVeil{position:absolute;inset:0;background:var(--night);pointer-events:none;opacity:0}
+#flick{position:absolute;inset:0;background:#FFF3E2;mix-blend-mode:screen;opacity:0;pointer-events:none}
+
+/* ---------------- the one earned hairline ---------------- */
+#hair{position:absolute;height:2px;background:var(--orange);transform:scaleX(0);opacity:.92;
+  border-radius:2px}
+
+/* ---------------- type ---------------- */
+.tx{position:absolute;right:var(--M);left:var(--M);text-align:right;opacity:0}
+.tx .kick{font-family:'Cairo',sans-serif;font-weight:600;font-size:30px;letter-spacing:.045em;
+  color:var(--p66);line-height:1.5;margin-bottom:18px}
+.tx .kick b{font-weight:700;font-size:38px;color:var(--p88);letter-spacing:0}
+.tx .ln{display:block;font-family:'Amiri',serif;font-weight:700;font-size:98px;line-height:1.34;
+  color:var(--paper)}
+
+/* ---------------- the ask ---------------- */
+#cta{position:absolute;inset:0;opacity:0;transform-origin:50% 50%}
+#dev{position:absolute;left:50%;top:262px;margin-left:-191.5px}
+/* product.jpg is 700x1422; .d-app is 2.0959*--dw tall, so this fills the aperture
+   exactly — top flush under the drawn status bar, tab bar flush at the home indicator.
+   It does NOT scroll: any scroll clips the app's own header off the top. */
+#devApp img{width:calc(var(--dw) * 1.0317);height:calc(var(--dw) * 2.0959);
+  left:50%;margin-left:calc(var(--dw) * -0.5159)}
+#lock{position:absolute;left:0;right:0;top:1160px;display:flex;direction:rtl;
+  align-items:center;justify-content:center;gap:26px}
+#lock .t{font-family:'Amiri',serif;font-weight:700;font-size:98px;line-height:1.30;color:var(--paper)}
+#lock img{width:76px;height:76px;border-radius:18px;display:block;
+  box-shadow:0 14px 34px rgba(26,26,26,.62)}
+#sub{position:absolute;left:0;right:0;top:1316px;text-align:center;
+  font-family:'Cairo',sans-serif;font-weight:500;font-size:33px;color:var(--p60)}
+#badges{position:absolute;left:0;right:0;top:1400px;display:flex;justify-content:center;gap:26px;direction:ltr}
+.badge{display:flex;align-items:center;gap:16px;padding:18px 30px;border-radius:9999px;
+  background:var(--paper);box-shadow:0 20px 48px rgba(26,26,26,.66);opacity:0}
+.badge svg{width:40px;height:40px;fill:var(--ink);flex:0 0 auto}
+.badge .t{text-align:left;line-height:1}
+.badge .t i{display:block;font-style:normal;font-weight:600;font-size:17px;letter-spacing:.10em;
+  color:var(--muted);text-transform:uppercase}
+.badge .t b{display:block;font-family:'Playfair',serif;font-weight:600;font-size:33px;color:var(--ink);margin-top:5px}
+#hand{position:absolute;left:0;right:0;top:1508px;text-align:center;
+  font-family:'Cairo',sans-serif;font-weight:600;font-size:28px;letter-spacing:.03em;
+  color:var(--p46);direction:ltr}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="ink"></div>
+
+  <div id="gate">
+    <!-- 4 beats · 0.00–3.00 — she rises out of black -->
+    <div class="plate" id="p0" style="--s1:34%;--sa:.90;--ta:.32;--vg:.34">
+      <img class="ph" src="../shared/assets/ph-onboarding-hero.jpg" alt="">
+      <img class="bl" src="../shared/assets/ph-onboarding-hero.jpg" alt="">
+      <div class="scrim"></div>
+    </div>
+    <!-- 3 beats · 3.00–5.25 — the sash on the plinth -->
+    <div class="plate" id="p1" style="--s1:26%;--sa:.95;--ta:.42;--vg:.76">
+      <img class="ph" src="../shared/assets/ph-detail-pedestal.jpg" alt="">
+      <img class="bl" src="../shared/assets/ph-detail-pedestal.jpg" alt="">
+      <div class="scrim"></div>
+    </div>
+    <!-- 3 beats · 5.25–7.50 — the cohort, printed anamorphic -->
+    <div class="plate" id="p2" style="--s1:58%;--sa:.62;--ta:.10;--vg:.20">
+      <div class="band">
+        <img class="ph" src="../shared/assets/ph-grad-crowd-hero.jpg" alt="">
+        <img class="bl" src="../shared/assets/ph-grad-crowd-hero.jpg" alt="">
+      </div>
+      <div class="scrim"></div>
+    </div>
+    <!-- 3 beats · 7.50–9.75 — the shop itself, with the lolo sign -->
+    <div class="plate" id="p3" style="--s1:40%;--sa:.88;--ta:.24;--vg:.40">
+      <img class="ph" src="../shared/assets/ph-look-boutique.jpg" alt="">
+      <img class="bl" src="../shared/assets/ph-look-boutique.jpg" alt="">
+      <div class="scrim"></div>
+    </div>
+    <!-- 3 beats · 9.75–12.00 — the embroidery, macro -->
+    <div class="plate" id="p4" style="--s1:24%;--sa:.96;--ta:.44;--vg:.82">
+      <img class="ph" src="../shared/assets/ph-detail-flatlay.jpg" alt="">
+      <img class="bl" src="../shared/assets/ph-detail-flatlay.jpg" alt="">
+      <div class="scrim"></div>
+    </div>
+    <!-- 4 beats · 12.00–15.00 — near-black; the texture keeps moving under the ask -->
+    <div class="plate" id="p5" style="--s1:20%;--sa:.72;--ta:.34;--vg:.46">
+      <img class="ph" src="../shared/assets/ph-detail-flatlay.jpg" alt="">
+      <div class="scrim"></div>
+    </div>
+  </div>
+
+  <div id="lift"></div>
+  <div id="vig"></div>
+  <div id="riseVeil"></div>
+  <div id="hair" style="right:88px;left:88px;top:1060px"></div>
+
+  <div class="tx" id="t0" style="bottom:468px">
+    <span class="ln">يوم واحد بالعمر</span>
+  </div>
+  <div class="tx" id="t1" style="bottom:468px">
+    <span class="ln">واسمك عليه</span><span class="ln">مطرّز بالخيط</span>
+  </div>
+  <div class="tx" id="t2" style="bottom:468px">
+    <div class="kick"><b id="cnt">٢٬٠١٧</b> طالب وطالبة سجّلوا معنا</div>
+    <span class="ln">بالخط العربي</span><span class="ln">مو طباعة تنمسح</span>
+  </div>
+  <div class="tx" id="t3" style="bottom:468px">
+    <div class="kick">إحنا اللي نفصّل ونطرّز، مو وسيط يشتري ويبيع</div>
+    <span class="ln">نخيطه بورشتنا</span><span class="ln">بديالى</span>
+  </div>
+  <div class="tx" id="t4" style="bottom:468px">
+    <div class="kick">ما تدفع ولا دينار هسه</div>
+    <span class="ln">الدفع نقداً</span><span class="ln">عند التسليم</span>
+  </div>
+
+  <div id="cta">
+    <div class="device dev-ti" id="dev" style="--dw:360px;--app-top:#FBF4EA;--app-fg:#1A1A1A">
+      <div class="d-frame">
+        <div class="d-screen">
+          <div class="d-app" id="devApp">
+            <img id="scrProd" src="../shared/app/product.jpg" alt="">
+          </div>
+          <div class="d-status">
+            <span class="d-time">٩:٤١</span>
+            <span class="d-sig">
+              <svg width="19" height="13" viewBox="0 0 19 13"><rect x="0" y="9" width="3" height="4" rx="1"/><rect x="5" y="6.4" width="3" height="6.6" rx="1"/><rect x="10" y="3.4" width="3" height="9.6" rx="1"/><rect x="15" y="0" width="3" height="13" rx="1"/></svg>
+              <svg width="17" height="13" viewBox="0 0 17 13"><path d="M8.5 12.4 6.2 9.9a3.3 3.3 0 0 1 4.6 0zM3.6 7.3 1.9 5.5a9.6 9.6 0 0 1 13.2 0l-1.7 1.8a7.2 7.2 0 0 0-9.8 0zm2.1 2.2L4 7.7a6 6 0 0 1 9 0l-1.7 1.8a3.7 3.7 0 0 0-5.6 0z"/></svg>
+              <svg width="26" height="13" viewBox="0 0 26 13"><rect x="0.6" y="0.6" width="21" height="11.8" rx="3.4" fill="none" stroke="currentColor" stroke-opacity=".38" stroke-width="1.2"/><rect x="2.3" y="2.3" width="15.6" height="8.4" rx="2.2"/><path d="M23.2 4.3c1.4.5 1.4 3.9 0 4.4z"/></svg>
+            </span>
+          </div>
+          <div class="d-island"><i class="d-lens"></i></div>
+          <div class="d-home"></div>
+          <div class="d-gloss" id="devGloss"></div>
+        </div>
+      </div>
+      <i class="d-btn d-act"></i><i class="d-btn d-vup"></i><i class="d-btn d-vdn"></i>
+      <i class="d-btn d-pwr"></i><i class="d-btn d-cam"></i>
+    </div>
+
+    <div id="lock">
+      <span class="t">حمّل تطبيق لولو شوب</span>
+      <img src="../shared/assets/app-icon.png" alt="">
+    </div>
+    <div id="sub">دوّر على «لولو شوب» بمتجر التطبيقات</div>
+    <div id="badges">
+      <span class="badge" id="bIos">
+        <svg viewBox="0 0 24 24"><path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.53 4.08zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"/></svg>
+        <span class="t"><i>Download on</i><b>App&nbsp;Store</b></span>
+      </span>
+      <span class="badge" id="bAnd">
+        <svg viewBox="0 0 24 24"><path d="M4.4 2.3c-.3.25-.5.66-.5 1.2v17c0 .54.2.95.5 1.2L14 12 4.4 2.3z"/><path d="M15.3 13.3l-2.3-2.3 2.3-2.3 3.2 1.85c1 .58 1 1.72 0 2.3l-3.2 1.85z"/><path d="M5.6 22.2 14.2 13.6l2.2 2.2-8.5 4.9c-.85.5-1.65.42-2.3-.5z" opacity=".92"/><path d="M5.6 1.8 14.2 10.4l2.2-2.2L7.9 3.3c-.85-.5-1.65-.42-2.3.5z" opacity=".72"/></svg>
+        <span class="t"><i>Get it on</i><b>Google&nbsp;Play</b></span>
+      </span>
+    </div>
+    <div id="hand"><bdi>@lolo_shop96</bdi> · <bdi>lolo-shop96.com</bdi></div>
+  </div>
+
+  <div id="flick"></div>
+  <div class="grain dark" id="grain"></div>
+</div>
+
+<script src="../shared/timeline.js"></script>
+<script>
+/* ======================= «الوعد» — every frame is a pure f(t) =======================
+   80 BPM · beat 0.75s · 20 beats · 15.000s.
+   The film was animated freehand against SC_A and is remapped at render time onto
+   SC_B, the beat grid: 4-3-3-3-3-4 beats. music.py carries the same map as g(),
+   so the piano, the dissolves and the picardy third stay locked to each other. */
+const DUR = 15.0, FPS = 30;
+const SC_A = [0, 2.85, 5.10, 7.45,  9.90, 12.20, 15.00];   /* authored, freehand   */
+const SC_B = [0, 3.00, 5.25, 7.50,  9.75, 12.00, 15.00];   /* shipped, on the beat */
+const grid = makeGrid(SC_A, SC_B);
+const CUT  = SC_A;                                          /* seek() lives in authored time */
+
+$('cnt').textContent = arNum(2017);   /* ٢٬٠١٧ — FACTS.md, the live signup count */
+
+/* ---- one ken-burns move per plate. It starts before the plate arrives and ends
+        after it leaves, so the photograph is still travelling through both of its
+        dissolves — which is the whole difference between a dissolve and a fade. */
+function kb(id, t, k, s0, s1, x0, x1, y0, y1){
+  const a = CUT[k] - 0.60, b = CUT[k+1] + 0.60;
+  const p = clamp((t - a) / (b - a), 0, 1), e = p*p*(3 - 2*p);   /* smoothstep: no stop */
+  const tr = `translate(${x0+(x1-x0)*e}px,${y0+(y1-y0)*e}px) scale(${s0+(s1-s0)*e})`;
+  const el = $(id);
+  el.querySelectorAll('.ph,.bl').forEach(n => { n.style.transform = tr; });
+  /* A/B dissolve: the incoming plate fades UP over the outgoing one, which is held
+     at full until it is completely covered. No luminance dip in the middle. */
+  const on  = k === 0 ? 1 : tw(t, CUT[k] - 0.26, CUT[k] + 0.26, 0, 1, eInOut);
+  const off = k === 5 ? 1 : tw(t, CUT[k+1] + 0.28, CUT[k+1] + 0.33, 1, 0, eLin);
+  el.style.opacity = on * off;
+}
+
+/* ---- the type reveal: a clip-path wipe that uncovers each line from its own
+        baseline upward, plus a 15px rise. One line at a time, never a word fade. */
+function lineIn(el, t, s){
+  const e = eSoft(clamp((t - s) / 0.72, 0, 1));
+  el.style.clipPath   = `inset(${(1-e)*100}% 0 -30% 0)`;
+  el.style.transform  = `translateY(${(1-e)*15}px)`;
+}
+function block(id, t, k, offs){
+  const el = $(id), lns = [...el.children];
+  const inAt = CUT[k] + 0.34;
+  lns.forEach((n, i) => lineIn(n, t, inAt + offs[i]));
+  /* held text still drifts, and it clears the frame before the dissolve is half done */
+  el.style.opacity   = tw(t, CUT[k+1] - 0.46, CUT[k+1] - 0.12, 1, 0, eInOut)
+                     * tw(t, inAt - 0.02, inAt + 0.02, 0, 1, eLin);
+  el.style.transform = `translateY(${tw(t, inAt, CUT[k+1], 0, -13, eLin)}px)`;
+}
+
+function seek(tIn){
+  const tReal = clamp(tIn, 0, DUR);   /* wall clock: grain, weave and flicker use this */
+  const t     = grid(tReal);          /* authored time: every keyframe below reads this */
+
+  /* ---------- the six plates, each on a move that never stops ---------- */
+  kb('p0', t, 0, 1.105, 1.030,   0,   10,  22, -20);   /* pull back off her face      */
+  kb('p1', t, 1, 1.000, 1.078, -16,   18,  12, -16);   /* push into the embroidery    */
+  kb('p3', t, 3, 1.080, 1.006,  14,  -12, -14,  14);   /* pull back, the shop opens   */
+  kb('p4', t, 4, 1.340, 1.462, -22,   24,  20, -18);   /* macro, still pushing        */
+  kb('p5', t, 5, 1.180, 1.260,  16,  -18, -10,  12);   /* the near-black bed breathes */
+  /* plate 2 is the anamorphic band: a slow lateral pan across the cohort */
+  {
+    const a = CUT[2] - 0.60, b = CUT[3] + 0.60;
+    const p = clamp((t - a) / (b - a), 0, 1), e = p*p*(3 - 2*p);
+    const tr = `translate(${34 - 62*e}px,0) scale(${1.055 - 0.055*e})`;
+    $('p2').querySelectorAll('.band img').forEach(n => { n.style.transform = tr; });
+    $('p2').style.opacity = tw(t, CUT[2]-0.26, CUT[2]+0.26, 0, 1, eInOut)
+                          * tw(t, CUT[3]+0.28, CUT[3]+0.33, 1, 0, eLin);
+  }
+
+  /* ---------- she rises out of black; frame 0 still carries the photograph ---------- */
+  $('riseVeil').style.opacity = tw(t, -0.02, 1.35, 0.50, 0, eSoft);
+
+  /* ---------- gate weave: ±0.6px, deterministic, so the frame breathes like film --- */
+  const wx = 0.34*Math.sin(tReal*11.7*6.2831853)
+           + 0.20*Math.sin(tReal*19.3*6.2831853 + 2.1)
+           + 0.07*Math.sin(tReal*41.0*6.2831853 + 0.7);
+  const wy = 0.16*Math.sin(tReal*8.30*6.2831853 + 1.3)
+           + 0.09*Math.sin(tReal*23.1*6.2831853 + 0.4);
+  $('gate').style.transform = `translate(${wx}px,${wy}px)`;
+
+  /* ---------- 2-frame gate flicker on every dissolve, measured in shipped time ------ */
+  let fl = 0;
+  for (let k = 1; k <= 5; k++){
+    const d = Math.abs(tReal - (SC_B[k] + 1/60));
+    if (d < 0.045) fl = Math.max(fl, 0.055 * (1 - d/0.045));
+  }
+  $('flick').style.opacity = fl;
+  /* the vignette breathes, so the grade never reads as a static overlay */
+  $('vig').style.opacity = 0.88 + 0.12*Math.sin(t*0.44);
+
+  /* ---------- the earned hairline: it retracts into each cut and redraws out of it -- */
+  let hs = tw(t, 0.45, 1.25, 0, 1, eSoft), ho = 'right center', hy = 1060, hL = 88, hR = 88;
+  for (let k = 1; k <= 5; k++){
+    const c = CUT[k];
+    if (t > c - 0.38 && t <= c)      { hs = tw(t, c-0.38, c-0.03, 1, 0, eInOut); ho = 'left center'; }
+    else if (t > c && t < c + 0.90)  { hs = tw(t, c+0.05, c+0.78, 0, 1, eSoft);  ho = 'right center'; }
+    else if (t >= c + 0.90)          { hs = 1; ho = 'right center'; }
+  }
+  if (t > CUT[5]) { hy = 1118; hL = 300; hR = 300; ho = '50% 50%'; }   /* the ask centres */
+  const hair = $('hair');
+  hair.style.top = hy + 'px'; hair.style.left = hL + 'px'; hair.style.right = hR + 'px';
+  hair.style.transformOrigin = ho;
+  hair.style.transform = `scaleX(${hs})`;
+  hair.style.opacity = 0.92;
+
+  /* ---------- the five lines ---------- */
+  block('t0', t, 0, [0.22]);
+  block('t1', t, 1, [0.00, 0.15]);
+  block('t2', t, 2, [0.00, 0.13, 0.27]);
+  block('t3', t, 3, [0.00, 0.13, 0.27]);
+  block('t4', t, 4, [0.00, 0.13, 0.27]);
+
+  /* ================= the ask — 12.00 → 15.00, four beats ================= */
+  const C5 = CUT[5];
+  $('cta').style.opacity   = tw(t, C5 - 0.10, C5 + 0.18, 0, 1, eOut);
+  $('cta').style.transform = `scale(${tw(t, C5 + 0.50, 15.0, 1.000, 1.016, eLin)})`;
+
+  /* the device rises on eSoft and never quite settles. It starts ON the cut, so it is
+     already climbing while the last plate dissolves away — the frame is never empty. */
+  const dY = tw(t, C5 + 0.00, C5 + 1.45, 250, 0, eSoft) + drift(t, 0.19, 4.0, 0.6);
+  $('dev').style.opacity   = tw(t, C5 + 0.00, C5 + 0.44, 0, 1, eOut);
+  $('dev').style.transform = `translateY(${dY}px) scale(${tw(t, C5+0.00, C5+1.45, 0.930, 1, eSoft)})`;
+  $('dev').style.filter    = `blur(${tw(t, C5 + 0.00, C5 + 0.62, 9, 0, eOut)}px)`;
+  /* the glass catches the light once, as the device arrives */
+  $('devGloss').style.opacity   = vis(t, C5 + 0.95, C5 + 1.25, C5 + 2.00, C5 + 2.35) * 0.85;
+  $('devGloss').style.transform = `translateX(${tw(t, C5 + 0.95, C5 + 2.35, -430, 430, eInOut)}px)`;
+
+  const lk = C5 + 0.62;
+  $('lock').style.opacity   = tw(t, lk, lk + 0.42, 0, 1, eOut);
+  $('lock').style.transform = `translateY(${tw(t, lk, lk + 0.80, 30, 0, eSoft)}px)`;
+  $('sub').style.opacity    = tw(t, lk + 0.26, lk + 0.66, 0, 1, eOut);
+  $('sub').style.transform  = `translateY(${tw(t, lk + 0.26, lk + 0.96, 24, 0, eSoft)}px)`;
+  ['bIos','bAnd'].forEach((id, i) => {
+    const s = lk + 0.52 + i*0.13;
+    $(id).style.opacity   = tw(t, s, s + 0.34, 0, 1, eOut);
+    $(id).style.transform = `translateY(${tw(t, s, s + 0.74, 30, 0, eSoft)}px) scale(${tw(t, s, s + 0.74, 0.94, 1, eSoft)})`;
+  });
+  $('hand').style.opacity   = tw(t, lk + 0.94, lk + 1.34, 0, 1, eOut);
+  $('hand').style.transform = `translateY(${tw(t, lk + 0.94, lk + 1.56, 18, 0, eSoft)}px)`;
+
+  /* ---------- grain: jittered by the real frame index, never by RNG ---------- */
+  grainAt($('grain'), Math.round(tReal * FPS));
+}
+
+publish(seek, { dur: DUR, fps: FPS });
+</script>
+</body>
+</html>

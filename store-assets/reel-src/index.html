@@ -1,0 +1,475 @@
+<!doctype html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="utf-8">
+<title>لولو شوب — ريل تحميل التطبيق</title>
+<style>
+/* ---- fonts: the app's own self-hosted faces, lifted from the Next build ---- */
+@font-face{font-family:'Cairo';src:url(assets/cairo-lat.woff2) format('woff2');font-weight:400 700;font-display:block}
+@font-face{font-family:'Cairo';src:url(assets/cairo-ar.woff2) format('woff2');font-weight:400 700;font-display:block;
+  unicode-range:U+0600-06FF,U+0750-077F,U+08A0-08FF,U+FB50-FDFF,U+FE70-FEFF,U+200C-200E,U+2010-2011,U+204F,U+2E41}
+@font-face{font-family:'Amiri';src:url(assets/amiri-lat.woff2) format('woff2');font-weight:400;font-display:block}
+@font-face{font-family:'Amiri';src:url(assets/amiri-ar-400.woff2) format('woff2');font-weight:400;font-display:block;
+  unicode-range:U+0600-06FF,U+0750-077F,U+08A0-08FF,U+FB50-FDFF,U+FE70-FEFF,U+200C-200E,U+2010-2011,U+204F,U+2E41}
+@font-face{font-family:'Amiri';src:url(assets/amiri-ar-700.woff2) format('woff2');font-weight:700;font-display:block;
+  unicode-range:U+0600-06FF,U+0750-077F,U+08A0-08FF,U+FB50-FDFF,U+FE70-FEFF,U+200C-200E,U+2010-2011,U+204F,U+2E41}
+@font-face{font-family:'Playfair';src:url(assets/playfair-lat.woff2) format('woff2');font-weight:400 700;font-display:block}
+
+/* ---- tokens: straight out of frontend/app/globals.css @theme ---- */
+:root{
+  --paper:#FAF4EA; --surface:#FFFDFA; --sink:#F5F0E6;
+  --ink:#1A1A1A; --ink-soft:#33302B; --muted:#6B6356; --line:#E3DDD0;
+  --orange:#F47B42; --orange-ink:#C2410C; --peach:#FFDAB9;
+  /* DESIGN.md "Ink-Not-Orange Shadow Rule": every shadow is ink-toned, never brand-toned */
+  --sh:rgba(26,26,26,.30); --sh-soft:rgba(26,26,26,.13); --sh-hair:rgba(26,26,26,.07);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:1080px;height:1920px;overflow:hidden;background:#000}
+body{font-family:'Cairo',sans-serif;-webkit-font-smoothing:antialiased;text-rendering:geometricPrecision}
+
+#stage{position:relative;width:1080px;height:1920px;overflow:hidden;background:var(--paper)}
+#cam{position:absolute;inset:0;transform-origin:50% 46%}
+.scene{position:absolute;inset:0;opacity:0}
+#bg{position:absolute;inset:-8%;
+  background:radial-gradient(62% 44% at 50% 32%, #FFFDFA 0%, #FAF4EA 48%, #F1E9DA 100%)}
+/* warm bloom — orange is earned, so it lives in light rather than in fills */
+#glow{position:absolute;left:50%;top:0;width:1560px;height:1560px;margin-left:-780px;border-radius:50%;
+  background:radial-gradient(circle, rgba(244,123,66,.26) 0%, rgba(255,218,185,.16) 42%, rgba(244,123,66,0) 70%);
+  filter:blur(8px);opacity:0}
+
+/* ---------- shared ---------- */
+.center{position:absolute;left:0;right:0;text-align:center}
+.disp{font-family:'Amiri',serif;font-weight:700;color:var(--ink);line-height:1.42}
+.body{font-family:'Cairo',sans-serif;color:var(--muted);line-height:1.75}
+.w{display:inline-block;white-space:pre;position:relative}
+.or{color:var(--orange-ink)}
+/* Playfair carries no Arabic-Indic digits; force the app's own face so the count-up
+   keeps stable metrics instead of reflowing through a fallback every frame */
+.num{font-family:'Cairo',sans-serif;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:.01em}
+bdi{unicode-bidi:isolate}
+/* one brush stroke under the word the whole film turns on */
+#ink{position:absolute;inset-inline:-4px;bottom:-6px;height:9px;border-radius:6px;background:var(--orange);
+  transform:scaleX(0);transform-origin:right center;display:block}
+
+.chip{display:inline-flex;align-items:center;gap:16px;padding:19px 38px;border-radius:9999px;
+  background:var(--surface);border:1.5px solid var(--line);
+  box-shadow:0 10px 26px var(--sh-hair);font-weight:600;font-size:32px;color:var(--ink-soft)}
+.dot{width:14px;height:14px;border-radius:50%;background:var(--orange);flex:0 0 auto;
+  box-shadow:0 0 0 6px rgba(244,123,66,.16)}
+
+/* ---------- the device: LoloShop actually running ---------- */
+#phoneWrap{position:absolute;left:50%;top:356px;margin-left:-230px;width:460px;height:961px;
+  perspective:2100px;perspective-origin:50% 42%;opacity:0;z-index:4}
+#tilt{width:100%;height:100%;transform-style:preserve-3d}
+#phone{position:relative;width:460px;height:961px;border-radius:58px;padding:15px;
+  background:linear-gradient(158deg,#2B2724 0%,#151311 40%,#231F1C 100%);
+  box-shadow:0 46px 92px var(--sh), 0 14px 30px var(--sh-soft), inset 0 0 0 1.5px rgba(255,253,250,.17)}
+#screen{position:relative;width:430px;height:931px;border-radius:44px;overflow:hidden;background:var(--paper)}
+#screen img{position:absolute;left:0;width:430px;display:block}
+#scrStrip{top:0}
+.scr{top:0;opacity:0}
+#chrome{position:absolute;inset:0;opacity:0;pointer-events:none;z-index:3}
+#chrome img{position:absolute;left:0;width:430px}
+#hdr{top:0}
+#tab{top:auto;bottom:0}
+/* the finger */
+#tap{position:absolute;width:150px;height:150px;border-radius:50%;opacity:0;z-index:5;pointer-events:none;
+  transform:translate(-50%,-50%) scale(.2);
+  background:radial-gradient(circle, rgba(26,26,26,.26) 0%, rgba(26,26,26,.11) 46%, rgba(26,26,26,0) 70%)}
+#gloss{position:absolute;inset:0;pointer-events:none;z-index:4;
+  background:linear-gradient(122deg,rgba(255,255,255,0) 36%,rgba(255,255,255,.34) 46%,rgba(255,255,255,0) 57%);
+  opacity:0}
+.btn{position:absolute;inset-inline-end:-4px;width:4px;border-radius:3px;background:#3A3532}
+.b1{top:196px;height:52px}.b2{top:270px;height:88px}.b3{top:376px;height:88px}
+
+/* ---------- floating product tiles ---------- */
+.card{position:absolute;width:262px;background:var(--surface);border-radius:22px;overflow:hidden;
+  box-shadow:0 30px 60px var(--sh),0 6px 16px var(--sh-soft);transform-origin:50% 80%;opacity:0;z-index:2}
+.card .ph{width:100%;height:262px;overflow:hidden;background:var(--sink)}
+.card .ph img{width:100%;height:100%;object-fit:cover;display:block}
+.card .meta{padding:18px 20px 22px;text-align:right}
+.card .nm{font-weight:700;font-size:27px;color:var(--ink);line-height:1.4}
+.card .pr{font-weight:700;font-size:30px;color:var(--orange-ink);margin-top:8px}
+.card .pr small{font-weight:600;font-size:22px;color:var(--muted)}
+
+/* ---------- trust rows ---------- */
+.trow{position:absolute;left:78px;right:78px;display:flex;align-items:center;gap:26px;
+  padding:30px 36px;border-radius:28px;background:var(--surface);border:1.5px solid var(--line);
+  box-shadow:0 16px 36px var(--sh-hair);opacity:0}
+.trow .ic{width:74px;height:74px;border-radius:22px;flex:0 0 auto;display:grid;place-items:center;
+  background:rgba(244,123,66,.11)}
+.trow .ic svg{width:38px;height:38px;stroke:var(--orange-ink);fill:none;stroke-width:2.1;
+  stroke-linecap:round;stroke-linejoin:round}
+.trow .tx{text-align:right;line-height:1.35}
+.trow .tx b{display:block;font-weight:700;font-size:33px;color:var(--ink)}
+.trow .tx span{display:block;font-weight:500;font-size:26px;color:var(--muted);margin-top:5px}
+
+/* ---------- store badges ---------- */
+#badges{position:absolute;left:0;right:0;top:1180px;display:flex;justify-content:center;gap:28px;direction:ltr}
+.badge{display:flex;align-items:center;gap:18px;padding:22px 34px;border-radius:22px;
+  background:var(--ink);box-shadow:0 20px 44px var(--sh);opacity:0}
+.badge svg{width:46px;height:46px;fill:var(--surface);flex:0 0 auto}
+.badge .t{text-align:left;line-height:1}
+.badge .t i{display:block;font-style:normal;font-weight:600;font-size:19px;
+  letter-spacing:.10em;color:rgba(255,253,250,.72);text-transform:uppercase}
+.badge .t b{display:block;font-family:'Playfair',serif;font-weight:600;font-size:38px;color:var(--surface);margin-top:5px}
+#appIcon{position:absolute;left:50%;top:546px;margin-left:-98px;width:196px;height:196px;border-radius:46px;
+  overflow:hidden;box-shadow:0 30px 62px var(--sh),0 8px 18px var(--sh-soft);opacity:0}
+#appIcon img{width:100%;height:100%;display:block}
+
+/* ---------- price chips ---------- */
+.pchip{position:absolute;display:inline-flex;align-items:baseline;gap:12px;padding:16px 30px;border-radius:9999px;
+  background:var(--surface);border:1.5px solid var(--line);box-shadow:0 10px 24px var(--sh-hair);
+  font-weight:700;font-size:30px;color:var(--ink);opacity:0;white-space:nowrap}
+.pchip u{text-decoration:none;font-weight:600;font-size:25px;color:var(--muted)}
+.pchip b{font-weight:700;font-size:32px;color:var(--orange-ink)}
+
+/* ---------- grade ---------- */
+#leak{position:absolute;inset:-25%;pointer-events:none;opacity:0;mix-blend-mode:screen;
+  background:linear-gradient(104deg,rgba(255,255,255,0) 36%,rgba(255,214,170,.50) 46%,
+    rgba(255,255,255,.78) 50%,rgba(255,214,170,.50) 54%,rgba(255,255,255,0) 64%)}
+#sweep{position:absolute;inset:0;pointer-events:none;opacity:0;
+  background:radial-gradient(72% 52% at 50% 44%,#FFFDFA 0%,rgba(255,253,250,.55) 54%,rgba(255,253,250,0) 100%)}
+#vig{position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(74% 60% at 50% 46%, rgba(26,26,26,0) 50%, rgba(26,26,26,.16) 82%, rgba(26,26,26,.34) 100%)}
+#grain{position:absolute;inset:-120px;pointer-events:none;opacity:.075;mix-blend-mode:multiply;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='260' height='260'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' seed='11'/></filter><rect width='260' height='260' filter='url(%23n)'/></svg>")}
+</style>
+</head>
+<body>
+<div id="stage">
+ <div id="cam">
+  <div id="bg"></div>
+  <div id="glow"></div>
+
+  <!-- ============ persistent device (S3 → S5) ============ -->
+  <div id="phoneWrap"><div id="tilt">
+    <div id="phone">
+      <div id="screen">
+        <img id="scrStrip" src="assets/app/strip-shop.jpg" alt="">
+        <img id="scrA" class="scr" src="assets/app/home2.jpg" alt="">
+        <img id="scrB" class="scr" src="assets/app/product.jpg" alt="">
+        <img id="scrC" class="scr" src="assets/app/product-opts.jpg" alt="">
+        <div id="chrome">
+          <img id="hdr" src="assets/app/chrome-header.jpg" alt="">
+          <img id="tab" src="assets/app/chrome-tabbar.jpg" alt="">
+        </div>
+        <div id="tap"></div>
+        <div id="gloss"></div>
+      </div>
+      <i class="btn b1"></i><i class="btn b2"></i><i class="btn b3"></i>
+    </div>
+  </div></div>
+
+  <!-- ============ S1 — splash ============ -->
+  <section id="s1" class="scene">
+    <div id="logoBox" style="position:absolute;left:50%;top:486px;margin-left:-260px;width:520px">
+      <img src="assets/logo.png" style="width:100%;display:block">
+    </div>
+    <div id="s1t" class="center disp" style="top:1146px;font-size:78px">أوشحة وروبات وقبعات التخرّج</div>
+    <div id="s1s" class="center body" style="top:1284px;font-size:40px;font-weight:500">مخيوطة بورشتنا — واسمك مطرّز عليها بالخيط</div>
+    <div id="s1c" class="center" style="top:1402px"><span class="chip"><i class="dot"></i>محل حقيقي بديالى · الدفع عند التسليم</span></div>
+  </section>
+
+  <!-- ============ S2 — hook ============ -->
+  <section id="s2" class="scene">
+    <div id="s2a" class="center disp" style="top:604px;font-size:100px"><span class="w">تخرّجك</span> <span class="w">مرة</span> <span class="w">وحدة</span> <span class="w">بالعمر</span></div>
+    <div id="s2b" class="center disp" style="top:762px;font-size:100px"><span class="w">خلّي</span> <span class="w">اسمك</span> <span class="w or">مطرّز<i id="ink"></i></span> <span class="w">عليه</span></div>
+    <div id="s2s" class="center body" style="top:952px;font-size:42px;font-weight:500">بالخط العربي — مو طباعة تنمسح بعد غسلة</div>
+    <div id="s2c" class="center" style="top:1080px"><span class="chip"><i class="dot"></i>إحنا اللي نفصّل ونطرّز — مو وسيط</span></div>
+  </section>
+
+  <!-- ============ S3 — the app ============ -->
+  <section id="s3" class="scene">
+    <div id="s3t" class="center disp" style="top:206px;font-size:84px">كل التخرّج صار بجيبك</div>
+    <div id="s3s" class="center body" style="top:1382px;font-size:42px;font-weight:600;color:var(--ink-soft)">
+      <bdi id="cnt" class="num or" style="font-size:58px">٠</bdi> طالب وطالبة سجّلوا معنا</div>
+    <div id="s3c" class="center" style="top:1478px"><span class="chip"><i class="dot"></i>تطبيق لولو شوب — أندرويد وآيفون</span></div>
+  </section>
+
+  <!-- ============ S4 — the catalogue ============ -->
+  <section id="s4" class="scene">
+    <div id="s4t" class="center disp" style="top:206px;font-size:84px"><bdi class="num">٥٤</bdi> موديل — كلها بالتطبيق</div>
+    <span id="p1" class="pchip" style="left:124px;top:1386px"><u>الوشاح من</u><b>١٥٬٠٠٠</b>د.ع</span>
+    <span id="p2" class="pchip" style="right:124px;top:1386px"><u>الروب من</u><b>٢٠٬٠٠٠</b>د.ع</span>
+    <span id="p3" class="pchip" style="left:50%;top:1488px;transform:translateX(-50%)"><u>القبعة من</u><b>١٠٬٠٠٠</b>د.ع</span>
+  </section>
+
+  <!-- ============ S5 — designed by you ============ -->
+  <section id="s5" class="scene">
+    <div id="s5t" class="center disp" style="top:206px;font-size:80px">اسمك وكليتك — مطرّزين بالخيط</div>
+    <div id="s5s" class="center body" style="top:1386px;font-size:40px;font-weight:500">اختار الشكل واللون والتطريز من التطبيق</div>
+    <div id="s5c" class="center" style="top:1482px"><span class="chip"><i class="dot"></i>للطالب الواحد أو للدفعة كاملة</span></div>
+    <div id="cardL" class="card" style="left:26px;top:640px">
+      <div class="ph"><img src="assets/p-sash-royal.jpg" alt=""></div>
+      <div class="meta"><div class="nm">وشاح مثلث ملكي</div><div class="pr">٢٥٬٠٠٠ <small>د.ع</small></div></div>
+    </div>
+    <div id="cardR" class="card" style="right:26px;top:830px">
+      <div class="ph"><img src="assets/p-cap-queen.jpg" alt=""></div>
+      <div class="meta"><div class="nm">قبعة ملكة</div><div class="pr">١٥٬٠٠٠ <small>د.ع</small></div></div>
+    </div>
+  </section>
+
+  <!-- ============ S6 — why LoloShop ============ -->
+  <section id="s6" class="scene">
+    <div id="s6t" class="center disp" style="top:500px;font-size:88px">ليش لولو شوب؟</div>
+    <div id="t1" class="trow" style="top:678px">
+      <div class="ic"><svg viewBox="0 0 24 24"><path d="M4 17c3-6 5-9 8-11 2.6-1.7 5-1.4 6.5.2"/><path d="M4 17c4 1.6 8 .8 10.5-1.6"/></svg></div>
+      <div class="tx"><b>الاسم مطرّز بالخيط</b><span>بالخط العربي، مو طباعة تنمسح بعد غسلة</span></div>
+    </div>
+    <div id="t2" class="trow" style="top:850px">
+      <div class="ic"><svg viewBox="0 0 24 24"><path d="M4 21v-9l8-5 8 5v9"/><path d="M9 21v-6h6v6"/></svg></div>
+      <div class="tx"><b>نخيطه بورشتنا</b><span>إحنا اللي نفصّل ونطرّز، مو وسيط يشتري ويبيع</span></div>
+    </div>
+    <div id="t3" class="trow" style="top:1022px">
+      <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 21s7-5.4 7-11a7 7 0 1 0-14 0c0 5.6 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/></svg></div>
+      <div class="tx"><b>محل حقيقي بديالى</b><span>تعال شوف القماش بعينك قبل الطلب</span></div>
+    </div>
+    <div id="t4" class="trow" style="top:1194px">
+      <div class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2.6"/><circle cx="12" cy="12" r="2.6"/></svg></div>
+      <div class="tx"><b>الدفع نقداً عند التسليم</b><span>ما تدفع ولا دينار هسه</span></div>
+    </div>
+  </section>
+
+  <!-- ============ S7 — download ============ -->
+  <section id="s7" class="scene">
+    <div id="appIcon"><img src="assets/app-icon.png" alt=""></div>
+    <div id="e1" class="center disp" style="top:792px;font-size:92px">حمّل تطبيق لولو شوب</div>
+    <div id="e2" class="center body" style="top:942px;font-size:40px;font-weight:500">دوّر على «لولو شوب» بمتجر التطبيقات</div>
+    <div id="badges">
+      <span class="badge" id="bIos">
+        <svg viewBox="0 0 24 24"><path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.53 4.08zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"/></svg>
+        <span class="t"><i>Download on</i><b>App&nbsp;Store</b></span>
+      </span>
+      <span class="badge" id="bAnd">
+        <svg viewBox="0 0 24 24"><path d="M4.4 2.3c-.3.25-.5.66-.5 1.2v17c0 .54.2.95.5 1.2L14 12 4.4 2.3z"/><path d="M15.3 13.3l-2.3-2.3 2.3-2.3 3.2 1.85c1 .58 1 1.72 0 2.3l-3.2 1.85z"/><path d="M5.6 22.2 14.2 13.6l2.2 2.2-8.5 4.9c-.85.5-1.65.42-2.3-.5z" opacity=".92"/><path d="M5.6 1.8 14.2 10.4l2.2-2.2L7.9 3.3c-.85-.5-1.65-.42-2.3.5z" opacity=".72"/></svg>
+        <span class="t"><i>Get it on</i><b>Google&nbsp;Play</b></span>
+      </span>
+    </div>
+    <div id="e3" class="center body" style="top:1366px;font-size:36px;font-weight:600;color:var(--ink-soft)">
+      <bdi>@lolo_shop96</bdi> · <bdi>lolo-shop96.com</bdi></div>
+  </section>
+ </div>
+
+ <div id="leak"></div>
+ <div id="sweep"></div>
+ <div id="vig"></div>
+ <div id="grain"></div>
+</div>
+
+<script>
+/* ================= deterministic timeline — every frame is a pure f(t) =================
+   Cut plan (reel physics, not film physics):
+     hook readable by 1.7s · the app on screen by 3.6s · the ask holds for the last 2.8s
+   Cuts are not all the same: bloom on the brand cut, a push on the device entrance,
+   a whip on the headline swaps, and two in-screen match-cuts fired by a real tap. */
+const $=id=>document.getElementById(id);
+const clamp=(x,a,b)=>x<a?a:(x>b?b:x);
+const eOut  =p=>1-Math.pow(1-p,3);
+const eOut5 =p=>1-Math.pow(1-p,5);
+const eIn   =p=>p*p*p;
+const eInOut=p=>p<.5?4*p*p*p:1-Math.pow(-2*p+2,3)/2;
+const eBack =p=>{const c1=1.9,c3=c1+1;return 1+c3*Math.pow(p-1,3)+c1*Math.pow(p-1,2);};
+function tw(t,t0,t1,a,b,ez){ez=ez||eOut; if(t1<=t0)return b; return a+(b-a)*ez(clamp((t-t0)/(t1-t0),0,1));}
+function vis(t,i0,i1,o0,o1){return Math.min(tw(t,i0,i1,0,1,eOut), tw(t,o0,o1,1,0,eIn));}
+/* one impulse, used for taps and accents: 0 → 1 → 0 around `at` */
+function hit(t,at,up,down){return Math.min(tw(t,at,at+up,0,1,eOut), tw(t,at+up,at+up+down,1,0,eOut));}
+
+const SC=[[0,1.75],[1.65,3.60],[3.50,6.30],[6.15,9.00],[8.85,11.40],[11.25,13.40],[13.25,16.00]];
+const CUTS=[1.68,3.53,6.18,8.88,11.20,13.20];
+const DUR=16.0, FPS=30;
+
+/* ---- the picture is cut TO the bed ----------------------------------------
+   The bed is 120 BPM, so every cut has to land on a 0.5s beat or the film reads
+   as amateur no matter how good the frames are. The animation below was authored
+   freehand (SC_A); SC_B is where the cuts belong once they are on the grid —
+   1.5 / 2.0 / 2.5 / 3.0 / 2.0 / 2.0 / 3.0 seconds, i.e. 3-4-5-6-4-4-6 beats,
+   summing to exactly 16.0s. One piecewise-linear remap moves the entire film
+   onto the beat without touching a single keyframe below. */
+const SC_A=[0,1.68,3.53,6.18,8.88,11.20,13.20,16.00];
+const SC_B=[0,1.50,3.50,6.00,9.00,11.00,13.00,16.00];
+function grid(x){
+  for(let i=0;i<SC_B.length-1;i++)
+    if(x<=SC_B[i+1]) return SC_A[i]+(x-SC_B[i])*(SC_A[i+1]-SC_A[i])/(SC_B[i+1]-SC_B[i]);
+  return SC_A[SC_A.length-1];
+}
+const TAP_SHOP=6.30, TAP_PROD=8.94;   /* the two in-screen navigations */
+
+const s2a=[...$('s2a').querySelectorAll('.w')], s2b=[...$('s2b').querySelectorAll('.w')];
+const AR='٠١٢٣٤٥٦٧٨٩';
+const arNum=n=>String(n).replace(/\B(?=(\d{3})+(?!\d))/g,'٬').replace(/[0-9]/g,d=>AR[+d]);
+
+/* ---- the device screen: real navigations, not a slideshow ---- */
+function screenAt(t){
+  /* /shop grid scrolling under the app's real header + tab bar, with a rubber-band settle */
+  const stripOn=vis(t,TAP_SHOP+0.02,TAP_SHOP+0.20,8.86,9.04);
+  const scroll = tw(t,6.46,8.58,0,-1256,eInOut) + tw(t,8.58,8.86,0,46,eOut);
+  $('scrStrip').style.opacity=stripOn;
+  $('scrStrip').style.transform=`translateY(${scroll}px)`;
+  $('chrome').style.opacity=stripOn;
+
+  $('scrA').style.opacity=vis(t,3.62,4.02,TAP_SHOP+0.02,TAP_SHOP+0.18);      /* home */
+  $('scrB').style.opacity=vis(t,8.86,9.04,10.52,10.72);                      /* product */
+  $('scrC').style.opacity=tw(t,10.52,10.74,0,1,eOut)*tw(t,11.04,11.30,1,0,eIn); /* options */
+  /* slow drift inside every screen — no shot is ever frozen */
+  $('scrA').style.transform=`translateY(${tw(t,3.62,6.30,0,-26,eInOut)}px)`;
+  $('scrB').style.transform=`translateY(${tw(t,8.86,10.52,0,-72,eInOut)}px) scale(${tw(t,8.86,9.30,1.055,1,eOut5)})`;
+  $('scrC').style.transform=`translateY(${tw(t,10.52,11.40,0,-38,eInOut)}px)`;
+
+  /* the finger: ripple lands one beat BEFORE the screen changes, which is what sells it */
+  let tapO=0, tx=215, ty=470;
+  const h1=hit(t,TAP_SHOP-0.16,0.10,0.34), h2=hit(t,TAP_PROD-0.16,0.10,0.34);
+  if(h1>h2){ tapO=h1; tx=132; ty=880; }        /* the "القطع" tab */
+  else if(h2>0){ tapO=h2; tx=300; ty=430; }    /* a product tile in the grid */
+  const tapEl=$('tap');
+  tapEl.style.opacity=tapO*0.9;
+  tapEl.style.left=tx+'px'; tapEl.style.top=ty+'px';
+  tapEl.style.transform=`translate(-50%,-50%) scale(${0.25+1.5*(1-tapO)*(tapO>0?1:0)+0.55*tapO})`;
+}
+
+function seek(tIn){
+  const tReal=clamp(tIn,0,DUR);      /* wall-clock: grain and the frame index use this */
+  const t=grid(tReal);               /* authored time: every keyframe below reads this */
+
+  /* ---- camera: a slow push inside each scene, reset on the cut ---- */
+  let ci=0; for(let i=0;i<SC.length;i++) if(t>=SC[i][0]) ci=i;
+  const cp=clamp((t-SC[ci][0])/(SC[ci][1]-SC[ci][0]),0,1);
+  $('cam').style.transform=`translateY(${(cp-0.5)*-13}px) scale(${1.010+0.036*cp})`;
+  /* background drifts against the push — cheap parallax, real depth */
+  $('bg').style.transform=`translateY(${(cp-0.5)*7}px) scale(${1.02-0.014*cp})`;
+
+  /* ---- cut bloom on the brand cuts only; the rest cut on movement ---- */
+  let bl=0;
+  for(const c of [CUTS[0],CUTS[5]]){ if(t>c-0.10&&t<c+0.30)
+    bl=Math.max(bl, Math.min(tw(t,c-0.10,c+0.02,0,.46,eOut), tw(t,c+0.02,c+0.30,1,0,eOut))); }
+  for(const c of [CUTS[1],CUTS[2],CUTS[3],CUTS[4]]){ if(t>c-0.08&&t<c+0.22)
+    bl=Math.max(bl, Math.min(tw(t,c-0.08,c+0.02,0,.17,eOut), tw(t,c+0.02,c+0.22,1,0,eOut))); }
+  $('sweep').style.opacity=bl;
+
+  /* ---- warm bloom + a light leak that passes twice, never on a loop ---- */
+  const gl=Math.max(vis(t,0.05,0.70,1.36,1.75)*0.95,
+                    vis(t,8.95,9.45,11.10,11.40)*0.46,
+                    vis(t,13.35,13.85,15.92,16.00)*1.00);
+  $('glow').style.opacity=gl;
+  $('glow').style.transform=`translateY(${tw(t,0,DUR,-150,70,eInOut)}px) scale(${1+0.12*gl})`;
+  const lk=Math.max(hit(t,4.10,0.55,0.75)*0.42, hit(t,14.90,0.60,0.90)*0.34);
+  $('leak').style.opacity=lk;
+  $('leak').style.transform=`translateX(${tw(t,4.05,5.45,-1500,1500,eInOut)+tw(t,14.85,16.0,0,2100,eInOut)}px)`;
+  /* the vignette breathes so the grade never reads as a static overlay */
+  $('vig').style.opacity=0.86+0.14*Math.sin(t*0.62);
+
+  /* =============== S1 — splash (1.75s: land the mark, move on) =============== */
+  /* Reels autoplay: frame 0 must already carry the mark, so the scene is up
+     immediately and the logo's own blur-in does the opening instead. */
+  $('s1').style.opacity=vis(t,-0.14,0.04,1.44,1.75);
+  $('logoBox').style.transform=`translateY(${tw(t,-0.10,0.80,52,0,eOut5)}px) scale(${tw(t,-0.10,0.86,0.86,1,eOut5)*tw(t,0.92,1.75,1,1.055,eInOut)})`;
+  $('logoBox').style.filter=`blur(${tw(t,-0.10,0.62,20,0,eOut)+tw(t,1.44,1.75,0,10,eIn)}px)`;
+  $('s1t').style.transform=`translateY(${tw(t,0.30,1.00,46,0,eOut5)}px)`;
+  $('s1t').style.opacity  = tw(t,0.30,0.76,0,1,eOut);
+  $('s1s').style.transform=`translateY(${tw(t,0.44,1.14,38,0,eOut5)}px)`;
+  $('s1s').style.opacity  = tw(t,0.44,0.88,0,1,eOut);
+  $('s1c').style.transform=`translateY(${tw(t,0.60,1.30,34,0,eOut5)}px) scale(${tw(t,0.60,1.30,0.92,1,eBack)})`;
+  $('s1c').style.opacity  = tw(t,0.60,1.02,0,1,eOut);
+
+  /* =============== S2 — hook (word by word, then one brush stroke) =============== */
+  $('s2').style.opacity=vis(t,1.65,2.02,3.38,3.66);
+  s2a.forEach((w,i)=>{const s=1.74+i*0.072;
+    w.style.transform=`translateY(${tw(t,s,s+0.52,64,0,eOut5)}px)`;
+    w.style.opacity  = tw(t,s,s+0.32,0,1,eOut);
+    w.style.filter   =`blur(${tw(t,s,s+0.34,11,0,eOut)}px)`;});
+  s2b.forEach((w,i)=>{const s=2.14+i*0.066;
+    w.style.transform=`translateY(${tw(t,s,s+0.48,50,0,eOut5)}px)`;
+    w.style.opacity  = tw(t,s,s+0.30,0,1,eOut);
+    w.style.filter   =`blur(${tw(t,s,s+0.32,9,0,eOut)}px)`;});
+  $('ink').style.transform=`scaleX(${tw(t,2.56,2.88,0,1,eOut5)})`;
+  $('s2s').style.transform=`translateY(${tw(t,2.72,3.30,32,0,eOut5)}px)`;
+  $('s2s').style.opacity  = tw(t,2.72,3.10,0,1,eOut);
+  $('s2c').style.transform=`translateY(${tw(t,2.94,3.50,30,0,eOut5)}px) scale(${tw(t,2.94,3.50,0.92,1,eBack)})`;
+  $('s2c').style.opacity  = tw(t,2.94,3.32,0,1,eOut);
+
+  /* =============== the device: one continuous hero move, S3 → S5 =============== */
+  screenAt(t);
+  const pOut=tw(t,11.00,11.30,0,1,eIn);
+  const pY  = tw(t,3.54,4.62,560,0,eOut5) + Math.sin(t*0.85)*4.5 + 150*pOut;
+  const rotY= tw(t,3.54,5.05,-15,0,eOut5) + tw(t,6.30,8.90,0,3.4,eInOut) + tw(t,8.94,11.10,0,-2.2,eInOut);
+  const rotX= tw(t,3.54,5.05,9,0,eOut5)   + Math.sin(t*0.7)*0.5;
+  const pSc = tw(t,3.54,4.62,0.84,1,eOut5)*tw(t,6.30,8.90,1,1.028,eInOut)*tw(t,8.94,11.10,1,1.045,eInOut)*(1-0.12*pOut);
+  $('phoneWrap').style.opacity  = tw(t,3.54,3.94,0,1,eOut)*(1-pOut);
+  $('phoneWrap').style.filter   =`blur(${tw(t,3.54,4.20,8,0,eOut)+pOut*16}px)`;
+  $('tilt').style.transform=`translateY(${pY}px) rotateY(${rotY}deg) rotateX(${rotX}deg) scale(${pSc})`;
+  /* glass catches the light once, as the device settles */
+  $('gloss').style.opacity  = vis(t,4.16,4.44,5.30,5.62)*0.9;
+  $('gloss').style.transform=`translateX(${tw(t,4.16,5.62,-560,560,eInOut)}px)`;
+
+  /* =============== S3 — the app (the count is the real signup number) =============== */
+  $('s3').style.opacity=vis(t,3.46,3.82,6.00,6.30);
+  $('s3t').style.transform=`translateY(${tw(t,3.50,4.12,44,0,eOut5)}px)`;
+  $('s3t').style.opacity  = tw(t,3.50,3.94,0,1,eOut);
+  $('cnt').textContent=arNum(Math.round(tw(t,4.66,5.62,0,2017,eOut5)));
+  $('s3s').style.transform=`translateY(${tw(t,4.60,5.18,34,0,eOut5)}px)`;
+  $('s3s').style.opacity  = tw(t,4.60,5.00,0,1,eOut);
+  $('s3c').style.transform=`translateY(${tw(t,5.36,5.94,32,0,eOut5)}px) scale(${tw(t,5.36,5.94,0.92,1,eBack)})`;
+  $('s3c').style.opacity  = tw(t,5.36,5.78,0,1,eOut);
+
+  /* =============== S4 — the catalogue (headline whips, it does not fade) =============== */
+  $('s4').style.opacity=vis(t,6.15,6.46,8.62,9.00);
+  $('s4t').style.transform=`translateY(${tw(t,6.20,6.72,-62,0,eOut5)}px)`;
+  $('s4t').style.opacity  = tw(t,6.20,6.52,0,1,eOut);
+  $('s4t').style.filter   =`blur(${tw(t,6.20,6.56,9,0,eOut)}px)`;
+  ['p1','p2','p3'].forEach((id,i)=>{const s=7.08+i*0.17, el=$(id);
+    const base = id==='p3' ? 'translateX(-50%) ' : '';
+    el.style.transform = base+`translateY(${tw(t,s,s+0.50,32,0,eOut5)}px) scale(${tw(t,s,s+0.50,0.88,1,eBack)})`;
+    el.style.opacity   = tw(t,s,s+0.30,0,1,eOut);});
+
+  /* =============== S5 — designed by you =============== */
+  $('s5').style.opacity=vis(t,8.85,9.18,10.98,11.26);
+  $('s5t').style.transform=`translateY(${tw(t,8.92,9.48,-58,0,eOut5)}px)`;
+  $('s5t').style.opacity  = tw(t,8.92,9.26,0,1,eOut);
+  $('s5t').style.filter   =`blur(${tw(t,8.92,9.30,8,0,eOut)}px)`;
+  $('s5s').style.transform=`translateY(${tw(t,10.14,10.72,32,0,eOut5)}px)`;
+  $('s5s').style.opacity  = tw(t,10.14,10.56,0,1,eOut);
+  $('s5c').style.transform=`translateY(${tw(t,10.40,10.98,30,0,eOut5)}px) scale(${tw(t,10.40,10.98,0.92,1,eBack)})`;
+  $('s5c').style.opacity  = tw(t,10.40,10.82,0,1,eOut);
+  const cardIn=(el,s,x0,rot)=>{
+    const out=tw(t,10.80,11.18,0,1,eIn);
+    el.style.transform=`translate(${x0*out}px,${tw(t,s,s+0.74,280,0,eOut5)-24*out+Math.sin((t+s)*0.8)*4}px) rotate(${rot}deg) scale(${tw(t,s,s+0.74,0.80,1,eOut5)*(1-0.10*out)})`;
+    el.style.opacity  = tw(t,s,s+0.36,0,1,eOut)*(1-out);
+    el.style.filter   =`blur(${tw(t,s,s+0.42,8,0,eOut)+out*12}px)`;
+  };
+  cardIn($('cardL'),9.30,-150,-7.0);
+  cardIn($('cardR'),9.52, 150, 6.4);
+
+  /* =============== S6 — why LoloShop (tight stagger, no dawdling) =============== */
+  $('s6').style.opacity=vis(t,11.08,11.42,13.00,13.32);
+  $('s6t').style.transform=`translateY(${tw(t,11.16,11.78,44,0,eOut5)}px)`;
+  $('s6t').style.opacity  = tw(t,11.16,11.60,0,1,eOut);
+  ['t1','t2','t3','t4'].forEach((id,i)=>{const s=11.38+i*0.115;
+    $(id).style.opacity  = tw(t,s,s+0.28,0,1,eOut);
+    $(id).style.transform=`translateX(${tw(t,s,s+0.56,58,0,eOut5)}px) scale(${tw(t,s,s+0.56,0.955,1,eOut5)})`;});
+
+  /* =============== S7 — the ask, held for 2.75s and dead still at the end =============== */
+  $('s7').style.opacity=vis(t,13.10,13.44,15.98,16.00);
+  $('appIcon').style.opacity  = tw(t,13.18,13.60,0,1,eOut);
+  $('appIcon').style.transform=`translateY(${tw(t,13.18,13.88,44,0,eOut5)}px) scale(${tw(t,13.18,13.88,0.70,1,eBack)*tw(t,13.88,15.50,1,1.045,eInOut)})`;
+  $('appIcon').style.filter   =`blur(${tw(t,13.18,13.68,13,0,eOut)}px)`;
+  $('e1').style.opacity  = tw(t,13.42,13.86,0,1,eOut);
+  $('e1').style.transform=`translateY(${tw(t,13.42,14.08,44,0,eOut5)}px)`;
+  $('e2').style.opacity  = tw(t,13.66,14.06,0,1,eOut);
+  $('e2').style.transform=`translateY(${tw(t,13.66,14.26,34,0,eOut5)}px)`;
+  ['bIos','bAnd'].forEach((id,i)=>{const s=13.92+i*0.14;
+    $(id).style.opacity  = tw(t,s,s+0.30,0,1,eOut);
+    $(id).style.transform=`translateY(${tw(t,s,s+0.56,38,0,eOut5)}px) scale(${tw(t,s,s+0.56,0.84,1,eBack)})`;});
+  $('e3').style.opacity  = tw(t,14.40,14.80,0,1,eOut);
+  $('e3').style.transform=`translateY(${tw(t,14.40,14.96,24,0,eOut5)}px)`;
+
+  /* ---- grain: deterministic per-frame jitter (no RNG — renders stay reproducible) ---- */
+  const fi=Math.round(tReal*FPS);
+  $('grain').style.transform=`translate(${(fi*37)%97-48}px,${(fi*61)%89-44}px)`;
+}
+window.__seek=seek;
+window.__meta={dur:DUR,fps:FPS,w:1080,h:1920};
+seek(0);
+document.fonts.ready.then(()=>{window.__ready=true;});
+</script>
+</body>
+</html>
