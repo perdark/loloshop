@@ -29,6 +29,18 @@ interface AuthCardProps {
   onBack?: () => void;
   /** Accessible name for the back control. Defaults to «رجوع». */
   backLabel?: string;
+  /**
+   * Adds `.app-chrome` to the root (no text selection, no iOS long-press callout, and the
+   * contextmenu/dragstart blocker in app/layout.tsx starts firing inside this tree).
+   *
+   * ⚠️ OPT-IN, AND IT HAS TO STAY OPT-IN. This component is shared by the CUSTOMER auth
+   * screens (login, register, forgot-password, join) AND by the three secret-key STAFF
+   * portals — /s (staff), /w (workshop), /d (design team). The owner call recorded above
+   * `.app-chrome` in globals.css (2026-08-16) puts those staff tools in the "leave selection
+   * alone" column, because copying an order id or a phone number there is real work. Putting
+   * the class on the root unconditionally would silently flip all three.
+   */
+  appChrome?: boolean;
 }
 
 /**
@@ -53,6 +65,7 @@ export function AuthCard({
   footer,
   onBack,
   backLabel = "رجوع",
+  appChrome = false,
 }: AuthCardProps) {
   const safeArea: CSSProperties = {
     paddingTop: "max(1.5rem, calc(env(safe-area-inset-top, 0px) + 0.75rem))",
@@ -63,7 +76,7 @@ export function AuthCard({
 
   return (
     <div
-      className="shop-paper animate-fade-page-in flex min-h-dvh flex-col bg-cream"
+      className={`${appChrome ? "app-chrome " : ""}shop-paper animate-fade-page-in flex min-h-dvh flex-col bg-cream`}
       style={safeArea}
       dir="rtl"
       lang="ar"

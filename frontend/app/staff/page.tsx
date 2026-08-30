@@ -178,6 +178,14 @@ function CompletedSection({ search }: { search: string }) {
   }
 
   return (
+    <>
+      {/* Same «N من M» the active tab shows. Without it a filtered grid here is
+          indistinguishable from "this is everything you have completed". */}
+      {search.trim() && (
+        <p className="mb-2 text-xs text-ink-soft">
+          {visible.length} من {items.length} طلب
+        </p>
+      )}
     <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
       {visible.map((item) => (
         <li key={item.id} className="relative">
@@ -196,6 +204,7 @@ function CompletedSection({ search }: { search: string }) {
         </li>
       ))}
     </ul>
+    </>
   );
 }
 
@@ -273,8 +282,15 @@ function QueueView({
 
   // Student / university / department / rep AND the التطريز text, Arabic-normalised.
   // Shared matcher so this screen, /staff/queue and المجهز's console cannot disagree about
-  // what "search" means. Plain derived value — the React Compiler memoizes it.
-  const visibleItems = items.filter((i) => matchesQueueSearch(i, search));
+  // what "search" means. MEMOISED deliberately: this queue runs ~500 rows and `items` is
+  // replaced by every silent SSE reload and patched by every presence event, so an
+  // unmemoised filter would re-normalise five fields per row on re-renders that have
+  // nothing to do with the query. (The React Compiler is NOT enabled in this app — there is
+  // no `experimental.reactCompiler` in next.config.ts and no babel plugin in package.json.)
+  const visibleItems = useMemo(
+    () => items.filter((i) => matchesQueueSearch(i, search)),
+    [items, search]
+  );
 
   const meta = QUEUE_META[staffType] ?? {
     title: "قائمة الطلبات",
@@ -351,15 +367,32 @@ function QueueView({
           source/zone filters already fetched, so «تجزئة» searches only retail rows and
           «ممثلين» only rep students, with no extra request per keystroke. */}
       <div className="mb-3">
-        <input
-          type="search"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="ابحث باسم الطالب أو الجامعة أو التطريز…"
-          aria-label="ابحث باسم الطالب أو الجامعة أو التطريز"
-          dir="rtl"
-          className="min-h-11 w-full rounded-full border border-line bg-surface px-4 py-1 text-sm text-ink placeholder:text-muted focus:border-orange-ink focus:outline-none sm:w-80"
-        />
+        {/* The ✕ is OURS, not the browser's. `type="search"` renders a native clear control in
+            a desktop browser, but this screen also runs inside the Capacitor WebView on the
+            iPad and on phones, where that control is not guaranteed to appear — and a worker
+            who cannot clear a query sees a queue that looks empty. 44px, and only present
+            when there is something to clear. */}
+        <div className="relative w-full sm:w-80">
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="ابحث بالاسم أو الجامعة أو القسم أو الممثل أو التطريز…"
+            aria-label="ابحث بالاسم أو الجامعة أو القسم أو الممثل أو التطريز"
+            dir="rtl"
+            className="min-h-11 w-full rounded-full border border-line bg-surface px-4 py-1 text-sm text-ink placeholder:text-muted focus:border-orange-ink focus:outline-none [&::-webkit-search-cancel-button]:appearance-none"
+          />
+          {search !== "" && (
+            <button
+              type="button"
+              onClick={() => setSearch("")}
+              aria-label="مسح البحث"
+              className="absolute inset-y-0 end-1 my-auto flex h-11 w-11 items-center justify-center rounded-full text-lg leading-none text-ink-soft transition-colors hover:bg-surface-sink hover:text-ink"
+            >
+              ✕
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Tab switcher */}

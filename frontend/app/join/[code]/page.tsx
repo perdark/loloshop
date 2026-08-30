@@ -109,7 +109,7 @@ export default function JoinPage() {
     return (
       <div
         dir="rtl"
-        className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-cream px-5"
+        className="app-chrome flex min-h-dvh flex-col items-center justify-center gap-4 bg-cream px-5"
         style={{
           paddingTop: "max(1.5rem, calc(env(safe-area-inset-top, 0px) + 0.75rem))",
           paddingBottom: "max(1.25rem, calc(env(safe-area-inset-bottom, 0px) + 0.75rem))",
@@ -125,7 +125,7 @@ export default function JoinPage() {
 
   if (invalid) {
     return (
-      <AuthCard title="الرابط غير صالح">
+      <AuthCard appChrome title="الرابط غير صالح">
         <p className="text-sm text-ink-soft">
           رابط الدعوة غير صحيح أو لم يعد فعّالاً. تأكد من الرابط مع ممثل جامعتك.
         </p>
@@ -135,7 +135,7 @@ export default function JoinPage() {
 
   if (submitted) {
     return (
-      <AuthCard title="طلبك قيد المراجعة">
+      <AuthCard appChrome title="طلبك قيد المراجعة">
         <div className="flex flex-col items-center gap-4 py-2 text-center">
           {/* Quiet success mark — warm ink circle with a line-SVG check */}
           <div className="flex h-16 w-16 items-center justify-center rounded-full border border-ink/12 bg-[var(--shop-sink)] text-orange-ink">
@@ -150,7 +150,7 @@ export default function JoinPage() {
   }
 
   return (
-    <AuthCard title="التسجيل بدعوة الممثل">
+    <AuthCard appChrome title="التسجيل بدعوة الممثل">
       {/* Cohort context — the rep's name + جامعة/قسم the student is joining under.
           These are inherited automatically, so they are shown, not entered. */}
       <div className="mb-6 space-y-2 rounded-[12px] border border-ink/10 bg-[var(--shop-sink)] px-4 py-3">
