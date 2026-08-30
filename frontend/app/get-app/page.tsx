@@ -16,7 +16,7 @@ export const metadata: Metadata = {
 
 export default function GetAppPage() {
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-8 bg-beige px-6 py-16 text-center">
+    <main className="safe-bottom safe-x flex min-h-screen flex-col items-center justify-center gap-8 bg-beige px-6 py-16 text-center">
       <div className="space-y-3">
         <h1 className="font-display text-3xl font-bold text-ink sm:text-4xl">
           لولو شوب صار تطبيق

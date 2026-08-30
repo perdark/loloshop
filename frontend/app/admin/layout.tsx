@@ -55,7 +55,7 @@ export default function AdminLayout({
           <NotificationBell />
         </div>
 
-        <main className="mx-auto w-full max-w-6xl p-4 lg:p-8 animate-fade-page-in">{children}</main>
+        <main className="safe-bottom safe-x mx-auto w-full max-w-6xl p-4 lg:p-8 animate-fade-page-in">{children}</main>
       </div>
     </div>
   );

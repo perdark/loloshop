@@ -34,7 +34,7 @@ export default function WorkshopWorkerPage() {
   if (!allowed) return <div className="flex min-h-screen items-center justify-center bg-cream px-6 text-center text-ink" dir="rtl">فوت من رابط الورشة الخاص فيك.</div>;
 
   return (
-    <div className="min-h-screen bg-cream pb-10" dir="rtl" lang="ar">
+    <div className="safe-bottom safe-x min-h-screen bg-cream pb-10" dir="rtl" lang="ar">
       <header className="sticky top-0 z-20 flex items-center justify-between border-b border-line bg-surface px-4 py-3">
         <div><p className="text-xs text-ink-soft">ورشة لولو</p><p className="text-lg font-bold text-ink">أهلين {name}</p></div>
         <button className="min-h-11 rounded-full border border-line px-4 text-sm text-ink" onClick={() => { logout(); router.replace("/"); }}>خروج</button>
