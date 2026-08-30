@@ -95,7 +95,9 @@ test.before(async () => {
   // Pick a real working day from the shop's OWN schedule rather than hardcoding one: the
   // seeded week is editable by the admin and الجمعة is a different shift entirely.
   const week = await query(
-    `SELECT weekday, to_char(start_time,'HH24:MI') AS start_time, is_off FROM staff_schedule_days`
+    `SELECT weekday, to_char(start_time,'HH24:MI') AS start_time,
+            to_char(end_time,'HH24:MI') AS end_time, is_off
+       FROM staff_schedule_days`
   );
   const byWeekday = new Map(week.rows.map((r) => [Number(r.weekday), r]));
   for (let back = 2; back <= 9; back += 1) {
@@ -105,19 +107,33 @@ test.before(async () => {
     if (!day || day.is_off) continue;
     const holiday = await query(`SELECT 1 FROM staff_holidays WHERE work_date = $1::date`, [date]);
     if (holiday.rows.length) continue;
+    // ⚠️ Skip a midnight-crossing day (الجمعة runs 15:00 → 00:00). Its end_time is EARLIER on
+    // the clock than its start, so «punch at the shift end» would be a timestamp before the
+    // arrival and would be read as an out-of-order punch instead of the way home.
+    if (day.end_time <= day.start_time) continue;
     ctx.workDate = date;
     ctx.shiftStart = day.start_time;
+    ctx.shiftEnd = day.end_time;
     break;
   }
   assert.ok(ctx.workDate, 'no open shift day in the last week — the schedule seed is missing');
 
-  // Three punches from a number NOBODY has claimed: arrival, a lunchtime double-touch, and
-  // the way out. They land before any mapping exists — the situation the replay exists for.
+  // Four punches from a number NOBODY has claimed: arrival, out for a break, back from it,
+  // and the way home. They land before any mapping exists — the situation the replay exists
+  // for.
+  //
+  // ⚠️ `punchOut` is the shift's OWN END, not "some hours later" as it was until
+  // 2026-08-30. Under the sequence rule a punch while the shop is still open is a خروج
+  // مؤقت, so a mid-afternoon last punch leaves the day open and this test's real
+  // subject — that a replay produces a whole day — would fail for a reason that has nothing
+  // to do with the replay.
   ctx.punchIn = `${ctx.workDate} ${hhmmPlus(ctx.shiftStart, 30)}`;
   ctx.punchMid = `${ctx.workDate} ${hhmmPlus(ctx.shiftStart, 180)}`;
-  ctx.punchOut = `${ctx.workDate} ${hhmmPlus(ctx.shiftStart, 400)}`;
+  ctx.punchBack = `${ctx.workDate} ${hhmmPlus(ctx.shiftStart, 200)}`;
+  ctx.punchOut = `${ctx.workDate} ${ctx.shiftEnd}`;
   ctx.rowIn = await insertPunch(PIN_UNMAPPED, ctx.punchIn);
   await insertPunch(PIN_UNMAPPED, ctx.punchMid);
+  await insertPunch(PIN_UNMAPPED, ctx.punchBack);
   ctx.rowOut = await insertPunch(PIN_UNMAPPED, ctx.punchOut);
 });
 
@@ -263,7 +279,7 @@ test('an unclaimed number shows up under «أرقام جهاز بلا اسم» w
   assert.strictEqual(res.statusCode, 200);
   const row = res.body.data.find((r) => r.device_pin === String(PIN_UNMAPPED));
   assert.ok(row, 'a punch from an unknown number must be visible, never dropped');
-  assert.strictEqual(row.punch_count, 3);
+  assert.strictEqual(row.punch_count, 4);
   assert.strictEqual(row.device_sn, SN);
   assert.strictEqual(row.mapped_user_id, null);
   assert.ok(new Date(row.first_seen_at) < new Date(row.last_seen_at));
@@ -280,7 +296,7 @@ test('⚠️ assigning an unmapped pin REPLAYS its stored punches into attendanc
   });
   assert.strictEqual(res.statusCode, 200, JSON.stringify(res.body));
   assert.strictEqual(res.body.data.pin, PIN_UNMAPPED);
-  assert.strictEqual(res.body.meta.replayed, 3, 'all three stored punches are replayed');
+  assert.strictEqual(res.body.meta.replayed, 4, 'all four stored punches are replayed');
   assert.strictEqual(res.body.meta.derived.created, 1, 'the first punch opens the day');
 
   // The whole point: a day of work that existed only as raw punches is now attendance.
@@ -297,7 +313,7 @@ test('⚠️ assigning an unmapped pin REPLAYS its stored punches into attendanc
   assert.strictEqual(
     new Date(after.rows[0].check_out_at).toISOString(),
     new Date(ctx.rowOut.punched_at).toISOString(),
-    'check-out is the LAST punch; the lunchtime touch between them changes nothing'
+    'check-out is the LAST punch — the one at the shift end'
   );
 
   // And the raw rows are now attributed, so the number leaves the «بلا اسم» list.
@@ -305,7 +321,7 @@ test('⚠️ assigning an unmapped pin REPLAYS its stored punches into attendanc
     `SELECT COUNT(*)::int n FROM punch_raw WHERE device_pin = $1 AND user_id = $2`,
     [String(PIN_UNMAPPED), ctx.workerC.id]
   );
-  assert.strictEqual(claimed.rows[0].n, 3);
+  assert.strictEqual(claimed.rows[0].n, 4);
   const list = await call(dev.listUnmapped);
   assert.ok(
     !list.body.data.some((r) => r.device_pin === String(PIN_UNMAPPED)),

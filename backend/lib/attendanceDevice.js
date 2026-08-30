@@ -20,12 +20,23 @@
 // it reads them directly here rather than importing a controller — the same "a lib must not
 // import a controller" rule that moved localParts into lib/shopTime.js.
 const schedule = require('./staffSchedule');
+const breaks = require('./attendanceBreak');
 const { localParts, DEFAULT_TZ } = require('./shopTime');
 
 const REASON_UNMAPPED = 'رقم الجهاز غير مرتبط بأي موظف';
 const REASON_OVERRIDDEN = 'اليوم بحالة معدَّلة من الإدارة، ما ينلمس';
 const REASON_NOT_REQUIRED = 'الموظف معفى من شرط البصمة';
 const REASON_BETWEEN = 'بصمة وقعت بين وقتي الدخول والخروج المسجلين';
+// A break edge is NOT an error — the reason column doubles as "what this punch meant", and
+// these two are why a punch mid-shift no longer looks like a stray touch.
+/**
+ * Two punches from the SAME worker inside this many minutes are one touch. Owner decision
+ * 2026-08-30. It is a per-user rule, not a per-device one — see the query in applyPunch.
+ */
+const PUNCH_COOLDOWN_MINUTES = 5;
+const REASON_TOO_SOON = 'بصمة مكررة خلال ٥ دقائق من بصمة سابقة';
+const REASON_BREAK_START = 'بصمة خروج مؤقت';
+const REASON_BREAK_END = 'بصمة عودة من الخروج المؤقت';
 
 /**
  * The subset of staff_attendance_settings + a per-user staff_attendance_user_settings override
@@ -85,6 +96,56 @@ async function markPunch(client, punchId, { userId = null, attendanceId = null, 
 }
 
 /**
+ * Close the worker's most recent still-open day when a NEW shift day begins, at that day's own
+ * scheduled end — plus any break still `out` inside it, flagged `auto_closed` so an admin can
+ * tell it apart from a real عودة.
+ *
+ * ⚠️ Only touches days STRICTLY BEFORE the one starting now, and never an `overridden` row.
+ * A day the admin has ruled on stays exactly as they left it, open or not.
+ */
+async function closeStaleOpenDay(client, userId, newWorkDate, settings, timeZone) {
+  const { rows } = await client.query(
+    `SELECT * FROM staff_attendance_records
+      WHERE user_id = $1 AND work_date < $2 AND check_out_at IS NULL AND status <> 'overridden'
+      ORDER BY work_date DESC
+      LIMIT 1
+      FOR UPDATE`,
+    [userId, newWorkDate]
+  );
+  if (!rows.length) return;
+  const stale = rows[0];
+
+  // The stored expected_end_time is the hours that applied on THAT day — reading today's
+  // schedule instead would re-date history every time the admin edits the week.
+  const end = stale.expected_end_time || '23:59:00';
+  const crosses = schedule.timeToMinutes(end) <= schedule.timeToMinutes(stale.expected_start_time || '00:00:00');
+  const { rows: at } = await client.query(
+    `SELECT (($1::date + $2::time) AT TIME ZONE $3) + ($4 || ' day')::interval AS ts`,
+    [stale.work_date, end, timeZone, crosses ? 1 : 0]
+  );
+  const closeAt = at[0].ts;
+
+  const open = await breaks.openBreakFor(client, userId);
+  if (open && open.state === 'out' && open.attendance_id === stale.id) {
+    await breaks.finishBreak(client, open, {
+      returnedAt: closeAt,
+      perMinute: settings.deduction_per_minute,
+      autoClosed: true,
+    });
+    await breaks.recomputeMonth(client, {
+      userId,
+      monthKey: breaks.monthKeyFor(closeAt, timeZone),
+      allowanceMinutes: breaks.effectiveAllowance(settings),
+    });
+  }
+
+  await client.query(
+    `UPDATE staff_attendance_records SET check_out_at = $2, updated_at = NOW() WHERE id = $1`,
+    [stale.id, closeAt]
+  );
+}
+
+/**
  * Apply one stored punch_raw row to staff_attendance_records. `punch` must carry at least
  * `{ id, device_pin, punched_at }` — the shape of a punch_raw row (what ingestPunches passes
  * right after INSERT, and what a re-derivation of previously-stored punches, e.g. the admin
@@ -107,6 +168,35 @@ async function applyPunch(client, punch) {
 
   const timeZone = settings.timezone || DEFAULT_TZ;
   const punchedAt = punch.punched_at instanceof Date ? punch.punched_at : new Date(punch.punched_at);
+
+  // ─── The per-worker cooldown ──────────────────────────────────────────────────────────
+  // A finger resting on the sensor reads twice, and under the sequence rule below a stray
+  // second read is not harmless any more: it would open a خروج مؤقت the worker never took.
+  // (The owner's own test punch did exactly this — 20:30:56 and 20:31:01, two rows.)
+  //
+  // ⚠️ PER WORKER, NEVER PER DEVICE. Two people punching at 10:15 and 10:16 is the normal
+  // morning queue and must both count; the same person at 10:15 and 10:16 is one arrival.
+  // Scoped by user_id for that reason.
+  //
+  // ⚠️ Measured from the last ACCEPTED punch, not the last punch of any kind. Chaining it off
+  // rejected ones lets a worker who taps every four minutes lock themselves out for the whole
+  // day: 10:15 accepted → 10:16 and 10:17 both rejected (the owner's example), and 10:21 is
+  // accepted because it is more than five minutes past 10:15, not past 10:17.
+  const { rows: recent } = await client.query(
+    `SELECT punched_at FROM punch_raw
+      WHERE user_id = $1
+        AND id <> $2
+        AND punched_at <= $3
+        AND punched_at > $3::timestamptz - ($4 || ' minutes')::interval
+        AND (ignored_reason IS NULL OR ignored_reason <> $5)
+      ORDER BY punched_at DESC
+      LIMIT 1`,
+    [userId, punch.id, punchedAt, String(PUNCH_COOLDOWN_MINUTES), REASON_TOO_SOON]
+  );
+  if (recent.length) {
+    await markPunch(client, punch.id, { userId, ignoredReason: REASON_TOO_SOON });
+    return 'ignored';
+  }
   const local = localParts(punchedAt, timeZone);
 
   // Both days, same reason checkIn loads them: a stamp just after midnight can belong to
@@ -158,6 +248,17 @@ async function applyPunch(client, punch) {
       // (the FOR UPDATE above already found no row), but never silently drop a punch either.
       throw new Error('تعارض غير متوقع عند إنشاء سجل حضور من نبضة الجهاز');
     }
+    // ⚠️ A NEW SHIFT DAY CLOSES THE PREVIOUS ONE, AND ON A MIDNIGHT-CROSSING SHIFT IT IS THE
+    // ONLY THING THAT CAN. The "at or after end_time" test below cannot fire for a shift like
+    // 22:16 → 10:15 (مضر's, on prod): resolveStamp files a stamp under the previous day only
+    // while it is STRICTLY BEFORE that end, so the very instant that would close the day is
+    // already the next shift's دخول. Without this the day — and any break inside it — would
+    // stay open forever, which is the same shape of bug migration 093 fixed for lateness.
+    //
+    // The previous day is closed at ITS OWN scheduled end, never at this punch's time: the
+    // worker went home at some unknown hour, and the shift end is the only defensible
+    // stand-in. `openTooLong` still marks it so the admin can see a day nobody punched out of.
+    await closeStaleOpenDay(client, userId, shift.date, settings, timeZone);
     await markPunch(client, punch.id, { userId, attendanceId: inserted.rows[0].id });
     return 'created';
   }
@@ -173,6 +274,82 @@ async function applyPunch(client, punch) {
   const punchedAtMs = punchedAt.getTime();
   const checkInAtMs = new Date(row.check_in_at).getTime();
   const checkOutAtMs = row.check_out_at ? new Date(row.check_out_at).getTime() : null;
+
+  // ─────────────────────────────────────────────────────────────────────────────────────
+  // THE SEQUENCE RULE — owner decision 2026-08-30. A day reads:
+  //   بصمة ١ دخول · ٢ خروج مؤقت · ٣ عودة · ٤ خروج   (or just دخول + خروج)
+  //
+  // What tells بصمة ٢ apart from a plain خروج is THE CLOCK, not the count: a punch at or
+  // after the shift's own end time closes the day; anything earlier opens or closes a break.
+  // Breaks alternate, so a worker may leave more than once and every pair is its own break.
+  //
+  // ⚠️ THE ACCEPTED FLAW, stated by the owner when choosing this rule: someone who genuinely
+  // goes home BEFORE the shift ends opens a break instead of closing their day. Nothing
+  // silently swallows that — the break stays `out`, crosses OPEN_BREAK_ALERT_MINUTES (4h) and
+  // surfaces to the admin, who fixes the day with
+  // `PATCH /admin/attendance/records/:id/override`. Do not "fix" it by guessing at intent.
+  //
+  // ⚠️ A DEVICE BREAK IS CREATED `approval = 'approved'` ON PURPOSE, AND THAT IS A MONEY
+  // DECISION. computeCharge gives an UNAPPROVED break zero free minutes — every minute is
+  // deducted from salary — so creating these as pending would quietly bill every worker for
+  // every break the moment the shop stopped using the phone's request flow. There is no إذن
+  // to ask for at a sensor: the finger IS the record. (`ffcb0ce` removes الإذن from the money
+  // rule outright; this line is what keeps the two consistent until that branch merges.)
+  const hasHours = !!(shift.start_time && shift.end_time);
+  let shiftIsOver = false;
+  if (hasHours) {
+    const startM = schedule.timeToMinutes(shift.start_time);
+    const endM = schedule.timeToMinutes(shift.end_time) + (shift.crosses_midnight ? 24 * 60 : 0);
+    // Same normalisation lateMinutesFor uses: after midnight on a crossing shift, "minutes
+    // since midnight" is tiny and would read as long before the start.
+    const nowM = shift.crosses_midnight && shift.minutes_now < startM
+      ? shift.minutes_now + 24 * 60
+      : shift.minutes_now;
+    shiftIsOver = nowM >= endM;
+  }
+
+  // A punch that is not the earliest of the day and lands while the shop is still open is a
+  // break edge. `openBreakFor` is scoped to the worker, not the day, which is what closes a
+  // break that was opened just before midnight on a crossing shift.
+  if (hasHours && punchedAtMs > checkInAtMs) {
+    const open = await breaks.openBreakFor(client, userId);
+    if (open && open.state === 'out') {
+      // عودة — always closes the break, even past the shift end. A return is a return; if the
+      // shift is also over, the same instant closes the day below.
+      await breaks.finishBreak(client, open, {
+        returnedAt: punchedAt,
+        perMinute: settings.deduction_per_minute,
+        autoClosed: false,
+      });
+      await breaks.recomputeMonth(client, {
+        userId,
+        monthKey: breaks.monthKeyFor(punchedAt, timeZone),
+        allowanceMinutes: breaks.effectiveAllowance(settings),
+      });
+      if (!shiftIsOver) {
+        await markPunch(client, punch.id, { userId, attendanceId: row.id, ignoredReason: REASON_BREAK_END });
+        return 'break_end';
+      }
+    } else if (!shiftIsOver) {
+      // خروج مؤقت — the shop is still open, so leaving is a break, not the end of the day.
+      await client.query(
+        `INSERT INTO staff_attendance_breaks
+           (user_id, attendance_id, work_date, month_key, left_at, state, approval,
+            left_without_approval, requested_at, deduction_per_minute)
+         VALUES ($1, $2, $3, $4, $5, 'out', 'approved', FALSE, $5, $6)`,
+        [
+          userId,
+          row.id,
+          shift.date,
+          breaks.monthKeyFor(punchedAt, timeZone),
+          punchedAt,
+          Number(settings.deduction_per_minute || 0),
+        ]
+      );
+      await markPunch(client, punch.id, { userId, attendanceId: row.id, ignoredReason: REASON_BREAK_START });
+      return 'break_start';
+    }
+  }
 
   // Rule 3 — an out-of-order punch earlier than the recorded check-in moves it back and
   // recomputes lateness from the new, earlier time. The old check-in becomes the checkout

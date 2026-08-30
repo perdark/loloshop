@@ -495,6 +495,35 @@ longer stranded on a branch · the laptop's loose credentials are filed in
 
 ## 💣 LANDMINES
 
+- **⚠️ A DAY IS READ FROM THE SEQUENCE OF PUNCHES, AND THE CLOCK — NOT THE COUNT — DECIDES
+  WHERE IT ENDS (owner rule, 2026-08-30).** بصمة ١ دخول · ٢ خروج مؤقت · ٣ عودة · ٤ خروج, and
+  a punch **at or after the shift's own `end_time`** closes the day while anything earlier
+  opens or closes a break. Multiple trips out are allowed; every pair is its own break.
+  · **⚠️ A DEVICE BREAK IS BORN `approval = 'approved'` AND THAT IS A MONEY DECISION.**
+    `computeCharge` gives an UNAPPROVED break **zero** free minutes — every minute deducted —
+    so creating these as `pending` would silently bill every worker for every break the day
+    the shop stopped using the phone's request flow. There is no إذن to ask for at a sensor.
+    `ffcb0ce` removes الإذن from the money rule outright; this line keeps the two consistent
+    until it merges. The allowance (`break_monthly_minutes`, **600** on prod) still applies.
+  · **⚠️ THE ACCEPTED FLAW, chosen by the owner over the alternatives:** someone who goes home
+    BEFORE the shift ends opens a break instead of closing their day. It is not swallowed —
+    the break stays `out`, crosses `OPEN_BREAK_ALERT_MINUTES` (4h) and surfaces to the admin,
+    who fixes it with `PATCH /admin/attendance/records/:id/override`. Do not "fix" it by
+    guessing at intent.
+  · **⚠️ ON A MIDNIGHT-CROSSING SHIFT NO PUNCH CAN EVER CLOSE THE DAY**, and مضر محمد is on
+    one (22:16 → 10:15). `resolveStamp` files a stamp under the previous day only while it is
+    STRICTLY BEFORE that end, so the closing instant is already the next shift's دخول. That is
+    what `closeStaleOpenDay` exists for: the **next** day's first punch closes the previous
+    open day at ITS OWN scheduled end and auto-closes any break still `out` inside it
+    (`auto_closed = true`, so an admin can tell it from a real عودة). It never touches an
+    `overridden` row. Pinned by test 6d — deleting it leaves those workers' days open forever.
+  · **⚠️ A PER-WORKER 5-MINUTE COOLDOWN** (`PUNCH_COOLDOWN_MINUTES`) drops a repeat punch from
+    the same person: a finger resting on the sensor reads twice, and under this rule a stray
+    read would open a break nobody took. **Per worker, never per device** — two people at
+    10:15 and 10:16 is the morning queue and both must count. It is measured from the last
+    **accepted** punch, not the last rejected one, or someone tapping every four minutes locks
+    themselves out all day. Tests C1/C2.
+
 - **⚠️ THE SERVER CLOCK STAMPS A PUNCH, AND THAT REVERSED `c494dc9` ON PURPOSE (2026-08-30).**
   `punched_at` is the instant the punch REACHED the API; `device_ts` keeps the K40's own
   reading. The owner ordered it after the device's wall clock was found wrong on site — a

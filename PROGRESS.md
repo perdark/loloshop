@@ -66,6 +66,35 @@ a new `replay()` helper, which is what the real `assignUnmapped` path does anywa
 
 **Verified:** 605/605 backend tests · `tsc --noEmit` clean · lint clean · `next build` clean.
 
+### A day is now read from the SEQUENCE of punches
+
+Owner rule: بصمة ١ دخول · ٢ خروج مؤقت · ٣ عودة · ٤ خروج — or just دخول + خروج. What separates
+بصمة ٢ from a plain خروج is **the clock, not the count**: a punch at or after the shift's own
+`end_time` closes the day, anything earlier opens or closes a break, and a worker may go out
+more than once (every pair is its own break, all counted against the same 600-min allowance).
+
+Plus a **per-worker 5-minute cooldown**: a finger resting on the sensor reads twice, and under
+this rule a stray second read would open a خروج مؤقت nobody took. The owner's own test punch
+did exactly that — 20:30:56 and 20:31:01, two rows. ⚠️ It is **per worker, never per device**
+(two people at 10:15 and 10:16 is the morning queue), and measured from the last **accepted**
+punch — chaining it off rejected ones would let someone tapping every four minutes lock
+themselves out for the day.
+
+⚠️ **Two things found while building it, both real:**
+· **A device break must be born `approval = 'approved'`.** `computeCharge` gives an unapproved
+  break ZERO free minutes, so creating them pending would have silently billed every worker
+  for every break the moment the phone flow stopped being used.
+· **On a midnight-crossing shift no punch can ever close the day** — and مضر محمد is on one
+  (22:16 → 10:15). `resolveStamp` files a stamp under the previous day only while it is
+  strictly before that end, so the closing instant is already the next shift's دخول; his day
+  and any break in it would stay open forever. `closeStaleOpenDay` is the answer: the next
+  day's first punch closes the previous open day at ITS scheduled end and auto-closes an open
+  break (`auto_closed`, distinguishable from a real عودة), never touching an overridden row.
+
+**Verified:** 611/611 backend tests (6 new: S1–S3, C1–C2, 6d) · tsc · lint · `next build`.
+Tests 3, 6c and the admin replay fixture moved their last punch to the shift end — under the
+sequence rule a mid-afternoon punch is a break, so they were asserting the old contract.
+
 ### The enrollment replay, cleaned up
 
 ⚠️ **The first cleanup script was WRONG and its dry run is what caught it** — it deleted any
