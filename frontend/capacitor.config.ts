@@ -5,7 +5,7 @@ import type { CapacitorConfig } from "@capacitor/cli";
 const config: CapacitorConfig = {
   appId: "com.loloshop96.app",
   appName: "لولو شوب",
-  webDir: "public",
+  webDir: "capacitor-shell", // shell فقط — الواجهة تُحمَّل من server.url، لا نحزم public/ داخل التطبيق
   server: {
     url: "https://lolo-shop96.com",
     cleartext: false,
