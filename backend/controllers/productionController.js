@@ -1,5 +1,5 @@
 const { query, tx } = require('../lib/db');
-const { canStaffTransition, STATUS_LABEL_AR, TRANSITIONS, orderZoneClause } = require('./orderController');
+const { canStaffTransition, STATUS_LABEL_AR, TRANSITIONS, orderZoneClause, LINE_STAFF } = require('./orderController');
 const { signSseTicket, staffScopeAllows, staffTypesOf } = require('../middleware/auth');
 const { imageUpload, publicUrl } = require('../lib/upload');
 const { addClient, publish } = require('../lib/eventBus');
@@ -56,7 +56,16 @@ function sourceClause(sourceFilter) {
   return '';
 }
 
-// Which production stages each staff_type works (its queue). Manager/admin see the whole line.
+// A staff member's OWN station — «مرحلتي», and nothing else.
+//
+// ⚠️ THIS IS NO LONGER THE LIST THEY SEE. Owner decision 2026-08-31 opened every production
+// stage except التصميم to every line staff member (LINE_VIEW_STAGES below). The two lists were
+// the same thing until then, and `staffController.viewerStages` derived itself from
+// orderController.STAGE_AUTHZ on the strength of that equivalence — so widening the authz map
+// alone would have made every stage "mine" for everyone and re-opened the rep console on 402
+// rows of other stations' finished work (bug 2, 2026-08-13). viewerStages now reads THIS map.
+// Keep them apart: this one answers «what is my job», LINE_VIEW_STAGES answers «what may I
+// look at and move».
 const QUEUE_STAGES = {
   designer: ['design_complete'],
   digitizer: ['converting'],
@@ -69,6 +78,20 @@ const QUEUE_STAGES = {
   // name). No transitions exist for tailor, so available_actions stays empty (read-only).
   tailor: ['design_complete', 'converting', 'embroidery', 'pressing', 'preparing', 'ready'],
 };
+// What every LINE staff member's queue shows and may act on: the whole line minus التصميم.
+//
+// WHY (owner, 2026-08-31): 197 retail شال امريكي had been sitting at التطريز since 2026-06-29
+// — together with 150 caps, 142 sashes and 95 robes — because the only embroiderer's
+// `order_scope` is 'wholesaler' and every shawl is a retail order. No station could see them
+// and no station was allowed to move them, so the line simply stopped for that whole
+// population and nothing on any screen said so. One person's scope must not be able to dam
+// the line, and the fix the owner chose is breadth of access rather than a scope edit that
+// would have to be repeated for every future hire.
+//
+// التصميم is the named exception and stays with the designer (QUEUE_STAGES.designer adds it
+// back for them). `delivered` is included and is bounded to 90 days in getQueue's WHERE.
+const LINE_VIEW_STAGES = ['converting', 'embroidery', 'pressing', 'preparing', 'ready', 'delivered'];
+
 const MANAGER_STAGES = ['design_complete', 'converting', 'embroidery', 'pressing', 'preparing', 'ready'];
 // What a manager/admin SEES in the production console — same as MANAGER_STAGES plus the
 // تم التسليم "done" column. Kept separate so monitor()'s WIP math stays on the 6 live stages.
@@ -384,9 +407,14 @@ async function getQueue(req, res) {
     const filter = req.query.stage;
     stages = filter && MANAGER_VIEW_STAGES.includes(filter) ? [filter] : MANAGER_VIEW_STAGES;
   } else {
-    // Multi-role: union the stage queues of every role the staff member holds.
+    // Union of: the whole line (for anyone who works it) + this person's own station. The
+    // second half is what still gives the designer التصميم and keeps مفصل's read-only breadth
+    // exactly as it was — neither is in LINE_VIEW_STAGES.
     const set = new Set();
-    for (const t of staffTypesOf(u)) (QUEUE_STAGES[t] || []).forEach((st) => set.add(st));
+    for (const t of staffTypesOf(u)) {
+      if (LINE_STAFF.includes(t)) LINE_VIEW_STAGES.forEach((st) => set.add(st));
+      (QUEUE_STAGES[t] || []).forEach((st) => set.add(st));
+    }
     stages = [...set];
   }
   if (!stages.length) return res.json({ data: [] });
@@ -558,7 +586,13 @@ async function getQueue(req, res) {
         // checkout_group_id was bought alone and is a complete set of one.
         if (r.checkout_group_id) r.set_pieces = setByGroup.get(r.checkout_group_id) || [];
       }
-      if (r.status === 'pressing' || r.status === 'preparing') {
+      // Computed for EVERY row since 2026-08-31, not just the caller's own station. A line
+      // staff member now sees the whole line (LINE_VIEW_STAGES) and may move it, so the row
+      // has to carry its own verdict — otherwise المكوجي looking at التطريز gets a list he is
+      // allowed to advance and no button to do it with. canStaffTransition is still the
+      // authority, so a row he may NOT move simply comes back can_advance:false.
+      // ready→delivered stays excluded: it needs the hand-off modal on the detail page.
+      {
         const next = nextStageFor({
           status: r.status,
           design_id: r.design_id,
@@ -893,6 +927,7 @@ async function getOrder(req, res) {
 async function loadAdvanceRow(id) {
   const cur = await query(
     `SELECT o.id, o.status, o.design_id, o.has_embroidery, o.needs_pressing,
+            o.wholesaler_approval, o.returned_to_customer,
             s.user_id, s.wholesaler_id, d.approval_status AS design_approval_status
      FROM orders o JOIN students s ON s.id = o.student_id
      LEFT JOIN designs d ON d.id = o.design_id
@@ -900,6 +935,30 @@ async function loadAdvanceRow(id) {
     [id]
   );
   return cur.rows[0] || null;
+}
+
+// ---------- The gate that belongs on the TRANSITION, not on a list ----------
+// getQueue hides an unapproved rep order and a returned order, so no STATION can offer one.
+// The الخط العربي workbench never had those filters, so «تحويل للتطريز» was a side door: the
+// order advanced cleanly and then existed in no queue at all — it IS at التطريز and every
+// screen that could show التطريز hides it. Measured on prod 2026-08-31: three orders in
+// exactly that state (2 × محمد باقر, 1 × محمد ناظم), which is why the designer counted 140
+// at التصميم and التطريز counted 137.
+//
+// ⚠️ «بانتظار موافقة الممثل» is NOT a queue to drain (owner ruling 2026-08-14). This gate
+// only REFUSES movement; it never approves anything and must never be "fixed" by
+// auto-approving. The approval belongs to the ممثل.
+//
+// Needs order.{wholesaler_id, wholesaler_approval, returned_to_customer} — i.e. a
+// loadAdvanceRow row. Returns null when the order may move.
+function advanceBlockReason(order) {
+  if (order.returned_to_customer) {
+    return { code: 'ERR_ORDER_RETURNED', reason: 'returned_to_customer', message: 'الطلب مُرجَع للطالب' };
+  }
+  if (order.wholesaler_id != null && order.wholesaler_approval !== 'approved') {
+    return { code: 'ERR_REP_APPROVAL_PENDING', reason: 'rep_approval_pending', message: 'الطلب بانتظار موافقة الممثل' };
+  }
+  return null;
 }
 
 // Apply ONE forward advance (guards must be checked by the caller). Writes the
@@ -945,6 +1004,8 @@ async function advance(req, res) {
   if (!staffScopeAllows(req.user, order.wholesaler_id == null)) {
     return res.status(403).json({ error: 'هذا الطلب خارج نطاقك', code: 'ERR_FORBIDDEN' });
   }
+  const blocked = advanceBlockReason(order);
+  if (blocked) return res.status(409).json({ error: blocked.message, code: blocked.code });
   const to = nextStageFor(order);
   if (!to) {
     return res.status(409).json({ error: 'لا يمكن تقديم هذه الحالة', code: 'ERR_INVALID_TRANSITION' });
@@ -1093,6 +1154,8 @@ async function advanceBulk(req, res) {
     if (!staffScopeAllows(req.user, order.wholesaler_id == null)) {
       results.push({ id, ok: false, reason: 'forbidden' }); continue;
     }
+    const blocked = advanceBlockReason(order);
+    if (blocked) { results.push({ id, ok: false, reason: blocked.reason }); continue; }
     const to = nextStageFor(order);
     if (!to || !canStaffTransition(req.user, order.status, to)) {
       results.push({ id, ok: false, reason: 'not_advanceable' }); continue;
@@ -1818,7 +1881,8 @@ module.exports = {
   tailorQueue, tailorComplete, tailorReopen, tailorCompleteBulk, tailorSummary,
   deleteOrder,
   // Shared with the calligraphy workbench («تحويل للتطريز» reuses the real state machine).
-  loadAdvanceRow, performAdvance, ADVANCE_LABEL_AR, detectZonesWithImages,
+  loadAdvanceRow, performAdvance, advanceBlockReason, ADVANCE_LABEL_AR, detectZonesWithImages,
+  QUEUE_STAGES, LINE_VIEW_STAGES,
   // Exported for tests: the التجهيز spec partitioning is pure, so it is asserted directly
   // rather than through an HTTP round trip. See test/prepSpec.test.js.
   buildPieceSpec,

@@ -31,7 +31,7 @@ import type { ProductionQueueItem, StationZone } from "@/lib/staff-types";
 // The advance has ALREADY succeeded when this opens — shelving is never a blocker.
 import { getShelfBoard, placePiece, type ShelfBoard, type ShelfInboxItem } from "@/lib/shelf";
 import { PlaceSheet } from "@/components/staff/shelf/PlaceSheet";
-import { PRODUCT_TYPE_LABELS, STUDY_TYPE_LABELS } from "@/lib/constants";
+import { PRODUCT_TYPE_LABELS, STUDY_TYPE_LABELS, ORDER_STATUS_LABELS } from "@/lib/constants";
 import { usePolling } from "@/lib/hooks/usePolling";
 import { useProductionEvents } from "@/hooks/useProductionEvents";
 import { useScrollRestore } from "@/hooks/useScrollRestore";
@@ -76,6 +76,13 @@ const META: Record<ConsoleKind, { title: string; subtitle: string; empty: string
   },
 };
 
+// The production line, in the order a piece walks it — mirrors the backend's LINE_VIEW_STAGES
+// (productionController.js). Owner decision 2026-08-31: every line staff member sees and may
+// move every stage except التصميم, so a station console is no longer one stage. This array is
+// display order only; what a person may SEE is decided by the backend's stage list and what
+// they may MOVE by each row's own `can_advance`.
+const LINE_ORDER = ["converting", "embroidery", "pressing", "preparing", "ready", "delivered"];
+
 // Canonical zone order — mirrors the backend's ZONE_DEFS so chips read الوشاح → القبعة → الروب.
 const ZONE_ORDER = [
   "sash_right",
@@ -106,6 +113,7 @@ interface StoredConsoleState {
   repFilter?: string;
   activeZone?: string;
   activeType?: string;
+  activeStage?: string;
   selected?: string[];
   openStudentKey?: string | null;
 }
@@ -145,19 +153,30 @@ function queueToPiece(r: ProductionQueueItem, kind: StationKind): StationPiece {
     source: r.source,
     deadline: r.deadline,
     createdAt: r.created_at,
-    zones: kind === "embroidery" ? r.zones ?? [] : null,
+    // Zones are the التطريز checklist and only mean anything on a row that IS at التطريز.
+    zones: r.status === "embroidery" ? r.zones ?? [] : null,
     // التجهيز's spec belongs to PrepConsole; this console serves التطريز/الكوي, which ask
     // "what do I stitch / press", not "which garment is this".
     spec: null,
     measurements: null,
-    canComplete: kind === "pressing" ? !!r.can_advance : true,
+    status: r.status,
+    // The backend now computes can_advance for EVERY row it returns, so a piece the viewer
+    // may not move (a sash whose zones are unticked, someone else's edge) simply arrives
+    // false. The old rule — «التطريز rows are always completable» — was only safe while this
+    // console showed nothing but its own stage.
+    canComplete:
+      r.status === "embroidery" && kind === "embroidery" ? true : !!r.can_advance,
     completeLabel:
-      kind === "pressing" ? r.advance_label ?? "إنهاء الكوي" : "إكمال التطريز",
+      r.advance_label ??
+      (r.status === "embroidery" ? "إكمال التطريز" : kind === "pressing" ? "إنهاء الكوي" : "إكمال"),
   };
 }
 
 function tailorToPiece(r: TailorOrderRow): StationPiece {
   return {
+    // الفصال runs BESIDE the production line, not on it — a فصال row has no line stage, and
+    // its own status lives in `tailor_status`. 'tailor' keeps it out of every stage chip.
+    status: "tailor",
     setPieces: null, // الفصال sews one garment; it never packs a set.
     id: r.id,
     studentId: r.studentId ?? r.studentName,
@@ -233,6 +252,11 @@ export function StationConsole({
   const [repFilter, setRepFilter] = useState(stored.repFilter ?? "");
   const [activeZone, setActiveZone] = useState(stored.activeZone ?? "");
   const [activeType, setActiveType] = useState(stored.activeType ?? "all");
+  // Which stage of the line is on screen. Defaults to this console's OWN station — a worker
+  // opening their queue must still land on their own work, not on 1,400 rows of the line.
+  const [activeStage, setActiveStage] = useState<string>(
+    stored.activeStage ?? (kind === "embroidery" ? "embroidery" : "pressing")
+  );
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set(Array.isArray(stored.selected) ? stored.selected : [])
   );
@@ -259,6 +283,7 @@ export function StationConsole({
         repFilter,
         activeZone,
         activeType,
+        activeStage,
         selected: [...selected],
         openStudentKey,
       };
@@ -266,7 +291,7 @@ export function StationConsole({
     } catch {
       /* storage full/unavailable — persistence is best-effort */
     }
-  }, [kind, view, search, sourceFilter, repFilter, activeZone, activeType, selected, openStudentKey]);
+  }, [kind, view, search, sourceFilter, repFilter, activeZone, activeType, activeStage, selected, openStudentKey]);
 
   // The one part of «getting back perfectly» that was still missing: the scroll offset.
   // Every filter above was restored and the worker was STILL dropped at the top of the
@@ -285,9 +310,11 @@ export function StationConsole({
           const rows = await getTailorQueue(false);
           setPieces(rows.map(tailorToPiece));
         } else {
-          const stage = kind === "embroidery" ? "embroidery" : "pressing";
+          // The whole line, not one stage (owner 2026-08-31). The backend decides what this
+          // person may see (LINE_VIEW_STAGES) and what they may move (can_advance); the
+          // console's job is to default to their own station and let them step out of it.
           const data = await getQueue(undefined, undefined, undefined, true);
-          setPieces(data.filter((r) => r.status === stage).map((r) => queueToPiece(r, kind)));
+          setPieces(data.map((r) => queueToPiece(r, kind)));
         }
         setLoadedOnce(true);
       } catch (err) {
@@ -402,38 +429,64 @@ export function StationConsole({
   }, [filtered]);
 
   useEffect(() => {
-    if (kind !== "embroidery" || !loadedOnce) return;
+    if (kind !== "embroidery" || activeStage !== "embroidery" || !loadedOnce) return;
     if (!zoneChips.some((c) => c.key === activeZone)) {
       setActiveZone(zoneChips[0]?.key ?? "");
       setSelected(new Set()); // the restored/previous selection belonged to the old zone
     }
-  }, [zoneChips, activeZone, kind, loadedOnce]);
+  }, [zoneChips, activeZone, kind, activeStage, loadedOnce]);
+
+  // ─── Stage chips — the line, in order, counted from what the backend actually sent ──────
+  // Only stages PRESENT in the payload get a chip, so a console never offers an empty stage
+  // and the row can never claim access the backend did not grant.
+  const stageChips = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const p of filtered) m.set(p.status, (m.get(p.status) ?? 0) + 1);
+    return LINE_ORDER.filter((st) => m.has(st)).map((st) => ({ stage: st, count: m.get(st)! }));
+  }, [filtered]);
+
+  // If the worker's own stage is empty this run, fall back to the first stage that has work
+  // rather than showing an empty screen with chips beside it.
+  useEffect(() => {
+    if (!loadedOnce || !stageChips.length) return;
+    if (!stageChips.some((c) => c.stage === activeStage)) setActiveStage(stageChips[0].stage);
+  }, [stageChips, activeStage, loadedOnce]);
+
+  const inStage = useMemo(
+    () => filtered.filter((p) => p.status === activeStage),
+    [filtered, activeStage]
+  );
 
   const typeChips = useMemo(() => {
     const m = new Map<string, number>();
-    for (const p of filtered) m.set(p.productType, (m.get(p.productType) ?? 0) + 1);
+    for (const p of inStage) m.set(p.productType, (m.get(p.productType) ?? 0) + 1);
     return [...m.entries()].map(([type, count]) => ({ type, count }));
-  }, [filtered]);
+  }, [inStage]);
 
   useEffect(() => {
     if (!loadedOnce) return;
     if (activeType !== "all" && !typeChips.some((c) => c.type === activeType)) setActiveType("all");
   }, [typeChips, activeType, loadedOnce]);
 
+  // The zone checklist is التطريز's own way of working and applies only while an embroiderer
+  // is looking AT التطريز. Stepping to another stage falls back to the plain type chips —
+  // otherwise a presser's view of التطريز would demand a zone that is not their job to tick.
+  const zoneMode = kind === "embroidery" && activeStage === "embroidery";
+
   const pieceRows = useMemo(() => {
-    if (kind === "embroidery") {
+    if (zoneMode) {
       if (!activeZone) return [] as { piece: StationPiece; zone?: StationZone }[];
-      return filtered
+      return inStage
         .map((p) => ({
           piece: p,
           zone: (p.zones ?? []).find((z) => z.key === activeZone && !z.done),
         }))
         .filter((r): r is { piece: StationPiece; zone: StationZone } => !!r.zone);
     }
-    return filtered
+    return inStage
       .filter((p) => activeType === "all" || p.productType === activeType)
       .map((p) => ({ piece: p, zone: undefined as StationZone | undefined }));
-  }, [filtered, kind, activeZone, activeType]);
+  }, [inStage, zoneMode, activeZone, activeType]);
 
   const selectableIds = useMemo(
     () => pieceRows.filter((r) => r.piece.canComplete).map((r) => r.piece.id),
@@ -550,7 +603,9 @@ export function StationConsole({
     if (selected.size === 0) return;
     setBulkLoading(true);
     try {
-      if (kind === "embroidery") {
+      // zoneMode, not kind: an embroiderer LOOKING at الكوي is doing a plain advance, and a
+      // presser looking at التطريز may not tick zones at all (the endpoint is role-gated).
+      if (zoneMode) {
         const res = await markEmbroideryZoneBulk(
           [...selected].map((id) => ({ order_id: id, zone: activeZone }))
         );
@@ -577,10 +632,11 @@ export function StationConsole({
       } else {
         const res = await advanceBulk([...selected]);
         if (res.advanced > 0) {
+          // Stage-neutral wording: this batch may not have been الكوي's (see bulkLabel).
           toast.success(
             res.skipped > 0
-              ? `تم إكمال كوي ${res.advanced} قطعة · تخطّي ${res.skipped}`
-              : `تم إكمال كوي ${res.advanced} قطعة`
+              ? `تم إكمال ${res.advanced} قطعة · تخطّي ${res.skipped}`
+              : `تم إكمال ${res.advanced} قطعة`
           );
         } else {
           toast.error("لم يكن بالإمكان إكمال أي قطعة من المحدد");
@@ -636,12 +692,20 @@ export function StationConsole({
   const toggleAll = () =>
     setSelected(() => (allChecked ? new Set() : new Set(selectableIds)));
 
-  const bulkLabel =
-    kind === "embroidery"
-      ? `إكمال «${zoneChips.find((c) => c.key === activeZone)?.label ?? "المنطقة"}» (${selected.size})`
-      : kind === "tailor"
-        ? `تم الفصال (${selected.size})`
-        : `إكمال الكوي (${selected.size})`;
+  // The label names the STAGE the selection is actually at, not the console's own station —
+  // «إكمال الكوي» on a batch of التطريز pieces would describe work nobody is about to do.
+  // Taken from the backend's own edge label (ADVANCE_LABEL_AR) when the rows agree on one.
+  const bulkLabel = (() => {
+    if (zoneMode) {
+      return `إكمال «${zoneChips.find((c) => c.key === activeZone)?.label ?? "المنطقة"}» (${selected.size})`;
+    }
+    if (kind === "tailor") return `تم الفصال (${selected.size})`;
+    const labels = new Set(
+      pieceRows.filter((r) => selected.has(r.piece.id)).map((r) => r.piece.completeLabel)
+    );
+    const one = labels.size === 1 ? [...labels][0] : null;
+    return `${one ?? "إكمال"} (${selected.size})`;
+  })();
 
   // ─── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -815,9 +879,49 @@ export function StationConsole({
         </ul>
       ) : (
         <>
+          {/* Stage chips — «مرحلتي» first, then the rest of the line. Only rendered when the
+              backend actually returned more than one stage, so الفصال and a single-stage day
+              look exactly as they did before. */}
+          {stageChips.length > 1 && (
+            <div className="mb-2 flex gap-2 overflow-x-auto pb-1">
+              {stageChips.map((c) => {
+                const own = c.stage === (kind === "embroidery" ? "embroidery" : "pressing");
+                return (
+                  <button
+                    key={c.stage}
+                    type="button"
+                    onClick={() => {
+                      if (activeStage === c.stage) return;
+                      setActiveStage(c.stage);
+                      setSelected(new Set()); // the selection belonged to the old stage
+                    }}
+                    aria-pressed={activeStage === c.stage}
+                    className={`flex min-h-10 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-xs font-bold transition-colors ${
+                      activeStage === c.stage
+                        ? "border-orange-ink bg-orange-ink text-white"
+                        : own
+                          ? "border-orange-ink/40 bg-peach/40 text-orange-ink hover:text-ink"
+                          : "border-line bg-surface text-ink-soft hover:text-ink"
+                    }`}
+                  >
+                    {own ? "مرحلتي · " : ""}
+                    {(ORDER_STATUS_LABELS as Record<string, string>)[c.stage] ?? c.stage}
+                    <span
+                      className={`rounded-full px-1.5 py-0.5 text-[10px] ${
+                        activeStage === c.stage ? "bg-white/20" : "bg-ink/8"
+                      }`}
+                    >
+                      {c.count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           {/* Chips: zones (التطريز) or piece types (الفصال/الكوي) */}
           <div className="flex gap-2 overflow-x-auto pb-1">
-            {kind === "embroidery"
+            {zoneMode
               ? zoneChips.map((c) => (
                   <button
                     key={c.key}
@@ -844,7 +948,7 @@ export function StationConsole({
                     </span>
                   </button>
                 ))
-              : [{ type: "all", count: filtered.length }, ...typeChips].map((c) => (
+              : [{ type: "all", count: inStage.length }, ...typeChips].map((c) => (
                   <button
                     key={c.type}
                     type="button"
@@ -875,7 +979,7 @@ export function StationConsole({
           {pieceRows.length === 0 ? (
             <EmptyState
               message={
-                kind === "embroidery"
+                zoneMode
                   ? "لا توجد قطع بانتظار هذه المنطقة."
                   : "لا توجد قطع من هذا النوع بانتظار العمل."
               }

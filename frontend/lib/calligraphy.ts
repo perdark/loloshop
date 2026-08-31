@@ -284,6 +284,13 @@ export interface CalOrderZones {
   can_send: boolean;
   next_stage: string | null;
   send_label: string | null;
+  /**
+   * Why this order may NOT be pushed out of التصميم — «بانتظار موافقة الممثل» or
+   * «مُرجَع للطالب». The workbench has no approval filter of its own, so before this the
+   * button was offered, the send succeeded, and the order landed at التطريز where no
+   * station queue could show it. Now the server refuses AND says so here.
+   */
+  blocked_reason?: string | null;
 }
 
 export async function getOrdersZones(ids: string[]): Promise<CalOrderZones[]> {

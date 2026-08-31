@@ -1,7 +1,7 @@
 const { query } = require('../lib/db');
 const { staffScopeAllows, staffTypesOf } = require('../middleware/auth');
 const { canStaffTransition, STATUS_LABEL_AR, orderZoneClause } = require('./orderController');
-const { nextStageFor } = require('./productionController');
+const { nextStageFor, QUEUE_STAGES } = require('./productionController');
 const { moneyCalculations, calculationFor } = require('../lib/moneyCalculation');
 const staffPresence = require('../lib/staffPresence');
 
@@ -188,11 +188,20 @@ const ALL_STATUSES = Object.keys(STATUS_LABEL_AR);
  */
 function viewerStages(user) {
   if (user.role === 'admin' || staffTypesOf(user).includes('manager')) return [];
-  return ALL_STATUSES.filter(
-    (from) =>
-      from !== 'cancelled' &&
-      ALL_STATUSES.some((to) => to !== from && canStaffTransition(user, from, to))
-  );
+  // ⚠️ READS QUEUE_STAGES, NOT STAGE_AUTHZ — and that changed on 2026-08-31. The original
+  // derivation («a status is mine when I may move an order out of it») was exact only while
+  // the two lists agreed. The owner then opened every non-design edge to every line staff
+  // type, so the authz map now says a presser may move an order out of التطريز — true, and
+  // emphatically not «التطريز is the presser's station». Deriving from it would make «مرحلتي»
+  // mean «الكل» for everyone, which is the exact regression bug 2 was filed for.
+  // `tailor` has no QUEUE_STAGES ownership by design — it is a read-only viewer, so it falls
+  // through to [] = «show الكل», same as manager/admin.
+  const own = new Set();
+  for (const t of staffTypesOf(user)) {
+    if (t === 'tailor') continue;
+    (QUEUE_STAGES[t] || []).forEach((st) => own.add(st));
+  }
+  return [...own].filter((s) => s !== 'cancelled');
 }
 
 // ---------- Orders of one rep's students — the wholesaler order-working console ----------

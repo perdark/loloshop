@@ -35,29 +35,47 @@ const TRANSITIONS = {
   printing: ['embroidery', 'pressing', 'cancelled'],
 };
 
+// Every staff_type that works the production line. `tailor` (مفصل) is deliberately absent:
+// it is a read-only viewer of the whole line and has never had a transition.
+const LINE_STAFF = ['designer', 'digitizer', 'embroiderer', 'presser', 'preparer'];
+
 // Which staff_type may perform each "from→to" edge.
 // admin role and `manager` staff_type bypass this map entirely; cancelling is manager/admin only.
+//
+// ⚠️ OWNER DECISION 2026-08-31 — «all staff, all stages EXCEPT the design stage», and they may
+// MOVE, not just look. Every non-design edge below is therefore LINE_STAFF. The reason is
+// concrete: 197 retail شال امريكي (and 387 other retail pieces) sat at التطريز from 2026-06-29
+// because the only embroiderer's `order_scope` is wholesaler-only, and no other station was
+// allowed to push them on. One person's scope must not be able to dam the line.
+//
+// TWO THINGS THIS DELIBERATELY DOES NOT OPEN, and neither is an oversight:
+//   · التصميم — `design_complete→*` stays ['designer']. That is the exception the owner named.
+//   · Any edge that moves a piece BACK INTO the design desk (`→design_complete`) keeps its
+//     original owner plus the designer. Reopening a design is a design decision; letting a
+//     presser do it would put work back on a desk they do not sit at.
+// The embroidery per-zone checklist is a SEPARATE guard in productionController.advance and
+// still applies to every non-manager, so widening this map cannot skip تطريز tracking.
 const STAGE_AUTHZ = {
   // forward edges
   'design_complete→embroidery': ['designer'], // stage-2 removed: design goes straight to التطريز
   'design_complete→converting': ['designer'], // drain-only
-  'converting→embroidery': ['digitizer'],     // drain-only
-  'converting→design_complete': ['digitizer'], // drain-only
-  'embroidery→pressing': ['embroiderer'],
-  'embroidery→preparing': ['embroiderer'],
-  'pressing→preparing': ['presser'],
-  'preparing→ready': ['preparer'],
-  'ready→delivered': ['preparer'],
+  'converting→embroidery': LINE_STAFF,        // drain-only
+  'converting→design_complete': ['digitizer', 'designer'], // drain-only, back into التصميم
+  'embroidery→pressing': LINE_STAFF,
+  'embroidery→preparing': LINE_STAFF,
+  'pressing→preparing': LINE_STAFF,
+  'preparing→ready': LINE_STAFF,
+  'ready→delivered': LINE_STAFF,
   // revert edges
   'design_complete→designing': ['designer'],
-  'delivered→preparing': ['preparer'],
-  'ready→preparing': ['preparer'],
-  'preparing→embroidery': ['preparer'],
+  'delivered→preparing': LINE_STAFF,
+  'ready→preparing': LINE_STAFF,
+  'preparing→embroidery': LINE_STAFF,
   // Revert for a PLAIN piece that came straight from الكوي (never embroidered).
-  'preparing→pressing': ['preparer'],
-  'pressing→embroidery': ['presser'],
-  'embroidery→converting': ['embroiderer'], // drain-only
-  'embroidery→design_complete': ['embroiderer'], // revert: one step back = the design desk
+  'preparing→pressing': LINE_STAFF,
+  'pressing→embroidery': LINE_STAFF,
+  'embroidery→converting': LINE_STAFF, // drain-only
+  'embroidery→design_complete': ['embroiderer', 'designer'], // revert: back to the design desk
 };
 
 function canStaffTransition(user, from, to) {
@@ -444,7 +462,7 @@ async function priceSelections({ productId, role, selections, studentGender }) {
   // `?role=` query param. That is what makes 'retail' mean «الطلاب العاديين فقط» here.
   const groups = await query(
     `SELECT id, name_ar, required, max_select, input_type, gender_restriction,
-            requires_customer_image, requires_customer_text
+            requires_customer_image, requires_customer_text, is_embroidery
      FROM option_groups
       WHERE product_id = ANY($1::uuid[]) AND active = TRUE
         AND (price_role_restriction IS NULL OR price_role_restriction = $2::price_role)`,
@@ -520,9 +538,20 @@ async function priceSelections({ productId, role, selections, studentGender }) {
         : null;
     const providedImage = s.customer_image_url ? String(s.customer_image_url) : null;
     // Track embroidery/design work: a required image/text — OR any reference photo / text the
-    // customer supplied (e.g. an optional «صورة القبعة» cap photo, or an image-only sash zone) —
-    // means there's design work, so the piece routes to the staff design stage (design_complete).
-    if (needsImage || needsText || providedText || providedImage) hasEmbroidery = true;
+    // customer supplied (e.g. an image-only sash zone) — means there's design work, so the
+    // piece routes to the staff design stage (design_complete).
+    //
+    // ⚠️ UNLESS THE GROUP IS A PRODUCT PICKER (migration 096, owner 2026-08-31). «صورة الشال»
+    // and «صورة القبعة» ask WHICH product the student wants and record the answer as
+    // customer_text — which used to trip this line and route the piece to التصميم → التطريز.
+    // 468 شال امريكي orders went that way and none of them carried a single «تطريز» line;
+    // they then sat at التطريز showing ZERO zones, because productionController's ZONE_DEFS
+    // correctly says the American shawl is not embroidery. The two rules contradicted each
+    // other and the pieces fell in the gap. `is_embroidery IS NULL` means unset = yes.
+    const groupIsEmbroidery = g.is_embroidery !== false;
+    if (groupIsEmbroidery && (needsImage || needsText || providedText || providedImage)) {
+      hasEmbroidery = true;
+    }
 
     const line = opt.price_delta * qty;
     total += line;
@@ -1636,6 +1665,6 @@ async function returnedOrders(req, res) {
 module.exports = {
   listOrders, myOrders, returnedOrders, updateStatus, configureOrder, configurePackage, configureFullSet, getOrderBreakdown,
   vipUpgradeContext, upgradeToVip, repFullSetContext, configureRepFullSet,
-  priceSelections, validateRobeMeasurements, canStaffTransition, TRANSITIONS, STATUS_LABEL_AR, ALL_STATUSES,
+  priceSelections, validateRobeMeasurements, canStaffTransition, TRANSITIONS, STATUS_LABEL_AR, ALL_STATUSES, LINE_STAFF,
   orderZoneClause,
 };
