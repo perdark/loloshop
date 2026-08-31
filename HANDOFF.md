@@ -503,8 +503,10 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   embroidery. Two rules contradicting each other, pieces falling in the gap, from 2026-06-29 until
   2026-08-31. `option_groups.is_embroidery` is **nullable and NULL means YES** — that is what lets
   the seed fill NULLs only, so `db/schema.sql` (re-applied on every deploy) can never revert an
-  admin's later edit. **Adding a new picker-shaped group re-creates the bug silently**, because
-  nothing on the product editor exposes the flag. «اللون» / «لون التطريز» / «ردن الروب» were left
+  admin's later edit. A new picker-shaped group is the admin's to mark:
+  «صورة منتج فقط — ما تروح للتصميم/التطريز» is on the group editor at `/admin/products` and
+  writes **FALSE or NULL, never TRUE** — a stray TRUE behaves the same but destroys the
+  column's meaning («the admin has decided about this group»). «اللون» / «لون التطريز» / «ردن الروب» were left
   TRUE on purpose: a sash with a colour really is embroidered.
 
 - **⚠️ THE CALLIGRAPHY WORKBENCH IS NOT A STATION QUEUE, AND `advanceBlockReason` IS THE ONLY
@@ -534,8 +536,8 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   `ENOTEMPTY … rmdir '.next/server/app/index.segments/…'` and prod served the `162cfab` frontend
   for two days while the box's git said `7a7dffe`. The `[PM2][ERROR] File ecosystem.config.js not
   found` in that log is a CONSEQUENCE — the script died inside `cd frontend && … && cd ..`, so PM2
-  ran from `frontend/`; the file exists at the repo root. **`rm -rf .next` before `npm run build`
-  is the fix and is NOT done.** Never read the box's `git log` as proof that a deploy landed —
+  ran from `frontend/`; the file exists at the repo root. **`rm -rf .next` before `npm run build` is now
+  in the script (2026-08-31).** Never read the box's `git log` as proof that a deploy landed —
   check the CI run and PM2 uptime.
 
 - **⚠️ A DAY IS READ FROM THE SEQUENCE OF PUNCHES, AND THE CLOCK — NOT THE COUNT — DECIDES

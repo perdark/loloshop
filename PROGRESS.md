@@ -99,10 +99,12 @@ site + `/api/health` 200, PM2 all three restarted 02:48. DB dumped first to
   then `[PM2][ERROR] File ecosystem.config.js not found` — a *consequence*, not a second bug:
   `deploy.sh` died inside `cd frontend && … && cd ..`, so PM2 ran from `frontend/` where that file
   is not. `deploy.sh` does `git pull` BEFORE the build, so `git log` on the box read `7a7dffe`
-  while the served build was `162cfab`. **Adding `rm -rf .next` before `npm run build` is the fix
-  and has not been done.**
-- **⚠️ There is no admin UI for `is_embroidery`.** A new product-picker group added later
-  re-creates cause 1 silently. Small follow-up: a checkbox on the option-group editor.
+  while the served build was `162cfab`. **Fixed 2026-08-31 — `rm -rf .next` is now in the script.**
+- ✅ **DONE — `is_embroidery` has a checkbox** («صورة منتج فقط — ما تروح للتصميم/التطريز», on
+  the option-group editor). It writes FALSE or NULL and never TRUE. Verified in a browser as
+  Admin and round-tripped by a test.
+- ✅ **DONE — `rm -rf .next` is in `scripts/deploy.sh`**, so a stale build artifact can no longer
+  leave the box's `git log` claiming a deploy that never built.
 - **⚠️ محمد عماد is still `order_scope = 'wholesaler'`.** He now sees the whole line but still no
   retail orders. Widening him is a one-row UPDATE and an owner call.
 
