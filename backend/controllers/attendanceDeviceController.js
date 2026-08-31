@@ -175,7 +175,7 @@ async function linkPin(client, { userId, pin, pushedName }) {
   // has to and lean on that correction path for no reason. `id` breaks ties inside a second.
   const stored = await client.query(
     `SELECT * FROM punch_raw
-      WHERE user_id IS NULL AND ${PIN_IS('device_pin', '$1')}
+      WHERE user_id IS NULL AND ignored_reason IS NULL AND ${PIN_IS('device_pin', '$1')}
       ORDER BY device_ts ASC, id ASC`,
     [pin]
   );
@@ -256,6 +256,23 @@ async function deletePin(req, res) {
  * Every PIN that has punched but is not attached to anybody. This list existing at all is the
  * design working: a stranger's finger is never dropped, it waits here to be claimed.
  */
+/**
+ * «تجاهل» — an unclaimed number marked as noise.
+ *
+ * ⚠️ Marked, never deleted. `punch_raw` is append-only truth (see this file's header): a punch
+ * is the record that a finger touched the device at a time, and that stays true even when
+ * nobody wants it. Clearing the marker with a single UPDATE brings the number back.
+ *
+ * PINs 1, 7 and 8 are the reason this exists — installer taps from the 2026-08-29 setup. Until
+ * now `assignUnmapped` was the ONLY way off this list, so the only route to a clean screen was
+ * attaching a stranger's finger to a real employee, which writes a working day they never had.
+ *
+ * ⚠️ Dismissed punches are also skipped by `linkPin`'s replay: if PIN 7 is later given to a
+ * real worker, an installer's two-day-old test tap must not become their attendance. Clear the
+ * marker first if the punches really were theirs.
+ */
+const REASON_DISMISSED = 'unmapped_dismissed';
+
 async function listUnmapped(req, res) {
   const { rows } = await query(
     `SELECT p.device_pin,
@@ -270,7 +287,7 @@ async function listUnmapped(req, res) {
        FROM punch_raw p
        LEFT JOIN staff_device_pins sdp ON ${PIN_IS('p.device_pin', 'sdp.pin')}
        LEFT JOIN users u ON u.id = sdp.user_id
-      WHERE p.user_id IS NULL
+      WHERE p.user_id IS NULL AND p.ignored_reason IS NULL
       GROUP BY p.device_pin, u.id, u.name
       ORDER BY MAX(p.punched_at) DESC`
   );
@@ -339,4 +356,5 @@ module.exports = {
   listUnmapped,
   assignUnmapped,
   listRejects,
+  REASON_DISMISSED,
 };
