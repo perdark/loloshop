@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { OrderCard } from "@/components/staff/OrderCard";
@@ -15,11 +15,12 @@ import { StatCard } from "@/components/ui/StatCard";
 import { Modal } from "@/components/ui/Modal";
 import { Input } from "@/components/ui/Input";
 import {
-  getQueue,
+  getQueueScoped,
   getMonitor,
   getCompleted,
   revertOrder,
 } from "@/lib/staff";
+import { StageChips } from "@/components/staff/StageChips";
 import { addStaffBonus, addStaffDeduction } from "@/lib/admin";
 import { getApiErrorMessage } from "@/lib/api";
 import { matchesQueueSearch } from "@/lib/queue-search";
@@ -226,6 +227,10 @@ interface StoredQueueState {
   sourceFilter?: SourceFilter;
   zoneFilter?: EmbroideryZone | "";
   search?: string;
+  /** «الكل» is stored explicitly so a deliberate widening survives a tap into an order
+   *  and back — `undefined` means «not chosen yet», which is what lets the first load
+   *  default to the worker's own station. */
+  stage?: OrderStatus | "all";
 }
 
 function readStoredQueue(): StoredQueueState {
@@ -263,18 +268,30 @@ function QueueView({
       ? stored.zoneFilter
       : ""
   );
+  // ── Stage scope ────────────────────────────────────────────────────────────
+  // Since 2026-08-31 this payload is the WHOLE line (backend LINE_VIEW_STAGES), so «مراجعة
+  // التصاميم» was opening on قيد التطريز / قيد الكوي rows too. The screen now opens on the
+  // viewer's own station and keeps every other stage one tap away — a default, not a
+  // narrowing. Both lists come from the backend; never re-derive them here.
+  const [myStages, setMyStages] = useState<OrderStatus[]>([]);
+  const [viewStages, setViewStages] = useState<OrderStatus[]>([]);
+  const [stage, setStage] = useState<OrderStatus | "all" | undefined>(stored.stage);
+  // The «open on my station» default is applied at most ONCE. Without this the source/zone
+  // refetch would drag the worker back to «مرحلتي» every time they touched another filter —
+  // the same trap the rep console's `stageDefaultSettled` guards.
+  const stageDefaultSettled = useRef<boolean>(stored.stage !== undefined);
 
   // Mirror the UI state so back-navigation restores it exactly.
   useEffect(() => {
     try {
       sessionStorage.setItem(
         QUEUE_STORAGE_KEY,
-        JSON.stringify({ activeTab, sourceFilter, zoneFilter, search })
+        JSON.stringify({ activeTab, sourceFilter, zoneFilter, search, stage })
       );
     } catch {
       /* storage full/unavailable — persistence is best-effort */
     }
-  }, [activeTab, sourceFilter, zoneFilter, search]);
+  }, [activeTab, sourceFilter, zoneFilter, search, stage]);
 
   // …and the scroll offset with it. Restoring the FILTERS but not the position still
   // dumped the worker at the top of a 100-row queue on every back-navigation.
@@ -287,10 +304,24 @@ function QueueView({
   // unmemoised filter would re-normalise five fields per row on re-renders that have
   // nothing to do with the query. (The React Compiler is NOT enabled in this app — there is
   // no `experimental.reactCompiler` in next.config.ts and no babel plugin in package.json.)
-  const visibleItems = useMemo(
+  const searchedItems = useMemo(
     () => items.filter((i) => matchesQueueSearch(i, search)),
     [items, search]
   );
+  // Stage is filtered CLIENT-side on purpose: one fetch keeps every chip's count live on a
+  // phone/slow network, exactly as the source and zone chips already work here.
+  const visibleItems = useMemo(
+    () =>
+      stage && stage !== "all"
+        ? searchedItems.filter((i) => i.status === stage)
+        : searchedItems,
+    [searchedItems, stage]
+  );
+  const stageCounts = useMemo(() => {
+    const m: Partial<Record<OrderStatus, number>> = {};
+    for (const i of searchedItems) m[i.status] = (m[i.status] ?? 0) + 1;
+    return m;
+  }, [searchedItems]);
 
   const meta = QUEUE_META[staffType] ?? {
     title: "قائمة الطلبات",
@@ -303,8 +334,21 @@ function QueueView({
       if (!silent) setLoading(true);
       setFetchError(false);
       try {
-        const data = await getQueue(undefined, sourceFilter || undefined, zoneFilter || undefined);
-        setItems(data);
+        const res = await getQueueScoped(
+          undefined,
+          sourceFilter || undefined,
+          zoneFilter || undefined
+        );
+        setItems(res.items);
+        setMyStages(res.myStages);
+        setViewStages(res.viewStages);
+        // Open on the worker's own station the first time only. A manager/مفصل has no
+        // station (`my_stages` is []) and correctly stays on «الكل», unchanged.
+        if (!stageDefaultSettled.current) {
+          stageDefaultSettled.current = true;
+          const own = res.myStages.find((st) => res.items.some((i) => i.status === st));
+          setStage(own ?? (res.myStages[0] || "all"));
+        }
       } catch (err) {
         if (!silent) {
           toast.error(getApiErrorMessage(err, "تعذر تحميل الطلبات"));
@@ -429,6 +473,19 @@ function QueueView({
             </div>
           ) : null}
 
+          {/* Stage scope — «مرحلتي» is preselected; the rest of the line stays one tap away.
+              Renders nothing when the backend returned a single stage, so a shop where this
+              worker really does only see their own station looks exactly as it did before. */}
+          <StageChips
+            className="mb-4"
+            stages={viewStages}
+            mine={myStages}
+            value={stage === "all" ? undefined : stage}
+            onChange={(s) => setStage(s ?? "all")}
+            counts={stageCounts}
+            totalCount={searchedItems.length}
+          />
+
           {/* Embroidery-zone / pleat filter (sash R/L/back · cap side/top · robe pleats) */}
           <div className="mb-4 flex flex-wrap gap-1.5" role="group" aria-label="تصفية حسب التطريز">
             <button
@@ -469,10 +526,22 @@ function QueueView({
           ) : items.length === 0 ? (
             <EmptyState message={meta.empty} />
           ) : visibleItems.length === 0 ? (
-            <EmptyState message={`لا توجد نتائج لـ «${search.trim()}»`} />
+            search.trim() ? (
+              <EmptyState message={`لا توجد نتائج لـ «${search.trim()}»`} />
+            ) : (
+              // A stage with no work is not an error — say which stage is empty and leave the
+              // chips above in reach, rather than repeating the station's generic empty line.
+              <EmptyState
+                message={
+                  stage && stage !== "all"
+                    ? `لا توجد طلبات في «${ORDER_STATUS_LABELS[stage]}» حالياً`
+                    : meta.empty
+                }
+              />
+            )
           ) : (
             <>
-              {search.trim() && (
+              {(search.trim() || (stage && stage !== "all")) && (
                 <p className="mb-2 text-xs text-ink-soft">
                   {visibleItems.length} من {items.length} طلب
                 </p>

@@ -114,15 +114,53 @@ export async function getQueue(
   zone?: string,
   station?: boolean
 ): Promise<ProductionQueueItem[]> {
+  return (await getQueueScoped(stage, source, zone, station)).items;
+}
+
+/**
+ * The same request, keeping the stage lists the backend sends alongside the rows.
+ *
+ * `myStages`  — the stages this viewer personally works («مرحلتي»). `[]` for a
+ *               manager/admin/مفصل, who have no station and correctly open on «الكل».
+ * `viewStages` — every stage the backend actually returned rows for, i.e. what they may
+ *               step to. Since 2026-08-31 that is the whole line minus التصميم for any line
+ *               staff member, which is exactly why a screen must OPEN on `myStages`.
+ *
+ * ⚠️ Never re-derive either list in TypeScript. They come from the backend's QUEUE_STAGES /
+ * LINE_VIEW_STAGES, and a second copy here would drift the way the viewerStages landmine
+ * describes (a UI that claims a stage is «مرحلتي» when the API says otherwise).
+ */
+export interface ScopedQueue {
+  items: ProductionQueueItem[];
+  myStages: OrderStatus[];
+  viewStages: OrderStatus[];
+}
+
+export async function getQueueScoped(
+  stage?: OrderStatus,
+  source?: "retail" | "wholesaler",
+  zone?: string,
+  station?: boolean
+): Promise<ScopedQueue> {
   const params: Record<string, string> = {};
   if (stage) params.stage = stage;
   if (source) params.source = source;
   if (zone) params.zone = zone;
   if (station) params.station = "1"; // enrich rows with zones / advance grants (station console)
-  const { data } = await api.get<{ data: ProductionQueueItem[] }>("/production/queue", {
+  const { data } = await api.get<{
+    data: ProductionQueueItem[];
+    my_stages?: OrderStatus[];
+    view_stages?: OrderStatus[];
+  }>("/production/queue", {
     params: Object.keys(params).length ? params : undefined,
   });
-  return data.data ?? [];
+  // Tolerate an older API that predates the two lists: [] means «الكل», i.e. exactly the
+  // behaviour every screen had before this shipped. Same fallback wholesalerOrders uses.
+  return {
+    items: data.data ?? [],
+    myStages: Array.isArray(data.my_stages) ? data.my_stages : [],
+    viewStages: Array.isArray(data.view_stages) ? data.view_stages : [],
+  };
 }
 
 /**

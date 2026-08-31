@@ -15,6 +15,25 @@ export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
   cancelled: "ملغي",
 };
 
+/**
+ * The production line in the order a piece walks it — DISPLAY ORDER ONLY.
+ *
+ * ⚠️ This is not an access list and must never be used as one. What a staff member may SEE
+ * comes from the queue response's `view_stages`, what is THEIRS from `my_stages`, and what
+ * they may MOVE from each row's own `can_advance`. This array only decides the order the
+ * chips are drawn in. `converting` is included because legacy orders still sit there
+ * (stage-2 was removed 2026-07-15) and `delivered` because the preparer owns the done column.
+ */
+export const PRODUCTION_STAGE_ORDER: OrderStatus[] = [
+  "design_complete",
+  "converting",
+  "embroidery",
+  "pressing",
+  "preparing",
+  "ready",
+  "delivered",
+];
+
 /** Staff job-type → Arabic label (production pipeline roles). */
 export const STAFF_TYPE_LABELS: Record<StaffType, string> = {
   designer: "مصمم",

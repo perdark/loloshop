@@ -254,8 +254,14 @@ export function StationConsole({
   const [activeType, setActiveType] = useState(stored.activeType ?? "all");
   // Which stage of the line is on screen. Defaults to this console's OWN station — a worker
   // opening their queue must still land on their own work, not on 1,400 rows of the line.
+  // ⚠️ «tailor» is NOT a line stage — tailorToPiece stamps every فصال row with it precisely
+  // to keep الفصال out of the stage chips, and LINE_ORDER does not contain it. So the فصال
+  // console must START there: it has no chips to correct a wrong initial value, and since the
+  // views below are stage-scoped a wrong start would render an empty الفصال queue.
   const [activeStage, setActiveStage] = useState<string>(
-    stored.activeStage ?? (kind === "embroidery" ? "embroidery" : "pressing")
+    kind === "tailor"
+      ? "tailor"
+      : (stored.activeStage ?? (kind === "embroidery" ? "embroidery" : "pressing"))
   );
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set(Array.isArray(stored.selected) ? stored.selected : [])
@@ -382,10 +388,49 @@ export function StationConsole({
     return [...s];
   }, [pieces]);
 
+  // ─── Stage chips — the line, in order, counted from what the backend actually sent ──────
+  // Only stages PRESENT in the payload get a chip, so a console never offers an empty stage
+  // and the row can never claim access the backend did not grant.
+  const stageChips = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const p of filtered) m.set(p.status, (m.get(p.status) ?? 0) + 1);
+    return LINE_ORDER.filter((st) => m.has(st)).map((st) => ({ stage: st, count: m.get(st)! }));
+  }, [filtered]);
+
+  // If the worker's own stage is empty this run, fall back to the first stage that has work
+  // rather than showing an empty screen with chips beside it.
+  //
+  // ⚠️ Derived, not just corrected in the effect below. The views are stage-scoped now, so a
+  // state-only correction paints one frame of «لا توجد قطع في …» before it lands. The effect
+  // stays so the corrected stage is what gets mirrored to sessionStorage.
+  // No chips (الفصال) = no line stage to fall back to — `activeStage` stands as-is.
+  const effectiveStage = useMemo(
+    () =>
+      stageChips.length && !stageChips.some((c) => c.stage === activeStage)
+        ? stageChips[0].stage
+        : activeStage,
+    [stageChips, activeStage]
+  );
+
+  useEffect(() => {
+    if (!loadedOnce || effectiveStage === activeStage) return;
+    setActiveStage(effectiveStage);
+  }, [effectiveStage, activeStage, loadedOnce]);
+
+  // ─── Stage scope ────────────────────────────────────────────────────────────
+  // EVERYTHING below this line works on ONE stage. Since 2026-08-31 the payload is the whole
+  // line, and «عرض بالطلب» used to group over all of it — so a presser's student list mixed
+  // in قيد التطريز and قيد التجهيز pieces with no chip in sight to explain why. Both views
+  // now sit behind the same stage chip row, which opens on this console's own station.
+  const inStage = useMemo(
+    () => filtered.filter((p) => p.status === effectiveStage),
+    [filtered, effectiveStage]
+  );
+
   // ─── «عرض بالطلب» grouping ──────────────────────────────────────────────────
   const groups = useMemo(() => {
     const m = new Map<string, StudentGroup>();
-    for (const p of filtered) {
+    for (const p of inStage) {
       const key = p.studentId || p.studentName;
       let g = m.get(key);
       if (!g) {
@@ -412,12 +457,14 @@ export function StationConsole({
       if (isPieceOverdue(p.deadline)) g.overdue = true;
     }
     return [...m.values()];
-  }, [filtered]);
+  }, [inStage]);
 
   // ─── «عرض بالقطع» chips + rows ──────────────────────────────────────────────
+  // Counted over the ACTIVE stage, matching the rows below them: counting across the whole
+  // line would advertise «الوشاح — جهة الاسم ١٢» and then list the two that are at التطريز.
   const zoneChips = useMemo(() => {
     const m = new Map<string, { key: string; label: string; count: number }>();
-    for (const p of filtered) {
+    for (const p of inStage) {
       for (const z of p.zones ?? []) {
         if (z.done) continue;
         const e = m.get(z.key) ?? { key: z.key, label: z.label, count: 0 };
@@ -426,36 +473,16 @@ export function StationConsole({
       }
     }
     return ZONE_ORDER.filter((k) => m.has(k)).map((k) => m.get(k)!);
-  }, [filtered]);
+  }, [inStage]);
 
   useEffect(() => {
-    if (kind !== "embroidery" || activeStage !== "embroidery" || !loadedOnce) return;
+    if (kind !== "embroidery" || effectiveStage !== "embroidery" || !loadedOnce) return;
     if (!zoneChips.some((c) => c.key === activeZone)) {
       setActiveZone(zoneChips[0]?.key ?? "");
       setSelected(new Set()); // the restored/previous selection belonged to the old zone
     }
-  }, [zoneChips, activeZone, kind, activeStage, loadedOnce]);
+  }, [zoneChips, activeZone, kind, effectiveStage, loadedOnce]);
 
-  // ─── Stage chips — the line, in order, counted from what the backend actually sent ──────
-  // Only stages PRESENT in the payload get a chip, so a console never offers an empty stage
-  // and the row can never claim access the backend did not grant.
-  const stageChips = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const p of filtered) m.set(p.status, (m.get(p.status) ?? 0) + 1);
-    return LINE_ORDER.filter((st) => m.has(st)).map((st) => ({ stage: st, count: m.get(st)! }));
-  }, [filtered]);
-
-  // If the worker's own stage is empty this run, fall back to the first stage that has work
-  // rather than showing an empty screen with chips beside it.
-  useEffect(() => {
-    if (!loadedOnce || !stageChips.length) return;
-    if (!stageChips.some((c) => c.stage === activeStage)) setActiveStage(stageChips[0].stage);
-  }, [stageChips, activeStage, loadedOnce]);
-
-  const inStage = useMemo(
-    () => filtered.filter((p) => p.status === activeStage),
-    [filtered, activeStage]
-  );
 
   const typeChips = useMemo(() => {
     const m = new Map<string, number>();
@@ -471,7 +498,7 @@ export function StationConsole({
   // The zone checklist is التطريز's own way of working and applies only while an embroiderer
   // is looking AT التطريز. Stepping to another stage falls back to the plain type chips —
   // otherwise a presser's view of التطريز would demand a zone that is not their job to tick.
-  const zoneMode = kind === "embroidery" && activeStage === "embroidery";
+  const zoneMode = kind === "embroidery" && effectiveStage === "embroidery";
 
   const pieceRows = useMemo(() => {
     if (zoneMode) {
@@ -820,6 +847,48 @@ export function StationConsole({
       )}
 
       {/* Body */}
+      {/* Stage chips — «مرحلتي» first, then the rest of the line. They sit ABOVE the view
+          branch on purpose: they used to live inside «عرض بالقطع» only, so «عرض بالطلب»
+          (the default view) listed every stage's students with nothing on screen saying so.
+          Only rendered when the backend actually returned more than one stage. */}
+      {view !== "done" && !loading && !fetchError && stageChips.length > 1 && (
+        <nav aria-label="تصفية حسب المرحلة" className="mb-2 flex gap-2 overflow-x-auto pb-1">
+          {stageChips.map((c) => {
+            const own = c.stage === (kind === "embroidery" ? "embroidery" : "pressing");
+            return (
+              <button
+                key={c.stage}
+                type="button"
+                onClick={() => {
+                  if (effectiveStage === c.stage) return;
+                  setActiveStage(c.stage);
+                  setSelected(new Set()); // the selection belonged to the old stage
+                  setOpenStudentKey(null); // …and so did the open student sheet
+                }}
+                aria-pressed={effectiveStage === c.stage}
+                className={`flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-xs font-bold transition-colors ${
+                  effectiveStage === c.stage
+                    ? "border-orange-ink bg-orange-ink text-white"
+                    : own
+                      ? "border-orange-ink/40 bg-peach/40 text-orange-ink hover:text-ink"
+                      : "border-line bg-surface text-ink-soft hover:text-ink"
+                }`}
+              >
+                {own ? "مرحلتي · " : ""}
+                {(ORDER_STATUS_LABELS as Record<string, string>)[c.stage] ?? c.stage}
+                <span
+                  className={`rounded-full px-1.5 py-0.5 text-[10px] ${
+                    effectiveStage === c.stage ? "bg-white/20" : "bg-ink/8"
+                  }`}
+                >
+                  {c.count}
+                </span>
+              </button>
+            );
+          })}
+        </nav>
+      )}
+
       {view === "done" ? (
         <DoneList
           rows={doneRows}
@@ -846,6 +915,14 @@ export function StationConsole({
         </div>
       ) : filtered.length === 0 ? (
         <EmptyState message={meta.empty} />
+      ) : inStage.length === 0 ? (
+        // A stage the worker stepped into that has no work is not an error — name it and
+        // leave the chips above in reach.
+        <EmptyState
+          message={`لا توجد قطع في «${
+            (ORDER_STATUS_LABELS as Record<string, string>)[effectiveStage] ?? effectiveStage
+          }» حالياً`}
+        />
       ) : view === "students" ? (
         <ul className="space-y-2.5">
           {groups.map((g) => (
@@ -879,46 +956,6 @@ export function StationConsole({
         </ul>
       ) : (
         <>
-          {/* Stage chips — «مرحلتي» first, then the rest of the line. Only rendered when the
-              backend actually returned more than one stage, so الفصال and a single-stage day
-              look exactly as they did before. */}
-          {stageChips.length > 1 && (
-            <div className="mb-2 flex gap-2 overflow-x-auto pb-1">
-              {stageChips.map((c) => {
-                const own = c.stage === (kind === "embroidery" ? "embroidery" : "pressing");
-                return (
-                  <button
-                    key={c.stage}
-                    type="button"
-                    onClick={() => {
-                      if (activeStage === c.stage) return;
-                      setActiveStage(c.stage);
-                      setSelected(new Set()); // the selection belonged to the old stage
-                    }}
-                    aria-pressed={activeStage === c.stage}
-                    className={`flex min-h-10 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-xs font-bold transition-colors ${
-                      activeStage === c.stage
-                        ? "border-orange-ink bg-orange-ink text-white"
-                        : own
-                          ? "border-orange-ink/40 bg-peach/40 text-orange-ink hover:text-ink"
-                          : "border-line bg-surface text-ink-soft hover:text-ink"
-                    }`}
-                  >
-                    {own ? "مرحلتي · " : ""}
-                    {(ORDER_STATUS_LABELS as Record<string, string>)[c.stage] ?? c.stage}
-                    <span
-                      className={`rounded-full px-1.5 py-0.5 text-[10px] ${
-                        activeStage === c.stage ? "bg-white/20" : "bg-ink/8"
-                      }`}
-                    >
-                      {c.count}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
           {/* Chips: zones (التطريز) or piece types (الفصال/الكوي) */}
           <div className="flex gap-2 overflow-x-auto pb-1">
             {zoneMode
