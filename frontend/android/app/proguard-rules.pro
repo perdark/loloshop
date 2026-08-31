@@ -19,3 +19,18 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# --- Play quality: R8 enabled (متطلبات جودة Google Play) ---
+# @capacitor/android ships consumer rules that keep Plugin subclasses, and the
+# default proguard-android.txt keeps @JavascriptInterface members. These are
+# belt-and-braces: plugin classes are resolved BY NAME at runtime from
+# assets/capacitor.plugins.json, so reflection is invisible to R8.
+-keep class com.getcapacitor.** { *; }
+-keep class com.capacitorjs.plugins.** { *; }
+-keep class * extends com.getcapacitor.BridgeActivity { *; }
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
+# Keep line numbers so Play Console crash reports stay readable after minifying.
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute SourceFile

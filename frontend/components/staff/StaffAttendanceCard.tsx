@@ -1,6 +1,5 @@
 "use client";
 
-import { Button } from "@/components/ui/Button";
 import { formatIQD } from "@/lib/format";
 import type { StaffAttendanceRecord, StaffAttendanceSettings } from "@/lib/types";
 
@@ -23,20 +22,21 @@ function durationLabel(minutes: number | null | undefined) {
   return `${mins} دقيقة`;
 }
 
+/**
+ * ⚠️ READ-ONLY SINCE 2026-08-30 — this card shows the day, it no longer punches it.
+ * دخول/خروج come from the K40 at the shop; the two buttons that used to live here are gone
+ * and the backend routes behind them were removed in the same change, so putting a button
+ * back would call an endpoint that does not exist. الخروج المؤقت stays in `breakSlot`: it is
+ * still a phone action, because the device's break keys are on an unmerged branch (ffcb0ce).
+ */
 export function StaffAttendanceCard({
   settings,
   record,
-  busy,
-  onCheckIn,
-  onCheckOut,
   breakSlot = null,
   className = "",
 }: {
   settings: StaffAttendanceSettings | null | undefined;
   record: StaffAttendanceRecord | null;
-  busy: boolean;
-  onCheckIn: () => void;
-  onCheckOut: () => void;
   /** الخروج المؤقت controls — rendered only while a shift is open */
   breakSlot?: React.ReactNode;
   className?: string;
@@ -63,27 +63,9 @@ export function StaffAttendanceCard({
           </p>
         </div>
         {attendanceRequired ? (
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              onClick={onCheckIn}
-              disabled={busy || !!record?.checkInAt}
-              loading={busy && !record?.checkInAt}
-              size="sm"
-            >
-              بصمة دخول
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={onCheckOut}
-              disabled={busy || !record?.checkInAt || !!record?.checkOutAt}
-              loading={busy && !!record?.checkInAt && !record?.checkOutAt}
-              size="sm"
-            >
-              بصمة خروج
-            </Button>
-          </div>
+          <span className="rounded-full border border-orange-ink/30 bg-orange-ink/8 px-3 py-1 text-xs font-bold text-orange-ink">
+            البصمة على الجهاز بالمحل
+          </span>
         ) : (
           <span className="rounded-full border border-emerald-500/30 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">
             غير مطلوب

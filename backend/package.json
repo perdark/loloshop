@@ -17,7 +17,8 @@
     "ai:scenarios": "node scripts/ai-scenarios.js",
     "photo-recovery": "node scripts/calligraphy-photo-recovery.js",
     "end-discounts": "node scripts/end-discounts.js",
-    "friday-deduction-report": "node scripts/friday-deduction-report.js"
+    "friday-deduction-report": "node scripts/friday-deduction-report.js",
+    "stranded-orders": "node scripts/stranded-orders.js"
   },
   "keywords": [],
   "author": "",

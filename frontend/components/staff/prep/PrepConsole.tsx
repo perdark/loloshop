@@ -138,6 +138,7 @@ function studentInfoLine(g: StudentGroup | null): string | null {
 
 function queueToPiece(r: ProductionQueueItem): StationPiece {
   return {
+    status: r.status,
     id: r.id,
     studentId: r.student_id ?? r.student_name,
     studentName: r.student_name,

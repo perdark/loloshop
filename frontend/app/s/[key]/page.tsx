@@ -78,7 +78,7 @@ export default function StaffPortalPage() {
   if (loading) {
     return (
       <div
-        className="flex min-h-screen items-center justify-center bg-cream"
+        className="flex min-h-dvh items-center justify-center bg-cream"
         dir="rtl"
         lang="ar"
       >
@@ -91,7 +91,7 @@ export default function StaffPortalPage() {
   if (notFound) {
     return (
       <div
-        className="flex min-h-screen flex-col items-center justify-center gap-2 bg-cream px-6 text-center"
+        className="flex min-h-dvh flex-col items-center justify-center gap-2 bg-cream px-6 text-center"
         dir="rtl"
         lang="ar"
       >

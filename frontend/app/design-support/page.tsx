@@ -730,7 +730,7 @@ export default function DesignSupportPage() {
   const title = session?.team?.name ?? "أيادي التصميم";
 
   return (
-    <div className="min-h-screen bg-cream" dir="rtl" lang="ar">
+    <div className="min-h-dvh bg-cream" dir="rtl" lang="ar">
       <header className="sticky top-0 z-20 border-b border-line bg-surface">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 lg:px-8">
           <div>

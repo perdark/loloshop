@@ -981,8 +981,11 @@ function ConsoleContent() {
     zoneParam && !zoneOptions.includes(zoneParam) ? [...zoneOptions, zoneParam] : zoneOptions;
 
   // ── Client-side filtering ──────────────────────────────────────────────────
-  // Plain derived value — the React Compiler memoizes it automatically (a manual
-  // useMemo here could not be preserved because it aliased/reassigned `items`).
+  // Plain derived value, deliberately unmemoised: a manual useMemo here could not be
+  // preserved because it aliased/reassigned `items`. ⚠️ It is NOT compiler-memoised either —
+  // this line used to claim the React Compiler handled it, and the compiler is not enabled in
+  // this app (no `experimental.reactCompiler`, no babel plugin). So this really does re-run on
+  // every render; it is accepted at this row count, not free.
   const q = search.trim().toLowerCase();
   const filtered = items.filter((i) => {
     if (stage && i.status !== stage) return false;

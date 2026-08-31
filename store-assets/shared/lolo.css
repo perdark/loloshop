@@ -1,0 +1,42 @@
+/* ============================================================================
+   LoloShop reel kit — brand tokens + self-hosted faces.
+   Tokens are lifted verbatim from frontend/app/globals.css @theme; do not invent
+   colours. DESIGN.md rules that bind here:
+     · orange is EARNED — <=10% of visual weight, action/emotional peaks only
+     · every shadow is INK-toned, never brand-toned ("Ink-Not-Orange Shadow Rule")
+     · Arabic display type is the craft: Amiri at scale, Cairo for UI/body
+   ========================================================================== */
+@font-face{font-family:'Cairo';src:url(assets/cairo-lat.woff2) format('woff2');font-weight:400 700;font-display:block}
+@font-face{font-family:'Cairo';src:url(assets/cairo-ar.woff2) format('woff2');font-weight:400 700;font-display:block;
+  unicode-range:U+0600-06FF,U+0750-077F,U+08A0-08FF,U+FB50-FDFF,U+FE70-FEFF,U+200C-200E,U+2010-2011,U+204F,U+2E41}
+@font-face{font-family:'Amiri';src:url(assets/amiri-lat.woff2) format('woff2');font-weight:400;font-display:block}
+@font-face{font-family:'Amiri';src:url(assets/amiri-ar-400.woff2) format('woff2');font-weight:400;font-display:block;
+  unicode-range:U+0600-06FF,U+0750-077F,U+08A0-08FF,U+FB50-FDFF,U+FE70-FEFF,U+200C-200E,U+2010-2011,U+204F,U+2E41}
+@font-face{font-family:'Amiri';src:url(assets/amiri-ar-700.woff2) format('woff2');font-weight:700;font-display:block;
+  unicode-range:U+0600-06FF,U+0750-077F,U+08A0-08FF,U+FB50-FDFF,U+FE70-FEFF,U+200C-200E,U+2010-2011,U+204F,U+2E41}
+@font-face{font-family:'Playfair';src:url(assets/playfair-lat.woff2) format('woff2');font-weight:400 700;font-display:block}
+@font-face{font-family:'Vibes';src:url(assets/greatvibes-lat.woff2) format('woff2');font-weight:400;font-display:block}
+
+:root{
+  --paper:#FAF4EA; --surface:#FFFDFA; --sink:#F5F0E6;
+  --ink:#1A1A1A; --ink-soft:#33302B; --muted:#6B6356; --line:#E3DDD0;
+  --orange:#F47B42; --orange-light:#FFA07A; --orange-ink:#C2410C; --peach:#FFDAB9;
+  --danger:#A3372A;
+  --sh:rgba(26,26,26,.30); --sh-soft:rgba(26,26,26,.13); --sh-hair:rgba(26,26,26,.07);
+  /* the dark register — for reels graded on ink rather than paper */
+  --night:#0E0C0B; --night-2:#191512; --night-3:#241E1A; --night-line:rgba(250,244,234,.14);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:1080px;height:1920px;overflow:hidden;background:#000}
+body{font-family:'Cairo',sans-serif;-webkit-font-smoothing:antialiased;text-rendering:geometricPrecision}
+#stage{position:relative;width:1080px;height:1920px;overflow:hidden}
+.disp{font-family:'Amiri',serif;font-weight:700;line-height:1.42}
+.body{font-family:'Cairo',sans-serif;line-height:1.75}
+.w{display:inline-block;white-space:pre;position:relative}
+bdi{unicode-bidi:isolate}
+.center{position:absolute;left:0;right:0;text-align:center}
+
+/* film grain — deterministic, jittered per frame by the timeline, never by RNG */
+.grain{position:absolute;inset:-120px;pointer-events:none;opacity:.075;mix-blend-mode:multiply;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='260' height='260'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' seed='11'/></filter><rect width='260' height='260' filter='url(%23n)'/></svg>")}
+.grain.dark{mix-blend-mode:screen;opacity:.055}

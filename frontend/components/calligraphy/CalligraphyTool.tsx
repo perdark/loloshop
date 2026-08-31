@@ -2289,6 +2289,13 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
                             {z.send_label ?? "تحويل للتطريز"}
                           </Button>
                         )}
+                        {/* Refused by the server's own gate — say why instead of showing a
+                            button that 409s, or (worse) letting the order vanish downstream. */}
+                        {canSendOrders && !z?.can_send && z?.blocked_reason && (
+                          <span className="ms-auto rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-800">
+                            ⏸ {z.blocked_reason}
+                          </span>
+                        )}
                         {sent && (
                           <span className="ms-auto rounded-full bg-green-50 px-3 py-1 text-xs font-bold text-green-700">
                             ✓ أُرسل

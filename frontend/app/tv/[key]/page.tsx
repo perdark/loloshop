@@ -301,7 +301,7 @@ export default function TvBoardPage() {
 
   if (status === "denied") {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[#FAEBD7]" dir="rtl">
+      <main className="flex min-h-dvh items-center justify-center bg-[#FAEBD7]" dir="rtl">
         <div className="text-center">
           <h1 className="font-[Cairo] text-6xl font-black text-[#5a3210]">٤٠٤</h1>
           <p className="mt-2 text-xl text-[#9a6a3a]">الصفحة غير موجودة</p>
@@ -311,7 +311,7 @@ export default function TvBoardPage() {
   }
   if (status === "loading" || !data) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[#FAEBD7]" dir="rtl">
+      <main className="flex min-h-dvh items-center justify-center bg-[#FAEBD7]" dir="rtl">
         <div className="text-center">
           <div className="text-5xl">◈</div>
           <p className="mt-3 animate-pulse font-[Amiri] text-2xl text-[#7a4e22]">جارٍ تحميل لوحة المتابعة…</p>

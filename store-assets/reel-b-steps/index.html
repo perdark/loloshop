@@ -1,0 +1,431 @@
+<!doctype html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="utf-8">
+<title>لولو شوب — أربع خطوات</title>
+<link rel="stylesheet" href="../shared/lolo.css">
+<link rel="stylesheet" href="../shared/device.css">
+<style>
+/* ============================================================================
+   «أربع خطوات» — ONE CONTINUOUS TAKE.
+   There is no cut and no cross-dissolve in this film. #reel is a single 8700px
+   designed page; seek(t) sets its translateY and almost nothing else. Every
+   reveal in here is a function of WHERE THE CAMERA IS, not of wall time.
+   Three parallax layers: rules/grid 0.55x · content 1.0x · numerals+chips 1.18x
+   ========================================================================== */
+#stage{background:var(--paper)}
+
+#camScale{position:absolute;inset:0;transform-origin:50% 48%;z-index:5}
+#reel{position:absolute;left:0;top:0;width:1080px;height:8900px}
+.layer{position:absolute;left:0;top:0;width:1080px;height:8900px}
+
+/* ---------------- background layer (0.55x) ---------------- */
+#lBg{background-image:repeating-linear-gradient(to bottom,
+      rgba(227,221,208,0) 0 147px, rgba(227,221,208,.62) 147px 148px)}
+#lBg .vr{position:absolute;top:0;width:1px;height:8900px;background:rgba(227,221,208,.80)}
+#lBg .wash{position:absolute;width:1000px;height:1000px;margin-left:-500px;left:50%;border-radius:50%;
+  background:radial-gradient(circle,rgba(255,218,185,.42) 0%,rgba(255,218,185,.16) 46%,rgba(255,218,185,0) 72%)}
+
+/* ---------------- shared element skeleton ---------------- */
+.el{position:absolute}
+.rule{height:1.5px;background:var(--line);transform-origin:100% 50%}
+.rule.thin{height:1px;background:rgba(227,221,208,.9)}
+
+.numBig{font-family:'Amiri',serif;font-weight:700;font-size:330px;line-height:1;
+  color:var(--orange);white-space:nowrap;text-align:center;
+  text-shadow:0 18px 34px rgba(26,26,26,.10)}
+
+.ttl{font-family:'Amiri',serif;font-weight:700;font-size:72px;line-height:1.30;color:var(--ink);text-align:right}
+.sub{font-family:'Cairo',sans-serif;font-weight:500;font-size:34px;line-height:1.62;color:var(--muted);text-align:right}
+.say{font-family:'Amiri',serif;font-weight:700;font-size:54px;line-height:1.34;color:var(--ink);text-align:right}
+.note{font-family:'Cairo',sans-serif;font-weight:600;font-size:32px;line-height:1.66;color:var(--ink-soft);text-align:right}
+.tiny{font-family:'Cairo',sans-serif;font-weight:500;font-size:27px;line-height:1.6;color:var(--muted)}
+
+.chip{display:inline-flex;align-items:baseline;gap:14px;padding:15px 28px;border-radius:9999px;
+  background:var(--surface);border:1.5px solid var(--line);box-shadow:0 12px 26px var(--sh-hair);
+  font-family:'Cairo',sans-serif;font-weight:700;font-size:29px;color:var(--ink);white-space:nowrap}
+.chip b{font-weight:700;font-size:31px;color:var(--ink)}
+.chip u{text-decoration:none;font-weight:600;font-size:24px;color:var(--muted)}
+.chip i.sep{width:5px;height:5px;border-radius:50%;background:var(--line);align-self:center;flex:none}
+
+.ph{display:block;border-radius:10px;box-shadow:0 26px 54px var(--sh-soft),0 6px 14px var(--sh-hair)}
+
+/* ---------------- panel 0 : the index ---------------- */
+.idx{display:flex;align-items:baseline;gap:26px;padding-bottom:19px;border-bottom:1.5px solid var(--line)}
+.idxn{font-family:'Amiri',serif;font-weight:700;font-size:42px;line-height:1;color:var(--orange);
+  min-width:34px;text-align:center}
+.idxt{font-family:'Cairo',sans-serif;font-weight:600;font-size:34px;color:var(--muted)}
+
+/* ---------------- device screen ---------------- */
+#chrome{position:absolute;inset:0;z-index:2}
+#scrStrip{z-index:1}
+#scrOpts{z-index:3;transform-origin:50% 0%}
+#devWrap{transform-origin:50% 40%;z-index:6}
+
+/* ---------------- CTA ---------------- */
+.badge{display:inline-flex;align-items:center;gap:15px;padding:13px 25px;border-radius:16px;
+  background:var(--ink);box-shadow:0 16px 32px var(--sh-soft);direction:ltr}
+.badge .bico{flex:none;display:block}
+.badge .btxt{display:flex;flex-direction:column;line-height:1;text-align:left;font-family:'Cairo',sans-serif}
+.badge u{text-decoration:none;font-size:18px;font-weight:500;color:rgba(250,244,234,.78);letter-spacing:.03em}
+.badge b{font-size:33px;font-weight:700;color:#FAF4EA;letter-spacing:.005em;margin-top:5px}
+.recap{display:flex;justify-content:center;gap:104px;align-items:flex-start}
+.recap span{display:flex;flex-direction:column;align-items:center;gap:12px;
+  font-family:'Cairo',sans-serif;font-weight:600;font-size:26px;color:var(--muted)}
+.recap b{font-family:'Amiri',serif;font-weight:700;font-size:46px;line-height:1;color:var(--orange)}
+
+/* ---------------- fixed furniture (never moves — proves the camera does) --- */
+#rail{position:absolute;right:44px;top:250px;width:3px;height:1420px;background:var(--line);
+  border-radius:2px;z-index:3}
+#railFill{position:absolute;left:0;top:0;width:3px;background:var(--orange);border-radius:2px;height:0}
+#rail .tk{position:absolute;right:-6px;width:15px;height:2px;background:var(--line)}
+#rail .tk i{position:absolute;inset:0;background:var(--orange);opacity:0}
+#cap{position:absolute;left:64px;top:232px;z-index:9;
+  font-family:'Cairo',sans-serif;font-weight:600;font-size:26px;letter-spacing:.02em;color:var(--muted)}
+#capB{position:absolute;left:64px;top:1502px;z-index:9;
+  font-family:'Cairo',sans-serif;font-weight:500;font-size:24px;letter-spacing:.06em;color:var(--muted);opacity:.72}
+
+/* ---------------- grade ---------------- */
+#wash{position:absolute;inset:0;pointer-events:none;z-index:10;mix-blend-mode:screen;
+  background:radial-gradient(78% 46% at 50% 8%,rgba(255,229,196,.55) 0%,rgba(255,229,196,0) 70%)}
+#vig{position:absolute;inset:0;pointer-events:none;z-index:11;
+  background:radial-gradient(76% 62% at 50% 46%,rgba(26,26,26,0) 48%,rgba(26,26,26,.14) 82%,rgba(26,26,26,.32) 100%)}
+</style>
+</head>
+<body>
+<div id="stage">
+ <div id="camScale">
+  <div id="reel">
+
+  <!-- ================= BACKGROUND LAYER — 0.55x ================= -->
+  <div class="layer" id="lBg">
+    <div class="vr" style="left:96px"></div>
+    <div class="vr" style="left:340px"></div>
+    <div class="vr" style="left:620px"></div>
+    <div class="vr" style="left:983px"></div>
+    <div class="el wash" data-p="0" data-y="180" data-ent="0"></div>
+    <div class="el wash" data-p="1" data-y="240" data-ent="0"></div>
+    <div class="el wash" data-p="2" data-y="240" data-ent="0"></div>
+    <div class="el wash" data-p="3" data-y="240" data-ent="0"></div>
+    <div class="el wash" data-p="4" data-y="240" data-ent="0"></div>
+    <div class="el wash" data-p="5" data-y="180" data-ent="0"></div>
+  </div>
+
+  <!-- ================= CONTENT LAYER — 1.0x ================= -->
+  <div class="layer" id="lMid">
+
+    <!-- ---------- PANEL 0 · التقديم ---------- -->
+    <div class="el rule" data-p="0" data-y="230" style="left:96px;width:888px"></div>
+    <div class="el" data-p="0" data-y="282" data-ent="0" style="left:440px;width:200px">
+      <img src="../shared/assets/logo.png" style="width:200px;display:block">
+    </div>
+    <div class="el" data-p="0" data-y="600" data-ent="0" style="left:0;width:1080px;text-align:center">
+      <span class="disp" style="font-size:96px;color:var(--ink)">صمّم وشاح تخرّجك</span>
+    </div>
+    <div class="el" data-p="0" data-y="782" data-ent="0" style="left:0;width:1080px;text-align:center">
+      <span class="body" style="font-size:40px;font-weight:500;color:var(--muted)">من التطبيق — بأربع خطوات</span>
+    </div>
+    <div class="el rule thin" data-p="0" data-y="906" style="left:330px;width:420px"></div>
+    <div class="el" data-p="0" data-y="1000" data-ent="0" style="left:230px;width:620px">
+      <div class="idx"><span class="idxn">١</span><span class="idxt">اختار موديلك</span></div></div>
+    <div class="el" data-p="0" data-y="1096" data-ent="0" style="left:230px;width:620px">
+      <div class="idx"><span class="idxn">٢</span><span class="idxt">اكتب اسمك وكليتك</span></div></div>
+    <div class="el" data-p="0" data-y="1192" data-ent="0" style="left:230px;width:620px">
+      <div class="idx"><span class="idxn">٣</span><span class="idxt">نخيطه ونطرّزه بورشتنا</span></div></div>
+    <div class="el" data-p="0" data-y="1288" data-ent="0" style="left:230px;width:620px">
+      <div class="idx"><span class="idxn">٤</span><span class="idxt">يوصلك قبل موعد الحفل</span></div></div>
+
+    <!-- ---------- PANEL 1 · اختار موديلك ---------- -->
+    <div class="el rule" data-p="1" data-y="230" style="left:96px;width:888px"></div>
+    <div class="el ttl" data-p="1" data-y="306" style="right:186px;width:660px">اختار موديلك</div>
+    <div class="el sub" data-p="1" data-y="428" style="right:186px;width:740px">أوشحة وروبات وقبعات بأسماء الطلاب وكلياتهم</div>
+
+    <!-- the device rides the canvas through steps ١ and ٢ -->
+    <div class="el" id="devWrap" data-p="1" data-y="518" data-ent="0" style="left:-24px">
+      <div class="device dev-ti" id="dev" style="--dw:400px">
+        <div class="d-frame">
+          <div class="d-screen">
+            <div class="d-app" id="devApp">
+              <img id="scrStrip" src="../shared/app/strip-shop.jpg" style="top:0" alt="">
+              <img id="scrOpts" src="../shared/app/product-opts.jpg" style="top:0" alt="">
+              <div id="chrome">
+                <img id="hdr" src="../shared/app/chrome-header.jpg" style="top:0" alt="">
+                <img id="tab" src="../shared/app/chrome-tabbar.jpg" style="bottom:0;top:auto" alt="">
+              </div>
+            </div>
+            <div class="d-status">
+              <span class="d-time">٩:٤١</span>
+              <span class="d-sig">
+                <svg width="19" height="13" viewBox="0 0 19 13"><rect x="0" y="9" width="3" height="4" rx="1"/><rect x="5" y="6.4" width="3" height="6.6" rx="1"/><rect x="10" y="3.4" width="3" height="9.6" rx="1"/><rect x="15" y="0" width="3" height="13" rx="1"/></svg>
+                <svg width="17" height="13" viewBox="0 0 17 13"><path d="M8.5 12.4 6.2 9.9a3.3 3.3 0 0 1 4.6 0zM3.6 7.3 1.9 5.5a9.6 9.6 0 0 1 13.2 0l-1.7 1.8a7.2 7.2 0 0 0-9.8 0zm2.1 2.2L4 7.7a6 6 0 0 1 9 0l-1.7 1.8a3.7 3.7 0 0 0-5.6 0z"/></svg>
+                <svg width="26" height="13" viewBox="0 0 26 13"><rect x="0.6" y="0.6" width="21" height="11.8" rx="3.4" fill="none" stroke="currentColor" stroke-opacity=".38" stroke-width="1.2"/><rect x="2.3" y="2.3" width="15.6" height="8.4" rx="2.2"/><path d="M23.2 4.3c1.4.5 1.4 3.9 0 4.4z"/></svg>
+              </span>
+            </div>
+            <div class="d-island"><i class="d-lens"></i></div>
+            <div class="d-home"></div>
+            <div class="d-gloss" id="devGloss"></div>
+          </div>
+        </div>
+        <i class="d-btn d-act"></i><i class="d-btn d-vup"></i><i class="d-btn d-vdn"></i>
+        <i class="d-btn d-pwr"></i><i class="d-btn d-cam"></i>
+      </div>
+    </div>
+
+    <div class="el note" data-p="1" data-y="1118" style="right:80px;width:440px">دفعتك كلها تقدر تطلب سوية</div>
+    <div class="el rule thin" data-p="1" data-y="1300" style="left:530px;width:454px"></div>
+
+    <!-- ---------- PANEL 2 · اكتب اسمك وكليتك ---------- -->
+    <div class="el rule" data-p="2" data-y="230" style="left:96px;width:888px"></div>
+    <div class="el ttl" data-p="2" data-y="306" style="right:186px;width:660px">اكتب اسمك وكليتك</div>
+    <div class="el sub" data-p="2" data-y="428" style="right:186px;width:740px">الاسم والكلية مطرّزين بالخيط</div>
+    <div class="el say" data-p="2" data-y="596" style="right:80px;width:450px">بالخط العربي،</div>
+    <div class="el say" data-p="2" data-y="676" style="right:80px;width:450px">مو طباعة تنمسح</div>
+    <div class="el say" data-p="2" data-y="756" style="right:80px;width:450px">بعد غسلة</div>
+    <div class="el rule thin" data-p="2" data-y="1300" style="left:530px;width:454px"></div>
+
+    <!-- ---------- PANEL 3 · نخيطه ونطرّزه بورشتنا ---------- -->
+    <div class="el rule" data-p="3" data-y="230" style="left:96px;width:888px"></div>
+    <div class="el ttl" data-p="3" data-y="306" style="right:186px;width:720px">نخيطه ونطرّزه بورشتنا</div>
+    <div class="el sub" data-p="3" data-y="428" style="right:186px;width:740px">إحنا اللي نفصّل ونطرّز، مو وسيط يشتري ويبيع</div>
+    <div class="el" data-p="3" data-y="540" style="left:88px">
+      <img class="ph" src="../shared/assets/ph-look-boutique.jpg" style="width:520px;height:693px" alt=""></div>
+    <div class="el" data-p="3" data-y="716" style="left:612px">
+      <img class="ph" src="../shared/assets/ph-detail-pedestal.jpg" style="width:380px;height:472px" alt=""></div>
+    <div class="el tiny" data-p="3" data-y="1296" style="left:88px;width:420px">تعال شوف القماش بعينك قبل الطلب</div>
+
+    <!-- ---------- PANEL 4 · يوصلك قبل موعد الحفل ---------- -->
+    <div class="el rule" data-p="4" data-y="230" style="left:96px;width:888px"></div>
+    <div class="el ttl" data-p="4" data-y="306" style="right:186px;width:720px">يوصلك قبل موعد الحفل</div>
+    <div class="el sub" data-p="4" data-y="428" style="right:186px;width:740px">الدفع نقداً عند التسليم — ما تدفع ولا دينار هسه</div>
+    <div class="el" data-p="4" data-y="520" style="left:-40px">
+      <img class="ph" src="../shared/assets/ph-grad-moments-1.jpg" style="width:545px;height:675px" alt=""></div>
+    <div class="el" data-p="4" data-y="586" style="right:96px;width:400px;text-align:right">
+      <span class="disp" style="font-size:94px;color:var(--ink)"><bdi>٢٬٠١٧</bdi></span></div>
+    <div class="el tiny" data-p="4" data-y="742" style="right:96px;width:330px;text-align:right">طالب وطالبة سجّلوا معنا</div>
+    <div class="el rule thin" data-p="4" data-y="846" style="left:600px;width:384px"></div>
+    <div class="el tiny" data-p="4" data-y="1024" style="right:96px;width:384px;text-align:right">افضل اللحظات تطرز من اصحاب الخبرة</div>
+
+    <!-- ---------- PANEL 5 · CTA ---------- -->
+    <div class="el rule" data-p="5" data-y="230" style="left:96px;width:888px"></div>
+    <div class="el" data-p="5" data-y="360" style="left:428px;width:224px">
+      <img src="../shared/assets/logo.png" style="width:224px;display:block"></div>
+    <div class="el" data-p="5" data-y="690" style="left:0;width:1080px;text-align:center">
+      <span class="disp" style="font-size:86px;color:var(--ink)">حمّل تطبيق لولو شوب</span></div>
+    <div class="el" data-p="5" data-y="842" style="left:0;width:1080px;text-align:center">
+      <span class="body" style="font-size:36px;font-weight:500;color:var(--muted)">دوّر على «لولو شوب» بمتجر التطبيقات</span></div>
+    <div class="el" data-p="5" data-y="960" style="left:0;width:1080px;text-align:center">
+      <span class="badge" style="margin:0 14px">
+        <svg class="bico" width="32" height="38" viewBox="0 0 384 512" fill="#FAF4EA"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/></svg>
+        <span class="btxt"><u>Download on the</u><b>App Store</b></span></span>
+      <span class="badge" style="margin:0 14px">
+        <svg class="bico" width="34" height="38" viewBox="0 0 512 512">
+          <path fill="#00D4FF" d="M47 20c-7 7-11 18-11 32v408c0 14 4 25 11 32l2 2 229-229v-5L49 18z"/>
+          <path fill="#FFCE00" d="M354 333l-77-77v-5l77-77 2 1 91 52c26 15 26 39 0 54l-91 52z"/>
+          <path fill="#FF3A44" d="M356 332l-79-79-229 229c9 9 23 10 39 1l269-151z"/>
+          <path fill="#00CC6A" d="M356 180L87 29C71 20 57 21 48 30l229 229z"/></svg>
+        <span class="btxt"><u>GET IT ON</u><b>Google Play</b></span></span>
+    </div>
+    <div class="el" data-p="5" data-y="1162" style="left:0;width:1080px">
+      <div class="recap">
+        <span><b>١</b>اختار</span><span><b>٢</b>اكتب</span><span><b>٣</b>نخيطه</span><span><b>٤</b>يوصلك</span>
+      </div></div>
+    <div class="el rule thin" data-p="5" data-y="1342" style="left:330px;width:420px"></div>
+    <div class="el" data-p="5" data-y="1392" style="left:0;width:1080px;text-align:center">
+      <span class="body" style="font-size:32px;font-weight:600;color:var(--muted);letter-spacing:.02em">
+        <bdi>@lolo_shop96</bdi> · <bdi>lolo-shop96.com</bdi></span></div>
+  </div>
+
+  <!-- ================= FOREGROUND LAYER — 1.18x ================= -->
+  <div class="layer" id="lFg">
+    <div class="el numBig" data-p="1" data-y="216" data-ent="0"><span>١</span></div>
+    <div class="el numBig" data-p="2" data-y="216"><span>٢</span></div>
+    <div class="el numBig" data-p="3" data-y="216"><span>٣</span></div>
+    <div class="el numBig" data-p="4" data-y="216"><span>٤</span></div>
+
+    <!-- panel 1 chips -->
+    <div class="el" data-p="1" data-y="566" style="right:80px">
+      <span class="chip"><b><bdi>٥٤</bdi></b>موديل</span><span class="chip" style="margin-inline-start:14px">للدفعة كاملة</span></div>
+    <div class="el" data-p="1" data-y="696" style="right:80px">
+      <span class="chip">وشاحات<b><bdi>١١</bdi></b><i class="sep"></i><u>من <bdi>١٥٬٠٠٠</bdi> د.ع</u></span></div>
+    <div class="el" data-p="1" data-y="826" style="right:80px">
+      <span class="chip">روبات<b><bdi>٢١</bdi></b><i class="sep"></i><u>من <bdi>٢٠٬٠٠٠</bdi> د.ع</u></span></div>
+    <div class="el" data-p="1" data-y="956" style="right:80px">
+      <span class="chip">قبعات<b><bdi>٥</bdi></b><i class="sep"></i><u>من <bdi>١٠٬٠٠٠</bdi> د.ع</u></span></div>
+
+    <!-- panel 2 chips -->
+    <div class="el" data-p="2" data-y="904" style="right:80px">
+      <span class="chip">الاسم مطرّز بالخيط</span></div>
+    <div class="el" data-p="2" data-y="1014" style="right:80px">
+      <span class="chip">مخيوط بورشتنا</span></div>
+
+    <!-- panel 3 chip -->
+    <div class="el" data-p="3" data-y="1266" style="right:88px">
+      <span class="chip">محل حقيقي بديالى</span></div>
+
+    <!-- panel 4 chips -->
+    <div class="el" data-p="4" data-y="898" style="right:80px">
+      <span class="chip">الدفع نقداً عند التسليم</span></div>
+  </div>
+
+  </div>
+ </div>
+
+ <!-- ---------------- fixed furniture ---------------- -->
+ <div id="rail">
+   <div id="railFill"></div>
+   <div class="tk" id="tk1"><i></i></div><div class="tk" id="tk2"><i></i></div>
+   <div class="tk" id="tk3"><i></i></div><div class="tk" id="tk4"><i></i></div>
+ </div>
+ <div id="cap">لولو شوب · أزياء التخرّج</div>
+ <div id="capB">أربع خطوات</div>
+
+ <div id="wash"></div>
+ <div id="vig"></div>
+ <div class="grain" id="grain" style="z-index:12"></div>
+ <span id="meas" style="position:absolute;visibility:hidden;left:0;top:0;font-family:'Amiri',serif;font-weight:700;font-size:330px;line-height:1;white-space:nowrap"></span>
+</div>
+
+<script src="../shared/timeline.js"></script>
+<script>
+/* ============================================================================
+   THE CAMERA IS THE PERFORMANCE.
+   105 BPM · beat = 0.5714285714 s · 28 beats · 16.000 s exactly.
+   The film is authored ON the grid (every anchor is bt(n)), so the makeGrid
+   remap is the identity — SC_A === SC_B. music.py carries the same pair as g().
+   ========================================================================== */
+const DUR = 16.0, FPS = 30;
+const BEAT = 60 / 105;                    /* 0.5714285714285714 */
+const bt = n => n * BEAT;
+
+const SC_A = [bt(0), bt(4), bt(10), bt(16), bt(22), bt(25), bt(28)];
+const SC_B = [bt(0), bt(4), bt(10), bt(16), bt(22), bt(25), bt(28)];
+const grid = makeGrid(SC_A, SC_B);        /* identity — authored on the grid */
+
+/* ---- camera anchor table: reel-y that sits at the top of frame per panel ---- */
+const A = [0, 1240, 2480, 3720, 4960, 6120];
+const T = SC_B;
+/* hold fraction of each segment — this is where the copy is readable */
+const H = [0.38, 0.50, 0.44, 0.50, 0.30];
+const CREEP = 0.035;                      /* the hold is a NEAR-hold, never dead */
+
+function camY(t){
+  let y = 0;
+  for (let k = 0; k < 5; k++){
+    const t0 = T[k], t1 = T[k+1], d = A[k+1] - A[k];
+    const tm = t0 + (t1 - t0) * H[k];
+    y += tw(t, t0, tm, 0, d * CREEP, eInOut);
+    y += tw(t, tm, t1, 0, d * (1 - CREEP), eInOut);
+  }
+  y += tw(t, T[5], T[6], 0, 60, eInOut);   /* the CTA settles, it does not freeze */
+  return y;
+}
+const VMAX = 1460;                         /* px/s — the whip into the CTA is the fastest move */
+
+/* ---- layer parallax ---- */
+const PAR = { bg: 0.55, mid: 1.0, fg: 1.18 };
+const reel = $('reel'), lBg = $('lBg'), lFg = $('lFg'), camScale = $('camScale');
+const devWrap = $('devWrap'), devGloss = $('devGloss');
+const scrStrip = $('scrStrip'), scrOpts = $('scrOpts'), devChrome = $('chrome');
+const railFill = $('railFill'), grain = $('grain'), vig = $('vig'), wash = $('wash');
+
+/* ---- place every authored element into reel space --------------------------
+   Everything above is authored in VIEWPORT coordinates (data-y = where it sits
+   when the camera is parked on its panel). This converts that into each layer's
+   own coordinate system so the parallax lands the element exactly on target. */
+const items = [];
+[...document.querySelectorAll('.el')].forEach(el => {
+  const lz  = el.closest('#lBg') ? 'bg' : (el.closest('#lFg') ? 'fg' : 'mid');
+  const par = PAR[lz];
+  const p = +el.dataset.p, y = +el.dataset.y;
+  const R = par * A[p] + y;
+  el.style.top = R + 'px';
+  if (el === devWrap) { devWrap.__R = R; return; }
+  const isRule = el.classList.contains('rule');
+  const noEnt  = el.dataset.ent === '0';
+  if (isRule || !noEnt) items.push({ el, R, par, isRule });
+  if (el.classList.contains('wash')) el.style.marginTop = '-500px';
+});
+
+/* the numerals bleed exactly half off the start edge, whatever the glyph width */
+function layoutNumerals(){
+  const m = $('meas');
+  [...document.querySelectorAll('.numBig')].forEach(el => {
+    m.textContent = el.querySelector('span').textContent;
+    const w = m.getBoundingClientRect().width || 120;
+    el.style.width = w + 'px';
+    el.style.right = (-w * 0.33) + 'px';
+  });
+  m.textContent = '';
+}
+
+/* rail ticks sit at the four step arrivals */
+const RAIL_H = 1420;
+[1,2,3,4].forEach(k => { $('tk'+k).style.top = (A[k] / A[5] * RAIL_H) + 'px'; });
+
+/* ============================================================================ */
+function seek(tIn){
+  const t  = grid(clamp(tIn, 0, DUR));
+  const fi = Math.round(clamp(tIn, 0, DUR) * FPS);
+  const cam = camY(t);
+  const vel = (camY(Math.min(t + 0.02, DUR)) - camY(Math.max(t - 0.02, 0))) / 0.04;
+  const vn  = clamp(vel / VMAX, 0, 1);
+
+  /* ---- the one move in the film ---- */
+  reel.style.transform     = `translate3d(0,${-cam}px,0)`;
+  lBg.style.transform      = `translate3d(0,${cam * 0.45}px,0)`;
+  lFg.style.transform      = `translate3d(0,${-cam * 0.18}px,0)`;
+  camScale.style.transform = `scale(${(1 + 0.011 * vn).toFixed(5)})`;
+
+  /* ---- everything else answers to WHERE THE CAMERA IS ---- */
+  for (const it of items){
+    const vy = it.R - it.par * cam;
+    if (it.isRule){
+      it.el.style.transform = `scaleX(${eOut(clamp((1920 - vy) / 900, 0, 1)).toFixed(4)})`;
+    } else {
+      const q = eOut(clamp((1900 - vy) / 460, 0, 1));
+      it.el.style.opacity = q.toFixed(3);
+      it.el.style.transform = `translate3d(0,${((1 - q) * 26).toFixed(2)}px,0)`;
+    }
+  }
+
+  /* ---- the device is carried from step ١ down into step ٢, and it LAGS ----
+     it is carried by the canvas through both steps, but with inertia: it falls
+     back in frame while the camera accelerates and only catches up after the
+     camera has already stopped. Printed rules slide behind it. */
+  const glued = clamp(cam - A[1], 0, A[2] - A[1]);        /* it rides the page, not the frame */
+  const carry = glued - 100 * hit(t, 4.12, 0.66, 1.10) + drift(t, 0.085, 9);
+  const tilt  = -3.4 * vn + drift(t, 0.115, 1.25);
+  const pitch = 1.1 * vn;
+  devWrap.style.transform =
+    `translate3d(0,${carry.toFixed(2)}px,0) perspective(1600px) rotateY(${tilt.toFixed(3)}deg) rotateX(${pitch.toFixed(3)}deg)`;
+  devGloss.style.opacity   = (0.08 + 0.46 * vn).toFixed(3);
+  devGloss.style.transform = `translateX(${tw(t, 0, DUR, -240, 240, eLin).toFixed(1)}px)`;
+
+  /* ---- the screen: /shop scrolling, then the options sheet. Overlapped, so
+     the panel is never blank; the swap is keyed to the camera crossing over. --- */
+  const cp   = clamp((cam - A[1]) / (A[2] - A[1]), 0, 1);
+  const sw   = eInOut(clamp((cp - 0.40) / 0.22, 0, 1));
+  scrOpts.style.opacity   = sw.toFixed(3);
+  scrOpts.style.transform = `scale(${(1 + 0.045 * eInOut(clamp((t - bt(9.5)) / (bt(16) - bt(9.5)), 0, 1))).toFixed(4)})`;
+  const sy = tw(t, bt(4.25), bt(7.8), 0, -1180, eInOut) + tw(t, bt(7.8), bt(8.2), 0, 34, eOut);
+  scrStrip.style.transform = `translate3d(0,${sy.toFixed(1)}px,0)`;
+
+  /* ---- the progress rail is the camera, drawn ---- */
+  const pr = clamp(cam / A[5], 0, 1);
+  railFill.style.height = (pr * RAIL_H).toFixed(1) + 'px';
+  for (let k = 1; k <= 4; k++)
+    $('tk'+k).firstElementChild.style.opacity = clamp((pr - A[k]/A[5]) / 0.018, 0, 1).toFixed(3);
+
+  /* ---- grade: the vignette closes when the camera runs, opens when it rests --- */
+  vig.style.opacity  = (0.78 + 0.20 * vn + 0.04 * Math.sin(t * 0.55)).toFixed(3);
+  wash.style.opacity = (0.52 + 0.30 * eOut(clamp((cam - A[4]) / (A[5] - A[4]), 0, 1))
+                             + 0.10 * Math.sin(t * 0.41 + 1.1)).toFixed(3);
+  grainAt(grain, fi);
+}
+
+document.fonts.ready.then(() => { layoutNumerals(); seek(0); });
+layoutNumerals();
+publish(seek, { dur: DUR, fps: FPS });
+</script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+[
+  {"name":"home",        "path":"/",                                             "wait":6500},
+  {"name":"shop",        "path":"/shop",                                         "wait":6500},
+  {"name":"product",     "path":"/product/e1d7e1a2-351b-4d3c-abab-1d23ee608ff0", "wait":6500},
+  {"name":"product-opts","path":"/product/e1d7e1a2-351b-4d3c-abab-1d23ee608ff0", "wait":6500, "scroll":760},
+  {"name":"vip",         "path":"/vip",                                          "wait":6000},
+  {"name":"lolo",        "path":"/lolo",                                         "wait":6500},
+  {"name":"package",     "path":"/package",                                      "wait":6500},
+  {"name":"cart",        "path":"/cart",                                         "wait":5500},
+  {"name":"why",         "path":"/",                                             "wait":6500,
+   "js":"(()=>{const h=[...document.querySelectorAll('h2,h3')].find(e=>e.textContent.includes('ليش لولو'));if(h)h.scrollIntoView({block:'start',behavior:'instant'});window.scrollBy(0,-70);return !!h})()"},
+  {"name":"strip-shop",  "path":"/shop", "wait":7000, "hideSel":"header, nav", "clipH":2400},
+  {"name":"strip-home",  "path":"/",     "wait":7000, "hideSel":"header, nav", "clipH":2400},
+  {"name":"measure",     "path":"/shop", "wait":6000,
+   "measure":"(()=>{const o=[];document.querySelectorAll('body *').forEach(e=>{const c=getComputedStyle(e);if(c.position==='fixed'||c.position==='sticky'){const r=e.getBoundingClientRect();if(r.width>200&&r.height>20)o.push({tag:e.tagName,t:Math.round(r.top),h:Math.round(r.height)})}});return o.slice(0,6)})()"}
+]

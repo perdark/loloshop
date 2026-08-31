@@ -1,0 +1,321 @@
+<!doctype html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="utf-8">
+<title>لولو شوب — «اسأل لولو» · إعلان التطبيق</title>
+<link rel="stylesheet" href="../shared/lolo.css">
+<link rel="stylesheet" href="../shared/device.css">
+<style>
+/* ============================================================================
+   «اسأل لولو» — the assistant ad.
+
+   EVERY WORD لولو SAYS IN THIS FILM IS HERS. Both answers were captured off
+   production on 2026-08-25 by typing the question into the real app and filming
+   the reply:
+     «شكد سعر الروب؟»  -> «هلا بيك عيني، روب التخرج عدنا يبدأ سعره من 25,000 دينار…»
+     «شكد سعر الوشاح؟» -> «هلا بيك عيني، الوشاح عدنا يبدأ سعره من 20,000 دينار…»
+   Nothing here is written copy pretending to be a product. That is the point —
+   «هلا بيك عيني» is warmer than anything a marketer would draft, and it is real.
+   ⚠️ If the assistant's wording changes, RE-CAPTURE. Do not retype her lines by
+   hand into a caption: the moment the film says something the app does not, the
+   ad is a lie and the whole premise of using her verbatim is gone.
+
+   THE ANSWER MUST BE READABLE. That is the entire ad, so on each answer beat the
+   phone pushes into a close-up (scale 1.62 about the bubble) instead of sitting
+   at full height. An assistant ad where you cannot read the assistant is the same
+   defect as an app ad where you cannot read the app.
+
+   ⚠️ Both questions are PRICE questions on purpose. Measured the same day: price
+   questions answer in ~2.0s from the price book with no model; «وين مكانكم؟» went
+   to the model and had rendered 22 characters after 27 seconds, twice. Filming a
+   stalled answer would have been filming a bug.
+   ========================================================================== */
+:root{
+  --M:148px; --ML:104px;
+  --dw:620px;
+  --devTop:648px;
+}
+#stage{background:var(--paper)}
+#ground{position:absolute;inset:0;background:
+  radial-gradient(118% 76% at 50% 10%, #FFF7EC 0%, var(--paper) 54%, #F2E9DA 100%)}
+#warm{position:absolute;inset:0;background:
+  radial-gradient(56% 42% at 50% 34%, rgba(244,123,66,.18) 0%, rgba(244,123,66,0) 70%);
+  mix-blend-mode:multiply;opacity:.5}
+
+.cap{position:absolute;right:var(--M);left:var(--ML);top:236px;text-align:right;opacity:0}
+.cap .kick{font-family:'Cairo',sans-serif;font-weight:600;font-size:31px;color:var(--muted);
+  line-height:1.6;margin-bottom:14px}
+.cap .ln{display:block;font-family:'Amiri',serif;font-weight:700;font-size:92px;
+  line-height:1.34;color:var(--ink)}
+.cap .ln em{font-style:normal;color:var(--orange-ink)}
+.cap .num{font-family:'Cairo',sans-serif;font-weight:700;font-variant-numeric:tabular-nums}
+
+#dev{position:absolute;left:50%;top:var(--devTop);margin-left:calc(var(--dw) * -0.5);
+  filter:drop-shadow(0 40px 90px rgba(26,26,26,.26))}
+#devApp{overflow:hidden}
+#devApp img{position:absolute;left:50%;top:0;
+  width:calc(var(--dw) * 1.0317);margin-left:calc(var(--dw) * -0.5159);
+  height:auto;display:block;opacity:0}
+
+#rule{position:absolute;height:3px;background:var(--orange);transform:scaleX(0);
+  border-radius:3px;right:var(--M);left:var(--ML);top:196px;transform-origin:right center}
+
+#cta{position:absolute;inset:0;opacity:0}
+#ctaIcon{position:absolute;left:50%;top:404px;margin-left:-125px;width:250px;height:250px;
+  border-radius:57px;display:block;box-shadow:0 26px 60px rgba(26,26,26,.30);opacity:0}
+#ctaLine{position:absolute;left:0;right:0;top:706px;text-align:center;
+  font-family:'Amiri',serif;font-weight:700;font-size:112px;color:var(--ink);opacity:0}
+#ctaSub{position:absolute;left:0;right:0;top:864px;text-align:center;
+  font-family:'Cairo',sans-serif;font-weight:600;font-size:38px;color:var(--muted);opacity:0}
+#badges{position:absolute;left:0;right:0;top:972px;display:flex;justify-content:center;
+  gap:26px;direction:ltr}
+.badge{display:flex;align-items:center;gap:15px;padding:19px 32px;border-radius:9999px;
+  background:var(--ink);box-shadow:0 20px 44px rgba(26,26,26,.30);opacity:0}
+.badge svg{width:40px;height:40px;fill:var(--paper);flex:0 0 auto}
+.badge .t{text-align:left;line-height:1}
+.badge .t i{display:block;font-style:normal;font-weight:600;font-size:17px;
+  letter-spacing:.10em;color:rgba(250,244,234,.62);text-transform:uppercase}
+.badge .t b{display:block;font-family:'Playfair',serif;font-weight:600;font-size:33px;
+  color:var(--paper);margin-top:5px}
+#hand{position:absolute;left:0;right:0;top:1092px;text-align:center;
+  font-family:'Cairo',sans-serif;font-weight:600;font-size:30px;color:var(--muted);
+  direction:ltr;opacity:0}
+#ctaShot{position:absolute;left:0;right:0;top:1136px;height:424px;overflow:hidden;opacity:0;
+  -webkit-mask-image:linear-gradient(180deg,rgba(0,0,0,0) 0%,#000 26%,#000 74%,rgba(0,0,0,0) 100%);
+          mask-image:linear-gradient(180deg,rgba(0,0,0,0) 0%,#000 26%,#000 74%,rgba(0,0,0,0) 100%)}
+#ctaShot img{position:absolute;left:50%;top:50%;width:1240px;margin-left:-620px;
+  transform:translateY(-50%);display:block}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="ground"></div>
+  <div id="warm"></div>
+  <div id="rule"></div>
+
+  <div class="cap" id="c0">
+    <div class="kick">بتطبيق لولو شوب</div>
+    <span class="ln">اسألي <em>لولو</em></span><span class="ln">أي وقت</span>
+  </div>
+  <div class="cap" id="c1">
+    <div class="kick">تكتب سؤالك بالعامية</div>
+    <span class="ln">شكد سعر</span><span class="ln">الروب؟</span>
+  </div>
+  <div class="cap" id="c2">
+    <div class="kick">جاوبت بثانيتين</div>
+    <span class="ln">تجاوبك</span><span class="ln">على طول</span>
+  </div>
+  <div class="cap" id="c3">
+    <div class="kick">وأي شي ثاني تريده</div>
+    <span class="ln">شكد سعر</span><span class="ln">الوشاح؟</span>
+  </div>
+  <div class="cap" id="c4">
+    <div class="kick">الأسعار · القياسات · وين وصل طلبك</div>
+    <span class="ln">تعرف كلشي</span><span class="ln">عن المحل</span>
+  </div>
+  <div class="cap" id="c5">
+    <div class="kick">ما تنطر أحد يرد عليك</div>
+    <span class="ln">متواجدة</span><span class="ln">الآن</span>
+  </div>
+  <div class="cap" id="c6">
+    <div class="kick"><span class="num">٢٬١٠١</span> طالب وطالبة سجّلوا معنا</div>
+    <span class="ln">ودفعتك كلها</span><span class="ln">تقدر تطلب سوية</span>
+  </div>
+
+  <div class="device dev-ti" id="dev" style="--app-top:#FBF4EA;--app-fg:#1A1A1A">
+    <div class="d-frame">
+      <div class="d-screen">
+        <div class="d-app" id="devApp">
+          <img id="a_idle" src="../shared/walk-lolo/l-000.jpg" alt="">
+          <img id="a_ask1" src="../shared/walk-lolo/l-002.jpg" alt="">
+          <img id="a_ans1" src="../shared/walk-lolo/l-006.jpg" alt="">
+          <img id="b_idle" src="../shared/walk-lolo3/l-000.jpg" alt="">
+          <img id="b_ask2" src="../shared/walk-lolo3/l-002.jpg" alt="">
+          <img id="b_ans2" src="../shared/walk-lolo3/l-008.jpg" alt="">
+          <img id="a_home" src="../shared/app/lolo.jpg" alt="">
+          <img id="a_hero" src="../shared/app/home.jpg" alt="">
+        </div>
+        <div class="d-status">
+          <span class="d-time">٩:٤١</span>
+          <span class="d-sig">
+            <svg width="19" height="13" viewBox="0 0 19 13"><rect x="0" y="9" width="3" height="4" rx="1"/><rect x="5" y="6.4" width="3" height="6.6" rx="1"/><rect x="10" y="3.4" width="3" height="9.6" rx="1"/><rect x="15" y="0" width="3" height="13" rx="1"/></svg>
+            <svg width="17" height="13" viewBox="0 0 17 13"><path d="M8.5 12.4 6.2 9.9a3.3 3.3 0 0 1 4.6 0zM3.6 7.3 1.9 5.5a9.6 9.6 0 0 1 13.2 0l-1.7 1.8a7.2 7.2 0 0 0-9.8 0zm2.1 2.2L4 7.7a6 6 0 0 1 9 0l-1.7 1.8a3.7 3.7 0 0 0-5.6 0z"/></svg>
+            <svg width="26" height="13" viewBox="0 0 26 13"><rect x="0.6" y="0.6" width="21" height="11.8" rx="3.4" fill="none" stroke="currentColor" stroke-opacity=".38" stroke-width="1.2"/><rect x="2.3" y="2.3" width="15.6" height="8.4" rx="2.2"/><path d="M23.2 4.3c1.4.5 1.4 3.9 0 4.4z"/></svg>
+          </span>
+        </div>
+        <div class="d-island"><i class="d-lens"></i></div>
+        <div class="d-home"></div>
+        <div class="d-gloss" id="devGloss"></div>
+      </div>
+    </div>
+    <i class="d-btn d-act"></i><i class="d-btn d-vup"></i><i class="d-btn d-vdn"></i>
+    <i class="d-btn d-pwr"></i><i class="d-btn d-cam"></i>
+  </div>
+
+  <div id="cta">
+    <img id="ctaIcon" src="../shared/assets/app-icon.png" alt="">
+    <div id="ctaLine">حمّل تطبيق لولو شوب</div>
+    <div id="ctaSub">ولولو تجاوبك أي وقت</div>
+    <div id="badges">
+      <span class="badge" id="bIos">
+        <svg viewBox="0 0 24 24"><path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.53 4.08zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"/></svg>
+        <span class="t"><i>Download on</i><b>App&nbsp;Store</b></span>
+      </span>
+      <span class="badge" id="bAnd">
+        <svg viewBox="0 0 24 24"><path d="M4.4 2.3c-.3.25-.5.66-.5 1.2v17c0 .54.2.95.5 1.2L14 12 4.4 2.3z"/><path d="M15.3 13.3l-2.3-2.3 2.3-2.3 3.2 1.85c1 .58 1 1.72 0 2.3l-3.2 1.85z"/><path d="M5.6 22.2 14.2 13.6l2.2 2.2-8.5 4.9c-.85.5-1.65.42-2.3-.5z" opacity=".92"/><path d="M5.6 1.8 14.2 10.4l2.2-2.2L7.9 3.3c-.85-.5-1.65-.42-2.3.5z" opacity=".72"/></svg>
+        <span class="t"><i>Get it on</i><b>Google&nbsp;Play</b></span>
+      </span>
+    </div>
+    <div id="hand"><bdi>@lolo_shop96</bdi> · <bdi>lolo-shop96.com</bdi></div>
+    <div id="ctaShot"><img src="../shared/assets/ph-detail-pedestal.jpg" alt=""></div>
+  </div>
+
+  <div class="grain" id="grain"></div>
+</div>
+
+<script src="../shared/timeline.js"></script>
+<script>
+/* ================== «اسأل لولو» — pure f(t) ==================
+   100 BPM · beat 0.60s · 25 beats · 15.000s · 2-3-3-3-3-3-3-5. */
+const DUR = 15.0, FPS = 30;
+const SC_A = [0, 1.26, 3.06, 4.86, 6.66, 8.46, 10.26, 12.42, 15.00];
+const SC_B = [0, 1.20, 3.00, 4.80, 6.60, 8.40, 10.20, 12.60, 15.00];
+const grid = makeGrid(SC_A, SC_B);
+const CUT  = SC_A;
+const IDS = ['a_idle','a_ask1','a_ans1','b_idle','b_ask2','b_ans2','a_home','a_hero'];
+
+function show(id, o){ const e = $(id); if (e) e.style.opacity = o; }
+function clearScreens(){ IDS.forEach(i => show(i, 0)); }
+
+function ken(id, t, k, y0, y1, s0, s1){
+  const e = $(id); if (!e) return;
+  const a = CUT[k] - 0.5, b = CUT[k+1] + 0.5;
+  const p = clamp((t - a) / (b - a), 0, 1), q = p*p*(3-2*p);
+  e.style.transform = `translateY(${y0 + (y1-y0)*q}px) scale(${s0 + (s1-s0)*q})`;
+}
+function capIn(id, t, k, offs){
+  const el = $(id), lns = [...el.children];
+  const inAt = (k === 0 ? -0.30 : CUT[k] + 0.20);
+  lns.forEach((n, i) => {
+    const e = eSoft(clamp((t - (inAt + offs[i])) / 0.62, 0, 1));
+    n.style.clipPath  = `inset(${(1-e)*100}% 0 -32% 0)`;
+    n.style.transform = `translateY(${(1-e)*14}px)`;
+  });
+  el.style.opacity = tw(t, CUT[k+1] - 0.40, CUT[k+1] - 0.08, 1, 0, eInOut)
+                   * tw(t, inAt - 0.02, inAt + 0.02, 0, 1, eLin);
+  el.style.transform = `translateY(${tw(t, inAt, CUT[k+1], 0, -11, eLin)}px)`;
+}
+
+function seek(tIn){
+  const tReal = clamp(tIn, 0, DUR);
+  const t = grid(tReal);
+  clearScreens();
+
+  /* ---------- the phone, and the push into each answer -------------------
+     ANSWER CLOSE-UPS. The answer bubble sits in the top third of لولو's screen
+     and the rest of it is empty white; at full phone height the reply is small
+     and the frame is mostly nothing. On the two answer beats the phone scales
+     about that bubble so the Arabic fills the frame — the reply IS the ad. */
+  let zoom = 1, zy = 0;
+  const inAns1 = t > CUT[2] - 0.24 && t < CUT[3] - 0.10;
+  const inAns2 = t > CUT[4] - 0.24 && t < CUT[5] - 0.10;
+  /* The push runs across the WHOLE answer scene and never settles. Ramping it
+     over 0.90s and holding measured 17/31 static half-seconds — worse than the
+     reels this was built to beat, because a chat screen is text on white and the
+     move is the only thing carrying it. Smoothstep, not eSoft: eSoft front-loads
+     and then crawls, which is exactly the hold that caused the problem. */
+  const cont = (t0, t1) => { const p = clamp((t - t0) / (t1 - t0), 0, 1);
+                             return p*p*(3-2*p); };
+  if (inAns1)      zoom = 1 + 0.30 * cont(CUT[2] - 0.24, CUT[3] - 0.10);
+  else if (inAns2) zoom = 1 + 0.30 * cont(CUT[4] - 0.24, CUT[5] - 0.10);
+  const devY = tw(t, -0.42, 1.20, 200, 0, eSoft) + drift(t, 0.12, 5.0, 0.4);
+  const devS = tw(t, -0.42, 1.20, 0.955, 1, eSoft);
+  const devOut = tw(t, CUT[7] + 0.26, CUT[7] + 1.06, 0, 1, eInOut);
+  $('dev').style.transformOrigin = '50% 16%';
+  $('dev').style.transform =
+    `translateY(${devY + zy + devOut * 320}px) scale(${devS * zoom * (1 - devOut * 0.06)})`;
+  $('dev').style.opacity = 1 - devOut;
+
+  $('devGloss').style.opacity   = vis(t, 0.85, 1.15, 1.85, 2.20) * 0.75;
+  $('devGloss').style.transform = `translateX(${tw(t, 0.85, 2.20, -760, 760, eInOut)}px)`;
+
+  /* scene 0 — the idle assistant, mascot and all */
+  if (t < CUT[1] + 0.30){
+    show('a_idle', tw(t, -0.30, 0.34, 0, 1, eOut));
+    ken('a_idle', t, 0, 24, -74, 1.000, 1.050);
+  }
+  /* scene 1 — the question is asked, لولو starts thinking */
+  if (t > CUT[1] - 0.30 && t < CUT[2] + 0.30){
+    show('a_ask1', tw(t, CUT[1] - 0.06, CUT[1] + 0.30, 0, 1, eOut)
+                 * tw(t, CUT[2] + 0.10, CUT[2] + 0.30, 1, 0, eLin));
+    ken('a_ask1', t, 1, 40, -72, 1.000, 1.048);
+  }
+  /* scene 2 — THE ANSWER (robe, 25,000) */
+  if (t > CUT[2] - 0.30 && t < CUT[3] + 0.30){
+    show('a_ans1', tw(t, CUT[2] - 0.06, CUT[2] + 0.26, 0, 1, eOut)
+                 * tw(t, CUT[3] + 0.10, CUT[3] + 0.30, 1, 0, eLin));
+    ken('a_ans1', t, 2, 46, -78, 1.000, 1.052);
+  }
+  /* scene 3 — second question, second answer (sash, 20,000) */
+  if (t > CUT[3] - 0.30 && t < CUT[4] + 0.30){
+    show('b_ask2', tw(t, CUT[3] - 0.06, CUT[3] + 0.30, 0, 1, eOut)
+                 * tw(t, CUT[4] + 0.10, CUT[4] + 0.30, 1, 0, eLin));
+    ken('b_ask2', t, 3, 40, -72, 1.000, 1.048);
+  }
+  if (t > CUT[4] - 0.30 && t < CUT[5] + 0.30){
+    show('b_ans2', tw(t, CUT[4] - 0.06, CUT[4] + 0.26, 0, 1, eOut)
+                 * tw(t, CUT[5] + 0.10, CUT[5] + 0.30, 1, 0, eLin));
+    ken('b_ans2', t, 4, 46, -78, 1.000, 1.052);
+  }
+  /* scene 5 — the idle screen again: the chips say what else she answers */
+  if (t > CUT[5] - 0.30 && t < CUT[6] + 0.30){
+    show('a_home', tw(t, CUT[5] - 0.06, CUT[5] + 0.30, 0, 1, eOut)
+                 * tw(t, CUT[6] + 0.10, CUT[6] + 0.30, 1, 0, eLin));
+    ken('a_home', t, 5, 46, -150, 1.000, 1.048);
+  }
+  /* scene 6 — the shop behind her */
+  if (t > CUT[6] - 0.30 && t < CUT[7] + 0.40){
+    show('a_hero', tw(t, CUT[6] - 0.06, CUT[6] + 0.30, 0, 1, eOut));
+    ken('a_hero', t, 6, 20, -210, 1.000, 1.046);
+  }
+
+  for (let k = 0; k <= 6; k++) capIn('c' + k, t, k, [0.00, 0.13]);
+
+  let rs = tw(t, 0.30, 1.05, 0, 1, eSoft), ro = 'right center';
+  for (let k = 1; k <= 6; k++){
+    const c = CUT[k];
+    if (t > c - 0.34 && t <= c)     { rs = tw(t, c - 0.34, c - 0.02, 1, 0, eInOut); ro = 'left center'; }
+    else if (t > c && t < c + 0.80) { rs = tw(t, c + 0.04, c + 0.70, 0, 1, eSoft);  ro = 'right center'; }
+    else if (t >= c + 0.80)         { rs = 1; ro = 'right center'; }
+  }
+  if (t > CUT[7]) rs = tw(t, CUT[7], CUT[7] + 0.30, 1, 0, eInOut);
+  $('rule').style.transformOrigin = ro;
+  $('rule').style.transform = `scaleX(${rs})`;
+
+  const C7 = CUT[7], ic = C7 - 0.10;
+  $('cta').style.opacity = tw(t, C7 - 0.16, C7 + 0.18, 0, 1, eOut);
+  $('ctaIcon').style.opacity   = tw(t, ic, ic + 0.36, 0, 1, eOut);
+  $('ctaIcon').style.transform = `translateY(${tw(t, ic, ic + 0.86, 44, 0, eSoft)}px) scale(${tw(t, ic, ic + 0.86, 0.86, 1, eSoft)})`;
+  $('ctaLine').style.opacity   = tw(t, ic + 0.22, ic + 0.60, 0, 1, eOut);
+  $('ctaLine').style.transform = `translateY(${tw(t, ic + 0.22, ic + 0.98, 30, 0, eSoft)}px)`;
+  $('ctaSub').style.opacity    = tw(t, ic + 0.44, ic + 0.82, 0, 1, eOut);
+  $('ctaSub').style.transform  = `translateY(${tw(t, ic + 0.44, ic + 1.16, 26, 0, eSoft)}px)`;
+  ['bIos','bAnd'].forEach((id, i) => {
+    const s = ic + 0.66 + i * 0.12;
+    $(id).style.opacity   = tw(t, s, s + 0.32, 0, 1, eOut);
+    $(id).style.transform = `translateY(${tw(t, s, s + 0.70, 28, 0, eSoft)}px) scale(${tw(t, s, s + 0.70, 0.94, 1, eSoft)})`;
+  });
+  $('ctaShot').style.opacity   = tw(t, ic + 0.50, ic + 1.10, 0, 1, eOut);
+  $('ctaShot').style.transform = `scale(${tw(t, ic + 0.50, 15.0, 1.00, 1.05, eLin)})`;
+  $('hand').style.opacity   = tw(t, ic + 1.00, ic + 1.38, 0, 1, eOut);
+  $('hand').style.transform = `translateY(${tw(t, ic + 1.00, ic + 1.58, 16, 0, eSoft)}px)`;
+
+  $('warm').style.opacity = 0.44 + 0.10 * Math.sin(t * 0.55);
+  $('warm').style.transform = `translate(${drift(t, 0.07, 22, 0)}px,${drift(t, 0.05, 16, 1.2)}px)`;
+  grainAt($('grain'), Math.round(tReal * FPS));
+}
+
+publish(seek, { dur: DUR, fps: FPS });
+</script>
+</body>
+</html>

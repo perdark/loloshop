@@ -22,9 +22,16 @@ const appOpenLimit = rateLimit({
 });
 router.post('/app-open', appOpenLimit, c.appOpen);
 
+// ⚠️ THE PHONE CAN READ ATTENDANCE BUT NO LONGER WRITE IT — owner decision 2026-08-30.
+// دخول/خروج come from the K40 at the shop and nowhere else, so `check-in`/`check-out` are
+// gone from here and from routes/payroll.js. `getToday` stays: the worker still needs to see
+// their own day, and `/staff/attendance` still shows it — it just cannot punch any more.
+// The escape hatch when the device is down is the admin's
+// `PATCH /admin/attendance/records/:id/override`, deliberately NOT a worker-facing one.
+// ⚠️ `attendanceController.checkIn`/`checkOut` are intentionally left in place and unrouted:
+// the break flow and the tests still call them, and re-exposing them is a route line, not a
+// rewrite. Do not delete the controller half thinking it is dead.
 router.get('/attendance/today', attendance.getToday);
-router.post('/attendance/check-in', attendance.checkIn);
-router.post('/attendance/check-out', attendance.checkOut);
 
 // الخروج المؤقت — request → leave → return. The worker owns these rows; the
 // controller scopes every query by req.user.id.

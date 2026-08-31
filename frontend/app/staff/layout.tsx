@@ -18,7 +18,7 @@ function StaffShell({ children }: { children: React.ReactNode }) {
   const isAdmin = user.role === "admin";
 
   return (
-    <div className="min-h-screen bg-cream bg-warm-veil" dir="rtl" lang="ar">
+    <div className="min-h-dvh bg-cream bg-warm-veil" dir="rtl" lang="ar">
       <Suspense fallback={null}>
         <StaffSidebar
           user={user}
@@ -66,7 +66,7 @@ function StaffShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <main className="p-4 lg:p-8 animate-fade-page-in">{children}</main>
+        <main className="safe-bottom safe-x p-4 lg:p-8 animate-fade-page-in">{children}</main>
       </div>
     </div>
   );

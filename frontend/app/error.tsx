@@ -27,7 +27,7 @@ export default function ErrorPage({ error, unstable_retry }: ErrorPageProps) {
     <main
       dir="rtl"
       lang="ar"
-      className="min-h-screen bg-cream flex flex-col items-center justify-center px-6 py-20 text-center"
+      className="min-h-dvh bg-cream flex flex-col items-center justify-center px-6 py-20 text-center"
     >
       {/* Brand anchor */}
       <Link href="/" aria-label="لولو شوب — الصفحة الرئيسية" className="mb-12 inline-flex">

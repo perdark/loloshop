@@ -95,7 +95,7 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <AuthCard
+    <AuthCard appChrome
       title="استعادة كلمة المرور"
       subtitle={
         phoneStep === "request"

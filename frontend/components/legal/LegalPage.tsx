@@ -28,7 +28,7 @@ export function LegalPage({
   links = [],
 }: LegalPageProps) {
   return (
-    <main className="min-h-screen bg-cream px-4 py-8 text-ink" dir="rtl" lang="ar">
+    <main className="safe-bottom safe-x min-h-dvh bg-cream px-4 py-8 text-ink" dir="rtl" lang="ar">
       <article className="mx-auto max-w-3xl rounded-[2rem] border border-line bg-beige p-6 shadow-card sm:p-8">
         <Link
           href="/"

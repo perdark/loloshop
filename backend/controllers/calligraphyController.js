@@ -737,7 +737,10 @@ async function ordersZones(req, res) {
     const row = await production.loadAdvanceRow(orderId);
     if (!row) continue;
     const zones = await production.detectZonesWithImages(orderId);
-    const next = row.status === 'design_complete' ? production.nextStageFor(row) : null;
+    // Same gate the send endpoint enforces, surfaced BEFORE the press: a blocked order shows
+    // its reason on the card instead of failing one row of a «حوّل الكل» pass silently.
+    const blocked = production.advanceBlockReason(row);
+    const next = row.status === 'design_complete' && !blocked ? production.nextStageFor(row) : null;
     out.push({
       order_id: orderId,
       order_status: row.status,
@@ -747,6 +750,7 @@ async function ordersZones(req, res) {
       send_label: next
         ? (production.ADVANCE_LABEL_AR[`design_complete→${next}`] || 'تحويل للتطريز')
         : null,
+      blocked_reason: blocked ? blocked.message : null,
     });
   }
   res.json({ data: out });
@@ -768,6 +772,12 @@ async function sendOrder(req, res) {
   if (row.status !== 'design_complete') {
     return bad(res, 'الطلب ليس بانتظار التصميم', 'ERR_BAD_STATUS', 409);
   }
+  // ⚠️ THE WORKBENCH IS NOT A STATION QUEUE — it has no approval filter of its own, so this
+  // guard is the only thing standing between «تحويل للتطريز» and an order that lands at
+  // التطريز where NO queue can show it (productionController.getQueue hides an unapproved
+  // rep order and a returned one). Three prod orders were lost that way before 2026-08-31.
+  const blocked = production.advanceBlockReason(row);
+  if (blocked) return bad(res, blocked.message, blocked.code, 409);
   const to = production.nextStageFor(row);
   if (!to) return bad(res, 'التصميم بحاجة لاعتماد المصمم أولاً', 'ERR_BAD_STATUS', 409);
   if (!canStaffTransition(req.user, 'design_complete', to)) {

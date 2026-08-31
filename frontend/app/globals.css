@@ -307,6 +307,27 @@ html {
   padding-right: env(safe-area-inset-right, 0px);
 }
 
+/* ⚠️ HOME-INDICATOR CLEARANCE FOR CONTENT THAT REACHES THE BOTTOM EDGE.
+   The mirror of `.safe-top`, and it was missing for months: `.safe-top` and
+   `.safe-x` existed, so the notch was handled everywhere, while the bottom
+   inset was only handled by the handful of files that spelled out
+   `env(safe-area-inset-bottom)` themselves — every one of them a FIXED bar
+   (the student and rep navs, the modals, the chat sheets). Any screen whose
+   content simply scrolled to the bottom of the viewport ended flush under the
+   iPhone home indicator and the Android gesture bar.
+
+   ⚠️ ADD IT TO THE SCROLLING CONTENT, NOT ON TOP OF A FIXED BOTTOM BAR.
+   Where a fixed bar already pads itself, the content above it clears the
+   inset via that bar's height — padding both double-pads and leaves a visible
+   dead strip. That is why `app/wholesaler/layout.tsx` and
+   `app/(student)/layout.tsx` are deliberately NOT given this class: their navs
+   own the bottom edge already.
+
+   Same `0px` fallback as `.safe-top`: on a desktop browser it adds nothing. */
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
 /* ── APP FEEL: no text selection, no iOS long-press callout ────────────────────
    Owner call 2026-08-16: «block the selecting because we can copy text like web,
    so that's wrong for an app». Long-pressing anything in a WebView raises the

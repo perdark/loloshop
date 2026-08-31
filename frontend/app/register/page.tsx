@@ -119,7 +119,7 @@ export default function RegisterPage() {
   }
 
   return (
-    <AuthCard
+    <AuthCard appChrome
       title={step === "form" ? "إنشاء حساب" : "رمز التحقق"}
       subtitle={step === "form" ? "بياناتك تُستخدم لتجهيز وشاحك وتسليمه" : undefined}
     >

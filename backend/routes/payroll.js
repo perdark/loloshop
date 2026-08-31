@@ -25,8 +25,10 @@ router.get('/me/goal', salary.getMyGoal);
 router.get('/me/summary', salary.getMySummary);
 router.get('/me/payout-account', payouts.getMyAccount);
 router.put('/me/payout-account', payouts.saveMyAccount);
+// ⚠️ Read-only since 2026-08-30 — the K40 is the only thing that writes دخول/خروج now.
+// This was the SECOND door onto the same controller (the staff router had the first), so
+// removing only one of them would have left the phone punching through here with nothing on
+// screen to explain how. See the note in routes/staff.js.
 router.get('/me/attendance/today', attendance.getToday);
-router.post('/me/attendance/check-in', attendance.checkIn);
-router.post('/me/attendance/check-out', attendance.checkOut);
 
 module.exports = router;

@@ -1609,20 +1609,11 @@ export async function getMyAttendanceToday(): Promise<MyAttendanceToday> {
   return mapAttendancePayload(data.data);
 }
 
-export async function checkInAttendance(
-  location: AttendanceLocationPayload | null
-): Promise<MyAttendanceToday> {
-  const { data } = await api.post<{ data: ApiAttendancePayload }>("/staff/attendance/check-in", {
-    location,
-  });
-  return mapAttendancePayload(data.data);
-}
-
-export async function checkOutAttendance(
-  location: AttendanceLocationPayload | null
-): Promise<MyAttendanceToday> {
-  const { data } = await api.post<{ data: ApiAttendancePayload }>("/staff/attendance/check-out", {
-    location,
-  });
-  return mapAttendancePayload(data.data);
-}
+// ⚠️ `checkInAttendance` / `checkOutAttendance` were deleted on 2026-08-30 together with the
+// routes behind them: the K40 at the shop is the only thing that records دخول/خروج now.
+// Re-adding a wrapper here would compile and then 404 at runtime.
+//
+// `getBrowserAttendanceLocation` above now has NO caller — it is kept, not deleted, because
+// it is the browser half of the GPS verification the owner action list still plans to switch
+// on (`verification_mode`, shop coordinates at /admin/attendance). It is dead code with a
+// scheduled use, which is why it has this note instead of being tidied away.

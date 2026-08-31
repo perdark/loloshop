@@ -1,0 +1,522 @@
+<!doctype html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="utf-8">
+<title>لولو شوب — ٥٤ موديل</title>
+<link rel="stylesheet" href="../shared/lolo.css">
+<link rel="stylesheet" href="../shared/device.css">
+<style>
+/* ============================================================================
+   REEL C — «٥٤ موديل» · kinetic poster grid.
+   128 BPM. Beat 0.46875s, 8th 0.234375s. 15.000s = 32 beats = 8 bars.
+   Swiss poster motion: a hard 6-column grid (78px margins, 154px columns),
+   everything snapping on the 8th, type at poster scale, tiles as a deck of cards.
+   Loudness comes from SCALE and RHYTHM, never from colour — orange is three
+   blocks and one rule in the whole film.
+   ========================================================================== */
+#stage{background:var(--paper)}
+#bg{position:absolute;inset:-6%;
+  background:radial-gradient(78% 52% at 50% 40%, #FFFDFA 0%, var(--paper) 54%, #F2EBDD 100%)}
+
+/* ---------- the layout grid: 6 columns, hairlines, pulses on the downbeat ----
+   The stroke is --muted rather than --line: --line (#E3DDD0) at the 12% resting
+   opacity the direction asks for is literally invisible on --paper, so the
+   downbeat pulse would not read at all. Same family, one step darker. */
+#gridL{position:absolute;inset:0;z-index:1;opacity:.12}
+#gridL i{position:absolute;background:var(--muted);display:block}
+#gridL i.v{top:200px;bottom:180px;width:1px}
+#gridL i.h{left:78px;width:924px;height:1px}
+
+/* ---------- masthead + footer: poster furniture, never leaves the frame ----- */
+#furn{position:absolute;inset:0;z-index:6;pointer-events:none}
+#furn .rule{position:absolute;left:78px;width:924px;height:2px;background:var(--ink);opacity:.86}
+#furn .slug{position:absolute;font-family:'Cairo',sans-serif;font-weight:600;font-size:27px;
+  color:var(--ink-soft);letter-spacing:.01em;line-height:1}
+#furn .slug.lt{font-family:'Playfair',serif;font-weight:600;letter-spacing:.06em;color:var(--muted);direction:ltr}
+
+/* ---------- tiles: one module, driven entirely by transform ---------------- */
+#tiles{position:absolute;inset:0;z-index:4}
+.tile{position:absolute;left:0;top:0;width:296px;height:291px;border-radius:18px;overflow:hidden;
+  background:var(--surface);box-shadow:0 26px 52px var(--sh-soft),0 6px 14px var(--sh-hair);
+  will-change:transform;transform-origin:50% 50%}
+.tile img{width:100%;height:100%;object-fit:cover;display:block}
+
+/* ---------- section 2 — SCALE --------------------------------------------- */
+#sScale{position:absolute;inset:0;z-index:6}
+#hRow{position:absolute;left:0;right:0;top:310px;display:flex;justify-content:center;align-items:center;gap:30px}
+#hBlock{background:var(--orange-ink);border-radius:14px;padding:14px 30px 26px;
+  box-shadow:0 22px 46px var(--sh-soft)}
+#hBlock b{display:block;font-family:'Cairo',sans-serif;font-weight:800;font-size:224px;line-height:1;
+  color:var(--paper);font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+#hWord{font-family:'Cairo',sans-serif;font-weight:800;font-size:112px;line-height:1;color:var(--ink);
+  letter-spacing:-.01em;padding-bottom:14px}
+#rScale1{position:absolute;left:78px;width:924px;top:668px;height:3px;background:var(--ink)}
+#rScale2{position:absolute;left:78px;width:924px;top:1054px;height:1px;background:var(--muted);opacity:.5}
+#rScale3{position:absolute;left:78px;width:924px;top:1418px;height:1px;background:var(--muted);opacity:.5}
+.cnt{position:absolute;top:1096px;width:231px;text-align:center}
+.cnt b{display:block;font-family:'Cairo',sans-serif;font-weight:800;font-size:124px;line-height:1;
+  color:var(--ink);font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.cnt span{display:block;font-family:'Cairo',sans-serif;font-weight:700;font-size:46px;line-height:1;
+  color:var(--muted);margin-top:26px}
+
+/* ---------- section 3 — PRICE --------------------------------------------- */
+#sPrice{position:absolute;inset:0;z-index:6}
+.pb{position:absolute;inset:0;opacity:0}
+.pb .lbl{position:absolute;right:78px;top:296px;font-family:'Cairo',sans-serif;font-weight:800;
+  font-size:98px;line-height:1;color:var(--ink);letter-spacing:-.01em}
+.pb .line{position:absolute;right:78px;top:452px;display:flex;align-items:flex-end;gap:20px;direction:rtl}
+.pb .line u{text-decoration:none;font-family:'Cairo',sans-serif;font-weight:700;font-size:56px;
+  line-height:1;color:var(--muted);padding-bottom:26px}
+.pb .line em{font-style:normal;font-family:'Cairo',sans-serif;font-weight:800;font-size:154px;
+  line-height:1;color:var(--ink);font-variant-numeric:tabular-nums;letter-spacing:-.03em}
+.pb .line em.blk{background:var(--orange-ink);color:var(--paper);border-radius:12px;
+  padding:6px 22px 20px;box-shadow:0 20px 44px var(--sh-soft)}
+.pb .line s{text-decoration:none;font-family:'Cairo',sans-serif;font-weight:700;font-size:62px;
+  line-height:1;color:var(--ink-soft);padding-bottom:22px}
+.pb .ghost{position:absolute;right:110px;top:854px;text-align:center;color:rgba(26,26,26,.155)}
+.pb .ghost b{display:block;font-family:'Cairo',sans-serif;font-weight:800;font-size:276px;line-height:.9;
+  font-variant-numeric:tabular-nums;letter-spacing:-.03em}
+.pb .ghost span{display:block;font-family:'Cairo',sans-serif;font-weight:700;font-size:52px;margin-top:6px}
+.pb .shot{position:absolute;left:78px;top:800px;width:460px;height:572px;border-radius:18px;
+  overflow:hidden;background:var(--surface);box-shadow:0 34px 66px var(--sh-soft),0 8px 18px var(--sh-hair)}
+.pb .shot img{width:100%;height:100%;object-fit:cover;display:block;transform-origin:50% 50%}
+#pb0 .shot img{transform:scale(1.16)}
+#pb2 .shot img{transform:scale(1.12)}
+#rPrice{position:absolute;left:78px;width:924px;top:740px;height:3px;background:var(--ink);opacity:0}
+
+/* ---------- section 4 — IN THE APP ---------------------------------------- */
+#sApp{position:absolute;inset:0;z-index:8}
+#appHead{position:absolute;left:78px;width:924px;top:302px;text-align:center;
+  font-family:'Cairo',sans-serif;font-weight:700;font-size:47px;line-height:1.3;color:var(--ink);opacity:0}
+#devWrap{position:absolute;left:540px;top:448px;margin-left:-234px;opacity:0;will-change:transform;
+  transform-origin:50% 50%}
+#heroShot{position:absolute;inset:0;z-index:1}
+#heroShot img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+#chrome{position:absolute;left:0;right:0;top:calc(var(--dw) * 0.141);bottom:0;z-index:2;opacity:0;pointer-events:none}
+#chrome img{position:absolute;left:0;width:var(--dw);display:block}
+#chTab{bottom:0}
+#tap{position:absolute;width:0;height:0;z-index:4;opacity:0}
+#tap i{position:absolute;left:0;top:0;border-radius:50%;display:block}
+#tap .core{width:130px;height:130px;margin:-65px 0 0 -65px;
+  background:radial-gradient(circle,rgba(26,26,26,.44) 0%,rgba(26,26,26,.20) 50%,rgba(26,26,26,0) 72%)}
+#tap .ring{width:132px;height:132px;margin:-66px 0 0 -66px;border:8px solid rgba(26,26,26,.72)}
+
+/* ---------- section 6 — CTA ------------------------------------------------ */
+#sCta{position:absolute;inset:0;z-index:9}
+#appIcon{position:absolute;left:540px;top:490px;margin-left:-100px;width:200px;height:200px;
+  border-radius:46px;overflow:hidden;opacity:0;
+  box-shadow:0 30px 62px var(--sh-soft),0 8px 18px var(--sh-hair)}
+#appIcon img{width:100%;height:100%;display:block}
+#ctaLine{position:absolute;left:78px;width:924px;top:730px;text-align:center;opacity:0;
+  font-family:'Cairo',sans-serif;font-weight:800;font-size:84px;line-height:1.12;color:var(--ink);
+  letter-spacing:-.015em}
+#ctaRule{position:absolute;left:540px;top:876px;margin-left:-265px;width:530px;height:10px;
+  border-radius:6px;background:var(--orange-ink);transform:scaleX(0);transform-origin:100% 50%}
+#badges{position:absolute;left:0;right:0;top:936px;display:flex;justify-content:center;gap:30px;direction:ltr}
+.badge{display:flex;align-items:center;gap:18px;padding:24px 36px;border-radius:22px;
+  background:var(--ink);box-shadow:0 22px 46px var(--sh-soft);opacity:0}
+.badge svg{width:48px;height:48px;fill:var(--surface);flex:0 0 auto}
+.badge .t{text-align:left;line-height:1}
+.badge .t i{display:block;font-style:normal;font-weight:600;font-size:20px;letter-spacing:.10em;
+  color:rgba(255,253,250,.72);text-transform:uppercase}
+.badge .t b{display:block;font-family:'Playfair',serif;font-weight:600;font-size:39px;
+  color:var(--surface);margin-top:5px}
+#ctaSub{position:absolute;left:78px;width:924px;top:1126px;text-align:center;opacity:0;
+  font-family:'Cairo',sans-serif;font-weight:600;font-size:43px;color:var(--ink-soft)}
+
+/* ---------- one-frame ink inversion: poster punctuation, never two frames --- */
+.flash{position:absolute;inset:0;z-index:20;background:var(--night);opacity:0;
+  display:flex;align-items:center;justify-content:center}
+#flashA b{font-family:'Cairo',sans-serif;font-weight:800;font-size:224px;color:var(--paper);
+  font-variant-numeric:tabular-nums;letter-spacing:-.02em;line-height:1}
+#flashA span{font-family:'Cairo',sans-serif;font-weight:800;font-size:112px;color:var(--paper);
+  line-height:1;margin-inline-start:30px}
+#flashB b{font-family:'Amiri',serif;font-weight:700;font-size:176px;color:var(--paper);line-height:1}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="bg"></div>
+
+  <div id="gridL">
+    <i class="v" style="left:78px"></i><i class="v" style="left:232px"></i><i class="v" style="left:386px"></i>
+    <i class="v" style="left:540px"></i><i class="v" style="left:694px"></i><i class="v" style="left:848px"></i>
+    <i class="v" style="left:1002px"></i>
+    <i class="h" style="top:260px"></i><i class="h" style="top:565px"></i><i class="h" style="top:870px"></i>
+    <i class="h" style="top:1175px"></i><i class="h" style="top:1466px"></i>
+  </div>
+
+  <div id="furn">
+    <div class="rule" style="top:248px"></div>
+    <div class="rule" style="top:1486px"></div>
+    <div class="slug" style="right:78px;top:204px">لولو شوب</div>
+    <div class="slug lt" style="left:78px;top:206px;font-size:25px">@lolo_shop96</div>
+    <div class="slug" style="right:78px;top:1502px;font-size:25px">الدفع نقداً عند التسليم</div>
+    <div class="slug lt" style="left:78px;top:1503px;font-size:25px">lolo-shop96.com</div>
+  </div>
+
+  <div id="tiles"></div>
+
+  <div id="sScale">
+    <div id="hRow"><div id="hBlock"><b>٥٤</b></div><div id="hWord">موديل</div></div>
+    <div id="rScale1"></div><div id="rScale2"></div><div id="rScale3"></div>
+    <div class="cnt" id="c0" style="right:78px"><b>٠</b><span>وشاحات</span></div>
+    <div class="cnt" id="c1" style="right:309px"><b>٠</b><span>روبات</span></div>
+    <div class="cnt" id="c2" style="right:540px"><b>٠</b><span>قبعات</span></div>
+    <div class="cnt" id="c3" style="right:771px"><b>٠</b><span>شالات</span></div>
+  </div>
+
+  <div id="sPrice">
+    <div id="rPrice"></div>
+    <div class="pb" id="pb0">
+      <div class="lbl">الوشاح</div>
+      <div class="line"><u>من</u><em>١٥٬٠٠٠</em><s>د.ع</s></div>
+      <div class="ghost"><b>١١</b><span>موديل</span></div>
+      <div class="shot"><img src="../shared/assets/p-sash-plain.jpg" alt=""></div>
+    </div>
+    <div class="pb" id="pb1">
+      <div class="lbl">الروب</div>
+      <div class="line"><u>من</u><em class="blk">٢٠٬٠٠٠</em><s>د.ع</s></div>
+      <div class="ghost"><b>٢١</b><span>موديل</span></div>
+      <div class="shot"><img src="../shared/assets/p-robe-am.jpg" alt=""></div>
+    </div>
+    <div class="pb" id="pb2">
+      <div class="lbl">القبعة</div>
+      <div class="line"><u>من</u><em>١٠٬٠٠٠</em><s>د.ع</s></div>
+      <div class="ghost"><b>٥</b><span>موديل</span></div>
+      <div class="shot"><img src="../shared/assets/p-cap-queen.jpg" alt=""></div>
+    </div>
+  </div>
+
+  <div id="sApp">
+    <div id="appHead">صمّم وشاح وروب تخرّجك الفاخر مع لولو شوب</div>
+    <div id="devWrap">
+      <div class="device dev-orange" id="dev" style="--dw:440px">
+        <div class="d-frame">
+          <div class="d-screen">
+            <div class="d-app" id="devApp">
+              <img id="scrStrip" src="../shared/app/strip-shop.jpg" alt="" style="top:0">
+              <img id="scrProd" src="../shared/app/product.jpg" alt="" style="top:0;opacity:0">
+              <img id="scrOpts" src="../shared/app/product-opts.jpg" alt="" style="top:0;opacity:0">
+              <div id="heroShot"><img src="../shared/assets/p-sash-royal.jpg" alt=""></div>
+            </div>
+            <div id="chrome">
+              <img id="chHdr" src="../shared/app/chrome-header.jpg" alt="" style="top:0">
+              <img id="chTab" src="../shared/app/chrome-tabbar.jpg" alt="">
+            </div>
+            <div id="tap"><i class="core"></i><i class="ring"></i></div>
+            <div class="d-status">
+              <span class="d-time">٩:٤١</span>
+              <span class="d-sig">
+                <svg width="19" height="13" viewBox="0 0 19 13"><rect x="0" y="9" width="3" height="4" rx="1"/><rect x="5" y="6.4" width="3" height="6.6" rx="1"/><rect x="10" y="3.4" width="3" height="9.6" rx="1"/><rect x="15" y="0" width="3" height="13" rx="1"/></svg>
+                <svg width="17" height="13" viewBox="0 0 17 13"><path d="M8.5 12.4 6.2 9.9a3.3 3.3 0 0 1 4.6 0zM3.6 7.3 1.9 5.5a9.6 9.6 0 0 1 13.2 0l-1.7 1.8a7.2 7.2 0 0 0-9.8 0zm2.1 2.2L4 7.7a6 6 0 0 1 9 0l-1.7 1.8a3.7 3.7 0 0 0-5.6 0z"/></svg>
+                <svg width="26" height="13" viewBox="0 0 26 13"><rect x="0.6" y="0.6" width="21" height="11.8" rx="3.4" fill="none" stroke="currentColor" stroke-opacity=".38" stroke-width="1.2"/><rect x="2.3" y="2.3" width="15.6" height="8.4" rx="2.2"/><path d="M23.2 4.3c1.4.5 1.4 3.9 0 4.4z"/></svg>
+              </span>
+            </div>
+            <div class="d-island"><i class="d-lens"></i></div>
+            <div class="d-home"></div>
+            <div class="d-gloss" id="devGloss"></div>
+          </div>
+        </div>
+        <i class="d-btn d-act"></i><i class="d-btn d-vup"></i><i class="d-btn d-vdn"></i>
+        <i class="d-btn d-pwr"></i><i class="d-btn d-cam"></i>
+      </div>
+    </div>
+  </div>
+
+  <div id="sCta">
+    <div id="appIcon"><img src="../shared/assets/app-icon.png" alt=""></div>
+    <div id="ctaLine">حمّل تطبيق لولو شوب</div>
+    <div id="ctaRule"></div>
+    <div id="badges">
+      <span class="badge" id="bIos">
+        <svg viewBox="0 0 24 24"><path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.53 4.08zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"/></svg>
+        <span class="t"><i>Download on</i><b>App&nbsp;Store</b></span>
+      </span>
+      <span class="badge" id="bAnd">
+        <svg viewBox="0 0 24 24"><path d="M4.4 2.3c-.3.25-.5.66-.5 1.2v17c0 .54.2.95.5 1.2L14 12 4.4 2.3z"/><path d="M15.3 13.3l-2.3-2.3 2.3-2.3 3.2 1.85c1 .58 1 1.72 0 2.3l-3.2 1.85z"/><path d="M5.6 22.2 14.2 13.6l2.2 2.2-8.5 4.9c-.85.5-1.65.42-2.3-.5z" opacity=".92"/><path d="M5.6 1.8 14.2 10.4l2.2-2.2L7.9 3.3c-.85-.5-1.65-.42-2.3.5z" opacity=".72"/></svg>
+        <span class="t"><i>Get it on</i><b>Google&nbsp;Play</b></span>
+      </span>
+    </div>
+    <div id="ctaSub"><bdi>@lolo_shop96</bdi> · <bdi>lolo-shop96.com</bdi></div>
+  </div>
+
+  <div class="flash" id="flashA"><b>٥٤</b><span>موديل</span></div>
+  <div class="flash" id="flashB"><b>لولو شوب</b></div>
+  <div class="grain" id="grain"></div>
+</div>
+
+<script src="../shared/timeline.js"></script>
+<script>
+/* ===========================================================================
+   THE BEAT GRID — 128 BPM.  real beat = 0.46875s, real 8th = 0.234375s.
+   The film is AUTHORED against a round 0.47s beat (SC_A) purely so every
+   keyframe below is a clean multiple of 0.235, and shipped on the true
+   0.46875s grid (SC_B) via makeGrid.  The remap is uniform inside every
+   section, so an authored 8th lands EXACTLY on a real 8th — nothing here is
+   ever a frame off the bed.  music.py carries the mirror of this as g().
+   sections (beats):  4 assemble · 6 scale · 6 price · 8 app · 4 explode · 4 cta
+   =========================================================================== */
+const BA = 0.47, E = BA/2;               /* authored beat / 8th */
+const b  = n => n * BA;                  /* authored time of beat n */
+const SC_A = [0, 1.88, 4.70, 7.52, 11.28, 13.16, 15.04];
+const SC_B = [0, 1.875, 4.6875, 7.500, 11.250, 13.125, 15.000];
+const grid = makeGrid(SC_A, SC_B);
+const DUR = 15.0, FPS = 30;
+const STILL = b(31.15);                  /* everything freezes here: the last ~0.4s is dead still */
+
+/* section entry points, in AUTHORED time */
+const T_ASM = b(0), T_SCL = b(4), T_PRC = b(10), T_APP = b(16), T_EXP = b(24), T_CTA = b(28);
+const BARS = [0,4,8,12,16,20,24,28].map(b);      /* bar downbeats */
+
+/* one-frame ink inversions: the nearest RENDERED frame to bars 3 and 6 */
+const FLASH_A = Math.round(3.750 * FPS);   /* 113 */
+const FLASH_B = Math.round(9.375 * FPS);   /* 281 */
+
+/* ---------------------------------------------------------------- geometry */
+const CX = 540;
+const A_COL = [848, 540, 232];                     /* 3x4 home, RTL: 0 = rightmost */
+const A_ROW = [405.5, 710.5, 1015.5, 1320.5];
+const W_COL = [925, 771, 617, 463, 309, 155];      /* the 6-column wall, RTL */
+const W_ROW = [780, 936];                          /* SCALE wall rows */
+const C_ROW = [332, 1396];                         /* CTA frame rows */
+const TW = 296, TH = 291;                          /* tile module */
+const S_WALL = 142 / TW;                           /* one grid column wide */
+const DEV_CX = 540, DEV_CY = 448 + 984.2/2;        /* device centre */
+const S_HERO = 440 / TW;                           /* tile 0 grown to the screen width */
+
+/* per-tile constants — index, home cell, entry edge, entry spin, wall slot,
+   scatter vector for the explode.  Twelve blocks by hand would be unreadable. */
+const TILE = [
+  /* src                    aC aR edge spin  wC wR   scatter dx   dy   spin */
+  ['p-sash-royal',           0, 0, 'R', -7,   0, 0,   -430, -560, -24],
+  ['p-sash-butterfly',       1, 0, 'T',  5,   1, 0,    390, -620,  19],
+  ['p-sash-plain',           2, 0, 'L', -5,   2, 0,   -500, -170,  27],
+  ['ph-detail-pedestal',     0, 1, 'L',  6,   3, 0,    470, -110, -25],
+  ['ph-detail-flatlay',      1, 1, 'B', -6,   4, 0,   -330,  350, -31],
+  ['p-cap-queen',            2, 1, 'R',  7,   5, 0,    430,  380,  29],
+  ['p-robe-am',              0, 2, 'R', -5,   0, 1,   -190, -700,  15],
+  ['ph-look-english-red',    1, 2, 'B',  6,   1, 1,    210, -770, -17],
+  ['ph-grad-diyala',         2, 2, 'L', -7,   2, 1,   -520,  560,  23],
+  ['ph-look-pharmacy-blue',  0, 3, 'L',  5,   3, 1,    500,  540, -21],
+  ['ph-gown-sash',           1, 3, 'T', -6,   4, 1,    -70,  720, -13],
+  ['ph-look-boutique',       2, 3, 'R',  6,   5, 1,     90, -430,  31],
+];
+/* arrival order: scattered on purpose, so the grid builds as a poster, not a
+   typewriter. 5 tiles land before t=0 so the cover frame is never near-empty. */
+const ARR = [0, 7, 3, 10, 5, 8, 1, 6, 11, 2, 9, 4];
+const PRE = 6;
+const ord = new Array(12); ARR.forEach((ti, k) => ord[ti] = k);
+
+const tilesEl = $('tiles');
+TILE.forEach((d, i) => {
+  const el = document.createElement('div');
+  el.className = 'tile'; el.id = 'tl' + i;
+  el.innerHTML = '<img src="../shared/assets/' + d[0] + '.jpg" alt="">';
+  tilesEl.appendChild(el);
+});
+const TEL = TILE.map((_, i) => $('tl' + i));
+const CNT = [$('c0'), $('c1'), $('c2'), $('c3')];
+const CNTV = [11, 21, 5, 17];
+const PB = [$('pb0'), $('pb1'), $('pb2')];
+
+/* place a tile by CENTRE, so every section can hand it a centre + a scale */
+function put(el, cx, cy, sc, rot, op) {
+  el.style.transform = 'translate(' + (cx - TW/2) + 'px,' + (cy - TH/2) + 'px) rotate(' + rot + 'deg) scale(' + sc + ')';
+  el.style.opacity = op;
+}
+/* stepped scroll: the catalogue advances one notch per 8th, it never glides */
+function steps(t, t0, n, per, ease) {
+  let s = 0; for (let k = 0; k < n; k++) s += tw(t, t0 + k*E, t0 + k*E + ease, 0, per, eOut5);
+  return s;
+}
+
+/* ---------------------------------------------------------------- the film */
+function seek(tIn) {
+  const tReal = clamp(tIn, 0, DUR);
+  const fi    = Math.round(tReal * FPS);
+  const t     = grid(tReal);                 /* authored time */
+  const tS    = Math.min(t, STILL);          /* frozen for the final hold */
+
+  /* ---- the layout grid pulses to 40% on every bar downbeat ---- */
+  let pulse = 0;
+  for (const bt of BARS) pulse = Math.max(pulse, hit(tS, bt - 0.012, 0.05, 0.30));
+  $('gridL').style.opacity = 0.12 + 0.30 * pulse;
+  $('bg').style.transform = 'scale(' + (1 + 0.010 * pulse) + ')';
+
+  /* ================= 1 · ASSEMBLE — 12 tiles, one per 8th ================= */
+  /* every tile also carries a tiny per-index drift so the wall never freezes */
+  const wallIn = tw(tS, T_SCL, T_SCL + 0.22, 0, 1, eOut5);          /* 3x4 -> 6x2 */
+  const wallOut = tw(tS, T_PRC, T_PRC + 0.17, 0, 1, eIn);           /* wall -> gone */
+  const back    = tw(tS, b(14.5), b(14.5) + 0.06, 0, 1, eOut);      /* wall snaps back */
+  const collapse= tw(tS, b(14.5), T_APP, 0, 1, eInOut);             /* -> one tile */
+  const burst   = tw(tS, T_EXP, T_EXP + 0.30, 0, 1, eOut5);         /* device -> shards */
+  const settle  = tw(tS, b(25.5), b(25.5) + 0.34, 0, 1, eOut5);         /* shards -> CTA frame */
+
+  TEL.forEach((el, i) => {
+    const d = TILE[i], k = ord[i];
+    const hx = A_COL[d[1]], hy = A_ROW[d[2]];
+    const wx = W_COL[d[5]], wy = W_ROW[d[6]];
+    const cx2 = W_COL[d[5]], cy2 = C_ROW[d[6]];
+    const dr = drift(tS, 0.11 + i*0.013, 3.4, i * 0.83);            /* nothing sits still */
+
+    /* --- entry: one tile per 8th note, from alternating edges --- */
+    const s0 = (k - PRE) * E;
+    const p  = clamp((tS - s0) / 0.30, 0, 1);
+    const e  = eBack(p);
+    let ox = 0, oy = 0;
+    if (d[3] === 'R') ox = 980; else if (d[3] === 'L') ox = -980;
+    else if (d[3] === 'T') oy = -820; else oy = 820;
+    let cx = hx + ox * (1 - e), cy = hy + oy * (1 - e) + dr;
+    let sc = 0.84 + 0.16 * e, rot = d[4] * (1 - e), op = p > 0 ? 1 : 0;
+
+    /* --- re-sort into the sorted 6x2 wall (sashes, then worn pieces) --- */
+    if (wallIn > 0) {
+      const dl = clamp((tS - (T_SCL + d[5]*0.011 + d[6]*0.006)) / 0.19, 0, 1);
+      const q = eOut5(dl);
+      cx = hx + (wx - hx) * q; cy = hy + (wy - hy) * q + dr * 0.5;
+      sc = 1 + (S_WALL - 1) * q; rot = 0;
+    }
+    /* --- price: the wall clears out --- */
+    if (wallOut > 0) { sc *= (1 - wallOut); op *= (1 - wallOut); rot = -14 * wallOut; }
+    /* --- the wall snaps back for one beat and a half, then collapses inward --- */
+    if (back > 0) {
+      const q = eInOut(collapse);
+      op = back;
+      if (i === 0) {
+        cx = hx + (DEV_CX - hx) * q; cy = hy + (DEV_CY - hy) * q;
+        sc = 1 + (S_HERO - 1) * q; rot = 0;
+        op = back * (1 - tw(tS, T_APP, T_APP + 0.06, 0, 1, eOut));
+      } else {
+        cx = hx + (DEV_CX - hx) * q; cy = hy + (DEV_CY - hy) * q;
+        sc = 1 - 0.985 * q; rot = 22 * q * (i % 2 ? 1 : -1);
+        op = back * (1 - eIn(clamp((collapse - 0.72)/0.28, 0, 1)));
+      }
+    }
+    /* --- explode: the device breaks back into the deck, then re-forms --- */
+    if (burst > 0) {
+      const sx = DEV_CX + d[7] * burst, sy = DEV_CY + d[8] * burst;
+      const q = settle;
+      cx = sx + (cx2 - sx) * q; cy = sy + (cy2 - sy) * q + dr * 0.5;
+      sc = (0.18 + (S_WALL*1.34 - 0.18) * burst) * (1 - q) + S_WALL * q;
+      rot = d[9] * burst * (1 - q);
+      op = tw(tS, T_EXP, T_EXP + 0.04, 0, 1, eOut);
+    }
+    put(el, cx, cy, sc, rot, op);
+  });
+
+  /* ================= 2 · SCALE — «٥٤ موديل» slams, counts tick ============ */
+  const SO0 = T_PRC - 0.11, SO1 = T_PRC - 0.01;          /* the block leaves upward */
+  const sclUp = tw(tS, SO0, SO1, 0, -104, eIn);
+  const sclOn = vis(tS, b(4.5) - 0.02, b(4.5) + 0.20, SO0, SO1);
+  $('hRow').style.opacity = sclOn;
+  $('hRow').style.transform = 'translateY(' + (tw(tS, b(4.5), b(4.5)+0.26, 74, 0, eBack)
+      + sclUp + drift(tS, 0.19, 2.2, 1.1)) + 'px) scale('
+      + (tw(tS, b(4.5), b(4.5)+0.26, 1.14, 1, eOut5) * tw(tS, SO0, SO1, 1, 0.93, eIn)) + ')';
+  $('hBlock').style.transform = 'scaleX(' + tw(tS, b(4.5), b(4.5)+0.22, 0.12, 1, eOut5) + ')';
+  $('hBlock').style.transformOrigin = '100% 50%';
+  $('rScale1').style.opacity = sclOn;
+  $('rScale1').style.transform = 'translateY(' + sclUp + 'px) scaleX('
+      + tw(tS, b(4.75), b(4.75)+0.24, 0, 1, eOut5) + ')';
+  $('rScale1').style.transformOrigin = '100% 50%';
+  const cntOn = vis(tS, b(5) - 0.02, b(5) + 0.14, SO0, SO1);
+  $('rScale2').style.opacity = cntOn * 0.5;
+  $('rScale3').style.opacity = cntOn * 0.5;
+  $('rScale2').style.transform = 'translateY(' + sclUp + 'px)';
+  $('rScale3').style.transform = 'translateY(' + sclUp + 'px)';
+  /* one cell per 8th, right to left, each ticking up the instant it lands */
+  CNT.forEach((el, i) => {
+    const s = b(5 + i * 0.5);
+    el.style.opacity = vis(tS, s - 0.01, s + 0.12, SO0, SO1);
+    el.style.transform = 'translateY(' + (tw(tS, s, s + 0.24, 46, 0, eBack) + sclUp) + 'px)';
+    el.querySelector('b').textContent = arNum(Math.round(tw(tS, s, s + 0.30, 0, CNTV[i], eOut5)));
+  });
+
+  /* ================= 3 · PRICE — three blocks, 3 eighths each ============= */
+  /* Each block REPLACES the last: the outgoing leaves on the 8th before the
+     incoming lands, so no beat is ever mid-air, and none of them stack. */
+  const PT = [T_PRC, b(11.5), b(13)];
+  PB.forEach((el, i) => {
+    const s = PT[i], o = (i < 2 ? PT[i+1] : b(14.5));
+    el.style.opacity = vis(tS, s - 0.02, s + 0.10, o - 0.10, o - 0.005);
+    el.style.transform = 'translateX(' + (tw(tS, s, s + 0.26, 76, 0, eOut5)
+      + tw(tS, o - 0.10, o - 0.005, 0, -72, eIn)) + 'px)';
+    const sh = el.querySelector('.shot');
+    sh.style.transform = 'translateY(' + tw(tS, s, s + 0.28, 54, 0, eBack) + 'px) scale('
+      + (tw(tS, s, s + 0.28, 0.90, 1, eOut5) * tw(tS, s, o, 1, 1.035, eLin)) + ')';
+    const gh = el.querySelector('.ghost');
+    gh.style.transform = 'scale(' + tw(tS, s, s + 0.26, 0.84, 1, eOut5) + ')';
+    gh.style.opacity = tw(tS, s, s + 0.16, 0, 1, eOut);
+    const ln = el.querySelector('.line');
+    ln.style.transform = 'translateX(' + tw(tS, s + 0.05, s + 0.05 + 0.24, 96, 0, eOut5) + 'px)';
+  });
+  $('rPrice').style.opacity = vis(tS, T_PRC, T_PRC + 0.12, b(14.5) - 0.10, b(14.5) - 0.005) * 0.9;
+  $('rPrice').style.transform = 'scaleX(' + tw(tS, T_PRC, T_PRC + 0.26, 0, 1, eOut5) + ')';
+  $('rPrice').style.transformOrigin = '100% 50%';
+
+  /* ================= 4 · IN THE APP — every step on a beat =============== */
+  const devIn = tw(tS, T_APP, T_APP + 0.24, 0, 1, eBack);
+  const devGo = tw(tS, T_EXP, T_EXP + 0.09, 0, 1, eIn);
+  $('devWrap').style.opacity = tw(tS, T_APP - 0.01, T_APP + 0.09, 0, 1, eOut) * (1 - devGo);
+  $('devWrap').style.filter  = 'blur(' + (18 * devGo) + 'px)';
+  $('devWrap').style.transform = 'translateY(' + (drift(tS, 0.24, 4.2, 0.4)) + 'px) scale('
+    + ((0.86 + 0.14 * devIn) * tw(tS, T_APP, T_EXP, 1, 1.035, eInOut) * (1 + 0.14 * devGo)) + ')';
+  $('devGloss').style.opacity = vis(tS, b(16.5), b(17), b(18), b(18.5)) * 0.85;
+  $('devGloss').style.transform = 'translateX(' + tw(tS, b(16.5), b(18.5), -520, 520, eInOut) + 'px)';
+  $('appHead').style.opacity = vis(tS, b(16.5) - 0.02, b(16.5) + 0.14, T_EXP - 0.06, T_EXP + 0.04);
+  $('appHead').style.transform = 'translateY(' + (tw(tS, b(16.5), b(16.5) + 0.26, 40, 0, eBack)
+    + drift(tS, 0.17, 2.0, 2.2)) + 'px)';
+
+  /* the hero tile becomes the screen: a real match cut, one 8th long */
+  $('heroShot').style.opacity = 1 - tw(tS, T_APP + 0.06, T_APP + E, 0, 1, eOut);
+  /* catalogue: 5 stepped scrolls, one per 8th, then the tap, then the cut */
+  const T_TAP1 = b(18.5), T_CUT1 = b(19), T_TAP2 = b(20.5), T_CUT2 = b(21);
+  $('scrStrip').style.transform = 'translateY(' + steps(tS, T_APP, 5, -232, 0.13) + 'px)';
+  $('scrStrip').style.opacity = 1 - tw(tS, T_CUT1, T_CUT1 + 0.05, 0, 1, eOut);
+  $('chrome').style.opacity = vis(tS, T_APP + 0.05, T_APP + 0.16, T_CUT1, T_CUT1 + 0.05);
+  $('scrProd').style.opacity = vis(tS, T_CUT1, T_CUT1 + 0.05, T_CUT2, T_CUT2 + 0.05);
+  $('scrProd').style.transform = 'translateY(' + tw(tS, T_CUT1, T_CUT2, 0, -58, eInOut) + 'px) scale('
+    + tw(tS, T_CUT1, T_CUT1 + 0.18, 1.05, 1, eOut5) + ')';
+  $('scrOpts').style.opacity = tw(tS, T_CUT2, T_CUT2 + 0.05, 0, 1, eOut);
+  $('scrOpts').style.transform = 'translateY(' + tw(tS, T_CUT2, T_EXP, 0, -74, eInOut) + 'px) scale('
+    + tw(tS, T_CUT2, T_CUT2 + 0.18, 1.05, 1, eOut5) + ')';
+
+  /* the ripple lands one 8th BEFORE each screen change — that is what sells it */
+  const h1 = hit(tS, T_TAP1, 0.06, 0.20), h2 = hit(tS, T_TAP2, 0.06, 0.20);
+  const tp = $('tap'), on = Math.max(h1, h2);
+  const px = h1 >= h2 ? 300 : 292, py = h1 >= h2 ? 520 : 772;
+  tp.style.opacity = on;
+  tp.style.left = px + 'px'; tp.style.top = py + 'px';
+  tp.querySelector('.core').style.transform = 'scale(' + (0.35 + 0.85 * on) + ')';
+  tp.querySelector('.ring').style.transform = 'scale(' + (0.30 + 1.55 * (1 - on)) + ')';
+  tp.querySelector('.ring').style.opacity = on;
+
+  /* ================= 6 · CTA ============================================= */
+  $('appIcon').style.opacity = tw(tS, b(26), b(26) + 0.12, 0, 1, eOut);
+  $('appIcon').style.transform = 'translateY('
+    + (tw(tS, b(26), b(26) + 0.28, 250, 196, eOut5) + tw(tS, T_CTA, T_CTA + 0.26, 0, -196, eOut5)
+       + drift(tS, 0.21, 3.0, 0.9)) + 'px) scale('
+    + (tw(tS, b(26), b(26) + 0.28, 0.55, 1.94, eBack) * tw(tS, T_CTA, T_CTA + 0.26, 1, 1/1.94, eOut5)) + ')';
+  $('ctaLine').style.opacity = tw(tS, T_CTA, T_CTA + 0.10, 0, 1, eOut);
+  $('ctaLine').style.transform = 'translateY(' + tw(tS, T_CTA, T_CTA + 0.26, 62, 0, eBack) + 'px) scale('
+    + tw(tS, T_CTA, T_CTA + 0.26, 1.10, 1, eOut5) + ')';
+  $('ctaRule').style.transform = 'scaleX(' + tw(tS, b(28.5), b(28.5) + 0.24, 0, 1, eOut5) + ')';
+  $('bIos').style.opacity = tw(tS, b(29), b(29) + 0.10, 0, 1, eOut);
+  $('bIos').style.transform = 'translateY(' + tw(tS, b(29), b(29) + 0.26, 52, 0, eBack) + 'px)';
+  $('bAnd').style.opacity = tw(tS, b(29.5), b(29.5) + 0.10, 0, 1, eOut);
+  $('bAnd').style.transform = 'translateY(' + tw(tS, b(29.5), b(29.5) + 0.26, 52, 0, eBack) + 'px)';
+  $('ctaSub').style.opacity = tw(tS, b(30), b(30) + 0.12, 0, 1, eOut);
+  $('ctaSub').style.transform = 'translateY(' + tw(tS, b(30), b(30) + 0.26, 34, 0, eOut5) + 'px)';
+
+  /* ---- one-frame ink inversion. Exactly one frame; two reads as a bug. ---- */
+  $('flashA').style.opacity = (fi === FLASH_A) ? 1 : 0;
+  $('flashB').style.opacity = (fi === FLASH_B) ? 1 : 0;
+
+  /* ---- grain, jittered off the frame index, frozen for the final hold ---- */
+  grainAt($('grain'), Math.min(fi, Math.round(14.6 * FPS)));
+}
+
+publish(seek, { dur: DUR, fps: FPS });
+</script>
+</body>
+</html>

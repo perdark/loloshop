@@ -93,7 +93,7 @@ export default function JoinPickerPage() {
   const showPicker = reps !== null && reps.length > 0;
 
   return (
-    <AuthCard
+    <AuthCard appChrome
       title="ادخل مع ممثلك"
       subtitle={empty || failed ? undefined : "اختر ممثل جامعتك للانتقال إلى صفحة التسجيل"}
     >

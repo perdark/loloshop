@@ -138,7 +138,7 @@ export default function LoginPage() {
   }
 
   return (
-    <AuthCard
+    <AuthCard appChrome
       title={onOtp ? "رمز التحقق" : "تسجيل الدخول"}
       subtitle={onOtp ? undefined : "أدخل رقمك وكلمة المرور للمتابعة"}
       onBack={goBack}

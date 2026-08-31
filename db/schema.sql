@@ -1095,6 +1095,16 @@ ALTER TABLE option_groups ADD COLUMN IF NOT EXISTS customer_text_placeholder_ar 
 -- means «الطلاب العاديين فقط». Enforced in TWO places on purpose — catalogController hides
 -- it, orderController refuses it — because hiding alone still accepts a hand-posted group_id.
 ALTER TABLE option_groups ADD COLUMN IF NOT EXISTS price_role_restriction price_role;
+
+-- Migration 096 — «صورة الشال»/«صورة القبعة» are PRODUCT PICKERS, not embroidery.
+-- FALSE keeps an order OFF التصميم/التطريز; NULL = unset = treated as TRUE, so no existing
+-- group changes behaviour. ⚠️ The seed fills NULLs ONLY — this file is re-applied on every
+-- deploy, and an unguarded UPDATE would silently revert an admin's later edit (the 093 trap).
+-- Full reasoning, and the 468 shawl orders that were stranded by the old rule, in
+-- db/migrations/096_option_group_is_embroidery.sql.
+ALTER TABLE option_groups ADD COLUMN IF NOT EXISTS is_embroidery BOOLEAN;
+UPDATE option_groups SET is_embroidery = FALSE
+ WHERE is_embroidery IS NULL AND name_ar IN ('صورة الشال', 'صورة القبعة');
 ALTER TABLE options       ADD COLUMN IF NOT EXISTS customer_text_placeholder_ar TEXT;
 
 -- Migration 027: wholesaler carries جامعة/قسم; students inherit them on join.

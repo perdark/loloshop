@@ -1,0 +1,13 @@
+[
+  {"name":"home2",       "path":"/",                                             "wait":6500},
+  {"name":"shop",        "path":"/shop",                                         "wait":6500},
+  {"name":"product",     "path":"/product/e1d7e1a2-351b-4d3c-abab-1d23ee608ff0", "wait":6500},
+  {"name":"product-opts","path":"/product/e1d7e1a2-351b-4d3c-abab-1d23ee608ff0", "wait":6500, "scroll":700},
+  {"name":"vip",         "path":"/vip",                                          "wait":6000},
+  {"name":"lolo",        "path":"/lolo",                                         "wait":6500},
+  {"name":"package",     "path":"/package",                                      "wait":6500},
+  {"name":"why",         "path":"/",                                             "wait":6500,
+   "js":"(()=>{const h=[...document.querySelectorAll('h2,h3')].find(e=>e.textContent.includes('ليش لولو'));if(h)h.scrollIntoView({block:'start',behavior:'instant'});window.scrollBy(0,-90);return !!h})()"},
+  {"name":"strip-shop",  "path":"/shop", "wait":7000, "hideSel":"header, nav", "clipH":2160},
+  {"name":"strip-home",  "path":"/",     "wait":7000, "hideSel":"header, nav", "clipH":2160}
+]

@@ -82,8 +82,15 @@ test('the handshake names the device back to itself', async () => {
   assert.match(res.body, /Realtime=1/);
 });
 
-test('an ATTLOG upload becomes an attendance record', async () => {
+test('an ATTLOG upload becomes an attendance record, filed on the ARRIVAL date', async () => {
+  // ⚠️ The device timestamp here is deliberately a date in the past, and the record must NOT
+  // land on it: since 2026-08-30 the server clock stamps the punch (see ingestPunches). This
+  // line used to assert '2026-08-20' — the device's own reading — and flipping it is the
+  // whole behaviour change, not a test fix.
   const ts = '2026-08-20 09:40:00';
+  const todayBaghdad = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Baghdad', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
   const res = await request('POST', `/iclock/cdata?SN=${SN}&table=ATTLOG`,
     `${PIN}\t${ts}\t0\t1\t0\t0\n`);
   assert.equal(res.status, 200);
@@ -98,7 +105,7 @@ test('an ATTLOG upload becomes an attendance record', async () => {
     [ctx.userId]
   );
   assert.equal(rec.rows.length, 1);
-  assert.equal(rec.rows[0].work_date, '2026-08-20');
+  assert.equal(rec.rows[0].work_date, todayBaghdad);
 });
 
 test('the same batch again stores nothing — the device resends its whole buffer', async () => {

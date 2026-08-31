@@ -58,7 +58,7 @@ export function AttendanceReminder({ className = "" }: { className?: string }) {
       >
         <span className="font-semibold text-orange-ink">لم تسجّل بصمة الدخول اليوم</span>
         <span className="shrink-0 text-xs font-bold text-orange-ink">
-          سجّل من صفحة البصمة <span aria-hidden>←</span>
+          بصّم على الجهاز بالمحل <span aria-hidden>←</span>
         </span>
       </Link>
     );

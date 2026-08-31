@@ -55,6 +55,13 @@ export interface StationPiece {
    * `null` at every other station, which packs nothing, and for a piece bought on its own.
    */
   setPieces: SetPiece[] | null;
+  /**
+   * The production stage this piece is actually AT. Since 2026-08-31 a station console shows
+   * the whole line, not just its own stage (owner: «all staff, all stages except design»), so
+   * a row can no longer be assumed to be at the console's own stage — the stage chips and the
+   * complete label both read this.
+   */
+  status: string;
   /** Backend-granted single-piece complete (الكوي uses can_advance; الفصال pending rows are always completable). */
   canComplete: boolean;
   /** Arabic label for the piece's complete action (backend edge label when available). */

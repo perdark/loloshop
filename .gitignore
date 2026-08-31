@@ -67,3 +67,18 @@ frontend/public/dev-token-tmp.json
 
 # Brainstorming visual-companion scratch
 .superpowers/
+
+# showme verify screenshots — evidence for one session, regenerated on the next run
+.showme/
+
+# Reel render outputs. The KIT is tracked (store-assets/shared/, each reel's
+# index.html + music.py + sheet.png); the rendered artefacts are not. All three
+# regenerate from the commands in store-assets/README.md — a 15 s reel is ~1 min
+# of headless Chrome, and `frames/` alone is ~170 MB while the disk sits at 95%.
+store-assets/*.mp4
+store-assets/*.mp4.part
+store-assets/loloshop-reel-cover.jpg
+store-assets/**/bed.wav
+store-assets/**/frames/
+store-assets/**/probe/
+__pycache__/
