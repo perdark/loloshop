@@ -1,5 +1,112 @@
 # Progress
 
+## 2026-08-31 — 🧣 The American shawl was never تطريز, and the line was hiding work from the people who do it
+
+Owner report, two symptoms: «محمد عادل can't see all the American shawls» and «140 orders at
+التصميم but 137 at the next stage». Measured against the **production** database, not the dev
+copy. Three separate causes, all now fixed and deployed (`d145e06`, migration 096).
+
+**1. A PRODUCT PHOTO WAS BEING READ AS EMBROIDERY.** `orderController.priceSelections` set
+`hasEmbroidery` from ANY option group carrying text or a photo. «صورة الشال» / «صورة القبعة»
+are product PICKERS — the student choosing which one they want — and the picker stores that
+choice as `customer_text`. So **468 شال امريكي orders** were routed التصميم → التطريز on the
+strength of it, and measured: **not one of them carried a line with «تطريز» in it** (0 of 272 at
+التصميم, 0 of 196 at التطريز). The two halves of the app disagreed — `ZONE_DEFS` correctly says
+the American shawl is not embroidery — so each order arrived at التطريز showing **zero zones**:
+nothing to tick, nothing to finish, and no screen saying why. They sat from **2026-06-29**.
+The tell was in the untouched rows: the 71 shawls that were already at الكوي all had
+`has_embroidery = false`, i.e. bought without that picker, and they had routed correctly.
+→ **Migration 096** adds `option_groups.is_embroidery`. Nullable on purpose, NULL = «yes,
+embroidery»: every existing group keeps its behaviour with no backfill, and the seed fills
+NULLs ONLY, so re-applying `db/schema.sql` on every deploy can never revert an admin's later
+edit (the 093 trap). «اللون» / «لون التطريز» / «ردن الروب» were deliberately left alone — a sash
+with a colour really is embroidered, and flipping them would de-route live sash work.
+
+**2. THE CALLIGRAPHY WORKBENCH WAS A SIDE DOOR AROUND REP APPROVAL — this is the 140 vs 137.**
+`productionController.getQueue` filters `wholesaler_approval = 'approved'` and
+`returned_to_customer = FALSE`; `calligraphyController.zoneBuckets` / `sendOrder` filtered
+neither, and `performAdvance` checked nothing. So «تحويل للتطريز» pushed unapproved rep orders
+into التطريز, where **every** screen hides them — they existed in no queue at all. Exactly three
+on prod, and they matched the owner's report: **زمن طارق اسماعيل** (قبعة) and **شهد عبد الكريم
+حسين** (قبعة, *rejected*) under **محمد باقر عباس هاشم**, plus **عطاء صلاح** (وشاح) under محمد
+ناظم مصطفى. The audit trail for the third shows how approval was lost: the rep created AND
+approved it 2026-07-01 08:51, an admin reverted it to `designing` on 07-02, the rep re-submitted
+at 22:27 — and `lib/fullSetOrder.js:484` resets `wholesaler_approval='pending'` on ANY edit.
+→ The gate belongs on the **transition**, not on a list: `productionController.advanceBlockReason`
+is enforced by `advance`, `advanceBulk` and `sendOrder` (409 `ERR_REP_APPROVAL_PENDING` /
+`ERR_ORDER_RETURNED`), and `ordersZones` reports it so the workbench card shows
+«⏸ بانتظار موافقة الممثل» instead of a button that strands the piece. **It never approves
+anything** — that stays the ممثل's decision (owner ruling 2026-08-14).
+
+**3. ALL STAFF, ALL STAGES EXCEPT التصميم** (owner decision this session, «see AND move»).
+584 retail pieces sat at التطريز — 197 shawls, 150 caps, 142 sashes, 95 robes, oldest
+2026-06-29 — because the only embroiderer (محمد عماد) is `order_scope = 'wholesaler'` and every
+shawl is a retail order. `staff_activity_log` proved it: **200** shawl `design_complete→embroidery`
+moves and **zero** `embroidery→*` moves, ever. One person's scope must not be able to dam the line.
+→ Every non-design edge in `STAGE_AUTHZ` is now `LINE_STAFF`; `design_complete→*` and every edge
+back INTO the design desk stay restricted; cancelling is still manager/admin. The per-zone
+embroidery checklist is untouched, so a sash with unticked zones still cannot be skipped — only
+zone-less pieces (the shawl) advance freely. The station console gained **stage chips**
+defaulting to «مرحلتي», and `can_advance` is now computed for every returned row, not just the
+caller's own station.
+
+⚠️ **`viewerStages` had to stop deriving itself from `STAGE_AUTHZ`.** Its old rule — «a status is
+mine when I may move an order out of it» — was exact only while `QUEUE_STAGES` and the authz map
+agreed. Widening the map alone would have made every stage "mine" for everyone and re-opened
+bug 2 (a designer landing on 402 rows of other stations' finished work). It reads `QUEUE_STAGES`
+now; `viewerStages.test.js` is the guard that caught it.
+
+### The repair, and the version of it that would have done real damage
+
+`npm run stranded-orders` reports; `--fix` applies. ⚠️ **Its first draft would have reverted all
+224 hidden orders to «بانتظار التصميم».** Only **4** were ever MOVED there; the other **220** are
+plain pieces BORN at الكوي/التجهيز (since `4176fb3` a plain non-cap piece is created at الكوي)
+waiting on their ممثل — hiding them is correct, and rewinding 220 real orders to the design desk
+would have been the worst change of the session. The script now separates them by whether an
+`audit_log` `status_change` row proves a human moved it, and only rewinds embroidery/converting:
+a piece already at الكوي/التجهيز has been physically handled and rewinding it would make the
+record lie about the cloth.
+
+### Deployed and verified on prod
+
+`d145e06` (merge of 9 commits — also carries the other session's K40 attendance work, the dvh /
+safe-area pass, R8, and the marketing kit). CI green on all three jobs, migration 096 applied,
+site + `/api/health` 200, PM2 all three restarted 02:48. DB dumped first to
+`/root/lolo-predeploy-2026-08-31-0239.dump` (6.0 MB).
+
+| | before | after |
+|---|---|---|
+| شال محمد عادل sees at الكوي | **71** | **538** |
+| شال at التطريز / التصميم | 197 / 272 | **0 / 0** |
+| orders stranded past التصميم | 3 | **0** |
+| total شال (nothing lost) | 601 | **601** — 540 الكوي · 60 التجهيز · 1 مُسلّم |
+
+538 rather than 540 because two are مُرجَع للطالب, which every queue hides. 473 pieces moved,
+23 shawls stopped skipping الكوي, 3 orders returned to التصميم, **220 untouched**.
+
+### Measured, and worth keeping
+
+- **The designer's work on unapproved orders cost $0.33.** Across the whole database, exactly
+  **10 orders / 16 plates** ever had calligraphy generated while the ممثل had not approved —
+  8 of them محمد باقر's. 4 were on orders the rep had already **rejected** ($0.24 of it). Against
+  $27.12 of calligraphy spend ever logged, this is ~1%. The damage was the 3 lost pieces, not a bill.
+- **⚠️ Still open: 582 pool lines across 375 unapproved orders sit in «توليد» right now** — 363
+  pending and **12 already rejected**. The new gate stops them LEAVING التصميم; it does not stop
+  them being generated. Holding them out of the pool is an owner decision (a rep often approves
+  later, so pre-generating is not automatically waste). Roughly $15–20 of exposure.
+- **⚠️ The 2026-08-29 deploy silently failed and prod served a stale frontend for two days.**
+  CI run `33275028760` was ✗ on «SSH deploy»: `ENOTEMPTY … rmdir '.next/server/app/index.segments/…'`,
+  then `[PM2][ERROR] File ecosystem.config.js not found` — a *consequence*, not a second bug:
+  `deploy.sh` died inside `cd frontend && … && cd ..`, so PM2 ran from `frontend/` where that file
+  is not. `deploy.sh` does `git pull` BEFORE the build, so `git log` on the box read `7a7dffe`
+  while the served build was `162cfab`. **Adding `rm -rf .next` before `npm run build` is the fix
+  and has not been done.**
+- **⚠️ There is no admin UI for `is_embroidery`.** A new product-picker group added later
+  re-creates cause 1 silently. Small follow-up: a checkbox on the option-group editor.
+- **⚠️ محمد عماد is still `order_scope = 'wholesaler'`.** He now sees the whole line but still no
+  retail orders. Widening him is a one-row UPDATE and an owner call.
+
+
 ## 2026-08-30 — 🖐️ The fingerprint device was punching into a 404
 
 Owner report: five workers had put their fingers on the K40 (2 محمد عادل · 3 علي · 4 محمد

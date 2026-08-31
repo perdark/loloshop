@@ -495,6 +495,49 @@ longer stranded on a branch · the laptop's loose credentials are filed in
 
 ## 💣 LANDMINES
 
+- **⚠️ «صورة الشال» / «صورة القبعة» ARE PRODUCT PICKERS, NOT EMBROIDERY — migration 096, and the
+  flag has NO admin UI.** `priceSelections` used to route an order to التصميم → التطريز from ANY
+  option group carrying text or a photo, and those two store the student's *choice of product* as
+  `customer_text`. 468 شال امريكي went that way and **not one carried a «تطريز» line**; they then
+  sat at التطريز showing ZERO zones, because `ZONE_DEFS` correctly says the American shawl is not
+  embroidery. Two rules contradicting each other, pieces falling in the gap, from 2026-06-29 until
+  2026-08-31. `option_groups.is_embroidery` is **nullable and NULL means YES** — that is what lets
+  the seed fill NULLs only, so `db/schema.sql` (re-applied on every deploy) can never revert an
+  admin's later edit. **Adding a new picker-shaped group re-creates the bug silently**, because
+  nothing on the product editor exposes the flag. «اللون» / «لون التطريز» / «ردن الروب» were left
+  TRUE on purpose: a sash with a colour really is embroidered.
+
+- **⚠️ THE CALLIGRAPHY WORKBENCH IS NOT A STATION QUEUE, AND `advanceBlockReason` IS THE ONLY
+  THING STANDING IN THE GAP (2026-08-31).** `getQueue` filters `wholesaler_approval='approved'`
+  and `returned_to_customer=FALSE`; `zoneBuckets`/`sendOrder` filter neither. Before the gate,
+  «تحويل للتطريز» pushed unapproved rep orders into التطريز where EVERY screen hides them — that
+  is the «140 at التصميم, 137 at التطريز» report, and three real orders were lost that way. The
+  gate lives on the TRANSITION (`advance`, `advanceBulk`, `sendOrder`), never on a list: hiding
+  alone still accepts a hand-posted id. It **refuses movement and never approves** — «بانتظار
+  موافقة الممثل» is not a queue to drain. Do not "simplify" it into a WHERE clause on the pool.
+
+- **⚠️ `viewerStages` READS `QUEUE_STAGES` AND MUST NOT GO BACK TO DERIVING FROM `STAGE_AUTHZ`
+  (2026-08-31).** The owner opened every non-design edge to every line staff type, so the authz
+  map now says a presser may move an order out of التطريز — true, and NOT «التطريز is the
+  presser's station». Deriving «mine» from it makes «مرحلتي» mean «الكل» for everyone and
+  re-opens bug 2. `QUEUE_STAGES` = my job; `LINE_VIEW_STAGES` = what I may look at and move. They
+  look redundant, which is exactly why a future tidy-up will want to merge them.
+  · `test/viewerStages.test.js` is the guard that catches it, and `test/lineWideAccess.test.js`
+    pins the other half (التصميم closed, cancel still manager/admin, edges back INTO design
+    restricted).
+  · A DB-touching test that leaves a fixture sitting in a live stage **breaks
+    `adminNumbers.test.js`** — it compares two live COUNT queries and a moving row straddles them
+    (measured: off by exactly one). Retire such a fixture inside its own test, not in cleanup.
+
+- **⚠️ `scripts/deploy.sh` DOES `git pull` BEFORE THE BUILD, SO A FAILED BUILD LEAVES `git log` ON
+  THE BOX LYING.** CI run `33275028760` (2026-08-29) died on
+  `ENOTEMPTY … rmdir '.next/server/app/index.segments/…'` and prod served the `162cfab` frontend
+  for two days while the box's git said `7a7dffe`. The `[PM2][ERROR] File ecosystem.config.js not
+  found` in that log is a CONSEQUENCE — the script died inside `cd frontend && … && cd ..`, so PM2
+  ran from `frontend/`; the file exists at the repo root. **`rm -rf .next` before `npm run build`
+  is the fix and is NOT done.** Never read the box's `git log` as proof that a deploy landed —
+  check the CI run and PM2 uptime.
+
 - **⚠️ A DAY IS READ FROM THE SEQUENCE OF PUNCHES, AND THE CLOCK — NOT THE COUNT — DECIDES
   WHERE IT ENDS (owner rule, 2026-08-30).** بصمة ١ دخول · ٢ خروج مؤقت · ٣ عودة · ٤ خروج, and
   a punch **at or after the shift's own `end_time`** closes the day while anything earlier
