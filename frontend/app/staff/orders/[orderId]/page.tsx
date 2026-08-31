@@ -680,6 +680,71 @@ function CopyOrderDetailsButton({
  * is at the embroidery stage. Toggling a zone calls the backend, which auto-advances
  * the order once all present zones are done.
  */
+/**
+ * «منو نقلها؟» — the stage history (owner, 2026-08-31).
+ *
+ * Asked about a شال امريكي sitting at «قيد التجهيز» that «ما اجه بالكوي وما نطاه تم بالكوي».
+ * The move was recorded all along — `staff_activity_log` has carried (who, from, to, when)
+ * since the line was built — but no screen read it back, so the question had to be settled
+ * between workers instead of by the system.
+ *
+ * ⚠️ A STAGE WITH NO ROW IS USUALLY THE ROUTING RULE, NOT A LOST RECORD. A piece skips الكوي
+ * whenever `needs_pressing` is false, and a plain cap STARTS at التجهيز — so «ليش ما مر
+ * بالكوي؟» is answered by the absence itself. The card therefore lists what happened and
+ * never invents a step that did not.
+ */
+function StageHistoryCard({
+  history,
+}: {
+  history: NonNullable<ProductionOrderDetail["stage_history"]>;
+}) {
+  return (
+    <article className="rounded-2xl border border-line bg-surface p-4 shadow-[var(--shadow-soft)]">
+      <h2 className="text-sm font-bold text-ink">سجل المراحل</h2>
+      <p className="mt-0.5 text-xs text-ink-soft">منو نقل القطعة، ومن وين لوين، وشوكت.</p>
+      {history.length === 0 && (
+        // ⚠️ AN EMPTY LOG IS AN ANSWER, NOT A BLANK. Measured on prod 2026-08-31: 293 pieces
+        // sit at التجهيز/جاهز with no log line at all — every one of them created on or
+        // before 2026-07-15, the day the owner routed plain pieces to الكوي («المكوجي gets
+        // every piece except caps»). They were opened AT التجهيز under the older rule, so
+        // nobody skipped a step and nobody forgot to press «تم». Saying that here is the
+        // whole point: the alternative is a worker being blamed for a routing change.
+        <p className="mt-3 rounded-xl bg-surface-sink px-3 py-2 text-xs text-ink-soft">
+          ما نُقلت من أي مرحلة — الطلب انفتح مباشرة على حالته الحالية.
+        </p>
+      )}
+      <ol className="mt-3 space-y-2">
+        {history.map((h, i) => (
+          <li
+            key={`${h.at}-${i}`}
+            className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 rounded-xl bg-surface-sink px-3 py-2 text-xs"
+          >
+            <span className="font-semibold text-ink">
+              {h.from_label ? `${h.from_label} ← ${h.to_label}` : h.to_label}
+            </span>
+            <span className="text-ink-soft">
+              {h.staff_name ?? "غير معروف"} · {formatStamp(h.at)}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </article>
+  );
+}
+
+/** «٣١ آب ٢٠٢٦، 4:15 م» — Baghdad time, because that is the clock the workshop reads. */
+const STAMP_FORMAT = new Intl.DateTimeFormat("ar-IQ", {
+  timeZone: "Asia/Baghdad",
+  day: "numeric",
+  month: "short",
+  hour: "numeric",
+  minute: "2-digit",
+});
+function formatStamp(value: string): string {
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? "—" : STAMP_FORMAT.format(d);
+}
+
 function EmbroideryZonesCard({
   zones,
   orderId,
@@ -1094,6 +1159,8 @@ function ProductionOrderDetailContent() {
   }
 
   const { order, design, items, package_orders, bundle, can_see_design, available_actions, embroidery_zones } = detail;
+  // Optional on the wire — an older backend simply renders no card. See ProductionOrderDetail.
+  const stageHistory = detail.stage_history ?? [];
   const intake = order.intake ?? null;
 
   // Presence banner — someone else is working on this order. `conflictOwner` is
@@ -1942,6 +2009,11 @@ function ProductionOrderDetailContent() {
               </div>
             </dl>
           </article>
+
+          {/* Who moved this piece, and when — see StageHistoryCard for why it exists.
+              Rendered even when empty: «no one moved it» is the answer to the question that
+              made this card exist. */}
+          <StageHistoryCard history={stageHistory} />
 
           {/* Embroidery zones checklist (FEATURE 1 — embroiderer/manager/admin) */}
           {showEmbroideryZones && (

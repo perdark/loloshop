@@ -240,7 +240,31 @@ async function wholesalerOrders(req, res) {
             s.id AS student_id, u.name AS student_name,
             p.name_ar AS product_name, p.type AS product_type,
             b.name_ar AS batch_name, b.deadline,
-            d.approval_status AS design_approval_status
+            d.approval_status AS design_approval_status,
+            -- Every word the STUDENT typed on this piece, flattened to one string for the
+            -- console's search box. Same subquery (and the same reasoning) as the production
+            -- queue's search_text: a worker holding a garment searches for what is WRITTEN
+            -- on it, and the console cannot search text it was never sent. Before this the
+            -- rep console matched the student NAME alone.
+            (SELECT string_agg(DISTINCT oi3.customer_text, ' ')
+               FROM order_items oi3
+              WHERE oi3.order_id = o.id
+                AND oi3.customer_text IS NOT NULL
+                AND oi3.customer_text <> '') AS search_text,
+            -- ⚠️ «شال امريكي» IS NOT A PIECE OF ITS OWN — it is an add-on line stored on the
+            -- SASH order (measured on the dev DB: 253 such lines, every one of them on a
+            -- product of type 'sash', zero on any other type). That is why the «شال أمريكي»
+            -- filter «shows sashes, not shawls»: the sash row IS the shawl's row, and nothing
+            -- on it said so. Rather than invent a phantom piece, the row now carries the fact
+            -- and the console prints it as a «+ شال أمريكي» chip, so a preparer bagging the set
+            -- can see the extra garment they have to put in the bag.
+            EXISTS (SELECT 1 FROM order_items oi4
+                     WHERE oi4.order_id = o.id
+                       AND (oi4.label_snapshot ILIKE '%شال%امريكي%'
+                            OR oi4.label_snapshot ILIKE '%شال%أمريكي%')
+                       AND ((oi4.customer_text IS NOT NULL AND btrim(oi4.customer_text) <> '')
+                            OR oi4.customer_image_url IS NOT NULL
+                            OR oi4.plate_image_url IS NOT NULL)) AS has_american_shawl
      FROM orders o
      JOIN students s ON s.id = o.student_id
      JOIN users u ON u.id = s.user_id
@@ -265,6 +289,9 @@ async function wholesalerOrders(req, res) {
       student_name: r.student_name,
       product_name: r.product_name,
       product_type: r.product_type,
+      // Search haystack + the shawl add-on flag — see the SELECT above for both.
+      search_text: r.search_text || null,
+      has_american_shawl: !!r.has_american_shawl,
       status: r.status,
       status_label: STATUS_LABEL_AR[r.status] || r.status,
       is_done: DONE_STATUSES.has(r.status),

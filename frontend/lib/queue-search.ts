@@ -33,21 +33,43 @@ export function normalizeArabic(value: string): string {
     .trim();
 }
 
+/**
+ * Does this row match the typed query, given the fields it is searchable by?
+ *
+ * EVERY whitespace-separated token must appear somewhere in the row, in any order and in any
+ * field: «احمد طب» finds Ahmed in the medicine faculty. Order-sensitive matching would fail
+ * the most natural way to narrow a 480-row list — name plus one distinguishing word.
+ *
+ * An empty query matches everything, so callers can pass the raw input straight through.
+ *
+ * Exported because the rep console («طلبات الممثل») searches a DIFFERENT row shape than the
+ * production queue does, and the shop must not end up with two spellings of "does this row
+ * match" again — that divergence is exactly what bug 8 part 2 was filed for.
+ */
+export function matchesSearchFields(
+  fields: (string | null | undefined)[],
+  query: string
+): boolean {
+  const tokens = normalizeArabic(query).split(" ").filter(Boolean);
+  if (!tokens.length) return true;
+  const hay = normalizeArabic(fields.filter(Boolean).join(" "));
+  return tokens.every((t) => hay.includes(t));
+}
+
 /** The fields a worker could reasonably be searching by, as one normalised haystack. */
-function haystack(item: ProductionQueueItem): string {
-  return normalizeArabic(
-    [
-      item.student_name,
-      item.university_name,
-      item.department,
-      item.wholesaler_name,
-      // What the student typed on the piece — above all the التطريز text. The half that was
-      // missing, and the one a worker holding the garment reaches for first.
-      item.search_text,
-    ]
-      .filter(Boolean)
-      .join(" ")
-  );
+function haystack(item: ProductionQueueItem): (string | null | undefined)[] {
+  return [
+    item.student_name,
+    // «بحث باسم الطلب» — what the piece IS («وشاح ملكي», «روب فصال بشت»). A preparer holding
+    // a garment names it before they name its owner.
+    item.product_name,
+    item.university_name,
+    item.department,
+    item.wholesaler_name,
+    // What the student typed on the piece — above all the التطريز text. The half that was
+    // missing, and the one a worker holding the garment reaches for first.
+    item.search_text,
+  ];
 }
 
 /**
@@ -60,8 +82,5 @@ function haystack(item: ProductionQueueItem): string {
  * An empty query matches everything, so callers can pass the raw input straight through.
  */
 export function matchesQueueSearch(item: ProductionQueueItem, query: string): boolean {
-  const tokens = normalizeArabic(query).split(" ").filter(Boolean);
-  if (!tokens.length) return true;
-  const hay = haystack(item);
-  return tokens.every((t) => hay.includes(t));
+  return matchesSearchFields(haystack(item), query);
 }

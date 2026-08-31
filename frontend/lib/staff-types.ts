@@ -337,6 +337,26 @@ export interface ProductionOrderDetail {
    * Each entry's `done` reflects whether that zone's stitching is finished.
    */
   embroidery_zones: { key: string; label: string; done: boolean }[];
+  /**
+   * «منو نقلها؟» — who moved this piece between stages, and when.
+   *
+   * Read back from `staff_activity_log`, which has recorded every advance/revert/approve
+   * since the line was built but was never surfaced anywhere. Optional on the wire so an
+   * older backend simply renders no card.
+   *
+   * ⚠️ A MISSING STAGE IS NOT A MISSING ROW. A piece legitimately skips الكوي when
+   * `needs_pressing` is false, and a plain cap starts AT التجهيز — so «ما مر بالكوي» is
+   * usually the routing rule, not a lost record. Read the gap, don't fill it.
+   */
+  stage_history?: {
+    action: string;
+    from_stage: string | null;
+    to_stage: string;
+    from_label: string | null;
+    to_label: string;
+    staff_name: string | null;
+    at: string;
+  }[];
   /** Actions the requesting user may perform on this order right now.
    *  Derived server-side from the same state machine used by POST handlers. */
   available_actions: {

@@ -730,6 +730,14 @@ export interface WholesalerOrderRow {
   nextLabel: string | null;
   adminAmount: number | null;
   wholesalerAmount: number | null;
+  /** Everything the student typed on this piece — the search box's real haystack. */
+  searchText: string | null;
+  /**
+   * Does this order carry a «شال امريكي» add-on? The shawl has no order row of its own — it
+   * is a line on the SASH order — so without this flag the «شال أمريكي» filter looks broken:
+   * it returns sashes, and nothing on them mentions a shawl.
+   */
+  hasAmericanShawl: boolean;
 }
 
 export interface WholesalerAccountLine {
@@ -773,6 +781,8 @@ interface WholesalerOrderApiRow {
   next_label: string | null;
   admin_amount: number | null;
   wholesaler_amount: number | null;
+  search_text?: string | null;
+  has_american_shawl?: boolean;
 }
 
 interface WholesalerAccountSummaryApi {
@@ -840,6 +850,10 @@ export async function getWholesalerOrders(
     nextLabel: r.next_label,
     adminAmount: r.admin_amount == null ? null : Number(r.admin_amount),
     wholesalerAmount: r.wholesaler_amount == null ? null : Number(r.wholesaler_amount),
+    // Optional on the wire so an older backend degrades to «name-only search, no shawl chip»
+    // instead of rendering `undefined`.
+    searchText: r.search_text ?? null,
+    hasAmericanShawl: Boolean(r.has_american_shawl),
   }));
   const raw = data.summary;
   return {

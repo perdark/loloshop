@@ -866,11 +866,20 @@ async function getOrder(req, res) {
     embroidery_zones = await detectEmbroideryZones(order.id, order.embroidery_zones);
   }
   delete order.embroidery_zones;
-  // Mandatory checklist: a non-manager embroiderer must tick EVERY zone. While any zone is
-  // unticked the manual advance is hidden here AND rejected in advance() — so the per-zone
-  // checklist can't be skipped. Manager/admin keep the manual advance as a fallback.
+  // Mandatory checklist: the EMBROIDERER must tick EVERY zone. While any zone is unticked the
+  // manual advance is hidden here AND rejected in advance() — so the per-zone checklist can't
+  // be skipped. Manager/admin keep the manual advance as a fallback.
+  //
+  // ⚠️ `uTypes.includes('embroiderer')` is the half that was missing, and its absence is why
+  // برزان (المجهز) could not move a قيد التطريز order: the button was hidden here and the
+  // request refused there, for a checklist only an embroiderer may tick. Keep this predicate
+  // and embroideryChecklistBlocks() saying the same thing — they are the screen and the door
+  // of one rule.
   const embroideryIncomplete =
-    order.status === 'embroidery' && embroidery_zones.length > 0 && !embroidery_zones.every((z) => z.done);
+    order.status === 'embroidery' &&
+    uTypes.includes('embroiderer') &&
+    embroidery_zones.length > 0 &&
+    !embroidery_zones.every((z) => z.done);
 
   // Admin/مدير الإنتاج editing: quick per-field edits on any order; the full طقم form only
   // for design-less orders of rep-linked or admin-created (name-only) students — never
@@ -886,6 +895,39 @@ async function getOrder(req, res) {
       canEditFullSet = st.rows.length > 0 && st.rows[0].phone == null;
     }
   }
+
+  // ─── «منو نقلها؟» — the per-order stage history (owner, 2026-08-31) ────────────────────
+  // Asked about a شال امريكي that was «قيد التجهيز» although it never appeared at الكوي and
+  // nobody there marked it done. The move HAD been recorded — `staff_activity_log` has carried
+  // (user, action, from_stage, to_stage) since the line was built — but nothing ever read it
+  // back, so a question about who moved a piece had no answer on any screen and turned into a
+  // conversation between workers. Every station sees it: it is names, stages and times, no
+  // money and no contact details, and it is the accountability the shop actually asked for.
+  //
+  // NOT a status derivation. `orders.status` stays the single source of truth for where the
+  // piece IS; this only says how it got there, and it is deliberately tolerant of gaps — a
+  // stage a piece skipped legitimately (needs_pressing = FALSE routes التطريز straight to
+  // التجهيز, and a plain cap starts AT التجهيز) simply has no row, which is the honest answer
+  // to «ليش ما مر بالكوي؟».
+  const stageHistory = await query(
+    `SELECT sal.action, sal.from_stage::text AS from_stage, sal.to_stage::text AS to_stage,
+            sal.created_at, su.name AS staff_name
+       FROM staff_activity_log sal
+       LEFT JOIN users su ON su.id = sal.user_id
+      WHERE sal.order_id = $1
+        AND sal.to_stage IS NOT NULL
+      ORDER BY sal.created_at ASC`,
+    [id]
+  );
+  const stage_history = stageHistory.rows.map((r) => ({
+    action: r.action,
+    from_stage: r.from_stage,
+    to_stage: r.to_stage,
+    from_label: STATUS_LABEL_AR[r.from_stage] || r.from_stage,
+    to_label: STATUS_LABEL_AR[r.to_stage] || r.to_stage,
+    staff_name: r.staff_name || null,
+    at: r.created_at,
+  }));
 
   const available_actions = {
     advance: nextTo && canTransition(u, order.status, nextTo) && !(embroideryIncomplete && !isManager(u))
@@ -926,6 +968,7 @@ async function getOrder(req, res) {
       package_orders: bundle, // backward-compat alias
       can_see_design: canSeeDesign,
       embroidery_zones,
+      stage_history,
       available_actions,
       // The UI never re-derives visibility from roles — it reads this layout discriminator
       // (mirrors the available_actions single-source pattern).
@@ -1011,6 +1054,33 @@ async function performAdvance(order, user) {
   return updated;
 }
 
+/**
+ * Is this person blocked from leaving التطريز by the per-zone checklist?
+ *
+ * ⚠️ THE CHECKLIST BELONGS TO THE EMBROIDERER, NOT TO THE LINE (2026-08-31 follow-up).
+ * It exists so محمد عماد cannot press «نقل للكوي» and skip the per-zone tracking his own
+ * station is measured by. It was written when التطريز was visible ONLY to him, so
+ * «!isManager» was the same sentence as «the embroiderer».
+ *
+ * The owner then opened every non-design edge to every line staff member (STAGE_AUTHZ), and
+ * this gate silently kept the door shut: `can_advance` says TRUE on the queue row (it asks
+ * canStaffTransition, which passes a preparer/presser), the button renders, the press 409s
+ * «أكمل مناطق التطريز أولاً» — and there is nothing the pressed-on worker can do about it,
+ * because markEmbroideryZone only accepts an embroiderer or a manager. Reported from the
+ * floor: «برزان can't move a قيد التطريز order, and I think it is for all staff». It was.
+ *
+ * So the gate now applies to exactly the role it was written for. Anyone else on the line
+ * may push the piece on — which is the whole point of the 2026-08-31 decision: one person's
+ * unticked checklist must not be able to dam the line.
+ */
+async function embroideryChecklistBlocks(user, id) {
+  if (isManager(user)) return false;
+  if (!staffTypesOf(user).includes('embroiderer')) return false;
+  const prog = (await query('SELECT embroidery_zones FROM orders WHERE id = $1', [id])).rows[0]?.embroidery_zones || {};
+  const zones = await detectEmbroideryZones(id, prog);
+  return zones.length > 0 && !zones.every((z) => z.done);
+}
+
 async function advance(req, res) {
   const { id } = req.params;
   const order = await loadAdvanceRow(id);
@@ -1027,15 +1097,9 @@ async function advance(req, res) {
   if (!canStaffTransition(req.user, order.status, to)) {
     return res.status(403).json({ error: 'ممنوع', code: 'ERR_FORBIDDEN' });
   }
-  // Mandatory checklist: a non-manager embroiderer can't manually leave التطريز while any
-  // detected zone is still unticked — he must complete each zone (which auto-advances). This
-  // closes the bypass so the manual «نقل للكوي» can't skip the per-zone tracking.
-  if (order.status === 'embroidery' && !isManager(req.user)) {
-    const prog = (await query('SELECT embroidery_zones FROM orders WHERE id = $1', [id])).rows[0]?.embroidery_zones || {};
-    const zones = await detectEmbroideryZones(id, prog);
-    if (zones.length > 0 && !zones.every((z) => z.done)) {
-      return res.status(409).json({ error: 'أكمل مناطق التطريز أولاً', code: 'ERR_EMBROIDERY_ZONES_INCOMPLETE' });
-    }
+  // Mandatory checklist — the EMBROIDERER's own, see embroideryChecklistBlocks.
+  if (order.status === 'embroidery' && (await embroideryChecklistBlocks(req.user, id))) {
+    return res.status(409).json({ error: 'أكمل مناطق التطريز أولاً', code: 'ERR_EMBROIDERY_ZONES_INCOMPLETE' });
   }
   const updated = await performAdvance(order, req.user);
   res.json({ data: updated });
@@ -1179,14 +1243,9 @@ async function advanceBulk(req, res) {
     if (to === 'delivered') {
       results.push({ id, ok: false, reason: 'needs_delivery' }); continue;
     }
-    // Mandatory checklist (same as single advance): a non-manager embroiderer can't bulk-skip
-    // التطريز while any zone is unticked — close the bulk bypass too.
-    if (order.status === 'embroidery' && !isManager(req.user)) {
-      const prog = (await query('SELECT embroidery_zones FROM orders WHERE id = $1', [id])).rows[0]?.embroidery_zones || {};
-      const zones = await detectEmbroideryZones(id, prog);
-      if (zones.length > 0 && !zones.every((z) => z.done)) {
-        results.push({ id, ok: false, reason: 'embroidery_zones_incomplete' }); continue;
-      }
+    // Mandatory checklist (same rule, same owner) — close the bulk bypass too.
+    if (order.status === 'embroidery' && (await embroideryChecklistBlocks(req.user, id))) {
+      results.push({ id, ok: false, reason: 'embroidery_zones_incomplete' }); continue;
     }
     try {
       const updated = await performAdvance(order, req.user);

@@ -6,11 +6,8 @@ import { useParams } from "next/navigation";
 import { toast } from "sonner";
 import { api, getApiErrorMessage } from "@/lib/api";
 import type { OrderStatus, StudentApprovalStatus, WholesalerStudentRow } from "@/lib/types";
-import {
-  FULLSET_ZONE_LABELS,
-  FULLSET_ZONE_ORDER,
-  type FullSetZone,
-} from "@/lib/constants";
+import { rememberQueueOrder } from "@/lib/queue-neighbors";
+import { matchesSearchFields } from "@/lib/queue-search";
 import {
   advanceBulk,
   getWholesalerOrders,
@@ -25,6 +22,7 @@ import { useRequireAuth } from "@/hooks/useRequireAuth";
 import { formatIQD } from "@/lib/format";
 import { Count } from "@/components/ui/Count";
 import { CalculationDetails } from "@/components/admin/CalculationDetails";
+// RosterTab still searches student names only — a roster has no piece and no تطريز on it.
 import { matchesAr } from "@/lib/arabic";
 
 // ─── Shared status pill (warm brand palette, no blue/purple) ──────────────────
@@ -66,9 +64,50 @@ type Tab = "orders" | "roster";
 // which would mismatch the server pass (no `window` there).
 const STORAGE_PREFIX = "loloshop-rep-console:";
 
+/**
+ * ⚠️ THE CHIPS FILTER GARMENTS, NOT EMBROIDERY POSITIONS (owner, 2026-08-31).
+ *
+ * They used to be the seven full-set ZONES — «وشاح — أمام», «وشاح — خلف», «قبعة — جانب»,
+ * «قبعة — أعلى», «روب — ردن أيمن», «روب — ردن أيسر», «شال أمريكي» — sent to the backend as
+ * `?zone=` and matched against `order_items.label_snapshot`. Two things were wrong with that
+ * for a المجهز, who is the person actually using this screen:
+ *
+ *   1. أمام and خلف are ONE sash in his hands. So is a pair of sleeves. He picks up a
+ *      garment, not an embroidery position — «add just a روب filter, not ردن روب».
+ *   2. A label-matched filter can only ever return pieces that CARRY that embroidery. A plain
+ *      robe — no ردن stitching at all — matched no chip and was reachable only through «الكل».
+ *      «we must see the pieces even the pieces without تطريز on filters».
+ *
+ * So the chip is now the product TYPE, which every piece has whether or not anything is
+ * stitched on it, and it filters client-side: the payload is already the whole rep and the
+ * rows already carry `productType`, so switching chips is instant instead of a refetch.
+ *
+ * `american_shawl` is the one chip that is NOT a product type, and cannot be: the shawl has
+ * no order row of its own — it is an add-on line on the SASH order (253 of them on the dev
+ * DB, every one on a product of type 'sash'). That is exactly why the old filter «showed
+ * sashes, not shawls», and it is not fixable by filtering harder. The backend now flags the
+ * carrier row (`has_american_shawl`) and `OrderRow` prints «+ شال أمريكي» on it, so the chip
+ * returns the sashes it always returned — and now they say why they are there.
+ */
+type GarmentFilter = "" | "sash" | "cap" | "robe" | "american_shawl";
+
+const GARMENT_CHIPS: { id: GarmentFilter; label: string }[] = [
+  { id: "", label: "الكل" },
+  { id: "sash", label: "وشاح" },
+  { id: "cap", label: "قبعة" },
+  { id: "robe", label: "روب" },
+  { id: "american_shawl", label: "شال أمريكي" },
+];
+
+function matchesGarment(o: WholesalerOrderRow, g: GarmentFilter): boolean {
+  if (!g) return true;
+  if (g === "american_shawl") return o.hasAmericanShawl;
+  return o.productType === g;
+}
+
 interface StoredConsoleState {
   tab?: Tab;
-  zone?: FullSetZone | "";
+  garment?: GarmentFilter;
   view?: CompletionView;
   search?: string;
   selected?: string[];
@@ -95,8 +134,8 @@ function writeStored(wholesalerId: string, patch: Partial<StoredConsoleState>) {
   }
 }
 
-function isValidZone(z: unknown): z is FullSetZone | "" {
-  return z === "" || FULLSET_ZONE_ORDER.includes(z as FullSetZone);
+function isValidGarment(g: unknown): g is GarmentFilter {
+  return GARMENT_CHIPS.some((c) => c.id === g);
 }
 function isValidCompletionView(v: unknown): v is CompletionView {
   return v === "all" || v === "actionable" || v === "done" || v === "mine";
@@ -188,14 +227,14 @@ function OrdersTab({
   const [accountSummary, setAccountSummary] = useState<WholesalerAccountSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);
-  const [zone, setZone] = useState<FullSetZone | "">("");
+  const [garment, setGarment] = useState<GarmentFilter>("");
   const [view, setView] = useState<CompletionView>("all");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkLoading, setBulkLoading] = useState(false);
   // TRUE once sessionStorage has been read on mount (see "Session persistence" above) —
-  // gates the data fetch (so a restored zone doesn't fetch twice: once with the stale
-  // default then again with the restored value) and the write-back effect below.
+  // gates the data fetch and the write-back effect below. (It no longer has to prevent a
+  // double fetch: the garment chip is client-side, so nothing about it refetches.)
   const [restored, setRestored] = useState(false);
   // TRUE after the first successful fetch — the restored selection must not be pruned
   // against the EMPTY pre-fetch order list (mirrors StationConsole's loadedOnce).
@@ -207,17 +246,16 @@ function OrdersTab({
   // outranks the stage default — otherwise switching to «الكل» would not survive a tap
   // into an order and back.
   const hadStoredView = useRef(false);
-  // The stage default is applied at most ONCE per rep, on the first load. Without this the
-  // zone-chip refetch would drag the worker back to «مرحلتي» every time they filtered.
+  // The stage default is applied at most ONCE per rep, on the first load.
   const stageDefaultSettled = useRef(false);
   // TRUE once the scroll offset has been re-applied (or deliberately skipped) — see
   // "Scroll restore" below.
   const [scrollReady, setScrollReady] = useState(false);
 
-  // Restore this rep's last zone/view/search/selection.
+  // Restore this rep's last garment/view/search/selection.
   useEffect(() => {
     const stored = readStored(wholesalerId);
-    if (isValidZone(stored.zone)) setZone(stored.zone);
+    if (isValidGarment(stored.garment)) setGarment(stored.garment);
     if (isValidCompletionView(stored.view)) setView(stored.view);
     if (typeof stored.search === "string") setSearch(stored.search);
     if (Array.isArray(stored.selected)) setSelected(new Set(stored.selected));
@@ -230,15 +268,15 @@ function OrdersTab({
   // Mirror the UI state so back-navigation restores it exactly.
   useEffect(() => {
     if (!restored) return;
-    writeStored(wholesalerId, { zone, view, search, selected: [...selected] });
-  }, [wholesalerId, zone, view, search, selected, restored]);
+    writeStored(wholesalerId, { garment, view, search, selected: [...selected] });
+  }, [wholesalerId, garment, view, search, selected, restored]);
 
-  // Zone is the only server-side filter (refetches); completion/search are client-side.
+  // Every filter on this screen is client-side now — one fetch per rep, then instant chips.
   const load = useCallback(() => {
     if (!wholesalerId) return;
     setLoading(true);
     setFetchError(false);
-    getWholesalerOrders(wholesalerId, { zone: zone || undefined, isAdmin })
+    getWholesalerOrders(wholesalerId, { isAdmin })
       .then(({ orders: rows, summary, myStages: stages }) => {
         setOrders(rows);
         setAccountSummary(summary);
@@ -263,7 +301,7 @@ function OrdersTab({
         setFetchError(true);
       })
       .finally(() => setLoading(false));
-  }, [wholesalerId, zone, isAdmin]);
+  }, [wholesalerId, isAdmin]);
 
   useEffect(() => {
     if (!ready || !restored) return;
@@ -342,21 +380,48 @@ function OrdersTab({
 
   const myStageSet = useMemo(() => new Set<string>(myStages), [myStages]);
 
+  // The garment chip narrows FIRST, and the view counts below are computed on its result —
+  // so «الكل (١٢)» always names the list the worker is looking at. That is not a new rule:
+  // the chip used to be a server-side `?zone=`, so `orders` arrived already narrowed and the
+  // counts were already chip-scoped. Moving the filter client-side had to keep it.
+  const byGarment = useMemo(
+    () => orders.filter((o) => matchesGarment(o, garment)),
+    [orders, garment]
+  );
+
   const filtered = useMemo(() => {
-    let out = orders;
+    let out = byGarment;
     if (view === "actionable") out = out.filter((o) => o.canAdvance);
     else if (view === "done") out = out.filter((o) => o.isDone);
     // A viewer with no station falls through to «الكل» rather than an empty list.
     else if (view === "mine" && myStageSet.size > 0)
       out = out.filter((o) => myStageSet.has(o.status));
     if (search.trim()) {
-      // Spelling-insensitive — see lib/arabic.ts. 28% of student names carry a
-      // variant character («سرى» vs «سري»), and a raw includes() hid every one of
-      // them from whoever typed the other spelling.
-      out = out.filter((o) => matchesAr(o.studentName, search));
+      // Was the student NAME alone. A preparer holding a garment searches for what is
+      // WRITTEN on it as often as for whose it is — «the search be with name of
+      // order/student or the التطريز» — so the haystack is now the name, the piece
+      // («وشاح ملكي»), its batch, and every word the student typed on it.
+      //
+      // Same matcher as the production console (lib/queue-search.ts), so both screens fold
+      // Arabic spelling variants identically: 28% of student names carry a variant character
+      // («سرى» vs «سري») and a raw includes() hid every one of them from whoever typed the
+      // other spelling.
+      out = out.filter((o) =>
+        matchesSearchFields([o.studentName, o.productName, o.batchName, o.searchText], search)
+      );
     }
     return out;
-  }, [orders, view, search, myStageSet]);
+  }, [byGarment, view, search, myStageSet]);
+
+  // «السابق»/«التالي» inside the order page. The console hands the order page the sequence
+  // it is showing — filters, search and all — the same way /staff/queue already does; the
+  // page reads it back with queueNeighbors(). Written on every change so stepping always
+  // follows the list the worker can actually see, and never a stale one. See
+  // lib/queue-neighbors.ts for why it is deliberately best-effort.
+  useEffect(() => {
+    if (loading) return;
+    rememberQueueOrder(filtered.map((o) => o.id));
+  }, [filtered, loading]);
 
   // Only advanceable rows in the current view can be batch-completed.
   const selectableIds = useMemo(
@@ -410,12 +475,12 @@ function OrdersTab({
 
   const counts = useMemo(
     () => ({
-      total: orders.length,
-      actionable: orders.filter((o) => o.canAdvance).length,
-      done: orders.filter((o) => o.isDone).length,
-      mine: orders.filter((o) => myStageSet.has(o.status)).length,
+      total: byGarment.length,
+      actionable: byGarment.filter((o) => o.canAdvance).length,
+      done: byGarment.filter((o) => o.isDone).length,
+      mine: byGarment.filter((o) => myStageSet.has(o.status)).length,
     }),
-    [orders, myStageSet]
+    [byGarment, myStageSet]
   );
   // Opening an order should return to THIS rep's page (not the generic /staff home).
   const backFrom = `/staff/wholesalers/${wholesalerId}/students`;
@@ -423,18 +488,18 @@ function OrdersTab({
   return (
     <div className="space-y-4">
       {accountSummary && <WholesalerSummary summary={accountSummary} />}
-      {/* Zone chips — horizontal scroll on mobile */}
+      {/* Garment chips — horizontal scroll on mobile. See GarmentFilter above for why these
+          are garments and not embroidery positions. */}
       <nav
-        aria-label="تصفية حسب مكان التطريز"
+        aria-label="تصفية حسب القطعة"
         className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
-        <ZoneChip label="الكل" active={zone === ""} onClick={() => setZone("")} />
-        {FULLSET_ZONE_ORDER.map((z) => (
+        {GARMENT_CHIPS.map((c) => (
           <ZoneChip
-            key={z}
-            label={FULLSET_ZONE_LABELS[z]}
-            active={zone === z}
-            onClick={() => setZone(z)}
+            key={c.id || "all"}
+            label={c.label}
+            active={garment === c.id}
+            onClick={() => setGarment(c.id)}
           />
         ))}
       </nav>
@@ -464,11 +529,11 @@ function OrdersTab({
         </div>
         <Input
           type="search"
-          placeholder="بحث باسم الطالب…"
+          placeholder="بحث بالاسم أو القطعة أو التطريز…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="w-full"
-          aria-label="بحث باسم الطالب"
+          aria-label="بحث بالاسم أو القطعة أو التطريز"
         />
       </div>
 
@@ -645,6 +710,14 @@ function OrderRow({
             {order.productName}
             {order.batchName ? ` · ${order.batchName}` : ""}
           </p>
+          {/* The شال أمريكي rides on THIS row and has no row of its own — say so, or the
+              «شال أمريكي» chip looks like it is returning plain sashes. It is also a real
+              garment the preparer has to put in the bag. */}
+          {order.hasAmericanShawl && (
+            <span className="mt-1 inline-flex rounded-full bg-orange-ink/10 px-2 py-0.5 text-[10px] font-bold text-orange-ink">
+              + شال أمريكي
+            </span>
+          )}
           {order.adminAmount != null && <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs"><span className="text-ink-soft">سعر الإدارة: <b className="text-ink" dir="ltr">{formatIQD(order.adminAmount)}</b></span><span className="text-ink-soft">سعر الممثل: <b className="text-orange-ink" dir="ltr">{formatIQD(order.wholesalerAmount || 0)}</b></span></div>}
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1.5">

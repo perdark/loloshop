@@ -36,6 +36,7 @@ import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { matchesQueueSearch } from "@/lib/queue-search";
+import { rememberQueueOrder } from "@/lib/queue-neighbors";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StudentSheet } from "@/components/staff/station/StudentSheet";
 import { isPieceOverdue, type AdvancedGhost, type StationPiece } from "@/components/staff/station/types";
@@ -43,13 +44,29 @@ import { getQueue, advanceOrder, advanceBulk } from "@/lib/staff";
 import { getApiErrorMessage } from "@/lib/api";
 import { useProductionEvents } from "@/hooks/useProductionEvents";
 import { useScrollRestore } from "@/hooks/useScrollRestore";
-import { STUDY_TYPE_LABELS } from "@/lib/constants";
+import { PRODUCT_TYPE_LABELS, STUDY_TYPE_LABELS } from "@/lib/constants";
 import { toArabicDigits } from "@/lib/format";
 import type { ProductionQueueItem } from "@/lib/staff-types";
 import type { OrderStatus } from "@/lib/types";
 
 type View = "preparing" | "ready";
 type SourceFilter = "" | "retail" | "wholesaler";
+
+/**
+ * ⚠️ THE PIECE FILTER IS THE GARMENT, NOT THE EMBROIDERY POSITION (owner, 2026-08-31).
+ *
+ * The preparer had no piece filter at all here — only «تجزئة/ممثلين» and the rep select — so
+ * «وين الروبات؟» meant reading 326 student rows. The obvious thing to reach for was the
+ * embroidery zones the sheet already renders («وشاح — من الأمام», «الروب — الردن الأيمن»),
+ * and that would have been wrong twice over: أمام and خلف are ONE sash in his hands, and a
+ * zone-derived filter can only ever list pieces that CARRY embroidery — «we must see the
+ * pieces even the pieces without تطريز on filters». Measured on the dev DB, the preparing+
+ * ready queue is mostly robes, and a robe usually has no ردن stitching at all.
+ *
+ * So it filters on `productType`, which every piece has. Chips render only for the types
+ * actually in the current tab, so the row never offers an empty filter.
+ */
+const GARMENT_ORDER = ["sash", "robe", "cap", "shawl"] as const;
 
 const VIEW_META: Record<View, { tab: string; empty: string }> = {
   preparing: { tab: "قيد التجهيز", empty: "لا توجد قطع قيد التجهيز حالياً" },
@@ -63,6 +80,7 @@ interface Stored {
   search?: string;
   sourceFilter?: SourceFilter;
   repFilter?: string;
+  garment?: string;
   openStudentKey?: string | null;
 }
 
@@ -179,6 +197,7 @@ export function PrepConsole({ showSourceFilter }: { showSourceFilter: boolean })
       : ""
   );
   const [repFilter, setRepFilter] = useState(stored.repFilter ?? "");
+  const [garment, setGarment] = useState(stored.garment ?? "");
   const [rows, setRows] = useState<ProductionQueueItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadedOnce, setLoadedOnce] = useState(false);
@@ -198,12 +217,12 @@ export function PrepConsole({ showSourceFilter }: { showSourceFilter: boolean })
     try {
       sessionStorage.setItem(
         STORAGE_KEY,
-        JSON.stringify({ view, search, sourceFilter, repFilter, openStudentKey })
+        JSON.stringify({ view, search, sourceFilter, repFilter, garment, openStudentKey })
       );
     } catch {
       /* best-effort */
     }
-  }, [view, search, sourceFilter, repFilter, openStudentKey]);
+  }, [view, search, sourceFilter, repFilter, garment, openStudentKey]);
 
   const load = useCallback(
     async ({ silent = false }: { silent?: boolean } = {}) => {
@@ -248,12 +267,37 @@ export function PrepConsole({ showSourceFilter }: { showSourceFilter: boolean })
       .filter((r) => r.status === view)
       .filter((r) => !sourceFilter || r.source === sourceFilter)
       .filter((r) => !repFilter || r.wholesaler_name === repFilter)
+      .filter((r) => !garment || r.product_type === garment)
       // Was student_name alone. The preparer is holding the garment, so the words stitched
       // ON it are the fastest handle they have — and the university/department/rep were
       // searchable on /staff/queue but not here. One shared matcher, one behaviour.
       .filter((r) => matchesQueueSearch(r, search))
       .map(queueToPiece);
-  }, [rows, view, search, sourceFilter, repFilter]);
+  }, [rows, view, search, sourceFilter, repFilter, garment]);
+
+  // Built from the tab + source/rep filters but NOT from `garment` itself — a chip that
+  // disappeared the moment you pressed it would leave no way back to «الكل».
+  const garmentChips = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of rows) {
+      if (r.status !== view) continue;
+      if (sourceFilter && r.source !== sourceFilter) continue;
+      if (repFilter && r.wholesaler_name !== repFilter) continue;
+      m.set(r.product_type, (m.get(r.product_type) ?? 0) + 1);
+    }
+    return GARMENT_ORDER.filter((t) => m.has(t)).map((t) => ({
+      type: t as string,
+      label: (PRODUCT_TYPE_LABELS as Record<string, string>)[t] ?? t,
+      count: m.get(t)!,
+    }));
+  }, [rows, view, sourceFilter, repFilter]);
+
+  // A garment that is not in this tab (switching «قيد التجهيز» → «جاهزة») would filter the
+  // list to nothing behind a chip row that no longer offers it. Fall back to «الكل».
+  useEffect(() => {
+    if (!loadedOnce || !garment) return;
+    if (!garmentChips.some((c) => c.type === garment)) setGarment("");
+  }, [garmentChips, garment, loadedOnce]);
 
   const repOptions = useMemo(() => {
     const s = new Set<string>();
@@ -295,6 +339,15 @@ export function PrepConsole({ showSourceFilter }: { showSourceFilter: boolean })
 
   const pieceCount = pieces.length;
 
+  // «السابق»/«التالي» inside the order page. The sequence handed over is the pieces in the
+  // order this list shows them — student by student, each student's pieces together — which
+  // is the only sequence the worker can predict. Same channel /staff/queue already uses; see
+  // lib/queue-neighbors.ts for why it is deliberately best-effort.
+  useEffect(() => {
+    if (loading) return;
+    rememberQueueOrder(groups.flatMap((g) => g.pieces.map((p) => p.id)));
+  }, [groups, loading]);
+
   const openGroup = useMemo(
     () => groups.find((g) => g.key === openStudentKey) ?? null,
     [groups, openStudentKey]
@@ -315,7 +368,7 @@ export function PrepConsole({ showSourceFilter }: { showSourceFilter: boolean })
       return;
     }
     setOpenStudentKey(null);
-  }, [view, sourceFilter, repFilter]);
+  }, [view, sourceFilter, repFilter, garment]);
 
   function recordGhost(piece: StationPiece) {
     const key = piece.studentId || piece.studentName;
@@ -467,6 +520,39 @@ export function PrepConsole({ showSourceFilter }: { showSourceFilter: boolean })
               </button>
             ))}
           </div>
+        )}
+        {/* Garment chips — see GARMENT_ORDER above for why these are garments, not zones. */}
+        {garmentChips.length > 1 && (
+          <nav
+            aria-label="تصفية حسب القطعة"
+            className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          >
+            {/* «الكل» counts across the garments, NOT `pieces.length` — that is already
+                garment-filtered, so it would read «الكل ٤٠» while showing 40 robes. */}
+            {[
+              {
+                type: "",
+                label: "الكل",
+                count: garmentChips.reduce((n, c) => n + c.count, 0),
+              },
+              ...garmentChips,
+            ].map((c) => (
+              <button
+                key={c.type || "all"}
+                type="button"
+                onClick={() => setGarment(c.type)}
+                aria-pressed={garment === c.type}
+                className={`inline-flex min-h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-pill border px-3.5 text-xs font-bold transition-colors ${
+                  garment === c.type
+                    ? "border-orange-ink bg-orange-ink/10 text-orange-ink"
+                    : "border-line text-ink-soft hover:text-ink"
+                }`}
+              >
+                {c.label}
+                <span className="tabular-nums opacity-70">{toArabicDigits(c.count)}</span>
+              </button>
+            ))}
+          </nav>
         )}
         {sourceFilter !== "retail" && repOptions.length > 0 && (
           <Select
