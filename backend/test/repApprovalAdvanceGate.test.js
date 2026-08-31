@@ -50,8 +50,14 @@ test('setup', async () => {
   ctx.productId = p.rows[0].id;
   fx.products.push(ctx.productId);
 
+  // ⚠️ BORN `deleted_at`-STAMPED, on purpose. `node --test` runs files concurrently and
+  // pushBroadcast.test.js counts the live audience with `WHERE u.deleted_at IS NULL` — two extra
+  // users existing for the length of this file fail «كل الأجهزة counts owned people and unowned
+  // handsets separately» by exactly two. Nothing under test here reads the flag: the controllers
+  // resolve an order by id and only ever use `students.user_id` as a foreign key.
   const repUser = await query(
-    `INSERT INTO users (name, phone, password_hash, role) VALUES ($1,$2,'x','wholesaler') RETURNING id`,
+    `INSERT INTO users (name, phone, password_hash, role, deleted_at)
+     VALUES ($1,$2,'x','wholesaler',NOW()) RETURNING id`,
     [`${TAG}-rep`, `0777${Date.now() % 10000000}`]
   );
   fx.users.push(repUser.rows[0].id);
@@ -63,7 +69,8 @@ test('setup', async () => {
   fx.wholesalers.push(ctx.wholesalerId);
 
   const stuUser = await query(
-    `INSERT INTO users (name, phone, password_hash, role) VALUES ($1,$2,'x','retail') RETURNING id`,
+    `INSERT INTO users (name, phone, password_hash, role, deleted_at)
+     VALUES ($1,$2,'x','retail',NOW()) RETURNING id`,
     [`${TAG}-student`, `0788${Date.now() % 10000000}`]
   );
   fx.users.push(stuUser.rows[0].id);

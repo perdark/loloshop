@@ -559,6 +559,16 @@ export interface CatalogOptionGroup {
    * options like «إضافة إطار». Enforced server-side in orderController, not just hidden.
    */
   priceRoleRestriction?: PriceRole | null;
+  /**
+   * FALSE = this group is a PRODUCT PICKER, not embroidery work, so choosing in it must not
+   * route the order to التصميم/التطريز (migration 096). `null`/undefined = unset = treated as
+   * TRUE, which is what every group written before 096 relies on.
+   *
+   * ⚠️ The bug this exists for: «صورة الشال» stores the student's choice of shawl as
+   * customer_text, the pricing engine read that as artwork, and 468 orders were routed to
+   * التطريز with nothing on them to stitch.
+   */
+  isEmbroidery?: boolean | null;
 }
 
 export interface ProductImage {

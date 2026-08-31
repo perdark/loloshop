@@ -15,12 +15,25 @@
 //
 // التصميم stays closed: design_complete→embroidery / →converting / →designing remain
 // designer-only, and so does every edge that moves an order BACK into the design desk.
-// Pure function, no DB.
+// The stage/authz assertions are pure functions; the last test touches the DB.
+require('dotenv').config();
+
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { canStaffTransition } = require('../controllers/orderController');
 const { QUEUE_STAGES, LINE_VIEW_STAGES } = require('../controllers/productionController');
 const { viewerStages } = require('../controllers/staffController');
+
+const crypto = require('node:crypto');
+const TAG = `ZZTEST-096-${crypto.randomUUID().slice(0, 8)}`;
+function mockRes() {
+  const res = {
+    statusCode: 200, body: null,
+    status(c) { res.statusCode = c; return res; },
+    json(b) { res.body = b; return res; },
+  };
+  return res;
+}
 
 const staff = (...types) => ({ role: 'staff', staff_types: types });
 const sorted = (a) => [...a].sort();
@@ -88,4 +101,38 @@ test('multi-role staff still union their own stations', () => {
     sorted(viewerStages(staff('presser', 'preparer'))),
     sorted(['pressing', 'preparing', 'ready', 'delivered'])
   );
+});
+
+// ── Migration 096's flag, round-tripped through the admin editor ──────────────
+// The checkbox writes FALSE or NULL and never TRUE, because NULL is «unset = yes» and is what
+// every pre-096 group relies on. A stray TRUE would be indistinguishable in behaviour but would
+// stop the column meaning «the admin has decided about this group».
+const { updateGroup } = require('../controllers/catalogController');
+const { query: q } = require('../lib/db');
+
+test('the admin editor can only ever write FALSE or NULL to is_embroidery', async () => {
+  const p = await q(
+    `INSERT INTO products (name_ar, type, base_price, active) VALUES ($1,'sash',1000,TRUE) RETURNING id`,
+    [`${TAG}-096`]
+  );
+  const g = await q(
+    `INSERT INTO option_groups (product_id, name_ar) VALUES ($1,$2) RETURNING id, is_embroidery`,
+    [p.rows[0].id, `${TAG}-group`]
+  );
+  assert.equal(g.rows[0].is_embroidery, null, 'a new group starts unset = embroidery');
+
+  const res = mockRes();
+  await updateGroup({ params: { id: g.rows[0].id }, body: { is_embroidery: false } }, res);
+  assert.equal(res.statusCode, 200);
+  let now = await q(`SELECT is_embroidery FROM option_groups WHERE id=$1`, [g.rows[0].id]);
+  assert.equal(now.rows[0].is_embroidery, false, 'unticking routes it away from التصميم');
+
+  // Anything that is not an explicit false goes back to NULL, never TRUE.
+  const res2 = mockRes();
+  await updateGroup({ params: { id: g.rows[0].id }, body: { is_embroidery: true } }, res2);
+  now = await q(`SELECT is_embroidery FROM option_groups WHERE id=$1`, [g.rows[0].id]);
+  assert.equal(now.rows[0].is_embroidery, null, 're-ticking returns to unset, not TRUE');
+
+  await q(`DELETE FROM option_groups WHERE id=$1`, [g.rows[0].id]);
+  await q(`DELETE FROM products WHERE id=$1`, [p.rows[0].id]);
 });

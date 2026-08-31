@@ -83,6 +83,12 @@ function mapGroup(
       (raw.price_role_restriction as CatalogOptionGroup["priceRoleRestriction"]) ??
       (raw.priceRoleRestriction as CatalogOptionGroup["priceRoleRestriction"]) ??
       null,
+    // ?? null, never Boolean(): null is «unset = yes, embroidery» and must survive the trip,
+    // because only an explicit FALSE means «this is a product picker».
+    isEmbroidery:
+      (raw.is_embroidery as boolean | null) ??
+      (raw.isEmbroidery as boolean | null) ??
+      null,
     options: opts.map(mapOption),
   };
 }
@@ -247,6 +253,8 @@ export async function createCatalogGroup(
     max_select?: number | null;
     /** null / omitted = every audience. See CatalogOptionGroup.priceRoleRestriction. */
     price_role_restriction?: PriceRole | null;
+    /** false = product picker, not embroidery. Omit for the default. See migration 096. */
+    is_embroidery?: boolean | null;
   }
 ): Promise<{ id: string }> {
   const { data } = await api.post<{ data: { id: string } }>(

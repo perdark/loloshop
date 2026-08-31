@@ -147,7 +147,8 @@ async function buildProductFull(id, role, isPrivileged) {
   // The cache key already carries both `role` and `isPrivileged`, so the two never mix.
   const groupCols = `SELECT id, name_ar, input_type, sort, required, has_image, hint_ar, image_url,
             max_select, gender_restriction, requires_customer_image, requires_customer_text,
-            customer_text_prompt_ar, customer_text_placeholder_ar, price_role_restriction
+            customer_text_prompt_ar, customer_text_placeholder_ar, price_role_restriction,
+            is_embroidery
      FROM option_groups WHERE product_id = $1 AND active = TRUE`;
   const groupAudienceSql = isPrivileged
     ? ''
@@ -482,18 +483,23 @@ async function createGroup(req, res) {
   const {
     name_ar, input_type, sort, required, has_image, hint_ar, image_url,
     max_select, gender_restriction, requires_customer_text, price_role_restriction,
+    is_embroidery,
   } = req.body;
   if (!name_ar) return res.status(400).json({ error: 'الاسم مطلوب', code: 'ERR_VALIDATION' });
   const { rows } = await query(
     `INSERT INTO option_groups
        (product_id, name_ar, input_type, sort, required, has_image, hint_ar, image_url,
-        max_select, gender_restriction, requires_customer_text, price_role_restriction)
+        max_select, gender_restriction, requires_customer_text, price_role_restriction,
+        is_embroidery)
      VALUES ($1,$2,COALESCE($3::option_input,'single_select'),COALESCE($4,0),COALESCE($5,FALSE),COALESCE($6,FALSE),$7,$8,
-             COALESCE($9,1),$10,COALESCE($11,FALSE),$12::price_role)
+             COALESCE($9,1),$10,COALESCE($11,FALSE),$12::price_role,$13)
      RETURNING id`,
     [id, name_ar, input_type, sort, required, has_image, hint_ar || null, image_url || null,
      max_select, gender_restriction || null, requires_customer_text,
-     normalizeAudience(price_role_restriction)]
+     normalizeAudience(price_role_restriction),
+     // NULL, not FALSE, when the admin says nothing — NULL is «unset = yes, embroidery» and
+     // keeps a new group behaving exactly like every group that predates migration 096.
+     is_embroidery === false ? false : is_embroidery === true ? true : null]
   );
   res.status(201).json({ data: { id: rows[0].id } });
 }
@@ -504,9 +510,15 @@ async function updateGroup(req, res) {
   if (req.body.price_role_restriction !== undefined) {
     req.body.price_role_restriction = normalizeAudience(req.body.price_role_restriction);
   }
+  // migration 096: only a real FALSE is stored. Anything else goes back to NULL = «yes,
+  // embroidery», which is the default every pre-096 group already relies on. Writing FALSE by
+  // accident would quietly stop routing a real تطريز group to التصميم.
+  if (req.body.is_embroidery !== undefined) {
+    req.body.is_embroidery = req.body.is_embroidery === false ? false : null;
+  }
   const upd = buildUpdate(
     'option_groups',
-    ['name_ar', 'input_type', 'sort', 'required', 'has_image', 'hint_ar', 'image_url', 'max_select', 'gender_restriction', 'requires_customer_image', 'requires_customer_text', 'customer_text_prompt_ar', 'customer_text_placeholder_ar', 'price_role_restriction', 'active'],
+    ['name_ar', 'input_type', 'sort', 'required', 'has_image', 'hint_ar', 'image_url', 'max_select', 'gender_restriction', 'requires_customer_image', 'requires_customer_text', 'customer_text_prompt_ar', 'customer_text_placeholder_ar', 'price_role_restriction', 'is_embroidery', 'active'],
     req.body, req.params.id
   );
   if (!upd) return res.status(400).json({ error: 'لا تغييرات', code: 'ERR_VALIDATION' });

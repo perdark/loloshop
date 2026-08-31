@@ -1478,6 +1478,21 @@ function GroupBlock({
               <option value="wholesaler">طلاب الممثلين فقط</option>
             </select>
           </label>
+          {/* ⚠️ Migration 096 — the flag that decides whether choosing in this group counts as
+              DESIGN WORK. It defaults to «yes» (null), and only an explicit tick here writes
+              FALSE. The bug it exists for: «صورة الشال» is a product picker that stores the
+              student's choice as customer_text, priceSelections read that as artwork, and 468
+              شال امريكي orders were routed التصميم → التطريز with nothing on them to stitch —
+              where the embroiderer's checklist correctly showed zero zones and they sat for two
+              months. Tick this on any group that only asks WHICH product, never what to embroider. */}
+          <CheckRow
+            checked={group.isEmbroidery === false}
+            disabled={busy}
+            onChange={(v) => onPersistGroup({ is_embroidery: v ? false : null })}
+          >
+            صورة منتج فقط — ما تروح للتصميم/التطريز
+          </CheckRow>
+
           {/* «صورة توضيحية» (group hint image) controls removed per request. */}
 
           {/* What the customer must type — admin controls the title + the in-box example. */}

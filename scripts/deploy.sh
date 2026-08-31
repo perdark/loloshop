@@ -17,7 +17,13 @@ echo "==> db: apply schema (idempotent)"
 cd backend && NODE_ENV=production npm run migrate && cd ..
 
 echo "==> frontend: install + build"
-cd frontend && npm ci && npm run build && cd ..
+# ⚠️ `rm -rf .next` is not tidiness. On 2026-08-29 the build died with
+#   ENOTEMPTY: rmdir '.next/server/app/index.segments/!KHN0dWRlbnQp'
+# — a stale artifact from the previous build that Next could not clear. Because the `git reset
+# --hard` above has ALREADY run by then, the box's `git log` read as deployed while the served
+# frontend was two commits old, and it stayed that way for two days with nothing on any screen
+# saying so. A cold build costs ~90s; a silently stale frontend costs whatever it costs.
+cd frontend && rm -rf .next && npm ci && npm run build && cd ..
 
 echo "==> PM2 reload"
 pm2 reload ecosystem.config.js --update-env
