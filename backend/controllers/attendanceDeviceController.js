@@ -24,6 +24,8 @@
 const { query, tx } = require('../lib/db');
 const { DEFAULT_TZ } = require('../lib/shopTime');
 const { applyPunch, allocatePin } = require('../lib/attendanceDevice');
+// The ADMS name-push body — one definition, shared with routes/iclock.js.
+const { userInfoBody } = require('../lib/iclockProtocol');
 const { ensureStaff } = require('./attendanceController');
 
 // The serial is printed on a sticker and typed in by hand next to a noisy device. Keep the
@@ -46,22 +48,17 @@ const PIN_IS = (col, param) => `${col} ~ '^[0-9]{1,9}$' AND ${col}::int = ${para
 const bad = (res, error, code = 'ERR_VALIDATION', status = 400) =>
   res.status(status).json({ error, code });
 
-/** The push the K40 needs to show an Arabic name beside the finger. Format from the ADMS spec. */
-function userInfoBody(pin, name) {
-  return `DATA UPDATE USERINFO PIN=${pin}\tName=${name}\tPri=0\tPasswd=\tCard=\tGrp=1\tTZ=`;
-}
-
 /**
  * Queue a command on every ACTIVE device. The device pulls it with GET /iclock/getrequest
  * (Task 5); nothing here talks to the device directly — it dials out to us, never the reverse.
  * Returns how many devices it was queued for, so the screen can say «ما في جهاز مسجّل».
  */
-async function queueOnActiveDevices(client, body) {
+async function queueOnActiveDevices(client, body, pin = null) {
   const { rows } = await client.query(
-    `INSERT INTO device_commands (device_sn, body)
-     SELECT serial_number, $1 FROM attendance_devices WHERE active = TRUE
+    `INSERT INTO device_commands (device_sn, body, pin)
+     SELECT serial_number, $1, $2 FROM attendance_devices WHERE active = TRUE
      RETURNING id`,
-    [body]
+    [body, pin]
   );
   return rows.length;
 }
@@ -188,7 +185,7 @@ async function linkPin(client, { userId, pin, pushedName }) {
     if (outcome in derived) derived[outcome] += 1;
   }
 
-  const queued = await queueOnActiveDevices(client, userInfoBody(pin, pushedName));
+  const queued = await queueOnActiveDevices(client, userInfoBody(pin, pushedName), pin);
   return { conflict: false, replayed: stored.rows.length, derived, queued };
 }
 
@@ -242,7 +239,11 @@ async function deletePin(req, res) {
       [userId]
     );
     if (!rows.length) return { missing: true };
-    const queued = await queueOnActiveDevices(client, `DATA DELETE USERINFO PIN=${rows[0].pin}`);
+    const queued = await queueOnActiveDevices(
+      client,
+      `DATA DELETE USERINFO PIN=${rows[0].pin}`,
+      rows[0].pin
+    );
     return { pin: rows[0].pin, queued };
   });
   if (result.missing) return bad(res, 'ما في رقم مربوط بهذا الموظف', 'ERR_NOT_FOUND', 404);

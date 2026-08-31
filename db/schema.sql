@@ -1803,3 +1803,11 @@ CREATE TABLE IF NOT EXISTS device_commands (
 );
 CREATE INDEX IF NOT EXISTS device_commands_queue_ix
   ON device_commands (device_sn, id) WHERE state = 'queued';
+
+-- Migration 098, repeated here on purpose — the 077/080 pattern. `npm run migrate` applies
+-- THIS file to a database whose `device_commands` already exists, and `CREATE TABLE IF NOT
+-- EXISTS` above will not add a column to it. Without this ALTER a fresh deploy leaves the
+-- ack path writing to a column that is not there.
+ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS pin INTEGER;
+CREATE INDEX IF NOT EXISTS device_commands_pin_ix
+  ON device_commands (pin) WHERE pin IS NOT NULL;

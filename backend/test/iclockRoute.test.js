@@ -17,7 +17,7 @@ const { query } = require('../lib/db');
 const TAG = `ZZTEST-iclock-${crypto.randomUUID().slice(0, 8)}`;
 const SN = `ZZTESTSN${crypto.randomUUID().slice(0, 6).toUpperCase()}`;
 const PIN = 60000 + Math.floor(Math.random() * 5000);
-const ctx = { userId: null, server: null, base: '' };
+const ctx = { userId: null, server: null, base: '', otherPins: [] };
 
 function request(method, path, body) {
   return new Promise((resolve, reject) => {
@@ -62,6 +62,15 @@ test.before(async () => {
 });
 
 test.after(async () => {
+  // Put every OTHER pin's push_state back exactly as it was. The self-healing push is
+  // shop-wide by design, so simply polling this test's device moves real rows — leaving them
+  // changed would hand the next reader a dev DB that disagrees with production for no reason.
+  for (const row of ctx.otherPins) {
+    await query(`UPDATE staff_device_pins SET push_state = $2 WHERE pin = $1`, [
+      row.pin,
+      row.push_state,
+    ]);
+  }
   await query(`DELETE FROM punch_raw WHERE device_sn = $1`, [SN]);
   await query(`DELETE FROM punch_reject WHERE device_sn = $1`, [SN]);
   await query(`DELETE FROM device_commands WHERE device_sn = $1`, [SN]);
@@ -153,9 +162,16 @@ test('a queued command is handed out once, then reported done', async () => {
   const first = await request('GET', `/iclock/getrequest?SN=${SN}`);
   assert.match(first.body, new RegExp(`^C:${id}:DATA UPDATE USERINFO`));
 
-  // Handing the same command out twice means its result can never be matched to it.
+  // Handing the SAME command out twice means its result can never be matched to it.
+  // ⚠️ This used to assert a bare 'OK'. It cannot any more, and that is the point of the
+  // self-healing push: an empty queue is now the moment the device is handed a name it does
+  // not have yet (the fixture's PIN is 'pending' and has no command). What must still hold —
+  // and is the thing this test was always really about — is that `id` is not re-issued.
   const second = await request('GET', `/iclock/getrequest?SN=${SN}`);
-  assert.equal(second.body, 'OK');
+  assert.ok(
+    !second.body.startsWith(`C:${id}:`),
+    `command ${id} was handed out twice: ${second.body}`
+  );
 
   await request('POST', `/iclock/devicecmd?SN=${SN}`, `ID=${id}&Return=0&CMD=DATA`);
   const done = await query(`SELECT state FROM device_commands WHERE id = $1`, [id]);
@@ -189,4 +205,92 @@ test('the device router does not eat the rest of the app\'s JSON bodies', async 
     req.end();
   });
   assert.equal(JSON.parse(res).kind, 'object');
+});
+
+// ─── The self-healing name push (2026-08-31) ─────────────────────────────────────────────
+// Seven PINs were mapped before the device's serial was registered, so `linkPin`'s
+// INSERT … SELECT matched zero devices and queued nothing — silently. The mappings were right,
+// `device_commands` was empty, and every finger showed a bare number on the device. The
+// recovery must not be a button: this admin watches the screen, he does not operate it.
+//
+// ⚠️ These tests PARK every other pin at 'confirmed' first. Not tidiness — the push is
+// deliberately shop-wide and ordered by pin, so on the dev DB (which carries the real shop's
+// pins 1..10) a poll hands over برزان's name long before this fixture's 64315, and the test
+// would be asserting against whichever rows happen to exist. `ctx.otherPins` restores them.
+test('park the shop\'s own pins so the fixture is the only candidate', async () => {
+  const { rows } = await query(
+    `SELECT pin, push_state FROM staff_device_pins WHERE pin <> $1`, [PIN]
+  );
+  ctx.otherPins = rows;
+  await query(`UPDATE staff_device_pins SET push_state = 'confirmed' WHERE pin <> $1`, [PIN]);
+  assert.ok(true);
+});
+
+test('a name that never reached the device is queued on the next poll, with no admin action', async () => {
+  // Exactly the broken shape: the pin is mapped and 'pending', nothing is queued for it.
+  await query(`DELETE FROM device_commands WHERE device_sn = $1`, [SN]);
+  await query(`UPDATE staff_device_pins SET push_state = 'pending' WHERE pin = $1`, [PIN]);
+
+  const res = await request('GET', `/iclock/getrequest?SN=${SN}`);
+  assert.match(
+    res.body,
+    new RegExp(`^C:\\d+:DATA UPDATE USERINFO PIN=${PIN}\\t`),
+    `expected the missing name to be handed over, got: ${res.body}`
+  );
+
+  const st = await query(`SELECT push_state FROM staff_device_pins WHERE pin = $1`, [PIN]);
+  assert.equal(st.rows[0].push_state, 'sent', 'the screen must stop saying «بانتظار الإرسال»');
+});
+
+test('the same name is not re-queued while one is already in flight', async () => {
+  // Without the NOT EXISTS guard every poll would stack another copy of the same name, and a
+  // device polling every few seconds would build an unbounded queue of duplicates.
+  const count = async () =>
+    (await query(
+      `SELECT COUNT(*)::int AS c FROM device_commands WHERE device_sn = $1 AND pin = $2`,
+      [SN, PIN]
+    )).rows[0].c;
+  const before = await count();
+  await request('GET', `/iclock/getrequest?SN=${SN}`);
+  await request('GET', `/iclock/getrequest?SN=${SN}`);
+  assert.equal(await count(), before, 'a second copy of the name was queued');
+});
+
+test('the device acknowledging the name is what turns the badge green', async () => {
+  const cmd = await query(
+    `SELECT id FROM device_commands WHERE device_sn = $1 AND pin = $2 ORDER BY id DESC LIMIT 1`,
+    [SN, PIN]
+  );
+  await request('POST', `/iclock/devicecmd?SN=${SN}`, `ID=${cmd.rows[0].id}&Return=0&CMD=DATA`);
+  const st = await query(
+    `SELECT push_state, enrolled_at FROM staff_device_pins WHERE pin = $1`, [PIN]
+  );
+  assert.equal(st.rows[0].push_state, 'confirmed');
+  assert.ok(st.rows[0].enrolled_at, 'confirming should stamp when the name landed');
+});
+
+test('a confirmed name is never handed over again', async () => {
+  // The other half of the loop guard: 'confirmed' is a resting state, so a device that has the
+  // name is not handed it on every poll for the rest of its life.
+  const res = await request('GET', `/iclock/getrequest?SN=${SN}`);
+  assert.equal(res.body, 'OK');
+});
+
+test('a name the device REFUSED is left failed, never retried in a loop', async () => {
+  // The guard that keeps a bad name from being handed over on every poll forever — which would
+  // look like a queue that never drains and would hide the failure from the only person
+  // watching. 'failed' is a resting state a human can see.
+  await query(`DELETE FROM device_commands WHERE device_sn = $1`, [SN]);
+  await query(`UPDATE staff_device_pins SET push_state = 'pending' WHERE pin = $1`, [PIN]);
+  await request('GET', `/iclock/getrequest?SN=${SN}`);
+  const cmd = await query(
+    `SELECT id FROM device_commands WHERE device_sn = $1 AND pin = $2 ORDER BY id DESC LIMIT 1`,
+    [SN, PIN]
+  );
+  await request('POST', `/iclock/devicecmd?SN=${SN}`, `ID=${cmd.rows[0].id}&Return=-1&CMD=DATA`);
+  const failed = await query(`SELECT push_state FROM staff_device_pins WHERE pin = $1`, [PIN]);
+  assert.equal(failed.rows[0].push_state, 'failed');
+
+  const res = await request('GET', `/iclock/getrequest?SN=${SN}`);
+  assert.equal(res.body, 'OK', 'a failed name must not be re-offered on the next poll');
 });

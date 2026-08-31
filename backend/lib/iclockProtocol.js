@@ -100,4 +100,17 @@ function handshakeBody(serial, { timeZoneOffset = 3 } = {}) {
   ].join('\n') + '\n';
 }
 
-module.exports = { parseAttlog, zonedToUtc, handshakeBody };
+/**
+ * The ADMS body that puts an Arabic name beside a finger on the device.
+ *
+ * Lives HERE, beside handshakeBody, because both halves build it: the admin half when a PIN is
+ * mapped, and the device-facing route when it notices a name that never made it (see
+ * routes/iclock.js queueMissingName). Two copies of this format is how a device silently
+ * ignores a name — the wire format is tab-separated and a single wrong separator is accepted
+ * and discarded by the firmware with no error anywhere.
+ */
+function userInfoBody(pin, name) {
+  return `DATA UPDATE USERINFO PIN=${pin}\tName=${name}\tPri=0\tPasswd=\tCard=\tGrp=1\tTZ=`;
+}
+
+module.exports = { parseAttlog, zonedToUtc, handshakeBody, userInfoBody };
