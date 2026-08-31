@@ -27,7 +27,7 @@ export default function WholesalerLayout({
   }
 
   return (
-    <div className="min-h-screen bg-cream bg-warm-veil" dir="rtl" lang="ar">
+    <div className="min-h-dvh bg-cream bg-warm-veil" dir="rtl" lang="ar">
       <header className="safe-top safe-x sticky top-0 z-20 border-b border-line bg-cream shadow-[var(--shadow-soft)]">
         <div className="mx-auto flex max-w-md items-center justify-between px-4 py-3.5">
           <h1 className="font-display text-lg font-bold text-ink">لوحة الممثل</h1>

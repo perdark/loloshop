@@ -83,7 +83,7 @@ export default function WorkshopPortalPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-cream" dir="rtl" lang="ar">
+      <div className="flex min-h-dvh items-center justify-center bg-cream" dir="rtl" lang="ar">
         <span className="h-7 w-7 animate-spin rounded-full border-2 border-ink/20 border-t-orange-ink" />
       </div>
     );
@@ -92,7 +92,7 @@ export default function WorkshopPortalPage() {
   if (notFound) {
     return (
       <div
-        className="flex min-h-screen flex-col items-center justify-center gap-2 bg-cream px-6 text-center"
+        className="flex min-h-dvh flex-col items-center justify-center gap-2 bg-cream px-6 text-center"
         dir="rtl"
         lang="ar"
       >

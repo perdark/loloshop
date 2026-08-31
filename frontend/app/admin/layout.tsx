@@ -20,7 +20,7 @@ export default function AdminLayout({
   }
 
   return (
-    <div className="shop-paper min-h-screen bg-cream bg-warm-veil" dir="rtl" lang="ar">
+    <div className="shop-paper min-h-dvh bg-cream bg-warm-veil" dir="rtl" lang="ar">
       <AdminSidebar
         user={user}
         open={sidebarOpen}
