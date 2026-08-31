@@ -276,6 +276,34 @@ test('a confirmed name is never handed over again', async () => {
   assert.equal(res.body, 'OK');
 });
 
+test('a name lost mid-poll is re-offered once it goes stale — healing must repeat', async () => {
+  // The failure this guards is the ordinary one for this device: it is marked 'sent' the
+  // instant we hand the command over, so a unit that drops before acknowledging (the whole
+  // 08-29 → 08-30 outage) leaves the command at 'sent' forever. Without the staleness window
+  // that corpse blocks the pin for the rest of time and the name is never offered again.
+  await query(`DELETE FROM device_commands WHERE device_sn = $1`, [SN]);
+  await query(`UPDATE staff_device_pins SET push_state = 'pending' WHERE pin = $1`, [PIN]);
+
+  const handed = await request('GET', `/iclock/getrequest?SN=${SN}`);
+  assert.match(handed.body, new RegExp(`^C:\\d+:DATA UPDATE USERINFO PIN=${PIN}\\t`));
+  // …and the device vanishes without ever POSTing /devicecmd. Nothing acknowledges it.
+  const stuck = await request('GET', `/iclock/getrequest?SN=${SN}`);
+  assert.equal(stuck.body, 'OK', 'still in flight — must not be re-sent immediately');
+
+  // Age the in-flight command past the window, exactly as wall-clock would.
+  await query(
+    `UPDATE device_commands SET sent_at = NOW() - INTERVAL '30 minutes'
+      WHERE device_sn = $1 AND pin = $2`,
+    [SN, PIN]
+  );
+  const again = await request('GET', `/iclock/getrequest?SN=${SN}`);
+  assert.match(
+    again.body,
+    new RegExp(`^C:\\d+:DATA UPDATE USERINFO PIN=${PIN}\\t`),
+    `a name lost in flight was never re-offered, got: ${again.body}`
+  );
+});
+
 test('a name the device REFUSED is left failed, never retried in a loop', async () => {
   // The guard that keeps a bad name from being handed over on every poll forever — which would
   // look like a queue that never drains and would hide the failure from the only person

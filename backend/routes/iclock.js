@@ -121,29 +121,43 @@ router.post('/cdata', async (req, res) => {
  * from every cause of the same symptom — a factory reset, a swapped unit, a mapping made while
  * the device was unplugged.
  *
- * ⚠️ 'pending' ONLY, never 'failed'. A device that rejects a name (bad codepage, full user
- * table) would otherwise be handed it again every poll forever, and the failure would never
- * surface — it would look like a queue that never drains. A failed name stays failed and
- * visible, which is exactly what an admin who only watches needs to see.
+ * ⚠️ NEVER 'failed'. A device that rejects a name (bad codepage, full user table) would
+ * otherwise be handed it again every poll forever, and the failure would never surface — it
+ * would look like a queue that never drains. A failed name stays failed and visible, which is
+ * exactly what an admin who only watches needs to see. 'confirmed' rests for the same reason.
+ *
+ * ⚠️ A 'sent' command goes STALE after IN_FLIGHT_MINUTES, and that is not a detail. The device
+ * is marked 'sent' the instant we hand a command over, so a unit that drops mid-poll — which
+ * is the normal way this device fails, see the whole 08-29 → 08-30 outage — leaves the command
+ * at 'sent' and the pin at 'sent' forever. Without this window the NOT EXISTS below would
+ * match that corpse for the rest of time and the name would never be offered again: healing
+ * exactly once, which is not healing. Anything still unacknowledged after the window is
+ * treated as lost and re-offered.
  *
  * ⚠️ One per poll, matching the queue's own one-command-per-poll rule: hand over five names at
  * once and four of their acknowledgements can never be matched back to a command.
  */
+const IN_FLIGHT_MINUTES = 15;
+
 async function queueMissingName(sn) {
   const { rows } = await query(
     `SELECT sdp.pin, COALESCE(sdp.pushed_name, u.name) AS pushed_name
        FROM staff_device_pins sdp
        JOIN users u ON u.id = sdp.user_id
-      WHERE sdp.push_state = 'pending'
+      WHERE sdp.push_state IN ('pending', 'sent')
         AND NOT EXISTS (
           SELECT 1 FROM device_commands dc
            WHERE dc.pin = sdp.pin
              AND dc.device_sn = $1
-             AND dc.state IN ('queued', 'sent')
+             AND (
+               dc.state = 'queued'
+               OR (dc.state = 'sent'
+                   AND dc.sent_at > NOW() - ($2 || ' minutes')::interval)
+             )
         )
       ORDER BY sdp.pin ASC
       LIMIT 1`,
-    [sn]
+    [sn, String(IN_FLIGHT_MINUTES)]
   );
   if (!rows.length) return null;
   // Inserted already marked 'sent', because it is handed over in this very response.
