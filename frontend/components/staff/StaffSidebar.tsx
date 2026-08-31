@@ -1,13 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { BrandMark } from "@/components/ui/BrandLogo";
 import { logout, setSkipDashboardRedirect } from "@/lib/auth";
 import { toast } from "sonner";
-import { STAFF_TYPE_LABELS } from "@/lib/constants";
+import { ORDER_STATUS_LABELS, STAFF_TYPE_LABELS } from "@/lib/constants";
 import type { User } from "@/lib/types";
-import type { StaffType } from "@/lib/types";
+import type { OrderStatus, StaffType } from "@/lib/types";
 
 // ─── Nav definitions per staff_type ──────────────────────────────────────────
 
@@ -17,6 +17,57 @@ interface NavLink {
   icon: React.ReactNode;
   /** If true, this link is active for all sub-paths too */
   prefix?: boolean;
+  /** Stage links all share `/staff/queue`, so «active» has to be decided by `?stage=`
+   *  rather than the path — otherwise every one of them lights up at once. */
+  stage?: OrderStatus;
+}
+
+// ─── The stage menu ──────────────────────────────────────────────────────────
+// Owner ask 2026-08-31: after the line was opened to everyone (backend LINE_VIEW_STAGES),
+// the workers wanted their own stage to be what a screen OPENS on, with the other stages
+// reachable from the menu. These links are the menu half; the chips on each work screen are
+// the other half, and both drive the same `?stage=` the console already understood.
+//
+// ⚠️ Display list, NOT an access list. The backend decides what each person may see and move;
+// a stage they may not see simply comes back empty. `converting` is left out because stage-2
+// was removed 2026-07-15 and only legacy rows sit there.
+const MENU_STAGES: OrderStatus[] = [
+  "embroidery",
+  "pressing",
+  "preparing",
+  "ready",
+  "delivered",
+];
+
+function iconLayers() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="m12 2 9 5-9 5-9-5 9-5z" />
+      <path d="m3 12 9 5 9-5" />
+      <path d="m3 17 9 5 9-5" />
+    </svg>
+  );
+}
+
+/**
+ * Stage links for the sidebar.
+ *
+ * التصميم is the line's one named exception — it stays with the designer (see
+ * productionController's LINE_VIEW_STAGES comment), so it is offered only to someone who
+ * could actually have rows there. That single role check is deliberately NOT a copy of
+ * QUEUE_STAGES: everything else about who sees what is still decided server-side.
+ */
+function getStageLinks(staffTypes: StaffType[], isAdmin: boolean): NavLink[] {
+  const stages: OrderStatus[] =
+    isAdmin || staffTypes.includes("manager") || staffTypes.includes("designer")
+      ? ["design_complete", ...MENU_STAGES]
+      : MENU_STAGES;
+  return stages.map((stage) => ({
+    href: `/staff/queue?stage=${stage}`,
+    label: ORDER_STATUS_LABELS[stage],
+    icon: iconLayers(),
+    stage,
+  }));
 }
 
 function iconClipboard() {
@@ -151,7 +202,13 @@ function getNavLinks(staffTypes: StaffType[], isAdmin: boolean): NavLink[] {
   const links: NavLink[] = [];
   const homeType = staffTypes.find((t) => t in HOME_LABELS);
   if (homeType) {
-    links.push({ href: "/staff", label: HOME_LABELS[homeType]!, icon: iconClipboard() });
+    // Marked «مرحلتي» so the contrast with the «المراحل» section below is explicit: this
+    // link is the worker's own station, the section is everywhere else on the line.
+    links.push({
+      href: "/staff",
+      label: `مرحلتي · ${HOME_LABELS[homeType]!}`,
+      icon: iconClipboard(),
+    });
   } else if (!staffTypes.includes("tailor")) {
     // Legacy/unknown role: generic board. A PURE tailor skips /staff entirely —
     // that page redirects them to /staff/tailor, so the link would be a bounce.
@@ -186,6 +243,11 @@ interface StaffSidebarProps {
 
 export function StaffSidebar({ user, open, onClose }: StaffSidebarProps) {
   const pathname = usePathname();
+  // Stage links differ only by `?stage=`, so the active one is read from the query.
+  // (The whole sidebar already mounts inside a <Suspense> in app/staff/layout.tsx, which is
+  // what useSearchParams requires.)
+  const searchParams = useSearchParams();
+  const activeStage = searchParams.get("stage");
 
   function handleLogout() {
     logout();
@@ -233,6 +295,7 @@ export function StaffSidebar({ user, open, onClose }: StaffSidebarProps) {
     : productionAndToolLinks;
 
   // Staff (not pure admins) track their own salary + activity.
+  const stageLinks = getStageLinks(myTypes, isAdmin);
   const links =
     user.role === "staff"
       ? [
@@ -289,6 +352,31 @@ export function StaffSidebar({ user, open, onClose }: StaffSidebarProps) {
               className={`flex min-h-11 items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
                 isActive
                   ? "bg-orange-ink/10 text-orange-ink"
+                  : "font-medium text-ink-soft hover:bg-surface-sink hover:text-ink"
+              }`}
+            >
+              {link.icon}
+              {link.label}
+            </Link>
+          );
+        })}
+
+        {/* المراحل — jump straight to any stage of the line. The work screens open on
+            «مرحلتي»; this is how a worker steps out of it without hunting for a chip. */}
+        <p className="px-3 pt-4 pb-1 text-[11px] font-bold uppercase tracking-wide text-muted">
+          المراحل
+        </p>
+        {stageLinks.map((link) => {
+          const isActive = pathname === "/staff/queue" && activeStage === link.stage;
+          return (
+            <Link
+              key={link.href}
+              href={link.href}
+              onClick={onClose}
+              aria-current={isActive ? "page" : undefined}
+              className={`flex min-h-11 items-center gap-2.5 rounded-xl px-3 py-2 text-sm transition-colors ${
+                isActive
+                  ? "bg-orange-ink/10 font-semibold text-orange-ink"
                   : "font-medium text-ink-soft hover:bg-surface-sink hover:text-ink"
               }`}
             >

@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { PageLoader } from "@/components/ui/Spinner";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { deleteProductionOrder, getQueue } from "@/lib/staff";
+import { deleteProductionOrder, getQueueScoped } from "@/lib/staff";
 import { getUser } from "@/lib/auth";
 import { getApiErrorMessage } from "@/lib/api";
 import { matchesQueueSearch } from "@/lib/queue-search";
@@ -156,9 +156,19 @@ interface StageRailProps {
   items: ProductionQueueItem[];
   activeStage: OrderStatus | undefined;
   onSelect: (s: OrderStatus | undefined) => void;
+  /** The viewer's own station(s) — backend `my_stages`. Marked «مرحلتي» and pulled to the
+   *  front so the worker's own work is the first thing on the rail, not the fourth. `[]`
+   *  for manager/admin/مفصل, who keep the plain line order. */
+  mine: OrderStatus[];
 }
 
-function StageRail({ items, activeStage, onSelect }: StageRailProps) {
+function StageRail({ items, activeStage, onSelect, mine }: StageRailProps) {
+  const mineSet = useMemo(() => new Set<OrderStatus>(mine), [mine]);
+  // «مرحلتي» first, then the rest of the line in walking order.
+  const orderedStages = useMemo(
+    () => [...STAGES.filter((s) => mineSet.has(s)), ...STAGES.filter((s) => !mineSet.has(s))],
+    [mineSet]
+  );
   // "الكل" counts in-production only; delivered has its own chip (matches the list filter).
   const total = items.filter((i) => i.status !== "delivered").length;
 
@@ -318,11 +328,12 @@ function StageRail({ items, activeStage, onSelect }: StageRailProps) {
         role="group"
         aria-label="مراحل الإنتاج"
       >
-        {railItem(undefined, "الكل", total, 0, 0, false, 100)}
-        {STAGES.map((s) => {
+        {orderedStages.map((s) => {
           const st = statByStage[s] ?? { count: 0, overdue: 0, missing: 0 };
-          return railItem(s, ORDER_STATUS_LABELS[s], st.count, st.overdue, st.missing, s === "ready");
+          const label = mineSet.has(s) ? `مرحلتي · ${ORDER_STATUS_LABELS[s]}` : ORDER_STATUS_LABELS[s];
+          return railItem(s, label, st.count, st.overdue, st.missing, s === "ready");
         })}
+        {railItem(undefined, "الكل", total, 0, 0, false, 100)}
       </div>
 
       {/* Desktop vertical rail */}
@@ -330,13 +341,12 @@ function StageRail({ items, activeStage, onSelect }: StageRailProps) {
         className="hidden md:flex flex-col w-[210px] shrink-0 overflow-hidden rounded-2xl border border-line bg-beige sticky top-4 self-start"
         aria-label="مراحل الإنتاج"
       >
-        {desktopRailItem(undefined, "الكل", total, 0, 0, false, 100)}
-        {STAGES.map((s) => {
+        {orderedStages.map((s) => {
           const st = statByStage[s] ?? { count: 0, overdue: 0, missing: 0 };
           const pct = total ? Math.round((st.count / total) * 100) : 0;
           return desktopRailItem(
             s,
-            ORDER_STATUS_LABELS[s],
+            mineSet.has(s) ? `مرحلتي · ${ORDER_STATUS_LABELS[s]}` : ORDER_STATUS_LABELS[s],
             st.count,
             st.overdue,
             st.missing,
@@ -344,6 +354,7 @@ function StageRail({ items, activeStage, onSelect }: StageRailProps) {
             pct
           );
         })}
+        {desktopRailItem(undefined, "الكل", total, 0, 0, false, 100)}
       </nav>
     </>
   );
@@ -768,6 +779,10 @@ interface StoredConsoleState {
   search?: string;
   page?: number;
   zonesOpen?: boolean;
+  /** «the open-on-my-station default already ran this session». Without it, a worker who
+   *  deliberately widened to «الكل» would be dragged back to «مرحلتي» on the next visit,
+   *  because an absent `stage` means «الكل» and «never chosen» alike. */
+  stageDefaulted?: boolean;
 }
 const STORAGE_KEY = "loloshop-console:production";
 
@@ -848,6 +863,11 @@ function ConsoleContent() {
   const [page,       setPage]       = useState(stored.page ?? 1);
   const [selectedBatch, setSelectedBatch] = useState(stored.batch ?? "");
   const [zonesOpen,  setZonesOpen]  = useState(stored.zonesOpen ?? false);
+  // The stages this viewer personally works — «مرحلتي». `[]` for manager/admin/مفصل, who
+  // have no station and correctly keep opening on «الكل». Comes from the backend; never
+  // re-derived here (see the viewerStages landmine).
+  const [myStages,   setMyStages]   = useState<OrderStatus[]>([]);
+  const [stageDefaulted, setStageDefaulted] = useState(stored.stageDefaulted === true);
 
   // ── Fetch — zone is the only server-side filter ────────────────────────────
   const load = useCallback(
@@ -856,8 +876,9 @@ function ConsoleContent() {
       setError(false);
       try {
         // Pass zone only — stage/source/rep are client-side filters
-        const data = await getQueue(undefined, undefined, effectiveZone);
-        setItems(data);
+        const res = await getQueueScoped(undefined, undefined, effectiveZone);
+        setItems(res.items);
+        setMyStages(res.myStages);
         setLoadedOnce(true);
       } catch (err) {
         toast.error(getApiErrorMessage(err, "تعذر تحميل قائمة الإنتاج"));
@@ -893,6 +914,27 @@ function ConsoleContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Open on «مرحلتي», once per session.
+  //
+  // WHY. Since 2026-08-31 this list is the WHOLE line for every line staff member
+  // (LINE_VIEW_STAGES) — the right call for the line, but it meant a designer or an
+  // embroiderer landed on hundreds of other stations' rows and said so. This changes the
+  // DEFAULT only: «الكل» and every other stage stay one tap away on the rail, and nobody
+  // loses the access the 08-31 decision granted.
+  //
+  // Three guards, all load-bearing: `stageDefaulted` (a deliberate «الكل» must survive —
+  // an absent `stage` cannot tell «الكل» apart from «not chosen yet»), a URL that already
+  // names a stage (a shared link or a rail click owns the choice), and `rehydrated` (the
+  // restore above may still be landing, and replacing over it would eat the restored filters).
+  useEffect(() => {
+    if (!loadedOnce || stageDefaulted || !rehydrated) return;
+    setStageDefaulted(true);
+    if (stage || !myStages.length) return;
+    const own = myStages.find((st) => items.some((i) => i.status === st)) ?? myStages[0];
+    router.replace(buildUrl({ stage: own, source, rep: repParam ?? undefined, zone: zoneParam }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadedOnce, rehydrated, stageDefaulted, myStages, stage]);
+
   // Mirror the UI state so back-navigation restores it exactly.
   useEffect(() => {
     try {
@@ -905,12 +947,13 @@ function ConsoleContent() {
         search,
         page,
         zonesOpen,
+        stageDefaulted,
       };
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
     } catch {
       /* storage full/unavailable — persistence is best-effort */
     }
-  }, [stage, source, repParam, zoneParam, selectedBatch, search, page, zonesOpen]);
+  }, [stage, source, repParam, zoneParam, selectedBatch, search, page, zonesOpen, stageDefaulted]);
 
   // Scroll offset, restored alongside the filters above. Keyed on stage+page so paging or
   // switching stage starts at the top (a new list), while «رجوع» from a piece does not.
@@ -1145,6 +1188,7 @@ function ConsoleContent() {
         <StageRail
           items={items}
           activeStage={stage}
+          mine={myStages}
           onSelect={setStage}
         />
 

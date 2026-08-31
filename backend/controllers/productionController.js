@@ -616,7 +616,21 @@ async function getQueue(req, res) {
       delete r.group_price;
     }
   }
-  res.json({ data: rows });
+  // «مرحلتي» vs «الكل» — the two lists the screens open on.
+  //
+  // WHY THIS RIDES THE QUEUE RESPONSE. Since 2026-08-31 this payload is the WHOLE line for
+  // every line staff member (LINE_VIEW_STAGES), so a designer's «مراجعة التصاميم» opened on
+  // every other station's work and the workers said so. The fix is a default, not a
+  // narrowing: the client opens on `my_stages` and may step to any stage in `view_stages`.
+  // Both are computed HERE rather than re-derived in TypeScript so the frontend can never
+  // hold a second, drifting copy of QUEUE_STAGES — the exact failure the viewerStages
+  // landmine describes.
+  //
+  // ⚠️ `require` is INSIDE the function on purpose: staffController requires THIS module at
+  // top level (nextStageFor + QUEUE_STAGES), so a top-level require here is a cycle. Same
+  // resolution lib/shelf.js already uses in the other direction.
+  const { viewerStages } = require('./staffController');
+  res.json({ data: rows, my_stages: viewerStages(u), view_stages: stages });
 }
 
 // ---------- Stage-appropriate order projection (presser NEVER receives the canvas) ----------
