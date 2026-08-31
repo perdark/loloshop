@@ -8,6 +8,18 @@ const crypto = require('node:crypto');
 const { query, tx } = require('../lib/db');
 const { zonedToUtc } = require('../lib/iclockProtocol');
 const device = require('../lib/attendanceDevice');
+// The admin half — «أرقام جهاز بلا اسم» and «اربط بموظف» are driven directly (they are plain
+// controller functions), so test 8b exercises the REAL queries rather than a copy of them.
+const devices = require('../controllers/attendanceDeviceController');
+
+function mockRes() {
+  const res = {
+    statusCode: 200, body: null,
+    status(c) { res.statusCode = c; return res; },
+    json(b) { res.body = b; return res; },
+  };
+  return res;
+}
 
 // ingestPunches runs each punch inside a SAVEPOINT so one bad row can't poison the whole
 // batch's Postgres transaction — that only makes sense inside a transaction the CALLER owns
@@ -423,6 +435,53 @@ test('8. a punch from an unmapped PIN stores user_id NULL and creates no record'
     [String(orphanPin), DEVICE_SN]
   );
   assert.equal(recs.rows[0].n, 0);
+});
+
+// ⚠️ REGRESSION GUARD, added 2026-08-31 after a filter shipped to production that emptied this
+// screen. «تجاهل» hides a dismissed number by writing `ignored_reason = 'unmapped_dismissed'`,
+// and the obvious way to filter that — `ignored_reason IS NULL` — is WRONG, because applyPunch
+// already stamps every unclaimed punch with REASON_UNMAPPED. Filtering on NULL therefore hides
+// EVERY unclaimed number and, worse, empties assignUnmapped's replay so naming a worker
+// recovers none of the punches they already made. Both halves are asserted here.
+test('8b. an unclaimed punch still LISTS and still REPLAYS — it carries REASON_UNMAPPED, not NULL', async () => {
+  const orphanPin = 60000 + Math.floor(Math.random() * 5000);
+  await ingest([mkPunch(orphanPin, '2027-02-10 09:05:00')]);
+
+  // It really does carry a reason — this is the fact the broken filter tripped over.
+  const raw = (await query(
+    `SELECT ignored_reason FROM punch_raw WHERE device_sn = $1 AND device_pin = $2`,
+    [DEVICE_SN, String(orphanPin)]
+  )).rows[0];
+  assert.ok(raw.ignored_reason, 'applyPunch stamps an unmapped punch with a reason');
+  assert.notEqual(raw.ignored_reason, 'unmapped_dismissed');
+
+  // 1. It must appear on «أرقام جهاز بلا اسم».
+  const res = mockRes();
+  await devices.listUnmapped({ query: {} }, res);
+  assert.ok(
+    res.body.data.some((r) => String(r.device_pin) === String(orphanPin)),
+    'an unclaimed number vanished from the list — the filter is matching the wrong reason'
+  );
+
+  // 2. And naming a worker must still recover its punches. This is the whole reason raw
+  //    punches are stored before they are understood.
+  const userId = await mkStaff();
+  const assignRes = mockRes();
+  await devices.assignUnmapped(
+    { params: { pin: String(orphanPin) }, body: { user_id: userId } },
+    assignRes
+  );
+  assert.ok(assignRes.body.meta, `assign failed: ${JSON.stringify(assignRes.body)}`);
+  assert.ok(
+    assignRes.body.meta.replayed >= 1,
+    `the replay recovered nothing (replayed=${assignRes.body.meta.replayed})`
+  );
+  // ⚠️ Park it immediately. `linkPin` leaves a new pin at push_state='pending', and
+  // iclockRoute.test.js's self-healing push is shop-wide BY DESIGN — `node --test` runs the two
+  // files in parallel, so a pending pin born here is a legitimate candidate over there and
+  // steals the poll its fixture was asserting on.
+  await query(`UPDATE staff_device_pins SET push_state = 'confirmed' WHERE pin = $1`, [orphanPin]);
+  fx.pins.push(orphanPin);
 });
 
 test('9. a record with status=overridden is left completely untouched by a later punch', async () => {

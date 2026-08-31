@@ -217,17 +217,22 @@ test('the device router does not eat the rest of the app\'s JSON bodies', async 
 // deliberately shop-wide and ordered by pin, so on the dev DB (which carries the real shop's
 // pins 1..10) a poll hands over برزان's name long before this fixture's 64315, and the test
 // would be asserting against whichever rows happen to exist. `ctx.otherPins` restores them.
-test('park the shop\'s own pins so the fixture is the only candidate', async () => {
-  const { rows } = await query(
-    `SELECT pin, push_state FROM staff_device_pins WHERE pin <> $1`, [PIN]
-  );
-  ctx.otherPins = rows;
+// Captures the real pins ONCE (test.after restores them), then parks every one of them at
+// 'confirmed' so the fixture is the only self-heal candidate. Called before each act rather
+// than once: `node --test` runs test FILES in parallel, so another file can create a pending
+// pin at any moment and it would legitimately win the next poll.
+async function parkOtherPins() {
+  if (!ctx.otherPins.length) {
+    ctx.otherPins = (await query(
+      `SELECT pin, push_state FROM staff_device_pins WHERE pin <> $1`, [PIN]
+    )).rows;
+  }
   await query(`UPDATE staff_device_pins SET push_state = 'confirmed' WHERE pin <> $1`, [PIN]);
-  assert.ok(true);
-});
+}
 
 test('a name that never reached the device is queued on the next poll, with no admin action', async () => {
   // Exactly the broken shape: the pin is mapped and 'pending', nothing is queued for it.
+  await parkOtherPins();
   await query(`DELETE FROM device_commands WHERE device_sn = $1`, [SN]);
   await query(`UPDATE staff_device_pins SET push_state = 'pending' WHERE pin = $1`, [PIN]);
 
@@ -243,6 +248,7 @@ test('a name that never reached the device is queued on the next poll, with no a
 });
 
 test('the same name is not re-queued while one is already in flight', async () => {
+  await parkOtherPins();
   // Without the NOT EXISTS guard every poll would stack another copy of the same name, and a
   // device polling every few seconds would build an unbounded queue of duplicates.
   const count = async () =>
@@ -270,6 +276,7 @@ test('the device acknowledging the name is what turns the badge green', async ()
 });
 
 test('a confirmed name is never handed over again', async () => {
+  await parkOtherPins();
   // The other half of the loop guard: 'confirmed' is a resting state, so a device that has the
   // name is not handed it on every poll for the rest of its life.
   const res = await request('GET', `/iclock/getrequest?SN=${SN}`);
@@ -281,6 +288,7 @@ test('a name lost mid-poll is re-offered once it goes stale — healing must rep
   // instant we hand the command over, so a unit that drops before acknowledging (the whole
   // 08-29 → 08-30 outage) leaves the command at 'sent' forever. Without the staleness window
   // that corpse blocks the pin for the rest of time and the name is never offered again.
+  await parkOtherPins();
   await query(`DELETE FROM device_commands WHERE device_sn = $1`, [SN]);
   await query(`UPDATE staff_device_pins SET push_state = 'pending' WHERE pin = $1`, [PIN]);
 
@@ -308,6 +316,7 @@ test('a name the device REFUSED is left failed, never retried in a loop', async 
   // The guard that keeps a bad name from being handed over on every poll forever — which would
   // look like a queue that never drains and would hide the failure from the only person
   // watching. 'failed' is a resting state a human can see.
+  await parkOtherPins();
   await query(`DELETE FROM device_commands WHERE device_sn = $1`, [SN]);
   await query(`UPDATE staff_device_pins SET push_state = 'pending' WHERE pin = $1`, [PIN]);
   await request('GET', `/iclock/getrequest?SN=${SN}`);

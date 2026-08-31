@@ -175,9 +175,10 @@ async function linkPin(client, { userId, pin, pushedName }) {
   // has to and lean on that correction path for no reason. `id` breaks ties inside a second.
   const stored = await client.query(
     `SELECT * FROM punch_raw
-      WHERE user_id IS NULL AND ignored_reason IS NULL AND ${PIN_IS('device_pin', '$1')}
+      WHERE user_id IS NULL AND ignored_reason IS DISTINCT FROM $2
+        AND ${PIN_IS('device_pin', '$1')}
       ORDER BY device_ts ASC, id ASC`,
-    [pin]
+    [pin, REASON_DISMISSED]
   );
   const derived = { created: 0, extended: 0, moved_in: 0, ignored: 0, unmapped: 0 };
   for (const punch of stored.rows) {
@@ -271,6 +272,18 @@ async function deletePin(req, res) {
  * real worker, an installer's two-day-old test tap must not become their attendance. Clear the
  * marker first if the punches really were theirs.
  */
+/**
+ * ⚠️ MATCH THIS EXACT MARKER, NEVER `ignored_reason IS NULL`.
+ *
+ * An unclaimed punch does NOT have a null reason: `applyPunch` stamps every one of them with
+ * REASON_UNMAPPED («رقم الجهاز غير مرتبط بأي موظف») the moment it is derived. Filtering on NULL
+ * therefore hides EVERY unclaimed number — the whole point of this screen — and, far worse,
+ * empties `linkPin`'s replay, so naming a worker recovers none of the punches they already
+ * made. That is the entire reason raw punches are kept before they are understood.
+ *
+ * `IS DISTINCT FROM` rather than `<>` because `<>` is NULL for a NULL left side, which would
+ * drop the (rare) genuinely-unstamped rows.
+ */
 const REASON_DISMISSED = 'unmapped_dismissed';
 
 async function listUnmapped(req, res) {
@@ -287,9 +300,10 @@ async function listUnmapped(req, res) {
        FROM punch_raw p
        LEFT JOIN staff_device_pins sdp ON ${PIN_IS('p.device_pin', 'sdp.pin')}
        LEFT JOIN users u ON u.id = sdp.user_id
-      WHERE p.user_id IS NULL AND p.ignored_reason IS NULL
+      WHERE p.user_id IS NULL AND p.ignored_reason IS DISTINCT FROM $1
       GROUP BY p.device_pin, u.id, u.name
-      ORDER BY MAX(p.punched_at) DESC`
+      ORDER BY MAX(p.punched_at) DESC`,
+    [REASON_DISMISSED]
   );
   res.json({ data: rows });
 }
