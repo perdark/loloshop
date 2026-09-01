@@ -1335,6 +1335,62 @@ export async function getMySummary(month?: string): Promise<MySummary> {
   return data.data;
 }
 
+// ─── «حصيلة شهرك وراتبك» — the frozen monthly statement (GET /payroll/me/statement) ──────
+//
+// ⚠️ NOT the same thing as MySummary. `getMySummary` recomputes the live month; a statement is
+// a snapshot taken when the shop decided what to pay, and its numbers never move afterwards.
+// Showing one where the other belongs is how a worker ends up reading two different figures
+// for the same month.
+
+export interface StatementDay {
+  d: number;
+  w: string;
+  fr?: boolean;
+  in: string | null;
+  kind: "full" | "half" | "gap" | "stray";
+  shift: string | null;
+  late: number;
+  wiped: number;
+  pay: number;
+  cut: number;
+  paidLeave?: boolean;
+}
+
+export interface MyStatement {
+  month: string;
+  dayRate: number;
+  halfRate: number;
+  minuteRate: number;
+  graceMinutes: number;
+  fullShifts: number;
+  halfShifts: number;
+  leaveDays: number;
+  unpaidDays: number;
+  lateDays: number;
+  lateMinutes: number;
+  waivedMinutes: number;
+  gross: number;
+  lateDeduction: number;
+  otherDeduction: number;
+  otherReasonAr: string | null;
+  net: number;
+  noteAr: string | null;
+  days: StatementDay[];
+  publishedAt: string;
+}
+
+/**
+ * `month` is 'YYYY-MM'. Omit it for the newest PUBLISHED statement.
+ * Resolves to `null` when the shop has not published one — that is a normal state, not an
+ * error, and the caller renders nothing rather than an empty card.
+ */
+export async function getMyStatement(month?: string): Promise<MyStatement | null> {
+  const { data } = await api.get<{ data: MyStatement | null }>("/payroll/me/statement", {
+    params: month ? { month } : undefined,
+  });
+  return data.data;
+}
+
 export async function getMyActivity(): Promise<MyActivityRow[]> {
   const { data } = await api.get<{
     data: {

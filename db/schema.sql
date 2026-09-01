@@ -1811,3 +1811,48 @@ CREATE INDEX IF NOT EXISTS device_commands_queue_ix
 ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS pin INTEGER;
 CREATE INDEX IF NOT EXISTS device_commands_pin_ix
   ON device_commands (pin) WHERE pin IS NOT NULL;
+
+-- ─── Migration 099 — «حصيلة شهرك وراتبك» (staff payroll statements) ───────────────
+-- Full reasoning in db/migrations/099_staff_payroll_statements.sql: a statement is a frozen
+-- SNAPSHOT, `published_at IS NULL` hides it from the worker, and its net is NEVER posted into
+-- staff_salary_transactions.
+  user_id          UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  month_key        TEXT NOT NULL CHECK (month_key ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'),
+
+  -- The prices this statement was computed at, frozen. A later rate change never moves it.
+  day_rate         BIGINT  NOT NULL DEFAULT 0 CHECK (day_rate >= 0),
+  half_rate        BIGINT  NOT NULL DEFAULT 0 CHECK (half_rate >= 0),
+  minute_rate      BIGINT  NOT NULL DEFAULT 0 CHECK (minute_rate >= 0),
+  grace_minutes    INTEGER NOT NULL DEFAULT 0 CHECK (grace_minutes >= 0),
+
+  full_shifts      INTEGER NOT NULL DEFAULT 0,
+  half_shifts      INTEGER NOT NULL DEFAULT 0,
+  leave_days       INTEGER NOT NULL DEFAULT 0,   -- unworked days paid anyway
+  unpaid_days      INTEGER NOT NULL DEFAULT 0,   -- unworked days NOT paid
+  late_days        INTEGER NOT NULL DEFAULT 0,
+  late_minutes     INTEGER NOT NULL DEFAULT 0,   -- the minutes actually charged
+  waived_minutes   INTEGER NOT NULL DEFAULT 0,   -- lateness forgiven, shown so it is not a secret
+
+  gross            BIGINT NOT NULL DEFAULT 0,
+  late_deduction   BIGINT NOT NULL DEFAULT 0,
+  other_deduction  BIGINT NOT NULL DEFAULT 0,
+  other_reason_ar  TEXT,
+  net              BIGINT NOT NULL DEFAULT 0,
+
+  note_ar          TEXT,                          -- the sentence shown under the number
+  days             JSONB  NOT NULL DEFAULT '[]'::jsonb,
+
+  published_at     TIMESTAMPTZ,
+  created_by       UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- One statement per person per month. A re-publish UPDATEs; it never stacks a second row,
+-- or «راتبك» would depend on which one the query happened to pick.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_payroll_statement_user_month
+  ON staff_payroll_statements (user_id, month_key);
+
+CREATE INDEX IF NOT EXISTS idx_payroll_statement_published
+  ON staff_payroll_statements (user_id, published_at DESC)
+  WHERE published_at IS NOT NULL;

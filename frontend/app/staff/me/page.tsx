@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { PayoutAccountPanel } from "@/components/payments/PayoutAccountPanel";
 import { MyMonthPanel } from "@/components/staff/MyMonthPanel";
+import { MonthlyStatementCard } from "@/components/staff/MonthlyStatementCard";
 import {
   getMyActivity,
   getMyGoal,
@@ -150,6 +151,11 @@ export default function StaffMePage() {
         </div>
       ) : (
         <div className="space-y-6">
+          {/* «حصيلة شهرك وراتبك» — first, above everything. It is the number a person opens
+              this page for, it renders nothing when no statement is published, and it has its
+              own fetch so a failure here cannot blank the rest of the page. */}
+          <MonthlyStatementCard />
+
           {/* Incentive goal + progress */}
           {goal && <GoalCard goal={goal} />}
 

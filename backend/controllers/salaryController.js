@@ -602,6 +602,70 @@ async function getMySummary(req, res) {
   });
 }
 
+/**
+ * GET /payroll/me/statement            (optional ?month=YYYY-MM)
+ *
+ * «حصيلة شهرك وراتبك» — the frozen monthly statement, read straight off the row.
+ *
+ * ⚠️ NOTHING HERE IS RECOMPUTED, and that is the whole point of the table (migration 099).
+ * The rates, the counts and the day list were snapshotted at publish time; re-deriving any of
+ * them from live attendance rows would let a later schedule edit, holiday or admin override
+ * move a number the shop has already paid in cash.
+ *
+ * ⚠️ `published_at IS NOT NULL` is the visibility gate. An unpublished row is a draft being
+ * checked and must stay invisible — hiding it in the UI alone is not the same thing.
+ */
+async function getMyStatement(req, res) {
+  const requested = String(req.query.month || '');
+  const params = [req.user.id];
+  let filter = '';
+  if (MONTH_RE.test(requested)) {
+    params.push(requested);
+    filter = 'AND month_key = $2';
+  }
+
+  const { rows } = await query(
+    `SELECT month_key, day_rate, half_rate, minute_rate, grace_minutes,
+            full_shifts, half_shifts, leave_days, unpaid_days,
+            late_days, late_minutes, waived_minutes,
+            gross, late_deduction, other_deduction, other_reason_ar, net,
+            note_ar, days, published_at
+       FROM staff_payroll_statements
+      WHERE user_id = $1 AND published_at IS NOT NULL ${filter}
+      ORDER BY month_key DESC
+      LIMIT 1`,
+    params
+  );
+  if (!rows.length) return res.json({ data: null });
+
+  const r = rows[0];
+  const n = (v) => Number(v || 0);
+  return res.json({
+    data: {
+      month: r.month_key,
+      dayRate: n(r.day_rate),
+      halfRate: n(r.half_rate),
+      minuteRate: n(r.minute_rate),
+      graceMinutes: n(r.grace_minutes),
+      fullShifts: n(r.full_shifts),
+      halfShifts: n(r.half_shifts),
+      leaveDays: n(r.leave_days),
+      unpaidDays: n(r.unpaid_days),
+      lateDays: n(r.late_days),
+      lateMinutes: n(r.late_minutes),
+      waivedMinutes: n(r.waived_minutes),
+      gross: n(r.gross),
+      lateDeduction: n(r.late_deduction),
+      otherDeduction: n(r.other_deduction),
+      otherReasonAr: r.other_reason_ar,
+      net: n(r.net),
+      noteAr: r.note_ar,
+      days: Array.isArray(r.days) ? r.days : [],
+      publishedAt: r.published_at,
+    },
+  });
+}
+
 module.exports = {
   getStaffSalary,
   setStaffSalary,
@@ -615,4 +679,5 @@ module.exports = {
   getMyActivity,
   getMyGoal,
   getMySummary,
+  getMyStatement,
 };

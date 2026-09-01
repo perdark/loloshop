@@ -5,6 +5,7 @@
  * Final paths:
  *   GET /api/payroll/me/salary
  *   GET /api/payroll/me/activity
+ *   GET /api/payroll/me/statement
  *
  * Attendance now lives under /api/staff/attendance/*.
  * The /payroll/me/attendance/* aliases remain for older frontend builds only.
@@ -23,6 +24,9 @@ router.get('/me/activity', salary.getMyActivity);
 router.get('/me/goal', salary.getMyGoal);
 // «راتبي ونشاطي» — the whole month in one call. See salaryController.getMySummary.
 router.get('/me/summary', salary.getMySummary);
+// «حصيلة شهرك وراتبك» — the frozen monthly statement (migration 099). Separate from
+// /me/summary on purpose: summary recomputes the live month, this reads a snapshot.
+router.get('/me/statement', salary.getMyStatement);
 router.get('/me/payout-account', payouts.getMyAccount);
 router.put('/me/payout-account', payouts.saveMyAccount);
 // ⚠️ Read-only since 2026-08-30 — the K40 is the only thing that writes دخول/خروج now.
