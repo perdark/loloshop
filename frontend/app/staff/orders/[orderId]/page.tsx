@@ -723,7 +723,16 @@ function StageHistoryCard({
               {h.from_label ? `${h.from_label} ← ${h.to_label}` : h.to_label}
             </span>
             <span className="text-ink-soft">
-              {h.staff_name ?? "غير معروف"} · {formatStamp(h.at)}
+              {/* ⚠️ «غير معروف» IS A BLAME-SHAPED WORD AND `route_fix` IS NOT A PERSON.
+                  Migration 101 moved 248 pieces back into الكوي — pieces opened directly at
+                  التجهيز before the 2026-07-15 routing change, so no worker ever moved them and
+                  none may be named. Those rows carry a NULL user on purpose; printing
+                  «غير معروف» beside them would re-create the exact suspicion the card exists to
+                  end («منو نقلها بدون ما يكويها؟»). Say what happened instead. */}
+              {h.action === "route_fix"
+                ? "تصحيح مسار آلي"
+                : h.staff_name ?? "غير معروف"}{" "}
+              · {formatStamp(h.at)}
             </span>
           </li>
         ))}
@@ -1859,6 +1868,19 @@ function ProductionOrderDetailContent() {
         {/* ── Side panel ── */}
         <section className="space-y-4">
 
+          {/* Who moved this piece, and when — see StageHistoryCard for why it exists.
+              Rendered even when empty: «no one moved it» is the answer to the question that
+              made this card exist.
+
+              ⚠️ IT SITS FIRST IN THIS COLUMN ON PURPOSE (2026-09-01). It shipped on 2026-08-31
+              below the student-info card — ~160 lines of contact rows and edit controls — which
+              on a phone (the only width المكوجي and المجهز ever use) put it below the fold of a
+              second screenful. The owner reported never having seen it live at all. The card was
+              deployed and correct the whole time; it was simply somewhere nobody scrolls. The
+              question it answers («منو نقل هذي القطعة؟») is asked while looking at the piece, so
+              it has to be the first thing this column says. */}
+          <StageHistoryCard history={stageHistory} />
+
           {/* Student info */}
           <article className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
             <h2 className="font-display-ar text-lg font-bold text-ink">بيانات الطالب</h2>
@@ -2009,11 +2031,6 @@ function ProductionOrderDetailContent() {
               </div>
             </dl>
           </article>
-
-          {/* Who moved this piece, and when — see StageHistoryCard for why it exists.
-              Rendered even when empty: «no one moved it» is the answer to the question that
-              made this card exist. */}
-          <StageHistoryCard history={stageHistory} />
 
           {/* Embroidery zones checklist (FEATURE 1 — embroiderer/manager/admin) */}
           {showEmbroideryZones && (

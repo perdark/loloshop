@@ -785,15 +785,25 @@ CREATE INDEX IF NOT EXISTS idx_salary_txn_active_user ON staff_salary_transactio
 -- =====================================================
 -- STAFF ACTIVITY LOG — auto-recorded production actions (advance/revert/claim)
 -- =====================================================
+-- ⚠️ `user_id` IS NULLABLE, AND NULL MEANS «THE SYSTEM, NOT A PERSON» (migration 101).
+-- Every writer in the app passes `req.user.id`; the only NULLs are route corrections made by a
+-- migration, which must not name a worker. Readers already cope: the stage-history query LEFT
+-- JOINs `users`, and every per-person reader (payroll goals, the staff activity feed,
+-- staffPresence) filters `WHERE user_id = $1`, which NULL can never match. Restoring NOT NULL
+-- would force those rows to borrow somebody's name — the exact blame this table's own card
+-- exists to prevent.
 CREATE TABLE IF NOT EXISTS staff_activity_log (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id    UUID REFERENCES users(id) ON DELETE CASCADE,
   action     TEXT NOT NULL,
   order_id   UUID REFERENCES orders(id) ON DELETE SET NULL,
   from_stage TEXT,
   to_stage   TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+-- The table predates the rule above on every existing database, so relax it here too — CREATE
+-- TABLE IF NOT EXISTS never touches a table that already exists.
+ALTER TABLE staff_activity_log ALTER COLUMN user_id DROP NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_staff_activity_user ON staff_activity_log(user_id, created_at DESC);
 
 -- =====================================================
@@ -1858,3 +1868,61 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_payroll_statement_user_month
 CREATE INDEX IF NOT EXISTS idx_payroll_statement_published
   ON staff_payroll_statements (user_id, published_at DESC)
   WHERE published_at IS NOT NULL;
+
+-- =====================================================
+-- 101 — LEGACY PIECES OPENED AT التجهيز BEFORE الكوي WAS ON THEIR ROUTE
+-- =====================================================
+-- ⚠️ REPEATED FROM db/migrations/101_legacy_unpressed_to_kawi.sql ON PURPOSE — the 077/080/093
+-- pattern. `scripts/deploy.sh` runs `npm run migrate`, which applies THIS file to a production
+-- database that already holds the damaged rows; the numbered migration alone would never reach
+-- them. Read that file's header for the measurement (293 pieces, 290 students, newest created
+-- 2026-07-15 — the day commit 4176fb3 routed plain non-cap pieces through الكوي).
+--
+-- ⚠️ THE GUARDS ARE WHAT MAKE IT SAFE TO RE-RUN ON EVERY DEPLOY, not decoration. Once a piece
+-- has been pressed and advanced again it carries a `pressing` row in staff_activity_log, and the
+-- NOT EXISTS below excludes it permanently — so this can never drag a garment back out of
+-- المكوجي's hands a second time. The date guard means a FUTURE bug producing this same shape is
+-- left alone and stays visible instead of being silently swept up. Do not simplify either one.
+-- Only 'preparing' is touched: 'ready' and 'delivered' are not statuses a script may walk back.
+--
+-- The undo table. 248 orders is 248 students who can each see their own status, so the move has
+-- to be reversible by one UPDATE — the undo statement is written out at the foot of the
+-- migration file.
+CREATE TABLE IF NOT EXISTS legacy_pressing_restore_log (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  batch_id    UUID NOT NULL,
+  order_id    UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  old_status  TEXT NOT NULL,
+  new_status  TEXT NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_legacy_pressing_restore_batch
+  ON legacy_pressing_restore_log (batch_id);
+
+INSERT INTO legacy_pressing_restore_log (batch_id, order_id, old_status, new_status)
+SELECT gen_random_uuid(), o.id, 'preparing', 'pressing'
+  FROM orders o
+  JOIN products p ON p.id = o.product_id
+ WHERE o.status = 'preparing'
+   AND o.needs_pressing = TRUE
+   AND p.type <> 'cap'
+   AND o.created_at < DATE '2026-07-16'
+   AND NOT EXISTS (SELECT 1 FROM staff_activity_log l
+                    WHERE l.order_id = o.id
+                      AND (l.from_stage = 'pressing' OR l.to_stage = 'pressing'))
+   AND NOT EXISTS (SELECT 1 FROM audit_log a
+                    WHERE a.entity = 'order' AND a.entity_id = o.id
+                      AND a.action IN ('status_change', 'status_revert')
+                      AND (a.details->>'to' = 'pressing' OR a.details->>'from' = 'pressing'));
+
+-- NULL user = «the system corrected a route», never a worker. See the staff_activity_log header.
+INSERT INTO staff_activity_log (user_id, action, order_id, from_stage, to_stage)
+SELECT NULL, 'route_fix', l.order_id, 'preparing', 'pressing'
+  FROM legacy_pressing_restore_log l
+ WHERE NOT EXISTS (SELECT 1 FROM staff_activity_log s
+                    WHERE s.order_id = l.order_id AND s.action = 'route_fix');
+
+UPDATE orders o
+   SET status = 'pressing', working_staff_id = NULL, working_since = NULL
+  FROM legacy_pressing_restore_log l
+ WHERE o.id = l.order_id AND o.status = 'preparing' AND l.new_status = 'pressing';

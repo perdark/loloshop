@@ -13,6 +13,15 @@ const ALL_STATUSES = [
   'ready', 'delivered', 'cancelled',
 ];
 
+// The pipeline in ORDER, used only to tell a forward move from a backward one when logging who
+// moved a piece. Deliberately NOT ALL_STATUSES: that list ends in 'cancelled', which would make
+// «ألغِ الطلب» read as the furthest-forward stage there is.
+const STAGE_ORDER = [
+  'pending_approval', 'designing', 'design_complete', 'converting',
+  'staff_review', 'printing', 'embroidery', 'pressing', 'preparing',
+  'ready', 'delivered',
+];
+
 // Allowed status transitions (state machine).
 // Pipeline: pending_approval → designing → design_complete (بانتظار التصميم)
 //   → (designer sends «تحويل للتطريز») embroidery → pressing → preparing → ready → delivered
@@ -416,6 +425,23 @@ async function updateStatus(req, res) {
        VALUES ($1, 'status_change', 'order', $2, $3)`,
       [req.user.id, id, JSON.stringify({ from: prev, to: status })]
     );
+    // ⚠️ «منو نقلها؟» READS `staff_activity_log`, NOT `audit_log` (2026-09-01). This endpoint is
+    // a second door onto the same state machine as /production/orders/:id/advance|revert, and it
+    // wrote only the audit row — so a piece moved through here reached التجهيز with NOBODY named
+    // on the staff order page, which is precisely the «راح لوحده وما نقله أحد» the stage-history
+    // card was built to answer. Measured on prod: every gap in that card traces to a writer that
+    // skipped this table. Same shape as performAdvance's row so the card cannot tell them apart;
+    // 'advance'/'revert' are chosen by DIRECTION because payroll and staff goals count
+    // `action IN ('advance','approve_design')` and a forward move made here is real work.
+    const fromIdx = STAGE_ORDER.indexOf(prev);
+    const toIdx = STAGE_ORDER.indexOf(status);
+    if (prev !== status && fromIdx !== -1 && toIdx !== -1) {
+      await client.query(
+        `INSERT INTO staff_activity_log (user_id, action, order_id, from_stage, to_stage)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [req.user.id, toIdx > fromIdx ? 'advance' : 'revert', id, prev, status]
+      );
+    }
     await client.query(
       `INSERT INTO notifications (user_id, type, title_ar, body_ar, link)
        VALUES ($1, 'status_change', $2, $3, '/')`,

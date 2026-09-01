@@ -387,15 +387,28 @@ function isFirstProductionStage(order) {
 
 // One-step-back target, aware of PLAIN pieces (no design/embroidery): they never visited
 // التطريز, so REVERT_MAP's embroidery targets would invent a ghost stage for them. A plain
-// piece at its first stage has nothing to revert to; a plain piece at التجهيز goes back to
-// الكوي (where it came from) when it pressed, else nowhere. Needs order.{status, design_id,
+// piece at its first stage has nothing to revert to. Needs order.{status, design_id,
 // has_embroidery, needs_pressing}.
+//
+// ⚠️ `needs_pressing` DECIDES WHAT COMES BEFORE التجهيز — FOR EVERY PIECE, NOT ONLY PLAIN ONES
+// (2026-09-01). This rule used to live inside the `plain` branch, so an EMBROIDERED sash at
+// التجهيز fell through to REVERT_MAP.preparing = 'embroidery' and jumped straight over الكوي —
+// back to a station it had already left, skipping the one it actually came from. Measured on
+// prod: 7 orders reverted that way, and محمد عادل (المكوجي) hit it live on 2026-09-01 18:23 on
+// وشاح مثلث صغير 115150c0 — the log shows him undoing it by hand 55 seconds later, advancing
+// التطريز→الكوي→التجهيز just to put the piece back where he wanted it. `nextStageFor` has
+// always keyed the forward edge on `needs_pressing`; this is the same question asked backwards,
+// so the two now agree. TRANSITIONS + STAGE_AUTHZ already allow preparing→pressing for LINE_STAFF.
 function resolveRevertTarget(order) {
   const plain = !order.design_id && !order.has_embroidery;
-  if (plain) {
-    if (order.status === 'pressing') return null; // first stage for plain non-cap
-    if (order.status === 'preparing') return order.needs_pressing ? 'pressing' : null;
+  if (order.status === 'preparing') {
+    // Pressed pieces came from الكوي, embroidered or not. A piece that skips الكوي goes back
+    // to التطريز — unless it is plain, in which case التجهيز was its FIRST stage (a cap, or a
+    // legacy row opened there before 2026-07-15) and there is nothing behind it.
+    if (order.needs_pressing) return 'pressing';
+    return plain ? null : REVERT_MAP.preparing;
   }
+  if (plain && order.status === 'pressing') return null; // first stage for plain non-cap
   return REVERT_MAP[order.status] ?? null;
 }
 
@@ -1959,4 +1972,7 @@ module.exports = {
   // Exported for tests: the التجهيز spec partitioning is pure, so it is asserted directly
   // rather than through an HTTP round trip. See test/prepSpec.test.js.
   buildPieceSpec,
+  // Same reason: «رجّع خطوة» is pure over the four order columns it reads, and الكوي being
+  // skipped on the way back was invisible until it was asserted. See test/revertTarget.test.js.
+  resolveRevertTarget,
 };
