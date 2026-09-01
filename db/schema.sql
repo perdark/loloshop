@@ -1816,6 +1816,8 @@ CREATE INDEX IF NOT EXISTS device_commands_pin_ix
 -- Full reasoning in db/migrations/099_staff_payroll_statements.sql: a statement is a frozen
 -- SNAPSHOT, `published_at IS NULL` hides it from the worker, and its net is NEVER posted into
 -- staff_salary_transactions.
+CREATE TABLE IF NOT EXISTS staff_payroll_statements (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id          UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   month_key        TEXT NOT NULL CHECK (month_key ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'),
 
