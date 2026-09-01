@@ -810,45 +810,112 @@ async function uploadFinalDesign(req, res) {
   res.json({ data: { url } });
 }
 
-// ── Lead decisions ───────────────────────────────────────────────────────────
-// Only an active lead (محمد هيثم) or an admin reaches these. Approve pushes the
-// order forward into the normal production pipeline (design_complete → embroidery;
-// stage-2 «التحويل» removed 2026-07-15), exactly like the staff designer's advance.
-// Reject bounces the task back to the helper with a note WITHOUT touching the
-// order — an internal rework, not a send-back to the student.
+// ── Finishing a job ──────────────────────────────────────────────────────────
+// Finishing pushes the order forward into the normal production pipeline
+// (design_complete → embroidery; stage-2 «التحويل» removed 2026-07-15), exactly like
+// the staff designer's advance. Reject stays a LEAD decision and bounces the task back
+// to the member with a note WITHOUT touching the order — an internal rework, not a
+// send-back to the student.
+//
+// ⚠️ OWNER CHANGE 2026-09-01 — THIS IS NO LONGER LEAD-ONLY. An active member finishes
+// their OWN job and sends it straight to التطريز without waiting for محمد's اعتماد.
+// Two things about the shape of that, both deliberate:
+//
+//  1. The route carries `requireTeamAccess` (admin OR any active member), NOT
+//     `requireTeamWorker`. `requireTeamWorker` demands a membership row and an admin
+//     deliberately has none — `attachTeamMember` lets admin through the module without
+//     one — so it would have 403'd the admin half of the very path this change had to
+//     leave untouched. `requireTeamAccess` is exactly the union we now need.
+//  2. WHO MAY FINISH WHICH JOB:
+//       · lead / admin  — any job, unconditionally, with the statement text unchanged.
+//       · active member — a job that is THEIRS (assigned_to = them) or that nobody
+//         holds (assigned_to IS NULL, or no task row yet). A job ANOTHER member claimed
+//         is 409 ERR_TASK_UNAVAILABLE — the same code claimJob/markReady already return.
+//     The member's rule is the WHERE on the upsert, not a read-then-write, and it runs
+//     BEFORE the order moves. Both matter: `lockRetailPendingOrder` holds the order row
+//     FOR UPDATE (claimJob and markReady take the same lock, so the three cannot
+//     interleave), and `tx` COMMITS on a normal return — a `return {conflict:true}`
+//     placed after the orders UPDATE would have shipped the piece to التطريز anyway.
+//
+// ⚠️ THERE IS DELIBERATELY NO «ارفع التصميم أولاً» SERVER GUARD, and adding one would
+// shut the desk. Measured on the dev DB 2026-09-01: of the 989 orders in this pool
+// **0** carry `orders.final_design_url` and 465 carry no `order_items` artwork either;
+// 4 of 5,228 orders in the whole database carry a final_design_url at all, which is
+// what tvBoardController.js:464 already calls «a DEAD field». The staff designer's own
+// `advance` (productionController.nextStageFor) takes design_complete→embroidery with
+// no artwork check whatsoever. So "artwork exists" is not an invariant of this edge and
+// the server must not invent one. The upload button is gated in the UI instead
+// (design-support/page.tsx) — a nudge for the member, never a wall for the lead.
 async function approveJob(req, res) {
   const { orderId } = req.params;
   if (!validUuid(orderId)) return res.status(400).json({ error: 'الطلب غير صحيح', code: 'ERR_VALIDATION' });
+  // Anyone reaching here who is not admin/lead is an active member (the route guard
+  // admits nobody else) finishing their own work.
+  const manage = canManage(req);
+  const memberRole = isActiveMember(req) ? req.designTeamMember.member_role : null;
   const result = await tx(async (client) => {
     const job = await lockRetailPendingOrder(client, orderId);
-    if (!job) return null;
+    if (!job) return { missing: true };
+    if (manage) {
+      await client.query(
+        `UPDATE design_team_tasks SET resolved_at = NOW(), status = 'ready', updated_by = $2
+          WHERE order_id = $1`,
+        [orderId, req.user.id]
+      );
+    } else {
+      // Claim-or-keep, then resolve, in one guarded statement — the claimJob idiom. A
+      // job with no task row is «unassigned», so the row is created here and the desk
+      // still records who finished it. A miss means someone else holds it: nothing was
+      // written, and the order below is not reached.
+      const finished = await client.query(
+        `INSERT INTO design_team_tasks
+           (order_id, team_id, status, note, assigned_to, assigned_at, ready_by, ready_at, resolved_at, updated_by)
+         VALUES ($1, $2, 'ready', NULL, $3, NOW(), $3, NOW(), NOW(), $3)
+         ON CONFLICT (order_id) DO UPDATE
+           SET status = 'ready',
+               assigned_to = CASE
+                 WHEN design_team_tasks.resolved_at IS NOT NULL THEN EXCLUDED.assigned_to
+                 ELSE COALESCE(design_team_tasks.assigned_to, EXCLUDED.assigned_to)
+               END,
+               assigned_at = CASE
+                 WHEN design_team_tasks.resolved_at IS NOT NULL THEN NOW()
+                 ELSE COALESCE(design_team_tasks.assigned_at, NOW())
+               END,
+               ready_by = EXCLUDED.ready_by, ready_at = NOW(), resolved_at = NOW(),
+               updated_by = EXCLUDED.updated_by
+         WHERE design_team_tasks.resolved_at IS NOT NULL
+            OR design_team_tasks.assigned_to IS NULL
+            OR design_team_tasks.assigned_to = EXCLUDED.assigned_to
+         RETURNING order_id`,
+        [orderId, TEAM_ID, req.user.id]
+      );
+      if (!finished.rows.length) return { conflict: true };
+    }
     await client.query(
       `UPDATE orders
           SET status = 'embroidery', working_staff_id = NULL, working_since = NULL
         WHERE id = $1`,
       [orderId]
     );
-    await client.query(
-      `UPDATE design_team_tasks SET resolved_at = NOW(), status = 'ready', updated_by = $2
-        WHERE order_id = $1`,
-      [orderId, req.user.id]
-    );
+    // `self_finished` is what tells a member's own send-off from محمد's اعتماد months
+    // later; `member_role` separates the admin (null) from the lead.
     await client.query(
       `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
        VALUES ($1, 'approve_design', 'order', $2, $3)`,
-      [req.user.id, orderId, JSON.stringify({ design_team: true })]
+      [req.user.id, orderId, JSON.stringify({ design_team: true, self_finished: !manage, member_role: memberRole })]
     );
     await client.query(
       `INSERT INTO notifications (user_id, type, title_ar, body_ar, link)
        VALUES ($1, 'design_approved', $2, $3, '/')`,
       [job.studentUserId, 'تمت الموافقة على تصميمك', 'اعتُمد تصميم الوشاح وانتقل إلى التطريز']
     );
-    return job;
+    return { job };
   });
-  if (!result) return res.status(404).json({ error: 'مهمة التصميم غير موجودة', code: 'ERR_NOT_FOUND' });
+  if (result.missing) return res.status(404).json({ error: 'مهمة التصميم غير موجودة', code: 'ERR_NOT_FOUND' });
+  if (result.conflict) return res.status(409).json({ error: 'المهمة يعمل عليها عضو آخر', code: 'ERR_TASK_UNAVAILABLE' });
   publish({ type: 'order', orderId, status: 'embroidery' });
   publish({ type: 'presence', orderId, working_staff_id: null, working_staff_name: null });
-  res.json({ data: { id: orderId, approval_status: 'approved', advanced: 1 } });
+  res.json({ data: { id: orderId, approval_status: 'approved', advanced: 1, self_finished: !manage } });
 }
 
 async function rejectJob(req, res) {

@@ -192,6 +192,10 @@ function JobDetail({
 }) {
   const [note, setNote] = useState(job.task.note ?? "");
   const [rejectMode, setRejectMode] = useState(false);
+  // Same two-step shape as rejectMode, and for the same reason: the footer swaps to
+  // «رجوع» + «تأكيد الإنهاء» instead of a window.confirm — a native browser dialog
+  // freezes the Chrome extension the project verifies with.
+  const [finishMode, setFinishMode] = useState(false);
   const [reason, setReason] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
   const isMine = job.task.assignedTo === viewerId;
@@ -251,15 +255,36 @@ function JobDetail({
               </Button>
             </>
           )}
-          {!canManage && !isReady && !isTaken && !isMine && (
+          {!canManage && !isReady && !isTaken && !isMine && !finishMode && (
             <Button onClick={onClaim} loading={busy === "claim"} disabled={actionBusy && busy !== "claim"}>
               استلام للتصميم
             </Button>
           )}
-          {canWork && !isReady && (
-            <Button onClick={markReady} loading={busy === "ready"} disabled={actionBusy && busy !== "ready"}>
+          {/* «جاهز لمراجعة محمد» is KEPT — a member who wants محمد to look first still can.
+              It steps down to `ghost` because finishing is now the primary move. */}
+          {canWork && !isReady && !finishMode && (
+            <Button variant="ghost" onClick={markReady} loading={busy === "ready"} disabled={actionBusy && busy !== "ready"}>
               جاهز لمراجعة محمد
             </Button>
+          )}
+          {canWork && !finishMode && (
+            <Button
+              onClick={() => setFinishMode(true)}
+              disabled={actionBusy || !finalSrc}
+              title={finalSrc ? undefined : "ارفع التصميم النهائي أولاً"}
+            >
+              إنهاء التصميم وإرساله للتطريز
+            </Button>
+          )}
+          {canWork && finishMode && (
+            <>
+              <Button variant="ghost" onClick={() => setFinishMode(false)} disabled={actionBusy}>
+                رجوع
+              </Button>
+              <Button onClick={onApprove} loading={busy === "approve"} disabled={actionBusy && busy !== "approve"}>
+                تأكيد الإنهاء
+              </Button>
+            </>
           )}
         </div>
       }
@@ -339,6 +364,14 @@ function JobDetail({
               </Button>
             </>
           )}
+          {/* The two halves of the finish rule have to agree. The SERVER does not require
+              artwork — `orders.final_design_url` is empty on every job in this pool, and the
+              staff designer's own advance never checks it, so refusing there would shut the
+              desk. So the rule is a UI one and lives ONLY here: a member is nudged to upload
+              before self-finishing, and «جاهز لمراجعة محمد» is always still open to them. */}
+          {canWork && !finalSrc && (
+            <p className="mt-3 text-xs font-medium text-orange-ink">ارفع التصميم النهائي أولاً لتتمكن من إنهاء التصميم بنفسك.</p>
+          )}
         </section>
 
         {job.task.note && !rejectMode && (
@@ -354,7 +387,16 @@ function JobDetail({
           </p>
         )}
 
-        {canWork && !isReady && (
+        {canWork && finishMode && (
+          <section className="rounded-2xl border border-orange-ink/30 bg-orange-ink/5 p-4">
+            <h3 className="text-sm font-semibold text-orange-ink">تأكيد الإنهاء</h3>
+            <p className="mt-1.5 text-sm leading-6 text-ink-soft">
+              سيخرج الطلب من أيادي التصميم وينتقل إلى التطريز، ولن تتمكن من تعديله من هنا بعدها.
+            </p>
+          </section>
+        )}
+
+        {canWork && !isReady && !finishMode && (
           <label className="block text-sm font-medium text-ink">
             <span className="mb-1.5 block">ملاحظة لمحمد (اختيارية)</span>
             <textarea
@@ -691,7 +733,10 @@ export default function DesignSupportPage() {
       const success = {
         claim: "تم استلام الطلب للتصميم",
         ready: "تم إرساله لمراجعة محمد",
-        approve: "تم اعتماد التصميم وإرساله للتطريز",
+        // Same endpoint, two different acts: محمد يعتمد عمل غيره، والعضو ينهي عمله بنفسه.
+        approve: session?.viewer.canManage
+          ? "تم اعتماد التصميم وإرساله للتطريز"
+          : "تم إنهاء التصميم وإرساله للتطريز",
         reject: "تمت إعادته للعضو",
       }[kind];
       toast.success(success);

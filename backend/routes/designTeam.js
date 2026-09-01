@@ -33,7 +33,13 @@ router.get('/jobs/:orderId', c.requireTeamAccess, c.getJob);
 router.post('/jobs/:orderId/claim', c.requireTeamWorker, c.claimJob);
 router.post('/jobs/:orderId/ready', c.requireTeamWorker, c.markReady);
 router.post('/jobs/:orderId/final-design', c.requireTeamWorker, imageUploadLimit, imageUpload.single('file'), validateUploadedArtwork, c.uploadFinalDesign);
-router.post('/jobs/:orderId/approve', c.requireTeamLead, c.approveJob);
+// ⚠️ approve is «إنهاء التصميم» and is NOT lead-only any more (owner, 2026-09-01): an
+// active member finishes their own job straight into التطريز. `requireTeamAccess` is the
+// union «admin OR any active member» — the guard cannot be `requireTeamWorker`, which
+// demands a membership row the admin deliberately does not have. Which job a member may
+// finish (theirs, or unclaimed) is decided inside approveJob, under the order's own lock.
+router.post('/jobs/:orderId/approve', c.requireTeamAccess, c.approveJob);
+// Sending a job BACK to a member stays a lead/admin decision.
 router.post('/jobs/:orderId/reject', c.requireTeamLead, c.rejectJob);
 
 module.exports = router;

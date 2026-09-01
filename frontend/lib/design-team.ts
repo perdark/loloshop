@@ -257,6 +257,13 @@ export async function readyDesignTeamJob(id: string, note: string): Promise<void
   await api.post(`/design-team/jobs/${id}/ready`, { note });
 }
 
+/**
+ * Finish a job — the order leaves the desk into التطريز.
+ * ONE endpoint, two acts (owner change 2026-09-01): محمد/المدير يعتمد أي طلب، وعضو
+ * الفريق ينهي طلبه هو. The server decides which of the two the caller is and 409s
+ * (`ERR_TASK_UNAVAILABLE`) if a member aims at a job another member has claimed — so no
+ * sibling call is needed here, only different wording on screen.
+ */
 export async function approveDesignTeamJob(id: string): Promise<void> {
   await api.post(`/design-team/jobs/${id}/approve`);
 }
