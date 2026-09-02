@@ -58,6 +58,39 @@ export const SALARY_TXN_LABELS: Record<"salary_set" | "bonus" | "deduction", str
   deduction: "خصم",
 };
 
+/**
+ * Staff activity action → Arabic verb, shared by `/staff/team` (admin looking at one worker)
+ * and `/staff/me` (a worker looking at their own log) — see `components/staff/ActivityList.tsx`.
+ * Not a `Record<...>` over a closed union: `staff_activity_log.action` and `audit_log.action`
+ * are free-text columns, so an unrecognised value must fall back to the raw key, never crash.
+ */
+export const ACTIVITY_ACTION_LABELS: Record<string, string> = {
+  advance: "قدّم مرحلة",
+  revert: "رجّع مرحلة",
+  advance_shawl: "قدّم الشال",
+  revert_shawl: "رجّع الشال",
+  approve_design: "اعتمد التصميم",
+  reject_design: "رفض التصميم",
+  claim: "بدأ الشغل",
+  embroidery_zone: "طرّز منطقة",
+  tailor_complete: "أنهى الفصال",
+  tailor_reopen: "رجّع الفصال",
+  return_to_customer: "رجّعها للطالب",
+  route_fix: "تصحيح مسار آلي",
+};
+
+/** Embroidery zone key → Arabic. Same keys as `lib/fullSetOrder.js`'s zone bundle on the backend. */
+export const ZONE_LABELS: Record<string, string> = {
+  sash_right: "الوشاح — جهة الاسم",
+  sash_left: "الوشاح — جهة السنة",
+  sash_back: "الوشاح — من الخلف",
+  sash_front: "الوشاح — من الأمام",
+  cap_top: "القبعة — من الأعلى",
+  cap_side: "القبعة — من الجانب",
+  robe_sleeve_right: "الروب — الردن الأيمن",
+  robe_sleeve_left: "الروب — الردن الأيسر",
+};
+
 export const PRODUCT_TYPE_LABELS: Record<ProductType, string> = {
   sash: "وشاح",
   robe: "روب",

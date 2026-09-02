@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { PayoutAccountPanel } from "@/components/payments/PayoutAccountPanel";
 import { MyMonthPanel } from "@/components/staff/MyMonthPanel";
 import { MonthlyStatementCard } from "@/components/staff/MonthlyStatementCard";
+import { ActivityList } from "@/components/staff/ActivityList";
 import {
   getMyActivity,
   getMyGoal,
@@ -13,9 +14,9 @@ import {
   type MyActivityRow,
 } from "@/lib/staff";
 import { getApiErrorMessage } from "@/lib/api";
-import { ORDER_STATUS_LABELS, SALARY_TXN_LABELS } from "@/lib/constants";
-import { formatDateShort, formatIQD } from "@/lib/format";
-import type { OrderStatus, StaffGoal, StaffSalary } from "@/lib/types";
+import { SALARY_TXN_LABELS } from "@/lib/constants";
+import { formatDateShort, formatIQD, monthLabel, recentMonthOptions } from "@/lib/format";
+import type { StaffGoal, StaffSalary } from "@/lib/types";
 import { getUser } from "@/lib/auth";
 import {
   getMyStaffPayoutAccount,
@@ -84,22 +85,14 @@ function GoalCard({ goal }: { goal: StaffGoal }) {
   );
 }
 
-const ACTION_LABELS: Record<string, string> = {
-  advance: "تقديم مرحلة",
-  revert: "إرجاع للتعديل",
-  claim: "بدء العمل",
-  approve_design: "اعتماد تصميم",
-  reject_design: "رفض تصميم",
-};
-
-function stageLabel(s: OrderStatus | null): string {
-  if (!s) return "—";
-  return ORDER_STATUS_LABELS[s] ?? s;
-}
+// This month + the previous 5, computed once when the module loads.
+const MONTH_OPTIONS = recentMonthOptions();
 
 export default function StaffMePage() {
   const [salary, setSalary] = useState<StaffSalary | null>(null);
   const [activity, setActivity] = useState<MyActivityRow[]>([]);
+  const [month, setMonth] = useState(MONTH_OPTIONS[0].value);
+  const [loadingActivity, setLoadingActivity] = useState(false);
   const [goal, setGoal] = useState<StaffGoal | null>(null);
   const [payoutAccount, setPayoutAccount] = useState<PayoutAccount | null>(null);
   const [loading, setLoading] = useState(true);
@@ -110,7 +103,7 @@ export default function StaffMePage() {
     try {
       const [s, a, g, payout] = await Promise.all([
         getMySalary(),
-        getMyActivity(),
+        getMyActivity(month),
         getMyGoal(),
         getMyStaffPayoutAccount(),
       ]);
@@ -123,11 +116,28 @@ export default function StaffMePage() {
     } finally {
       setLoading(false);
     }
+    // Only the initial load — a later month switch goes through `handleMonthChange`, which
+    // refreshes only the activity list, not the whole page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  async function handleMonthChange(next: string) {
+    setMonth(next);
+    setLoadingActivity(true);
+    try {
+      setActivity(await getMyActivity(next));
+    } catch (e) {
+      // A separate toast on purpose — the page's own `error` state blanks the whole screen
+      // (see MyMonthPanel's header comment for why that must never happen to a section fetch).
+      toast.error(getApiErrorMessage(e, "تعذر تحميل نشاط هذا الشهر"));
+    } finally {
+      setLoadingActivity(false);
+    }
+  }
 
   return (
     <div className="animate-step-in" dir="rtl">
@@ -234,32 +244,31 @@ export default function StaffMePage() {
             )}
           </section>
 
-          {/* Activity */}
+          {/* Activity — one month at a time, grouped by day */}
           <section className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
-            <h2 className="mb-3 font-display text-base font-semibold text-ink">سجل النشاط</h2>
-            {activity.length === 0 ? (
-              <p className="text-sm text-ink-soft">لا يوجد نشاط بعد.</p>
-            ) : (
-              <ul className="divide-y divide-line">
-                {activity.map((a) => (
-                  <li key={a.id} className="py-2.5">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-medium text-ink">
-                        {ACTION_LABELS[a.action] ?? a.action}
-                        {a.productName ? ` — ${a.productName}` : ""}
-                      </p>
-                      <p className="shrink-0 text-xs text-muted">{formatDateShort(a.createdAt)}</p>
-                    </div>
-                    {(a.fromStage || a.toStage) && (
-                      <p className="mt-0.5 text-xs text-ink-soft">
-                        {stageLabel(a.fromStage)} ← {stageLabel(a.toStage)}
-                        {a.studentName ? ` · ${a.studentName}` : ""}
-                      </p>
-                    )}
-                  </li>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="min-w-0 font-display text-base font-semibold text-ink">
+                سجل النشاط — {monthLabel(month)} ({activity.length})
+              </h2>
+              <select
+                value={month}
+                onChange={(e) => handleMonthChange(e.target.value)}
+                disabled={loadingActivity}
+                aria-label="شهر النشاط"
+                className="min-h-11 shrink-0 rounded-lg border border-line bg-beige px-2 py-1 text-xs text-ink outline-none focus:border-orange-ink disabled:opacity-60"
+              >
+                {MONTH_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
-              </ul>
-            )}
+              </select>
+            </div>
+            <div className="mt-3">
+              {loadingActivity ? (
+                <div className="skeleton h-16 w-full rounded-xl" />
+              ) : (
+                <ActivityList rows={activity} />
+              )}
+            </div>
           </section>
         </div>
       )}

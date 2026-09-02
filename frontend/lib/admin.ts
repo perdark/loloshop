@@ -1937,22 +1937,34 @@ export async function searchAdminCustomOrderStudents(
 
 interface ApiStaffActivity {
   id: string;
+  source: "stage" | "audit";
   action: string;
   order_id: string | null;
   from_stage: string | null;
   to_stage: string | null;
+  zone: string | null;
   created_at: string;
+  product_name: string | null;
+  student_name: string | null;
 }
 
-export async function getStaffActivity(userId: string): Promise<StaffActivity[]> {
-  const { data } = await api.get<{ data: ApiStaffActivity[] }>(`/admin/staff/${userId}/activity`);
+/** `month` is 'YYYY-MM'. Omit it for the current month at the shop (Asia/Baghdad). */
+export async function getStaffActivity(userId: string, month?: string): Promise<StaffActivity[]> {
+  const { data } = await api.get<{ data: ApiStaffActivity[]; meta: { month: string } }>(
+    `/admin/staff/${userId}/activity`,
+    { params: month ? { month } : undefined }
+  );
   return (data.data || []).map((r) => ({
     id: r.id,
+    source: r.source,
     action: r.action,
     orderId: r.order_id,
     fromStage: (r.from_stage as StaffActivity["fromStage"]) ?? null,
     toStage: (r.to_stage as StaffActivity["toStage"]) ?? null,
+    zone: r.zone,
     createdAt: r.created_at,
+    productName: r.product_name,
+    studentName: r.student_name,
   }));
 }
 
