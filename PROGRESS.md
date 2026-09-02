@@ -1,5 +1,347 @@
 # Progress
 
+## 2026-09-01 (b) — 🧣 الشال الأمريكي صار قطعة، وما تغيّر شي عند الممثلين
+
+**Migration 100 + `lib/shawlPiece.js`. Zero rep-facing queries changed — that was the owner's
+hard constraint and it is asserted, not assumed.**
+
+### The two things called «شال امريكي»
+
+· **تجزئة** — a real product (`products.type='shawl'`, 18 SKUs, 601 orders). Own order row,
+  born at الكوي, walks الكوي → التجهيز → جاهز.
+· **ممثل** — a **tick-box on the وشاح**. `lib/fullSetOrder.js:213` only offers it when a sash
+  is selected; `:119` writes «إضافة: شال امريكي» (the money) and `:375` writes «شال امريكي»
+  (the note + reference photo), both onto the SASH order. **No shawl order is ever created.**
+  Measured on the dev DB: **253 carriers, every one a sash, every one a rep student** (251
+  «وشاح», 2 «وشاح الفراشة»). Each carries TWO lines — spec + price — which is why an earlier
+  count in this file said 506.
+
+Owner's ruling: «it is a whole peace … but we work with it like a peace», «the stages for
+shawl for wholesaler staff are same for retail staff», and — the constraint everything below
+bends around — «**i dont want to change anything for wholeseallers or wholeseallers
+studnets**».
+
+### ⚠️ WHY IT IS NOT A ROW IN `orders`, AND MUST NEVER BECOME ONE
+
+The obvious fix — create a real شال order at price 0 — was rejected because it is visible to
+the ممثل even at zero, and it was **measured**, not guessed:
+· `wholesalerController.js:429` builds their own order list with `STRING_AGG(p.name_ar)`, so
+  every طقم would start reading «روب، قبعة، وشاح، **شال**». Verified after the change: still
+  «وشاح، روب، قبعة», **0 summaries containing شال**.
+· `wholesalerController.js:126` shows «آخر حالة» as the student's NEWEST order — a new row
+  becomes the status they see.
+· `uq_orders_student_product_nodesign` collides the moment a student has two sashes with a
+  shawl.
+· `configureFullSet` DELETEs and rebuilds a طقم's rows — the path that destroyed the
+  calligraphy plates (migration 080) — so the piece would have to survive it.
+
+So the piece's **stage, and nothing else**, lives in `sash_shawl_pieces`. Only three files
+read that table (`shawlPiece.js`, `productionController.js`, `fullSetOrder.js`), and the one
+rep-path file among them only ever WRITES it. **No money column exists there and none may** —
+the shawl is paid for on its carrier, and `lib/counts.js` would double it the day the two
+were joined.
+
+### What it does now
+
+**The id space is transparent on purpose.** A piece id is a real uuid, and `advance`,
+`advanceBulk`, `revert`, `getOrder`, `claim` and `release` each fall back to the piece **only
+after** the ordinary `orders` lookup has missed — so the hot path for a real order is
+byte-for-byte unchanged and the station consoles need no client-side branch at all.
+· `getQueue` appends synthetic rows: `product_type: 'shawl'`, name «شال امريكي», the carrier's
+  student / rep / batch / deadline, **no `price` key**, and `piece_kind: 'shawl_addon'`.
+· It walks **الكوي → التجهيز → جاهز**. `ready → delivered` is refused: hand-over is captured on
+  the وشاح, and a shawl goes home inside its طقم.
+· **The visibility gate is the carrier's, inherited at query time, never copied.** An
+  unapproved or returned طقم hides its shawl AND refuses the transition (409
+  `ERR_REP_APPROVAL_PENDING`) — hiding alone would still accept a hand-posted id, the same
+  side door `advanceBlockReason` exists to close.
+· Backfill: **234 pieces** at الكوي (19 cancelled carriers correctly skipped), **146 visible**
+  under the carrier's approval gate.
+
+⚠️ **A shawl move is logged to `staff_activity_log` against the CARRIER's order_id** (the FK
+points at `orders` and a piece id is not one) under action `advance_shawl`, so «منو نقلها؟»
+stays answerable. `getOrder`'s `stage_history` therefore **excludes** that action — without
+the filter a shawl move prints as the sash having moved to التجهيز, which never happened.
+Pinned by test 8, verified red.
+
+⚠️ **The `?zone=` filter deliberately returns no shawls.** Zone chips match embroidery
+positions on `order_items` and a شال carries none — returning shawls for «وشاح — تطريز يمين»
+would repeat the exact category error that hid them. Garment chips are what reach it.
+
+**Verified:** 12 new tests in `test/shawlPiece.test.js`, all green, and **red-checked** —
+deleting the stage-history filter fails test 8, removing the approval gate fails test 6.
+Full suite **682 tests / 680 pass**; the 2 failures are the same pair that fails on clean
+`main` (`pings inside the session window`, `an empty marketing audience`). Driven against the
+live API: 146 shawl rows at الكوي with `can_advance: true` / «إنهاء الكوي، نقل للتجهيز»,
+one real advance → `preparing` with **the carrier sash unchanged at `embroidery`**, then
+reverted. `tsc`, `eslint`, `next build` clean.
+
+⚠️ **NOT verified in a browser — the Chrome extension was disconnected.** The queue payload,
+the detail page payload and the transitions are proven over HTTP; what nobody has LOOKED at
+is the shawl row on المكوجي's and المجهز's screens and the «قطعة من طقم الطالب» explainer on
+its detail page.
+
+## 2026-09-01 — 👕 المكوجي والمجهز ما كانوا يكدرون يلكون الشالات، والهاتف صار واتساب
+
+**Two unrelated asks in one session, both frontend-only. No migration, no backend change.**
+
+### ① «فلتر القطعة» على قائمة الإنتاج كان يخفي كل شال — وكل قطعة سادة
+
+Owner: «الشال يحتاج كوي … وكذلك المجهز، الشالات ما دا تطلع له بصورة صحيحة، دا تطلع أوشحة.»
+He is right, and the routing was never the problem — a شال DOES go through الكوي
+(`orderController.js:655,664`, commit `4176fb3`) and that stays exactly as it is.
+
+**ROOT CAUSE — every chip on `/staff/queue` is a predicate over `order_items.label_snapshot`,
+and a plain شال امريكي has no line to match.** Its only two lines are «السعر الأساسي» and
+«صورة الشال: شال», and migration 096 marks that picker `is_embroidery = FALSE` on purpose.
+**Measured on the dev DB: of the 600 شال orders sitting at الكوي/التجهيز/جاهز, ZERO match any
+chip the page offers.** So both stations pressed the filter, got أوشحة/قبعات/روبات, and
+concluded their shawls had gone missing. They were simply unreachable:
+· المجهز's set was `PREPARER_ZONE_ORDER` = وشاح · قبعة · روب بكسرات · روب بدون كسرات — **no شال**.
+· المكوجي's set was `EMBROIDERY_ZONE_ORDER`, the seven embroidery positions — **no شال**,
+  and every one of them is about stitching, which is not what a presser picks by.
+
+**THE FIX IS THE RULING THE OWNER ALREADY MADE — it just never reached this page.**
+PrepConsole's `GARMENT_ORDER` header (2026-08-31): «we must see the pieces even the pieces
+without تطريز on filters», so the piece filter is the GARMENT (`product_type`, which every
+piece has). `/staff/queue` now does the same for المكوجي **and** المجهز
+(`isGarmentView`): garment chips with counts — وشاح · روب · قبعة · شال — plus the two روب
+pleat chips, which are the surviving half of the 2026-08-14 decision (بكسرات/بدون كسرات is a
+spec `product_type` cannot say). The garment filter is client-side over rows already fetched,
+mutually exclusive with the pleat chips, and persisted in sessionStorage like المجهز's own.
+· ⚠️ **`sash_any`/`cap_any` were DELETED, not kept beside the new chips.** Both sit in
+  `ZONE_NEEDS_CONTENT`, so they listed only pieces that CARRY embroidery — a plain وشاح عدل
+  was as invisible as the شال. The garment chips reach every piece; measured, وشاح as a
+  garment chip is 57 at الكوي / 157 at التجهيز where `sash_any` matched 230 of 230 sashes but
+  0 of 980 robes, 0 of 408 caps and 0 of 592 shawls.
+· `GARMENT_FILTER_ORDER` is now shared with PrepConsole, so the two screens a preparer uses
+  cannot offer different garments.
+· `PREPARER_ZONE_ORDER` is gone — with `isGarmentView` covering every preparer it was a dead
+  branch. Its reasoning moved into `GARMENT_VIEW_ZONE_ORDER`'s header verbatim.
+
+**VERIFIED IN A REAL BROWSER** on the production build, both stations, dev DB:
+· المكوجي (علي مهند, presser) at قيد الكوي → «كل القطع · وشاح ٥٧ · روب ٧٠٨ · شال ٥٣٧ · روب —
+  بكسرات · روب — بدون كسرات»; pressing «شال ٥٣٧» → «يُعرض 537 قطعة», first 8 rows all «شال».
+· المجهز (برزان, preparer) at قيد التجهيز → «… قبعة ٣٦٥ · شال ٥٥»; «شال ٥٥» → 55 rows, all «شال».
+· `tsc --noEmit`, `eslint` and `next build` clean.
+
+**STILL OPEN — the OTHER شال امريكي, and it is a different animal.** «شال امريكي» is also an
+ADD-ON line on a *sash* order with no order row of its own (506 lines on the dev DB, every one
+on a sash: 252 at التصميم, 198 at التطريز, 18 at التجهيز). It is invisible to both stations and
+the new garment chip does not help, because the row IS a sash:
+· At الكوي it is invisible outright — `productionController`'s `SPEC_STAGES = {preparing,
+  ready}` and `ZONE_STAGES = {embroidery, preparing, ready}`, so `pressing` gets neither spec
+  nor zones and a sash carrying a shawl looks identical to one that does not.
+· At التجهيز the spec row survives `buildPieceSpec`, but `summarizeSet` counts ORDERS via
+  `checkout_group_id`, so a set with a shawl still reads «٢ من ٢» and the bag closes without it.
+· `has_american_shawl` — the flag that answers exactly this — is computed ONLY in
+  `staffController.wholesalerOrders` (the rep console). `productionController.getQueue`, which
+  is what both stations run, never computes it. **Awaiting an owner decision, not blocked.**
+
+### ② واتساب beside every phone number an order screen prints
+
+`/staff/orders/[orderId]` printed the retail student's «الهاتف» and the delivery recipient's
+phone as `tel:` links only, while the انستا intake card on the SAME page already had a واتساب
+pill. Both rows now carry one, and so do `/admin/orders`'s two intake phones. All four reuse
+the `iqPhone` normaliser that was already there — `07xx…` → `9647xx…`, which is what `wa.me`
+wants — and render nothing when the value holds no digits, so a junk phone keeps its tel: link
+instead of getting a dead pill. Verified live: `07752776585` → `https://wa.me/9647752776585`.
+· `dir="ltr"` moved from the `<dd>` onto the number itself, so the pill stays in RTL flow.
+
+## 2026-08-31 (c) — 🪡 الملفات كانت خربانة: the auto-digitiser was ~50% hatch, and coverage hid it
+
+The owner's verdict on the four files sent to the embroiderer was «the dst files are all bad
+and broken». They were. **`stats.coverage` said 99.6% and every one of the 14 tests was green**
+— which is the whole lesson of this entry: coverage measures that thread landed on the
+artwork, not that it landed as embroidery.
+
+**MEASURED AGAINST THE SHOP'S OWN 417 FILES**, read back with this module's `readDst`
+(`node-unrar-js` in a scratch dir opens the RAR5 archive; p7zip cannot):
+
+| | shop's 417 files | what we sent | now |
+|---|---|---|---|
+| satin (alternating) pairs | **92.6%** (p10 87) | **43–57%** | **91–93%** |
+| stitches under 0.6 mm | **1.8%** (p90 4) | **10–15%** | **0.4–0.7%** |
+| jumps per 1,000 stitches | **18.5** | **49–67** | **12–18** |
+| column-edge roughness (median / p90) | 0.04 / 0.21–0.54 mm | 0.14 / 1.06 mm | **0.038 / 0.11 mm** |
+| same-side stitch spacing (median / p90) | 0.40 / 0.95 mm | — | **0.41 / 0.90 mm** |
+| column width median | 4.76 mm @ 111 mm tall | 3.5 mm @ 70 mm | 4.1–5.2 mm @ 70 mm |
+
+**ROOT CAUSE — `pruneSpurs` was not pruning spurs.** Its doc-comment described dead-end
+branches; its body filtered **every** branch by length against the local stroke width. On
+«حسين» that deleted **88 of 107 branches — 55% of the centreline**, so satin could only ever
+cover ~30% of the ink (measured: 29.8%). The coverage-completion pass then sprayed tatami
+over the other 70% until the number read 99.6%. That hatch is what the embroiderer saw.
+Everything else on this list was downstream of it or hidden behind it.
+
+**THE FIVE FIXES**, each measured on the same ten plates:
+1. `pruneSpurs` prunes only a branch with a **free end** (a real dead end). A branch joining
+   two junctions is the middle of a stroke and is never an artefact. → satin-only coverage
+   29.8% → 67%.
+2. `extendEnds` (new, `trace.js`) walks each free end down its own tangent until it leaves
+   the ink. A medial axis retracts from every terminal by about one half-width, so satin
+   built straight on it leaves a bare cap on every stroke end.
+3. `maxSatinMm` **8.0 → 11.5**. 8.0 was never the shop's number — their widest column per
+   file has a median of 10.3 mm. At 8.0 every letter bowl was carved out of the satin mask
+   and handed to tatami.
+4. A leftover hole is patched with **satin on its own medial axis** (`satinPatch`), not
+   tatami. The tatami patch pass bought +11 points of coverage and paid 10 points of satin
+   ratio and 4% short stitches for it.
+5. **Centre-run underlay**, then satin back along the same path — one run, so it costs zero
+   extra jumps. This is not a guess: the shop's 8.2% non-satin is almost entirely long
+   same-direction sequences, and a 2.2 mm run under a 0.2 mm satin advance is 9% of the file.
+   Plus `connectTravel`: a jump whose straight line stays inside the ink becomes stitches.
+
+Also fixed while in there: the re-centring step replaced the smoothed half-width with a raw
+local reading (so column edges came out hairy — now the widths and the re-centred positions
+are both smoothed along the column), and it could take a *junction's* larger width and fire
+one stitch past the letter edge (now clamped: re-centring may correct a width, not invent one).
+`mergeAtJunctions` measured its tangents over 6 skeleton pixels ≈ 0.5 mm of staircase, which
+is mostly quantisation noise — now a 1.5 mm baseline.
+
+**TESTS — the three that would have caught this are now in `test/digitize.test.js` (17/17).**
+Verified red/green: on the old `pruneSpurs` the new tests 4 and 4b fail and **tests 1–3e all
+still pass**, which is exactly how a half-hatch file shipped. Test 4 pins the shop's signature
+(satin ≥80%, short ≤5%, jumps/1k ≤35, edge spacing p90 ≤1.6 mm) on a curved varying-width
+stroke — a straight bar has no junctions and passes anything.
+
+**FOUND ON THE SECOND LOOK — two writer bugs that no metric above could see.** The owner
+looked at the new render and said it was also bad. He was right: a defect map (ink in grey,
+uncovered ink in RED, thread outside the ink in GREEN, rebuilt **from the DST** rather than
+from the runs) showed a clean bare slit through the thickest part of the ح and a stray thread
+running out of the bottom-left corner.
+
+· ⚠️ **`writeDst` turned any stitch longer than 12.1 mm into JUMPS.** The split loop emitted
+  `jump` for every part of an over-long move whatever it was splitting, so a satin column
+  wider than one DST record simply had no thread laid across it — and it bites exactly where
+  the design is widest. Now a stitch splits into stitches and a jump into jumps.
+· ⚠️ **The first record of the file was a stitch, not a jump** (`si === 0 && ri > 0`). The
+  needle starts at (0,0), so every file this module ever wrote laid a line of thread from the
+  machine origin into the artwork — visible as a thin tail off the bottom-left corner.
+· And the reason both survived: **`stats.coverage` was rasterising `ordered`, the runs we
+  meant to write.** It is now read back out of the finished buffer. Measure the artefact,
+  not the intent — the old number said 99.6% on a file with a slit through a letter.
+· Cap fixed with them: `(maxSatinMm + 1) / 2` let a column reach 12.5 mm, past what one
+  record holds on an axis. It is `maxSatinMm / 2` now. And with patches being satin rather
+  than tatami, `minPatchMm2`/`completionRounds` moved 3.0/2 → **1.0/5**: coverage 98.6% →
+  99.5% for 0.05 points of satin ratio.
+
+Result on حسين, measured from the file: bare ink **2.0% → 0.6%**, largest hole **7.3 → 1.5 mm²**.
+**19/19 tests** — test 5 goes red on the old writer, 4 and 4b on the old `pruneSpurs`.
+
+**AND THE ONE THE OWNER NAMED HIMSELF: «الحرف صار أكثر من شكل».** He was right, and it was
+the most serious of the lot — every break between shapes is a stop, a trim, a re-start and a
+tail, i.e. wear on the machine and work for a person. Counted against the shop's files:
+
+| | shop | ours before | ours now |
+|---|---|---|---|
+| shapes in one name | 60 (at 111 mm tall) | **184** (at 70 mm) | **7** |
+| mean shape | 231–309 stitches | **15–21** | **313–542** |
+| longest continuous shape | 1,509–2,357 | **112–275** | **540–1,114** |
+| shapes under 40 stitches | **2** | **162** | **0** |
+| shapes per dm² | 10.5–11.6 | **124** | **4.7–11.8** |
+| jumps per 1,000 | 18.5 | 49–67 | **4–7** |
+
+The cause was that every satin column was written as its own run and the gaps between them
+were jumps. **The fix is that ink is CONNECTED**: `connectTravel` now routes THROUGH the
+artwork (a windowed BFS over ink pixels) when the straight line fails, laying a running
+stitch that hides under the satin covering it, so a trim is only needed between genuinely
+separate pieces — another letter, a dot, a hamza. Exactly where the shop's files trim.
+· ⚠️ **Two traps inside that, both measured.** Snapping to ink before routing is mandatory:
+  a column's endpoints sit *outside* the artwork by the pull compensation, so testing
+  `ink()` on them directly answers "no" for almost every run and every connection silently
+  falls back to a jump. And the core-only route (travel down the middle of a stroke, where
+  the satin hides it, instead of hugging the outline where it shows) must be a PREFERENCE
+  with a fallback — as a hard condition it costs the whole feature on thin strokes: 7
+  shapes → 35.
+· `test/digitize.test.js` **20/20**, and test 6 is the guard: one connected stroke must come
+  out as one shape (it becomes 31 without the router), two separate pieces must stay two.
+
+⚠️ **NOT VERIFIED ON A MACHINE OR BY THE EMBROIDERER.** Every number above is geometry read
+back out of the file. New files for review are in `~/Desktop/_inbox/للمطرز/جديد/` — five names including
+**فرقان**, plus a proof image that colours each shape separately so «one letter, one piece»
+is visible at a glance. The originals were left in place, not overwritten.
+
+## 2026-08-31 (b) — 🪡 «صورة الاسم» يصير ملف تطريز: the Wilcom step, done on the server
+
+The workshop's embroidery library was handed over as `مفرد جاهز 7 - Copy.rar`. Reading it is
+what produced everything below, so the measurements come first — none of this is guesswork
+about how the job is done.
+
+**WHAT THE ARCHIVE SAYS (840 files, all created 2026-08-26 → 08-30).**
+`.DGT` turned out to be a **90×90 BMP thumbnail** of each design, so a contact sheet of all
+412 is one script — that alone is a visual index of a library that had none. Across all
+**417 `.DST` files / 4.06M stitches**:
+· **92.3%** of consecutive long-stitch pairs point in opposite directions → the shop digitises
+  almost everything as **satin columns**; there is essentially no other technique in the library.
+· column advance **0.20 mm** (p10 0.14 · p90 0.32) → ~4–5 stitches/mm. That IS «يثخنه».
+· column width median **4.67 mm**, p90 **8.2 mm** → follows the calligraphy stroke thickness.
+· **zero colour changes in every single file** — one thread, always.
+· ~140 files sit at **421 × 111 mm**: the sash panel, one frame repeated.
+· And the naming: **412 of 412 are keypad mash** («44444441000.DST», «ggergergerg.EMB»).
+  Nothing in the shop could answer «وين ملف تطريز فلان؟». That is the second problem this
+  work closes, and it is the cheaper half.
+
+**WHAT SHIPPED.** `backend/lib/digitize/` — plate PNG → machine-ready Tajima `.DST`, ~1–5 s,
+**no model call, no new npm package** (`sharp` was already a dependency; a native imaging
+package would have put a permanent new advisory surface inside `scripts/deploy.sh`'s
+`npm audit` gate, which is the same discipline `lib/push.js` follows). Four modules:
+`dst.js` (format), `grid.js` (morphology · exact EDT · Zhang–Suen thinning · components),
+`trace.js` (skeleton → branches, spur pruning, junction merging), `stitches.js` (satin, tatami
+fill, travel order). Parameters are the measured ones above, not taste.
+
+**Measured on 10 Arabic names: 99.5% mean coverage.** Coverage = the fraction of the artwork
+that actually received thread, computed by rasterising the generated file back over the mask.
+
+**FIVE BUGS FOUND BY BUILDING IT — every one of them silent:**
+1. **The DST move is BALANCED TERNARY, not a sum of flags.** A greedy encoder OR-s the same
+   bit twice and loses the remainder; the file still parses and still previews, but the design
+   comes out in fragments. Pinned by an exhaustive 243×243 round-trip test.
+2. **Image space is y-DOWN, embroidery space is y-UP.** Missing that one flip stitches the
+   whole design mirrored — and the preview looks entirely plausible. Coverage 29.8% → 61.1%.
+3. **`sharp.resize()` on a raw 1-channel input returns 3 channels.** Reading it with the wrong
+   stride does not throw; it yields a squashed mask that still looks like *a* shape.
+4. **A tatami fill returned as one polyline lays a stitch straight across a letter's counter**
+   — the holes in ف ة ه — filling them solid. Runs must be broken STRUCTURALLY (same-row
+   segment boundary), never by a distance threshold: a legitimate 4 mm fill stitch and a 4 mm
+   hole crossing are the same length.
+5. **The DST header is ASCII.** «المترجمة زهراء» wrote into it as `'DE*1,E) 2G1'!`. The header
+   now carries `LOLO-<id8>`; the Arabic name lives in the filename, where a person reads it.
+
+**Bowls.** A satin stitch over ~8 mm snags on a real machine, which is why the shop's own files
+never span one with a single column. Measured on a typical name only **2.8%** of area exceeds
+9 mm — but it is the letter BODIES, so leaving it to satin is exactly what makes an auto file
+look broken. Anything wider is lifted out and filled. On top of that a **coverage-driven
+completion pass** rasterises what was generated, finds what is still bare, and fills it:
+29.8% → 87.8% → 99.5%. Nothing can silently go unstitched, which is the one failure a
+digitiser must never ship, because it is invisible until it is on fabric.
+
+**Wiring.** Migration **097** (`dst_path`, `dst_stats`, `dst_generated_at`) — applied to the
+DEV DB only, and in `db/schema.sql` so the next prod `npm run migrate` creates it.
+`POST /calligraphy/plates/:id/dst` (cached on the row) and `POST /calligraphy/plates/dst`
+(batch, capped at 20 — it is CPU work on the box that also serves RevoArt). The plates ZIP now
+carries a `dst/` folder named by student. The workbench card gained «حوّل لملف تطريز» and then
+a download chip showing coverage.
+⚠️ **A reroll clears all three columns**, because the file describes artwork that no longer
+exists — and a stale one would look perfectly healthy, since the row still has a plate and
+still has a DST.
+
+**Verified: 637/640 backend tests** (was 626 before this work; 14 new, all passing) ·
+frontend `tsc` + `lint` clean · driven end to end against a real `calligraphy_plates` row
+(4,354 stitches, 99.8% coverage, 13,577 bytes on disk, re-parsed byte-for-byte).
+⚠️ The **2 failures are pre-existing and touch nothing here** — my diff contains no push or
+console code. `pushBroadcast`'s «an empty marketing audience says WHY it is empty» was
+reproduced on clean HEAD with this work stashed, and `adminConsole`'s «pings inside the
+session window do NOT count a second open» is the flake HANDOFF already documents.
+⚠️ **Do not run the suite while `git stash` is in play.** `test/digitize.test.js` is untracked,
+so `git stash -u` deletes it mid-run and the runner reports it as a FAILING TEST FILE
+(`Cannot find module …/digitize.test.js`) rather than a missing one — it cost a re-run here.
+
+⚠️ **NOT VERIFIED: a real machine, and real AI plates.** 99.5% coverage in simulation is not
+clean stitching on fabric, no underlay is generated, and every test input was a font outline —
+the AI plates have textured edges, which is where the threshold step will bite first. The
+next step is three real plates through the button and the operator's verdict in Wilcom.
+
 ## 2026-08-31 — 🧣 The American shawl was never تطريز, and the line was hiding work from the people who do it
 
 Owner report, two symptoms: «محمد عادل can't see all the American shawls» and «140 orders at

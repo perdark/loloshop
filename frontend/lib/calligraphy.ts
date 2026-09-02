@@ -28,6 +28,23 @@ export interface CalPlate {
   /** Paid regenerations already spent on this plate. The server refuses past CAL_REROLL_LIMIT. */
   reroll_count?: number;
   /**
+   * ملف التطريز — the machine-ready Tajima .DST generated from this plate (migration 097),
+   * or null if it has never been generated. A reroll clears it, because the file describes
+   * artwork that no longer exists.
+   */
+  dst_path?: string | null;
+  /**
+   * ⚠️ THE FRACTION OF THE ARTWORK THAT ACTUALLY RECEIVED THREAD, 0..1 — a safety rail, not
+   * a statistic. An auto-digitised file that missed part of a letter still opens, still
+   * previews and still runs; the mistake only appears once it is stitched on a sash. Always
+   * show it next to the download, and treat anything under 0.95 as «open this one first».
+   */
+  dst_coverage?: number | null;
+  dst_stats?: {
+    stitches: number; jumps: number; coverage: number; spill: number;
+    widthMm: number; heightMm: number; satinColumns: number; fillRegions: number; ms: number;
+  } | null;
+  /**
    * `render_text` reads as a message to the shop, not a name («نفس الصوره»). Classified
    * server-side so this screen and the queue can never disagree. Rerolling one of these
    * without correcting the text just buys another picture of the same wrong words.
@@ -251,6 +268,32 @@ export const CAL_REROLL_LIMIT = 10;
  * just buys another picture of the same wrong words. The corrected text is saved onto the
  * plate, so the queue and the artwork stop disagreeing.
  */
+/**
+ * Generate (or fetch the cached) ملف التطريز for one plate.
+ * The server caches on the row, so pressing this twice costs nothing the second time.
+ */
+export async function generatePlateDst(id: string, force = false): Promise<CalPlate> {
+  const { data } = await api.post<{ data: CalPlate; cached: boolean }>(
+    `/calligraphy/plates/${id}/dst${force ? "?force=1" : ""}`
+  );
+  return data.data;
+}
+
+/**
+ * Generate machine files for several plates at once.
+ * ⚠️ The server caps this at 20 per call and it is CPU-bound — chunk long lists rather than
+ * raising the cap; the same box serves the storefront.
+ */
+export async function generatePlateDstBatch(
+  ids: string[]
+): Promise<{ plates: CalPlate[]; failed: number }> {
+  const { data } = await api.post<{ data: CalPlate[]; failed: number }>(
+    "/calligraphy/plates/dst",
+    { ids: ids.slice(0, 20) }
+  );
+  return { plates: data.data, failed: data.failed };
+}
+
 export async function rerollPlate(
   id: string,
   overrides?: { render_text?: string; element_text?: string | null; variant?: CalVariant }

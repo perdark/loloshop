@@ -65,6 +65,13 @@ router.post('/plates/:id/reroll', genLimit, c.reroll);
 // «ربط بالطلب» removed 2026-07-15 — plates auto-attach on generation; the only manual
 // action is the order-level send below.
 router.post('/plates/zip', c.platesZip);
+
+// ملف التطريز (migration 097) — the mechanical Wilcom step, done on the server.
+// ⚠️ Rate-limited on the SAME bucket as generation even though it costs no money: it is
+// CPU-bound image work on the box that also serves RevoArt, so an unbounded loop here
+// degrades two production sites. It is not a paid path, but it is an expensive one.
+router.post('/plates/dst', genLimit, c.generateDstBatch);
+router.post('/plates/:id/dst', genLimit, c.generateDst);
 router.get('/orders-zones', c.ordersZones);
 router.post('/orders/:orderId/send', requireDesignerOrAdmin, c.sendOrder);
 

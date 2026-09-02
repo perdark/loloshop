@@ -31,6 +31,7 @@ import {
   platesZipBlob,
   processCalJob,
   rerollPlate,
+  generatePlateDst,
   sendCalOrder,
   suggestCalText,
   VARIANT_LABEL,
@@ -116,6 +117,18 @@ function PlateCard({
   const [saving, setSaving] = useState(false);
   const rerollsUsed = plate.reroll_count ?? 0;
   const atRerollLimit = rerollsUsed >= CAL_REROLL_LIMIT;
+
+  // ملف التطريز — the machine file. Generated on the server from this very plate, cached on
+  // the row, so the second press is instant. `dstPlate` shadows the prop after a generate so
+  // the card updates without a full refetch of the job.
+  const [dstPlate, setDstPlate] = useState<CalPlate | null>(null);
+  const [dstBusy, setDstBusy] = useState(false);
+  const dst = dstPlate ?? plate;
+  const dstUrl = absUrl(dst.dst_path ?? null);
+  const coverage = dst.dst_coverage ?? null;
+  // ⚠️ Below this the file is missing part of a letter. It still opens and still runs — the
+  // only place that shows up is the finished sash, so the card must say so out loud.
+  const dstWeak = coverage !== null && coverage < 0.95;
 
   return (
     <article className="flex min-w-0 flex-col gap-2 overflow-hidden rounded-2xl border border-line bg-white p-3 shadow-sm">
@@ -220,6 +233,54 @@ function PlateCard({
           <span className="self-center rounded-full bg-beige px-2 py-0.5 text-[11px] text-ink-soft border border-line">
             أُعيد {rerollsUsed}/{CAL_REROLL_LIMIT}
           </span>
+        )}
+
+        {/* ملف التطريز */}
+        {plate.status === "done" && imgUrl && (
+          dstUrl ? (
+            <a
+              href={dstUrl}
+              download={safeFileName(
+                `${plate.student_name || plate.render_text} ${VARIANT_LABEL[plate.variant] ?? plate.variant}`,
+                "dst",
+                "تطريز"
+              )}
+              className={`inline-flex min-h-9 items-center gap-1 self-center rounded-full border px-3 text-xs font-bold ${
+                dstWeak
+                  ? "border-amber-300 bg-amber-50 text-amber-800"
+                  : "border-green-200 bg-green-50 text-green-700"
+              }`}
+              title={
+                dst.dst_stats
+                  ? `${dst.dst_stats.stitches} غرزة · ${dst.dst_stats.widthMm}×${dst.dst_stats.heightMm} ملم`
+                  : undefined
+              }
+            >
+              {dstWeak ? "⚠" : "⬇"} ملف التطريز
+              {coverage !== null && (
+                <span className="opacity-70">{Math.round(coverage * 100)}%</span>
+              )}
+            </a>
+          ) : (
+            <Button
+              size="sm"
+              variant="ghost"
+              loading={dstBusy}
+              disabled={dstBusy}
+              onClick={async () => {
+                setDstBusy(true);
+                try {
+                  setDstPlate(await generatePlateDst(plate.id));
+                } catch (e) {
+                  toast.error(getApiErrorMessage(e, "تعذّر توليد ملف التطريز"));
+                } finally {
+                  setDstBusy(false);
+                }
+              }}
+            >
+              حوّل لملف تطريز
+            </Button>
+          )
         )}
 
         {plate.status === "done" && imgUrl && (

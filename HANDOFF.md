@@ -495,6 +495,39 @@ longer stranded on a branch · the laptop's loose credentials are filed in
 
 ## 💣 LANDMINES
 
+- **⚠️ «شال امريكي» IS TWO THINGS, AND THE REP ONE IS NOT AN `orders` ROW — migration 100.**
+  For a تجزئة student it is a real product with its own order. For a rep student it is an
+  ADD-ON PRICE on the وشاح (`lib/fullSetOrder.js:119` money, `:375` note+photo) and no shawl
+  order exists — 253 carriers on the dev DB, every one a sash. The workshop still makes and
+  presses it as a whole garment, so its STAGE (and only its stage) lives in
+  `sash_shawl_pieces`, and `getQueue` synthesises a row from it.
+  · **It may never become a row in `orders`.** Owner: «i dont want to change anything for
+    wholesalers or wholesalers students» — and it really would: `wholesalerController.js:429`
+    STRING_AGGs product names into the rep's OWN order list («روب، قبعة، وشاح، شال»),
+    `:126` shows the newest order as their «آخر حالة», `uq_orders_student_product_nodesign`
+    collides on a student with two sashes, and `configureFullSet` DELETEs and rebuilds a
+    طقم's rows (the path that ate the calligraphy plates).
+  · **No money column may ever be added there.** The shawl is paid for on its carrier;
+    `lib/counts.js` would double it the day the two are joined.
+  · **The piece id is transparent on purpose** — advance/revert/getOrder/claim/release fall
+    back to it ONLY after the `orders` lookup misses, which is why no console branches on it.
+    Never encode the kind into the id.
+  · ⚠️ **A shawl move is logged against the CARRIER's order_id** under action
+    `advance_shawl` (the FK points at `orders`). `getOrder`'s `stage_history` must keep
+    excluding that action or a shawl move prints as the sash having moved. Test 8 guards it.
+  · ⚠️ **The visibility gate is the carrier's, read at query time.** Storing an approval on
+    the piece would drift, and the shop would work a طقم its ممثل has not approved.
+
+- **⚠️ THE PIECE FILTER ON قائمة الإنتاج IS THE GARMENT, NOT THE EMBROIDERY POSITION
+  (2026-09-01).** Every key in `EMBROIDERY_ZONE_ORDER` is a predicate over
+  `order_items.label_snapshot`, so it can only list a piece that CARRIES embroidery.
+  Measured: **0 of 600 شال orders in the line matched ANY chip that page offered**, so
+  المكوجي and المجهز pressed «فلتر القطعة», got أوشحة, and reported their shawls missing.
+  `GARMENT_FILTER_ORDER` (`product_type`) is what reaches every piece; the two روب
+  بكسرات/بدون كسرات chips stay because that is the one thing `product_type` cannot say.
+  `PREPARER_ZONE_ORDER` was deleted — `sash_any`/`cap_any` are content-gated and hid a plain
+  وشاح عدل the same way. Do not "restore" them beside the garment chips.
+
 - **⚠️ «صورة الشال» / «صورة القبعة» ARE PRODUCT PICKERS, NOT EMBROIDERY — migration 096, and the
   flag has NO admin UI.** `priceSelections` used to route an order to التصميم → التطريز from ANY
   option group carrying text or a photo, and those two store the student's *choice of product* as

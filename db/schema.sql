@@ -1211,6 +1211,14 @@ CREATE INDEX IF NOT EXISTS idx_calligraphy_student ON calligraphy_plates(student
 CREATE INDEX IF NOT EXISTS idx_calligraphy_status  ON calligraphy_plates(status);
 CREATE INDEX IF NOT EXISTS idx_calligraphy_orderitem ON calligraphy_plates(order_item_id);
 
+-- ⚠️ dst_stats.coverage is a SAFETY RAIL: an auto-digitised file that misses part of a
+-- letter still opens and still runs, and the mistake only shows on fabric. Under ~0.95
+-- means «open this one first». See db/migrations/097_calligraphy_dst.sql.
+ALTER TABLE calligraphy_plates ADD COLUMN IF NOT EXISTS dst_path         TEXT;
+ALTER TABLE calligraphy_plates ADD COLUMN IF NOT EXISTS dst_stats        JSONB;
+ALTER TABLE calligraphy_plates ADD COLUMN IF NOT EXISTS dst_generated_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_calligraphy_dst ON calligraphy_plates(job_id) WHERE dst_path IS NOT NULL;
+
 -- Migration 080: «إعادة التوليد» was uncapped — each press bought a fresh image on the same
 -- plate row with nothing recording how many had been spent. cost_usd already accumulated;
 -- this counts the presses so calligraphyController.reroll can refuse the eleventh.

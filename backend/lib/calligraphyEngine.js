@@ -26,6 +26,12 @@ function toPlate(r) {
     // shows it so a designer can see WHY two plates of the same zone look different.
     style: r.style || null,
     plate_path: r.plate_path, sheet_path: r.sheet_path,
+    // The machine file (migration 097) and its honest report. `dst_coverage` is what the
+    // workbench shows beside the download: an auto-digitised file that missed part of a
+    // letter still opens and still runs, so this number is the only warning there is.
+    dst_path: r.dst_path || null,
+    dst_stats: r.dst_stats || null,
+    dst_coverage: r.dst_stats && typeof r.dst_stats.coverage === 'number' ? r.dst_stats.coverage : null,
     student_id: r.student_id, order_item_id: r.order_item_id,
     linked: !!r.linked_at, cost_usd: Number(r.cost_usd || 0), error: r.error,
     // How many paid regenerations this plate has already had, so the workbench can grey

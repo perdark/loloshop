@@ -573,7 +573,12 @@ async function reroll(req, res) {
     `UPDATE calligraphy_plates
         SET status='done', plate_path=$2, cost_usd = cost_usd + $3, error=NULL, linked_at = NULL,
             render_text=$4, element_text=$5, variant=$6, style=$8, reroll_count = reroll_count + 1,
-            original_plate_path = COALESCE(original_plate_path, $7)
+            original_plate_path = COALESCE(original_plate_path, $7),
+            -- ⚠️ A reroll REPLACES the artwork, so the machine file derived from the old
+            -- artwork is now wrong (migration 097). Leaving it would hand the workshop a
+            -- .DST of a design nobody can see any more — and it would look fine, because
+            -- the row still has a plate and still has a DST. Clear all three together.
+            dst_path = NULL, dst_stats = NULL, dst_generated_at = NULL
       WHERE id=$1 RETURNING *`,
     [id, plate.url, Number(gen.cost || 0), renderText, elementText, variant, p.plate_path, style]);
   // Re-attach the fresh artwork onto the order line right away (auto-link, no manual step).
@@ -598,6 +603,14 @@ function streamPlatesZip(res, rows, filename, includeSheets = false) {
     const abs = absFromUrl(r.plate_path);
     if (abs) archive.file(abs, { name });
     if (includeSheets && r.sheet_path) { const s = absFromUrl(r.sheet_path); if (s) archive.file(s, { name: `sheets/${safe}-sheet.png` }); }
+    // The machine file rides in its own folder under the STUDENT'S NAME (migration 097).
+    // That naming is the whole point: the shop's existing archive is 417 files called
+    // «44444441000.DST» and nothing can say whose any of them is. Only already-generated
+    // files are included — a download must never block on minutes of CPU.
+    if (r.dst_path) {
+      const d = absFromUrl(r.dst_path);
+      if (d) archive.file(d, { name: `dst/${name.replace(/\.png$/, '')}.dst` });
+    }
   }
   archive.finalize();
 }
@@ -607,7 +620,7 @@ async function downloadZip(req, res) {
   const { jobId } = req.params;
   const includeSheets = String(req.query.sheets || '0') === '1';
   const { rows } = await query(
-    `SELECT render_text, plate_path, sheet_path FROM calligraphy_plates
+    `SELECT render_text, plate_path, sheet_path, dst_path FROM calligraphy_plates
       WHERE job_id=$1 AND status='done' AND plate_path IS NOT NULL ORDER BY created_at`, [jobId]);
   if (!rows.length) return bad(res, 'لا توجد صور جاهزة للتنزيل', 'ERR_NOT_FOUND', 404);
   streamPlatesZip(res, rows, `calligraphy-${jobId.slice(0, 8)}.zip`, includeSheets);
@@ -620,7 +633,7 @@ async function platesZip(req, res) {
   const ids = raw.filter((x) => typeof x === 'string' && UUID_RE.test(x)).slice(0, 500);
   if (!ids.length) return bad(res, 'لا توجد صور محددة');
   const { rows } = await query(
-    `SELECT render_text, plate_path FROM calligraphy_plates
+    `SELECT render_text, plate_path, dst_path FROM calligraphy_plates
       WHERE id = ANY($1) AND status='done' AND plate_path IS NOT NULL ORDER BY created_at`, [ids]);
   if (!rows.length) return bad(res, 'لا توجد صور جاهزة للتنزيل', 'ERR_NOT_FOUND', 404);
   streamPlatesZip(res, rows, `calligraphy-plates-${rows.length}.zip`);
@@ -827,8 +840,84 @@ async function generateElement(req, res) {
   res.json({ data: { url: saved.url, cost: Number(gen.cost || 0) } });
 }
 
+// ---------------------------------------------------------------------------------------
+// ملف التطريز — turn a plate PNG into a machine-ready Tajima .DST (migration 097).
+//
+// This is the mechanical half of what the operator does by hand in Wilcom: read the shape,
+// lay satin along every stroke, fill what is too wide to satin, order the travel. It does
+// NOT replace his judgement — `coverage` rides on every result precisely so a weak one can
+// be caught before it reaches fabric.
+//
+// Generation is on demand and CACHED on the row. A plate does not change once generated
+// (a reroll writes a new plate_path and must clear these columns), so re-deriving the file
+// on every download would spend seconds of CPU to produce an identical byte stream.
+const DST_BATCH_MAX = 20;
+
+async function generateDstForRow(row, req) {
+  const { digitizePlate } = require('../lib/digitize');
+  const { absFromUrl, saveBufferToUploads } = require('../lib/upload');
+  const abs = absFromUrl(row.plate_path);
+  if (!abs) throw Object.assign(new Error('لا توجد صورة لهذا الاسم'), { code: 'ERR_NO_PLATE' });
+  // The DST header is ASCII-only (see lib/digitize/dst.js), so the Arabic name cannot live
+  // there — it goes in the FILENAME, which is what a human reads. The header carries a short
+  // stable id instead, so a file found loose on the machine can still be traced to its row.
+  const label = `LOLO-${String(row.id).slice(0, 8)}`;
+  const { buffer, stats } = await digitizePlate(abs, { label });
+  const saved = saveBufferToUploads(req, 'calligraphy/dst', buffer, 'dst');
+  const { rows } = await query(
+    `UPDATE calligraphy_plates
+        SET dst_path = $2, dst_stats = $3::jsonb, dst_generated_at = NOW()
+      WHERE id = $1 RETURNING *`,
+    [row.id, saved.url, JSON.stringify(stats)]);
+  return rows[0];
+}
+
+// POST /calligraphy/plates/:id/dst
+async function generateDst(req, res) {
+  const { id } = req.params;
+  if (!UUID_RE.test(String(id))) return bad(res, 'معرّف غير صالح', 'ERR_BAD_INPUT', 400);
+  const { rows } = await query('SELECT * FROM calligraphy_plates WHERE id=$1', [id]);
+  const row = rows[0];
+  if (!row) return bad(res, 'الاسم غير موجود', 'ERR_NOT_FOUND', 404);
+  if (!row.plate_path) return bad(res, 'لا توجد صورة لهذا الاسم', 'ERR_NO_PLATE', 409);
+  if (row.dst_path && String(req.query.force || '0') !== '1') {
+    const [dto] = await attachOrderContext([toPlate(row)]);
+    return res.json({ data: dto, cached: true });
+  }
+  try {
+    const updated = await generateDstForRow(row, req);
+    const [dto] = await attachOrderContext([toPlate(updated)]);
+    return res.json({ data: dto, cached: false });
+  } catch (e) {
+    if (e && e.code === 'ERR_EMPTY_PLATE') return bad(res, 'الصورة فارغة أو لا يمكن قراءتها', 'ERR_EMPTY_PLATE', 422);
+    console.error('digitize failed', e);
+    return bad(res, 'تعذّر توليد ملف التطريز', 'ERR_DIGITIZE', 500);
+  }
+}
+
+// POST /calligraphy/plates/dst   { ids: [...] }
+// Bounded on purpose: digitising is CPU work on the same box that serves the shop (and
+// RevoArt). 20 names is a few seconds of event loop; a whole job would be minutes of it.
+async function generateDstBatch(req, res) {
+  const ids = Array.isArray(req.body && req.body.ids) ? req.body.ids : [];
+  const clean = [...new Set(ids.filter((x) => UUID_RE.test(String(x))))].slice(0, DST_BATCH_MAX);
+  if (!clean.length) return bad(res, 'لم تُحدَّد أسماء', 'ERR_BAD_INPUT', 400);
+  const { rows } = await query(
+    'SELECT * FROM calligraphy_plates WHERE id = ANY($1::uuid[]) AND plate_path IS NOT NULL', [clean]);
+  const out = [];
+  let failed = 0;
+  for (const row of rows) {
+    if (row.dst_path) { out.push(toPlate(row)); continue; }
+    try { out.push(toPlate(await generateDstForRow(row, req))); }
+    catch (e) { failed++; console.error('digitize failed for', row.id, e && e.message); }
+  }
+  const data = await attachOrderContext(out);
+  return res.json({ data, requested: clean.length, generated: data.length, failed });
+}
+
 module.exports = {
   listWholesalers, wholesalerNames, createJob, processNext, getJob, reroll, downloadZip,
   getQueue, queueGenerate, recentPlates, composePlate, generateElement,
   ordersZones, sendOrder, platesZip, retailQueue, suggestText, listStyles,
+  generateDst, generateDstBatch, generateDstForRow,
 };

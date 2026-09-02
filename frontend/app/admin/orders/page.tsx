@@ -360,25 +360,46 @@ function BundleCard({
             </p>
           )}
 
-          {/* Phones */}
-          <div className="flex flex-wrap gap-x-4 gap-y-1">
+          {/* Phones — tel: to call, واتساب to message. `iqPhone` already returns the bare
+              international digits wa.me wants, so the two links share one normalisation. */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
             {phone1Int && (
-              <a
-                href={`tel:+${phone1Int}`}
-                className="font-medium text-orange-ink underline-offset-2 hover:underline"
-                dir="ltr"
-              >
-                +{phone1Int}
-              </a>
+              <span className="inline-flex items-center gap-1.5">
+                <a
+                  href={`tel:+${phone1Int}`}
+                  className="font-medium tabular-nums text-orange-ink underline-offset-2 hover:underline"
+                  dir="ltr"
+                >
+                  +{phone1Int}
+                </a>
+                <a
+                  href={`https://wa.me/${phone1Int}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex min-h-[32px] items-center rounded-full bg-[#25D366]/15 px-2.5 py-0.5 text-xs font-semibold text-[#128C7E]"
+                >
+                  واتساب
+                </a>
+              </span>
             )}
             {phone2Int && (
-              <a
-                href={`tel:+${phone2Int}`}
-                className="font-medium text-orange-ink underline-offset-2 hover:underline"
-                dir="ltr"
-              >
-                +{phone2Int}
-              </a>
+              <span className="inline-flex items-center gap-1.5">
+                <a
+                  href={`tel:+${phone2Int}`}
+                  className="font-medium tabular-nums text-orange-ink underline-offset-2 hover:underline"
+                  dir="ltr"
+                >
+                  +{phone2Int}
+                </a>
+                <a
+                  href={`https://wa.me/${phone2Int}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex min-h-[32px] items-center rounded-full bg-[#25D366]/15 px-2.5 py-0.5 text-xs font-semibold text-[#128C7E]"
+                >
+                  واتساب
+                </a>
+              </span>
             )}
           </div>
 
