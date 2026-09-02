@@ -1,6 +1,6 @@
 'use strict';
 // Who may open الخط العربي, and who may push an order out of التصميم with it. The two are
-// different questions on purpose: محمد عماد (المطرّز) generates and downloads plates/DST for
+// different questions on purpose: محمد عماد (المطرّز) generates and downloads plates for
 // his own station; «تحويل للتطريز» stays the designer's (advanceBlockReason's side door).
 require('dotenv').config();
 const test = require('node:test');

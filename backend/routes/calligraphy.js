@@ -13,7 +13,7 @@ const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 
 // Who may use the AI calligraphy tool:
 //   • `mayUseTool` (lib/calligraphyAccess.js) — admin role, and staff manager/designer/
 //     embroiderer. embroiderer was added 2026-09-02 so محمد عماد (المطرّز) can generate,
-//     reroll and download his own plates/DST without waiting on a designer — التطريز has a
+//     reroll and download his own plates without waiting on a designer — التطريز has a
 //     backlog and used to have to queue behind التصميم for this. AND
 //   • أيادي التصميم — an ACTIVE design_team member (محمد هيثم + his helpers), checked here
 //     rather than in the shared predicate because it needs a DB lookup, not a role/staff_type
