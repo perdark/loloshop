@@ -273,22 +273,44 @@ design). Does not accept params; shape is owned by `lib/otp.js`'s `gatewayStatus
 }
 ```
 
-### GET `/admin/staff/:id/activity`
-Returns up to 200 most recent activity log entries for the staff member.
+### GET `/admin/staff/:id/activity?month=YYYY-MM`
+One shared builder (`backend/lib/staffActivity.js`) behind this AND `/payroll/me/activity` below.
+Returns up to 500 rows for one calendar month (default: current month, Asia/Baghdad), newest
+first, from TWO sources UNIONed together: `staff_activity_log` (stage moves, `source: 'stage'`)
+and `audit_log` (embroidery-zone ticks and a few other order actions, `source: 'audit'`) — the
+embroiderer's actual daily work is zone ticks, which never wrote to `staff_activity_log`. A bad
+`month` is a 400 `ERR_VALIDATION`, never a 500.
 ```json
 {
   "data": [
     {
       "id": "uuid",
-      "action": "advance_stage",
-      "from_stage": "staff_review",
-      "to_stage": "printing",
+      "source": "audit",
+      "action": "embroidery_zone",
+      "from_stage": null,
+      "to_stage": null,
+      "zone": "sash_back",
       "created_at": "...",
       "order_id": "uuid",
       "product_name": "وشاح تخرج",
-      "student_name": "محمد علي"
+      "student_name": "محمد علي",
+      "month": "2026-09"
+    },
+    {
+      "id": "uuid",
+      "source": "stage",
+      "action": "advance",
+      "from_stage": "embroidery",
+      "to_stage": "pressing",
+      "zone": null,
+      "created_at": "...",
+      "order_id": "uuid",
+      "product_name": "وشاح تخرج",
+      "student_name": "محمد علي",
+      "month": "2026-09"
     }
-  ]
+  ],
+  "meta": { "month": "2026-09" }
 }
 ```
 
@@ -299,8 +321,8 @@ Returns up to 200 most recent activity log entries for the staff member.
 ### GET `/payroll/me/salary`
 Staff member reads their own salary summary (same shape as admin endpoint above).
 
-### GET `/payroll/me/activity`
-Staff member reads their own activity log (same shape as admin endpoint above).
+### GET `/payroll/me/activity?month=YYYY-MM`
+Staff member reads their own activity log (same builder and shape as the admin endpoint above).
 
 ---
 
