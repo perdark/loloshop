@@ -2,28 +2,29 @@
 const router = require('express').Router();
 const rateLimit = require('express-rate-limit');
 const multer = require('multer');
-const { authRequired, staffTypesOf } = require('../middleware/auth');
+const { authRequired } = require('../middleware/auth');
 const { query } = require('../lib/db');
 const { imageUploadLimit } = require('../lib/upload');
+const { mayUseTool, mayPushOrder } = require('../lib/calligraphyAccess');
 const c = require('../controllers/calligraphyController');
 
 const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
 // Who may use the AI calligraphy tool:
-//   • admin role (full access), and manager/designer staff (the production designers), AND
-//   • أيادي التصميم — an ACTIVE design_team member (محمد هيثم + his helpers). The design-team
-//     crew's whole job is running this AI, so it is deliberately opened to role='design_helper'.
-//     Membership must be active (a deactivated helper's still-valid JWT is rejected), mirroring
-//     designTeamController.attachTeamMember's fail-closed rule.
+//   • `mayUseTool` (lib/calligraphyAccess.js) — admin role, and staff manager/designer/
+//     embroiderer. embroiderer was added 2026-09-02 so محمد عماد (المطرّز) can generate,
+//     reroll and download his own plates/DST without waiting on a designer — التطريز has a
+//     backlog and used to have to queue behind التصميم for this. AND
+//   • أيادي التصميم — an ACTIVE design_team member (محمد هيثم + his helpers), checked here
+//     rather than in the shared predicate because it needs a DB lookup, not a role/staff_type
+//     check. The design-team crew's whole job is running this AI, so it is deliberately opened
+//     to role='design_helper'. Membership must be active (a deactivated helper's still-valid
+//     JWT is rejected), mirroring designTeamController.attachTeamMember's fail-closed rule.
 async function allowCalligraphyUser(req, res, next) {
   try {
     const u = req.user;
     if (!u) return res.status(401).json({ error: 'غير مصرح', code: 'ERR_AUTH' });
-    if (u.role === 'admin') return next();
-    if (u.role === 'staff') {
-      const mine = staffTypesOf(u);
-      if (mine.includes('manager') || mine.includes('designer')) return next();
-    }
+    if (mayUseTool(u)) return next();
     if (u.role === 'design_helper') {
       const { rows } = await query(
         `SELECT 1 FROM design_team_members WHERE user_id = $1 AND active = TRUE LIMIT 1`,
@@ -38,15 +39,12 @@ async function allowCalligraphyUser(req, res, next) {
 }
 
 // «تحويل للتطريز» (advance an order out of بانتظار التصميم) is STRICTER than the tool
-// itself: admin or staff manager/designer only. design_helper can generate/compose plates
-// but never push orders — the أيادي التصميم flow keeps going through محمد هيثم's approval.
+// itself, and stays that way on purpose: `mayPushOrder` admits only admin + staff
+// manager/designer — NOT embroiderer, and NOT design_helper. محمد عماد can generate and
+// download plates for his own station but never pushes an order into التطريز; that keeps
+// going through the designer/أيادي التصميم flow via محمد هيثم's approval, same as before.
 function requireDesignerOrAdmin(req, res, next) {
-  const u = req.user;
-  if (u && u.role === 'admin') return next();
-  if (u && u.role === 'staff') {
-    const mine = staffTypesOf(u);
-    if (mine.includes('manager') || mine.includes('designer')) return next();
-  }
+  if (mayPushOrder(req.user)) return next();
   return res.status(403).json({ error: 'ممنوع', code: 'ERR_FORBIDDEN' });
 }
 
