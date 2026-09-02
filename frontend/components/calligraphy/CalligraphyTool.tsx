@@ -666,9 +666,14 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
   // Current path — appended as ?from= so the order page's back button returns HERE.
   const pathname = usePathname();
 
-  // Role gating (send + order links). The tool is shared by admin, staff
-  // designer/manager AND design_helper — helpers generate plates but never push
-  // orders (their desk flow goes through محمد هيثم) and can't open /staff routes.
+  // Role gating (send + order links). The tool is OPENED by admin + staff
+  // manager/designer/embroiderer/design_helper — see `lib/calligraphyAccess.js`'s
+  // `TOOL_STAFF_TYPES` on the backend and the page-level gates in
+  // app/staff/calligraphy/page.tsx / StaffSidebar.tsx. design_helper generates plates
+  // but never pushes orders (their desk flow goes through محمد هيثم) and can't open
+  // /staff routes. embroiderer opens the tool (2026-09-02) but never sees «تحويل
+  // للتطريز» — canSendOrders below stays designer/manager/admin only
+  // (`PUSH_STAFF_TYPES`), deliberately excluding embroiderer.
   const me = getUser();
   const myStaffTypes: string[] =
     (me as unknown as { staff_types?: string[] })?.staff_types ??

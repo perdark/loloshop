@@ -1,5 +1,40 @@
 # Progress
 
+## 2026-09-02 — ✒️ محمد عماد (مطرّز) صار يفتح أداة الخط العربي
+
+Task 2A.3, frontend half of the embroiderer-access change whose backend half (`mayUseTool` /
+`mayPushOrder` in `backend/lib/calligraphyAccess.js`) shipped on this branch in `a834575`. This
+task only makes the frontend gates say the same thing — there is no shared package between the
+two apps, so the list is mirrored by hand in three places:
+· `frontend/app/staff/calligraphy/page.tsx` — the page's `allowed` predicate now includes
+  `myTypes.includes("embroiderer")`, and the EmptyState copy reads «أداة الخط العربي مخصّصة
+  للمصممين والمطرّزين والمديرين فقط».
+· `frontend/components/staff/StaffSidebar.tsx` — `canCalligraphy` gained the same check; the
+  comment above it no longer claims it matches `requireStaffType('designer')` — it now says it
+  mirrors `backend/lib/calligraphyAccess.js`'s `TOOL_STAFF_TYPES`.
+· `frontend/components/calligraphy/CalligraphyTool.tsx` — **`canSendOrders` (send to embroidery /
+  «تحويل للتطريز») is UNCHANGED, on purpose.** It still reads `admin || staff(designer|manager)`
+  only. المطرّز opens the tool, generates and rerolls plates, downloads the DST file — and never
+  sees the push button. Comment updated to say so explicitly.
+
+`cd frontend && npx tsc --noEmit && npm run lint` — both clean (0 errors; lint's 6 pre-existing
+warnings are all in `android/app/build/…/native-bridge.js`, a build artifact, not this diff).
+
+⚠️ **THE DST DIGITISER IS STILL NOT VERIFIED ON A MACHINE.** Everything the 2026-08-31 (b) entry
+below reports — 99.5% mean coverage, the five bugs found and fixed, 637/640 backend tests — is
+geometry measured back out of the generated file. Nobody has stitched one yet. **It stays
+unverified until محمد عماد actually stitches one test piece on a real machine**, and giving him
+the tool in this task is exactly how that becomes possible — it was not possible before, because
+he could not open `/staff/calligraphy` at all. Until that first real stitch: **any plate whose
+DST coverage reads below 0.95 means «افتح هذا أولاً»** — open and inspect that one first, do not
+assume the completion pass caught it, and do not treat a high coverage number as proof the file
+is good on fabric. Coverage is a rasterisation self-check, not a machine result.
+
+Files touched: `frontend/app/staff/calligraphy/page.tsx`, `frontend/components/staff/StaffSidebar.tsx`,
+`frontend/components/calligraphy/CalligraphyTool.tsx`, this file. Also committed alongside (were
+untracked, belong to this branch's work): `docs/superpowers/plans/2026-09-02-five-floor-edits.md`,
+`docs/superpowers/specs/2026-09-02-five-floor-edits-design.md`.
+
 ## 2026-09-01 (b) — 🧣 الشال الأمريكي صار قطعة، وما تغيّر شي عند الممثلين
 
 **Migration 100 + `lib/shawlPiece.js`. Zero rep-facing queries changed — that was the owner's

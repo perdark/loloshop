@@ -6,10 +6,12 @@ import { PageLoader } from "@/components/ui/Spinner";
 import { EmptyState } from "@/components/ui/EmptyState";
 import type { StaffType } from "@/lib/types";
 
-// Designer (+ admin/manager) calligraphy tool inside the staff layout. Same tool as
-// /admin/calligraphy. The backend restricts /calligraphy/* to designer/manager/admin
-// (requireStaffType('designer')). The page shell must gate to the SAME set — otherwise
-// any staff role loads the tool and every API call 403s → a broken screen.
+// Designer/manager/embroiderer (+ admin) calligraphy tool inside the staff layout. Same
+// tool as /admin/calligraphy. The backend restricts /calligraphy/* per
+// `lib/calligraphyAccess.js`'s `TOOL_STAFF_TYPES` (manager/designer/embroiderer + admin).
+// The page shell must gate to the SAME set — otherwise any staff role loads the tool and
+// every API call 403s → a broken screen. Pushing to embroidery («تحويل للتطريز») stays a
+// narrower set (`PUSH_STAFF_TYPES`, manager/designer only) — see CalligraphyTool.tsx.
 export default function StaffCalligraphyPage() {
   const { user, loading } = useRequireAuth(["staff", "admin"]);
 
@@ -26,14 +28,15 @@ export default function StaffCalligraphyPage() {
   const allowed =
     user.role === "admin" ||
     myTypes.includes("manager") ||
-    myTypes.includes("designer");
+    myTypes.includes("designer") ||
+    myTypes.includes("embroiderer");
 
   if (!allowed) {
     return (
       <div className="mx-auto max-w-lg px-4 py-16" dir="rtl">
         <EmptyState
           title="غير مصرّح"
-          message="أداة الخط العربي مخصّصة للمصممين والمديرين فقط."
+          message="أداة الخط العربي مخصّصة للمصممين والمطرّزين والمديرين فقط."
         />
       </div>
     );
