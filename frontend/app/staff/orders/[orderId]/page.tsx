@@ -1172,6 +1172,13 @@ function ProductionOrderDetailContent() {
   const stageHistory = detail.stage_history ?? [];
   const intake = order.intake ?? null;
 
+  // واتساب beside every phone this page prints. The number is stored the way the shop types
+  // it (`07xx…`), which `wa.me` rejects — it wants bare international digits — so both links
+  // go through the same `iqPhone` normaliser the انستا intake card already uses. Null when the
+  // value holds no digits, so a junk phone renders the tel: link alone instead of a dead pill.
+  const studentWa = iqPhone(order.student_phone);
+  const deliveryWa = iqPhone(order.delivery_phone);
+
   // Presence banner — someone else is working on this order. `conflictOwner` is
   // the live heartbeat signal (updates without a reload); the order snapshot is
   // the fallback for the first paint before the heartbeat resolves.
@@ -1711,6 +1718,25 @@ function ProductionOrderDetailContent() {
         backLabel={back.label}
       />
 
+      {/* ⚠️ A شال امريكي sold to a rep student is a whole garment with no order of its own —
+          it is an add-on price on the وشاح. Without this line the page looks broken to the
+          worker: no price, no design, no قياسات, and a «طقم» that appears to be missing a
+          piece. Say where it came from, and link there. */}
+      {order.piece_kind === "shawl_addon" && (
+        <div className="mb-4 rounded-xl border border-line bg-surface-sink px-4 py-3 text-sm text-ink-soft">
+          قطعة من طقم الطالب — الشال الأمريكي يُباع كإضافة على الوشاح، فسعره وتصميمه على الوشاح
+          نفسه.{" "}
+          {order.carrier_order_id && (
+            <Link
+              href={`/staff/orders/${order.carrier_order_id}`}
+              className="font-semibold text-orange-ink underline underline-offset-2"
+            >
+              افتح الوشاح
+            </Link>
+          )}
+        </div>
+      )}
+
       {/* Presence banner — admin/staff see which employee is working on this order */}
       {presenceOwner && (
         <div
@@ -1804,14 +1830,24 @@ function ProductionOrderDetailContent() {
             {order.delivery_method === "delivery" && order.delivery_phone && (
               <div className="flex gap-2">
                 <dt className="text-muted">الهاتف:</dt>
-                <dd>
+                <dd className="flex flex-wrap items-center gap-2">
                   <a
                     href={`tel:${order.delivery_phone}`}
-                    className="inline-flex min-h-11 items-center font-semibold text-orange-ink hover:underline"
+                    className="inline-flex min-h-11 items-center font-semibold tabular-nums text-orange-ink hover:underline"
                     dir="ltr"
                   >
                     {order.delivery_phone}
                   </a>
+                  {deliveryWa && (
+                    <a
+                      href={`https://wa.me/${deliveryWa}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex min-h-11 items-center rounded-full bg-[#25D366]/15 px-3 py-1 text-xs font-semibold text-[#128C7E]"
+                    >
+                      واتساب
+                    </a>
+                  )}
                 </dd>
               </div>
             )}
@@ -1904,10 +1940,22 @@ function ProductionOrderDetailContent() {
               {order.student_phone && (
                 <div className="flex justify-between gap-4 border-b border-line pb-2.5">
                   <dt className="text-muted">الهاتف</dt>
-                  <dd dir="ltr">
-                    <a href={`tel:${order.student_phone}`} className="inline-flex min-h-11 items-center font-medium text-ink">
+                  {/* dir="ltr" sits on the number itself, not the cell — the واتساب pill has to
+                      stay in the RTL flow beside it. */}
+                  <dd className="flex flex-wrap items-center justify-end gap-2">
+                    <a href={`tel:${order.student_phone}`} className="inline-flex min-h-11 items-center font-medium tabular-nums text-ink" dir="ltr">
                       {order.student_phone}
                     </a>
+                    {studentWa && (
+                      <a
+                        href={`https://wa.me/${studentWa}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex min-h-11 items-center rounded-full bg-[#25D366]/15 px-3 py-1 text-xs font-semibold text-[#128C7E]"
+                      >
+                        واتساب
+                      </a>
+                    )}
                   </dd>
                 </div>
               )}
@@ -2031,6 +2079,7 @@ function ProductionOrderDetailContent() {
               </div>
             </dl>
           </article>
+
 
           {/* Embroidery zones checklist (FEATURE 1 — embroiderer/manager/admin) */}
           {showEmbroideryZones && (

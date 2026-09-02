@@ -9,6 +9,7 @@
 // lines on order_items, not priced options. Mirrors orderController.configureFullSet's
 // pipeline. Order-status rules stay here (backend-only).
 const { query, tx } = require('./db');
+const shawlPiece = require('./shawlPiece');
 const { publish } = require('./eventBus');
 
 function normalizeDigits(s) {
@@ -538,6 +539,18 @@ async function persistFullSetOrder({ student, body, actorUserId, approval }) {
           [oid, it.label, it.price || 0, it.admin_price || 0, it.customer_image_url || null, it.customer_text || null,
            preservedPlates.get(it.label) || null]
         );
+      }
+      // ── الشال الأمريكي: keep its production PIECE in step with this sash ─────────────
+      // The shawl is sold here as an add-on price (the two lines above), but the workshop
+      // makes and presses it as a whole garment, so it has a stage of its own in
+      // `sash_shawl_pieces` (migration 100). This is the ONLY writer that creates or
+      // removes one — see lib/shawlPiece.js for why it may not be an `orders` row.
+      //
+      // ⚠️ Inside the transaction on purpose: a rolled-back طقم must not leave a piece
+      // behind for a sash that was never written. And nothing the rep SEES changes — this
+      // table is read by no rep-facing query.
+      if (type === 'sash') {
+        await shawlPiece.syncForOrder(client, oid, shawlEnabled);
       }
       ids[type] = oid;
     }

@@ -119,13 +119,24 @@ export const EMBROIDERY_ZONE_LABELS: Record<EmbroideryZone, string> = {
 export const EMBROIDERY_ZONE_ORDER: EmbroideryZone[] = [
   "sash_right", "sash_left", "sash_back", "cap_side", "cap_top", "robe_pleat", "robe_no_pleat",
 ];
-/** قائمة الإنتاج chip set for a المجهز (owner 2026-08-14) — garments, not embroidery positions.
- *  وشاح merges يمين/يسار/خلف/أمام into one chip; قبعة merges جانب/أعلى. The two روب chips stay
- *  SPLIT: بكسرات/بدون كسرات is a garment spec the preparer actually picks by (86 vs 116 pieces
- *  on the live queue, measured 2026-08-14), not an embroidery position. */
-export const PREPARER_ZONE_ORDER: EmbroideryZone[] = [
-  "sash_any", "cap_any", "robe_pleat", "robe_no_pleat",
-];
+/** ⚠️ قائمة الإنتاج's piece filter for المكوجي + المجهز — the GARMENT, not the position.
+ *
+ *  Every key above is a predicate over `order_items.label_snapshot`, so it can only ever
+ *  list a piece that CARRIES embroidery. A plain شال امريكي carries none (its two lines are
+ *  «السعر الأساسي» and «صورة الشال: شال», and migration 096 marks that picker
+ *  `is_embroidery = FALSE`), so no zone chip can reach one — measured on the dev DB: 0 of
+ *  600 شال orders in the line match ANY chip on that page. `products.type` is the only
+ *  handle every piece has. Same ruling PrepConsole's GARMENT_ORDER already carries.
+ *
+ *  This REPLACES the `PREPARER_ZONE_ORDER` chip set (owner 2026-08-14: «sash_any, cap_any,
+ *  robe_pleat, robe_no_pleat»). That decision's surviving half is the روب pair below —
+ *  بكسرات/بدون كسرات is a garment SPEC the preparer genuinely picks by (86 vs 116 pieces on
+ *  the live queue, measured then), and it is the one thing `product_type` cannot say. Its
+ *  other half, `sash_any`/`cap_any`, is gone: both are in ZONE_NEEDS_CONTENT, so they listed
+ *  only pieces that CARRY embroidery and hid a plain وشاح عدل the same way they hid the شال.
+ *  وشاح and قبعة are garment chips now and reach every piece. */
+export const GARMENT_FILTER_ORDER: ProductType[] = ["sash", "robe", "cap", "shawl"];
+export const GARMENT_VIEW_ZONE_ORDER: EmbroideryZone[] = ["robe_pleat", "robe_no_pleat"];
 
 /** Wholesaler full-set (طقم) embroidery zones — match the label set persisted by
  *  backend/lib/fullSetOrder.js. Used by the rep-scoped orders console so an embroiderer

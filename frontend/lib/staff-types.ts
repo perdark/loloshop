@@ -124,6 +124,23 @@ export interface ProductionQueueItem {
   set_pieces?: { id: string; status: OrderStatus; product_name: string }[];
   needs_pressing?: boolean;
   /**
+   * ⚠️ «شال امريكي» sold to a REP student is a whole garment with no `orders` row of its own —
+   * it is an add-on PRICE on the وشاح (backend/lib/fullSetOrder.js), so its production stage
+   * lives in `sash_shawl_pieces` and the queue synthesises this row from it. Present only on
+   * such a row; a retail شال is a real product and never carries it.
+   *
+   * The id IS usable everywhere an order id is — advance, revert, claim and the detail page
+   * all fall back to the piece — which is why no console branches on this field to WORK. It
+   * exists so a screen can EXPLAIN the row: there is no price and no design on it, and the
+   * money lives on `carrier_order_id`.
+   */
+  piece_kind?: "shawl_addon";
+  /** The وشاح this shawl was sold on. Only set alongside `piece_kind`. */
+  carrier_order_id?: string | null;
+  /** What the student asked for on this shawl, and their reference photo. */
+  shawl_note?: string | null;
+  shawl_image_url?: string | null;
+  /**
    * Station console only (?station=1). The piece's embroidery zones with the stitch
    * content (text / plate image).
    * · التطريز rows — so the worker sees WHAT to embroider inline, and ticks each zone.
@@ -306,6 +323,11 @@ export interface ProductionOrderDetail {
     delivery_notes?: string | null;
     /** Name of the staff member who confirmed delivery. */
     delivered_by_name?: string | null;
+    /** See ProductionQueueItem.piece_kind. On this payload the fields a shawl genuinely does
+     *  not have — price, design, measurements, intake, contact — are simply absent. */
+    piece_kind?: "shawl_addon";
+    carrier_order_id?: string | null;
+    status_label?: string;
   };
   design: {
     id: string;

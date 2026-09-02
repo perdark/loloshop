@@ -44,7 +44,7 @@ import { getQueue, advanceOrder, advanceBulk } from "@/lib/staff";
 import { getApiErrorMessage } from "@/lib/api";
 import { useProductionEvents } from "@/hooks/useProductionEvents";
 import { useScrollRestore } from "@/hooks/useScrollRestore";
-import { PRODUCT_TYPE_LABELS, STUDY_TYPE_LABELS } from "@/lib/constants";
+import { GARMENT_FILTER_ORDER, PRODUCT_TYPE_LABELS, STUDY_TYPE_LABELS } from "@/lib/constants";
 import { toArabicDigits } from "@/lib/format";
 import type { ProductionQueueItem } from "@/lib/staff-types";
 import type { OrderStatus } from "@/lib/types";
@@ -66,7 +66,10 @@ type SourceFilter = "" | "retail" | "wholesaler";
  * So it filters on `productType`, which every piece has. Chips render only for the types
  * actually in the current tab, so the row never offers an empty filter.
  */
-const GARMENT_ORDER = ["sash", "robe", "cap", "shawl"] as const;
+// Shared with قائمة الإنتاج (`GARMENT_FILTER_ORDER`) so the two screens a preparer uses
+// cannot offer different garments — /staff/queue got this filter on 2026-09-01, when the
+// شال turned out to be unreachable there.
+const GARMENT_ORDER = GARMENT_FILTER_ORDER;
 
 const VIEW_META: Record<View, { tab: string; empty: string }> = {
   preparing: { tab: "قيد التجهيز", empty: "لا توجد قطع قيد التجهيز حالياً" },

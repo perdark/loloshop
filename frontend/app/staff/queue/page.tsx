@@ -17,7 +17,8 @@ import {
   ORDER_SOURCE_LABELS,
   EMBROIDERY_ZONE_LABELS,
   EMBROIDERY_ZONE_ORDER,
-  PREPARER_ZONE_ORDER,
+  GARMENT_FILTER_ORDER,
+  GARMENT_VIEW_ZONE_ORDER,
   PRODUCT_TYPE_LABELS,
   type EmbroideryZone,
 } from "@/lib/constants";
@@ -778,6 +779,9 @@ interface StoredConsoleState {
   batch?: string;
   search?: string;
   page?: number;
+  /** The garment chip (`products.type`) — see `isGarmentView`. Not a URL param: it is a
+   *  client-side filter over rows already fetched, exactly like المجهز's own console. */
+  pieceType?: string;
   zonesOpen?: boolean;
   /** «the open-on-my-station default already ran this session». Without it, a worker who
    *  deliberately widened to «الكل» would be dragged back to «مرحلتي» on the next visit,
@@ -803,9 +807,9 @@ function ConsoleContent() {
   const currentUser = getUser();
   const canDelete = currentUser?.role === "admin" || currentUser?.staff_type === "manager" || currentUser?.staff_types?.includes("manager") === true;
 
-  // ── Whose chip set? (owner 2026-08-14) ─────────────────────────────────────
+  // ── Whose chip set? (owner 2026-08-14, widened 2026-09-01) ─────────────────
   // قائمة الإنتاج is ONE page for every production role (StaffSidebar.tsx:114-121 gives the
-  // link to all of them), so the merge is scoped here rather than by editing
+  // link to all of them), so the scoping is done here rather than by editing
   // EMBROIDERY_ZONE_ORDER — /admin/orders and the designer/digitizer QueueView still need
   // the granular set. A المجهز holds ONE sash, so يمين/يسار/خلف as three chips is noise;
   // a التطريز staffer batches BY position and must keep them apart. Anyone who also
@@ -816,13 +820,31 @@ function ConsoleContent() {
       : currentUser?.staff_type
         ? [currentUser.staff_type]
         : [];
-  const isPreparerView =
+  // ── ⚠️ A ZONE CHIP CANNOT NAME الشال، AND THAT IS NOT FIXABLE BY ADDING ONE ──────────
+  // Every option in EMBROIDERY_ZONE_ORDER (and the PREPARER_ZONE_ORDER set it replaced) is a predicate over
+  // `order_items.label_snapshot`, and a plain شال امريكي carries exactly two lines —
+  // «السعر الأساسي» and «صورة الشال: شال» — neither of which is تطريز (migration 096 marks
+  // the picker `is_embroidery = FALSE` on purpose). Measured on the dev DB: of the 600 شال
+  // orders sitting at الكوي/التجهيز/جاهز, **zero** match any chip this page offers. So the
+  // presser and the preparer both pressed «فلتر القطعة», got أوشحة, and concluded the
+  // shawls were missing — they were simply unreachable.
+  //
+  // This is the ruling the owner already made for المجهز's own console on 2026-08-31 and
+  // that never reached قائمة الإنتاج: «we must see the pieces even the pieces without تطريز
+  // on filters» — so the piece filter is the GARMENT (`product_type`, which every piece
+  // has), not the embroidery position. See PrepConsole.tsx's GARMENT_ORDER header.
+  //
+  // The two روب chips are NOT garments and stay: بكسرات/بدون كسرات is a spec the preparer
+  // genuinely picks by (owner 2026-08-14), and it is the one thing product_type cannot say.
+  // وشاح/قبعة move to the garment row — as zone chips they matched only pieces that CARRY
+  // embroidery, so a plain وشاح عدل was as invisible as the شال.
+  const isGarmentView =
     currentUser?.role !== "admin" &&
-    myTypes.includes("preparer") &&
+    myTypes.some((t) => t === "preparer" || t === "presser") &&
     !myTypes.some(
       (t) => t === "manager" || t === "embroiderer" || t === "designer" || t === "digitizer"
     );
-  const zoneOptions = isPreparerView ? PREPARER_ZONE_ORDER : EMBROIDERY_ZONE_ORDER;
+  const zoneOptions = isGarmentView ? GARMENT_VIEW_ZONE_ORDER : EMBROIDERY_ZONE_ORDER;
 
   // Restore the last UI state (see StoredConsoleState above).
   const [stored] = useState<StoredConsoleState>(() => readStored());
@@ -863,6 +885,7 @@ function ConsoleContent() {
   const [page,       setPage]       = useState(stored.page ?? 1);
   const [selectedBatch, setSelectedBatch] = useState(stored.batch ?? "");
   const [zonesOpen,  setZonesOpen]  = useState(stored.zonesOpen ?? false);
+  const [pieceType,  setPieceType]  = useState(stored.pieceType ?? "");
   // The stages this viewer personally works — «مرحلتي». `[]` for manager/admin/مفصل, who
   // have no station and correctly keep opening on «الكل». Comes from the backend; never
   // re-derived here (see the viewerStages landmine).
@@ -946,6 +969,7 @@ function ConsoleContent() {
         batch: selectedBatch,
         search,
         page,
+        pieceType,
         zonesOpen,
         stageDefaulted,
       };
@@ -953,7 +977,7 @@ function ConsoleContent() {
     } catch {
       /* storage full/unavailable — persistence is best-effort */
     }
-  }, [stage, source, repParam, zoneParam, selectedBatch, search, page, zonesOpen, stageDefaulted]);
+  }, [stage, source, repParam, zoneParam, selectedBatch, search, page, pieceType, zonesOpen, stageDefaulted]);
 
   // Scroll offset, restored alongside the filters above. Keyed on stage+page so paging or
   // switching stage starts at the top (a new list), while «رجوع» from a piece does not.
@@ -1010,7 +1034,16 @@ function ConsoleContent() {
   }
 
   function setZone(z: EmbroideryZone | undefined) {
+    // The garment row and the pleat row are two answers to one question («أي قطعة؟»), so
+    // they are exclusive: «شال» + «روب بكسرات» is an empty list dressed up as a filter.
+    setPieceType("");
     router.push(buildUrl({ stage, source, rep: repParam ?? undefined, zone: z }));
+    setPage(1);
+  }
+
+  function setGarment(t: string) {
+    setPieceType(t);
+    if (zoneParam) router.push(buildUrl({ stage, source, rep: repParam ?? undefined }));
     setPage(1);
   }
 
@@ -1030,7 +1063,9 @@ function ConsoleContent() {
   // this app (no `experimental.reactCompiler`, no babel plugin). So this really does re-run on
   // every render; it is accepted at this row count, not free.
   const q = search.trim().toLowerCase();
-  const filtered = items.filter((i) => {
+  // Everything EXCEPT the garment chip — this is the population the chips count, so a chip
+  // never disappears the moment it is pressed (same rule as PrepConsole's garmentChips).
+  const beforeGarment = items.filter((i) => {
     if (stage && i.status !== stage) return false;
     // "الكل" means everything still in production — delivered shows only under its own chip.
     if (!stage && i.status === "delivered") return false;
@@ -1046,6 +1081,24 @@ function ConsoleContent() {
     if (!matchesQueueSearch(i, q)) return false;
     return true;
   });
+  const filtered = pieceType
+    ? beforeGarment.filter((i) => i.product_type === pieceType)
+    : beforeGarment;
+
+  // The garments actually present, in a fixed order — a chip is never offered for a garment
+  // this list does not hold, so «شال ٠» can't happen.
+  const garmentChips = GARMENT_FILTER_ORDER.map((t) => ({
+    type: t,
+    count: beforeGarment.filter((i) => i.product_type === t).length,
+  })).filter((c) => c.count > 0);
+
+  // A garment that leaves the list (switching stage, or the last شال packed) would otherwise
+  // filter the page to nothing behind a chip row that no longer offers it.
+  const garmentKeys = garmentChips.map((c) => c.type).join(",");
+  useEffect(() => {
+    if (!loadedOnce || !pieceType) return;
+    if (!garmentKeys.split(",").includes(pieceType)) setPieceType("");
+  }, [garmentKeys, pieceType, loadedOnce]);
 
   // Hand the order page its «السابق»/«التالي» (bug 8, part 3). The FILTERED list, not the
   // visible page, so stepping past the bottom of page 1 continues instead of dead-ending.
@@ -1289,13 +1342,13 @@ function ConsoleContent() {
                 onClick={() => setZonesOpen((o) => !o)}
                 className={[
                   "inline-flex min-h-[34px] items-center rounded-full border px-3 py-1 text-xs font-semibold transition-colors",
-                  zonesOpen || zoneParam
+                  zonesOpen || zoneParam || pieceType
                     ? "border-orange-ink text-orange-ink"
                     : "border-dashed border-line text-muted hover:border-orange-ink/40 hover:text-ink",
                 ].join(" ")}
               >
-                {isPreparerView ? "فلتر القطعة" : "فلتر المنطقة"} {zonesOpen ? "▲" : "▾"}
-                {zoneParam && <span className="ms-1 h-1.5 w-1.5 rounded-full bg-orange-ink" />}
+                {isGarmentView ? "فلتر القطعة" : "فلتر المنطقة"} {zonesOpen ? "▲" : "▾"}
+                {(zoneParam || pieceType) && <span className="ms-1 h-1.5 w-1.5 rounded-full bg-orange-ink" />}
               </button>
 
               {!loading && (
@@ -1311,11 +1364,31 @@ function ConsoleContent() {
               <div className="flex flex-wrap gap-2 pt-1">
                 <button
                   type="button"
-                  onClick={() => setZone(undefined)}
-                  className={chipCls(!zoneParam)}
+                  onClick={() => {
+                    setPieceType("");
+                    setZone(undefined);
+                  }}
+                  className={chipCls(!zoneParam && !pieceType)}
                 >
-                  {isPreparerView ? "كل القطع" : "كل المناطق"}
+                  {isGarmentView ? "كل القطع" : "كل المناطق"}
                 </button>
+                {/* Garment chips — المكوجي/المجهز only. They carry a count because «شال ٥٩٢»
+                    is the answer to the question that produced this row; the pleat chips
+                    beside them stay bare, since they answer a spec question, not «how many
+                    of these do I have». */}
+                {isGarmentView &&
+                  garmentChips.map((c) => (
+                    <button
+                      key={c.type}
+                      type="button"
+                      onClick={() => setGarment(pieceType === c.type ? "" : c.type)}
+                      aria-pressed={pieceType === c.type}
+                      className={chipCls(pieceType === c.type)}
+                    >
+                      {PRODUCT_TYPE_LABELS[c.type]}
+                      <span className="ms-1 tabular-nums opacity-70">{c.count}</span>
+                    </button>
+                  ))}
                 {visibleZones.map((z) => (
                   <button
                     key={z}

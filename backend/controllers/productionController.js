@@ -1,4 +1,5 @@
 const { query, tx } = require('../lib/db');
+const shawlPiece = require('../lib/shawlPiece');
 const { canStaffTransition, STATUS_LABEL_AR, TRANSITIONS, orderZoneClause, LINE_STAFF } = require('./orderController');
 const { signSseTicket, staffScopeAllows, staffTypesOf } = require('../middleware/auth');
 const { imageUpload, publicUrl } = require('../lib/upload');
@@ -437,7 +438,8 @@ async function getQueue(req, res) {
   // their other merged stages unfiltered. Design-less embroidery orders (cap/robe) the
   // designer also handles (design_id IS NULL).
   const designerPending = staffTypesOf(u).includes('designer') && !isManager(u);
-  const srcClause = sourceClause(resolveSourceFilter(u, req.query.source));
+  const sourceFilter = resolveSourceFilter(u, req.query.source);
+  const srcClause = sourceClause(sourceFilter);
   // Embroidery-zone / pleat filter (sash R/L/back · cap side/top · robe pleats).
   const zoneClause = req.query.zone ? orderZoneClause(req.query.zone, 'o') : null;
   const { rows } = await query(
@@ -618,6 +620,37 @@ async function getQueue(req, res) {
       }
     }
   }
+  // ── الشال الأمريكي كقطعة ────────────────────────────────────────────────────────────
+  // Appended, never joined into the SQL above: the piece has no `orders` row, so there is
+  // nothing to UNION with. Its stage lives in `sash_shawl_pieces` (migration 100) and it
+  // walks the same ladder a retail شال walks — owner's rule: «the stages for shawl for
+  // wholesaler staff are same for retail staff». See lib/shawlPiece.js.
+  //
+  // ⚠️ The zone filter deliberately EXCLUDES every shawl. `?zone=` matches embroidery
+  // positions on `order_items`, and a شال carries none — so asking for «وشاح — تطريز يمين»
+  // and getting shawls back would be the same category error that made the piece invisible
+  // in the first place. Filtering by garment is what reaches it (GARMENT_FILTER_ORDER).
+  if (!zoneClause) {
+    const shawlRows = await shawlPiece.queueRows(stages, sourceFilter || '');
+    for (const r of shawlRows) {
+      // Same state-machine grant every other row carries, computed the same way, so the
+      // console never has to know this row is special to render its button.
+      const next = shawlPiece.nextStageFor(r);
+      r.next_status = next;
+      r.can_advance = !!next && next !== 'delivered' && canStaffTransition(u, r.status, next);
+      r.advance_label = next ? ADVANCE_LABEL_AR[`${r.status}→${next}`] ?? null : null;
+    }
+    rows.push(...shawlRows);
+    // One list, one order. Re-sorted on the SAME keys the SQL used (deadline, then age) so
+    // a shawl lands beside the طقم it belongs to instead of in a block at the bottom.
+    rows.sort((a, b) => {
+      const ad = a.deadline ? new Date(a.deadline).getTime() : Infinity;
+      const bd = b.deadline ? new Date(b.deadline).getTime() : Infinity;
+      if (ad !== bd) return ad - bd;
+      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+    });
+  }
+
   // The raw progress jsonb is internal — expose only the computed zones list.
   for (const r of rows) delete r.embroidery_zones;
   // PRICE VISIBILITY — the SAME rule getOrder's canSeeMoney uses (front-desk = preparer,
@@ -711,7 +744,14 @@ async function getOrder(req, res) {
      WHERE o.id = $1`,
     [id]
   );
-  if (!base.rows.length) return res.status(404).json({ error: 'الطلب غير موجود', code: 'ERR_NOT_FOUND' });
+  if (!base.rows.length) {
+    // Not an order — a شال امريكي piece? Its detail page is deliberately THIN: a shawl has
+    // no design, no zones, no measurements, no money of its own (that is all on the carrier
+    // sash). What the worker needs is who it is for, what was asked for, and the button.
+    const piece = await shawlPiece.loadPiece(id);
+    if (piece) return res.json({ data: await shawlOrderDetail(piece, u) });
+    return res.status(404).json({ error: 'الطلب غير موجود', code: 'ERR_NOT_FOUND' });
+  }
   const order = { ...base.rows[0] };
 
   // Full-set form intake (delivery / phones / event date / deposit) — null for cart bundles.
@@ -929,6 +969,10 @@ async function getOrder(req, res) {
        LEFT JOIN users su ON su.id = sal.user_id
       WHERE sal.order_id = $1
         AND sal.to_stage IS NOT NULL
+        -- WARNING: a shawl piece's moves are logged against its CARRIER (this FK points at
+        -- orders and a piece id is not one), so without this filter «منو نقلها؟» on the وشاح
+        -- would print the SHAWL's stage moves as the sash's own. See performShawlAdvance.
+        AND sal.action <> 'advance_shawl'
       ORDER BY sal.created_at ASC`,
     [id]
   );
@@ -1094,10 +1138,191 @@ async function embroideryChecklistBlocks(user, id) {
   return zones.length > 0 && !zones.every((z) => z.done);
 }
 
+// ══ الشال الأمريكي كقطعة — the handlers that make its id transparent ══════════════════
+//
+// A شال امريكي sold to a rep student is a real garment with no order row of its own; its
+// stage lives in `sash_shawl_pieces`. See lib/shawlPiece.js for why it may never be an
+// `orders` row. Every function below runs ONLY AFTER the ordinary `orders` lookup has
+// already missed, so the hot path for a real order is byte-for-byte what it was.
+
+/** The same two refusals `advanceBlockReason` applies to an order, read off the CARRIER.
+ *  Inherited rather than copied: the shawl is part of that طقم, so an unapproved sash must
+ *  not be pressed as a shawl through a side door — the exact gap the calligraphy workbench
+ *  left open (see advanceBlockReason's own header). */
+function shawlBlockReason(piece) {
+  if (piece.returned_to_customer) {
+    return { code: 'ERR_ORDER_RETURNED', reason: 'returned_to_customer', message: 'الطلب مُرجَع للطالب' };
+  }
+  if (piece.wholesaler_id != null && piece.wholesaler_approval !== 'approved') {
+    return { code: 'ERR_REP_APPROVAL_PENDING', reason: 'rep_approval_pending', message: 'الطلب بانتظار موافقة الممثل' };
+  }
+  return null;
+}
+
+/** Shared decision for one shawl move: null when it may go, else {status, code, message}. */
+function shawlAdvanceRefusal(piece, user, to) {
+  if (!staffScopeAllows(user, piece.wholesaler_id == null)) {
+    return { status: 403, code: 'ERR_FORBIDDEN', reason: 'forbidden', message: 'هذا الطلب خارج نطاقك' };
+  }
+  const blocked = shawlBlockReason(piece);
+  if (blocked) return { status: 409, ...blocked };
+  if (!to) {
+    return { status: 409, code: 'ERR_INVALID_TRANSITION', reason: 'not_advanceable', message: 'لا يمكن تقديم هذه الحالة' };
+  }
+  if (!canStaffTransition(user, piece.status, to)) {
+    return { status: 403, code: 'ERR_FORBIDDEN', reason: 'not_advanceable', message: 'ممنوع' };
+  }
+  return null;
+}
+
+/**
+ * Move one shawl piece. Mirrors performAdvance, with two deliberate differences:
+ *
+ * · **No `notifications` row.** performAdvance tells the student «حالة طلبك الآن: …», and
+ *   for a shawl that sentence would be false — their ORDER is the وشاح and it has not
+ *   moved. The piece is an internal production unit; the student's status stays the sash's.
+ * · **`staff_activity_log` gets the CARRIER's order_id with action `advance_shawl`.** The
+ *   column is FK'd to `orders`, and a shawl id is not one — but «منو نقلها؟» must still be
+ *   answerable, so the move is recorded against the job it belongs to under its own action
+ *   name. ⚠️ Anything reading that table for STAGE history must exclude or label
+ *   `advance_shawl`, or a shawl move reads as a sash move (getOrder's stage_history does).
+ */
+async function performShawlAdvance(piece, user, to) {
+  const from = piece.status;
+  const updated = await tx(async (client) => {
+    const { rows } = await client.query(
+      `UPDATE sash_shawl_pieces
+          SET status = $1, working_staff_id = NULL, working_since = NULL, updated_at = NOW()
+        WHERE id = $2 RETURNING id, status::text AS status`,
+      [to, piece.id]
+    );
+    await client.query(
+      `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
+       VALUES ($1, 'status_change', 'shawl_piece', $2, $3)`,
+      [user.id, piece.id,
+       JSON.stringify({ from, to, by: user.staff_type || user.role, carrier_order_id: piece.carrier_order_id })]
+    );
+    await client.query(
+      `INSERT INTO staff_activity_log (user_id, action, order_id, from_stage, to_stage)
+       VALUES ($1, 'advance_shawl', $2, $3, $4)`,
+      [user.id, piece.carrier_order_id, from, to]
+    );
+    return rows[0];
+  });
+  // The console watches the CARRIER's id — the piece has no channel of its own — so this is
+  // what refreshes the queue for everyone looking at that job.
+  emitOrderChanged(piece.carrier_order_id, updated.status);
+  return updated;
+}
+
+/**
+ * The شال piece's detail payload — the same envelope getOrder returns for an order, so the
+ * existing page renders it with no new branch.
+ *
+ * ⚠️ NO CONTACT AND NO MONEY, for anyone. Not a strip like getOrder's: there is simply
+ * nothing to send. The shawl's price lives on the carrier وشاح and is reported there, and a
+ * figure here would read as a second sale of one garment. If this ever needs the student's
+ * phone, take it from the carrier through the SAME canSeeContact rule getOrder applies —
+ * never unconditionally.
+ */
+async function shawlOrderDetail(piece, user) {
+  const row = shawlPiece.toQueueRow(piece);
+  const to = shawlPiece.nextStageFor(piece);
+  const back = shawlPiece.revertTargetFor(piece);
+  const canAdvance = !!to && to !== 'delivered' && !shawlAdvanceRefusal(piece, user, to);
+  const canRevert =
+    !!back && staffScopeAllows(user, piece.wholesaler_id == null) &&
+    canStaffTransition(user, piece.status, back);
+
+  // «منو نقلها؟» for the shawl alone. Keyed on the carrier's order_id (the FK), narrowed to
+  // this piece's own action so a sash move never appears in a shawl's history.
+  const hist = await query(
+    `SELECT sal.action, sal.from_stage::text AS from_stage, sal.to_stage::text AS to_stage,
+            sal.created_at, su.name AS staff_name
+       FROM staff_activity_log sal
+       LEFT JOIN users su ON su.id = sal.user_id
+      WHERE sal.order_id = $1 AND sal.action = 'advance_shawl' AND sal.to_stage IS NOT NULL
+      ORDER BY sal.created_at ASC`,
+    [piece.carrier_order_id]
+  );
+
+  return {
+    order: {
+      ...row,
+      // The carrier is named so a worker holding the shawl can open the وشاح it belongs to.
+      carrier_order_id: piece.carrier_order_id,
+      status_label: STATUS_LABEL_AR[piece.status] || piece.status,
+    },
+    design: null,
+    // The student's own words + reference photo for this shawl, in the shape the items list
+    // already renders. `plate_image_url` is null by construction — a shawl is never
+    // calligraphy — so the gallery shows the reference photo as the reference it is.
+    items: piece.shawl_note || piece.shawl_image
+      ? [{
+          id: `${piece.id}-spec`,
+          label_snapshot: shawlPiece.SHAWL_PRODUCT_NAME,
+          price_snapshot: null,
+          qty: 1,
+          customer_image_url: piece.shawl_image || null,
+          plate_image_url: null,
+          customer_text: piece.shawl_note || null,
+          group_id: null,
+          option_id: null,
+        }]
+      : [],
+    bundle: null,
+    package_orders: null,
+    can_see_design: false,
+    embroidery_zones: [],
+    stage_history: hist.rows.map((r) => ({
+      action: r.action,
+      from_stage: r.from_stage,
+      to_stage: r.to_stage,
+      from_label: STATUS_LABEL_AR[r.from_stage] || r.from_stage,
+      to_label: STATUS_LABEL_AR[r.to_stage] || r.to_stage,
+      staff_name: r.staff_name || null,
+      at: r.created_at,
+    })),
+    available_actions: {
+      advance: canAdvance
+        ? { to, label: ADVANCE_LABEL_AR[`${piece.status}→${to}`] ?? 'تقدم للمرحلة التالية' }
+        : null,
+      revert: canRevert ? { to: back } : null,
+      can_approve: false,
+      can_reject: false,
+      // A shawl is not the student's order, so it cannot be handed back to them, edited as a
+      // طقم, deleted on its own, or given artwork. All of those belong to the carrier وشاح.
+      return_to_customer: false,
+      can_upload_final_design: false,
+      can_delete: false,
+      can_edit: false,
+      can_edit_full_set: false,
+    },
+    view: { layout: 'full' },
+  };
+}
+
 async function advance(req, res) {
   const { id } = req.params;
   const order = await loadAdvanceRow(id);
-  if (!order) return res.status(404).json({ error: 'الطلب غير موجود', code: 'ERR_NOT_FOUND' });
+  if (!order) {
+    // Not an order — is it a شال امريكي piece? (lib/shawlPiece.js: the id space is
+    // transparent on purpose, so the station consoles need no branch of their own.)
+    const piece = await shawlPiece.loadPiece(id);
+    if (piece) {
+      const to = shawlPiece.nextStageFor(piece);
+      const refusal = shawlAdvanceRefusal(piece, req.user, to);
+      if (refusal) return res.status(refusal.status).json({ error: refusal.message, code: refusal.code });
+      if (to === 'delivered') {
+        // Same rule as an order: hand-off details are captured by /deliver, and a shawl has
+        // no delivery row of its own — it is handed over inside its طقم.
+        return res.status(409).json({ error: 'التسليم يتم من الوشاح نفسه', code: 'ERR_INVALID_TRANSITION' });
+      }
+      const updated = await performShawlAdvance(piece, req.user, to);
+      return res.json({ data: updated });
+    }
+    return res.status(404).json({ error: 'الطلب غير موجود', code: 'ERR_NOT_FOUND' });
+  }
   if (!staffScopeAllows(req.user, order.wholesaler_id == null)) {
     return res.status(403).json({ error: 'هذا الطلب خارج نطاقك', code: 'ERR_FORBIDDEN' });
   }
@@ -1241,7 +1466,24 @@ async function advanceBulk(req, res) {
   let advanced = 0;
   for (const id of ids) {
     const order = await loadAdvanceRow(id);
-    if (!order) { results.push({ id, ok: false, reason: 'not_found' }); continue; }
+    if (!order) {
+      // A شال امريكي piece — see advance()'s fallback. Same guards, same reasons, so a
+      // mixed selection of sashes and shawls reports one consistent result list.
+      const piece = await shawlPiece.loadPiece(id);
+      if (!piece) { results.push({ id, ok: false, reason: 'not_found' }); continue; }
+      const to = shawlPiece.nextStageFor(piece);
+      const refusal = shawlAdvanceRefusal(piece, req.user, to);
+      if (refusal) { results.push({ id, ok: false, reason: refusal.reason }); continue; }
+      if (to === 'delivered') { results.push({ id, ok: false, reason: 'needs_delivery' }); continue; }
+      try {
+        const updated = await performShawlAdvance(piece, req.user, to);
+        advanced++;
+        results.push({ id, ok: true, status: updated.status });
+      } catch {
+        results.push({ id, ok: false, reason: 'error' });
+      }
+      continue;
+    }
     if (!staffScopeAllows(req.user, order.wholesaler_id == null)) {
       results.push({ id, ok: false, reason: 'forbidden' }); continue;
     }
@@ -1358,7 +1600,39 @@ async function revert(req, res) {
      FROM orders o JOIN students s ON s.id = o.student_id WHERE o.id = $1`,
     [id]
   );
-  if (!cur.rows.length) return res.status(404).json({ error: 'الطلب غير موجود', code: 'ERR_NOT_FOUND' });
+  if (!cur.rows.length) {
+    // A شال امريكي piece — one step back on its own little ladder. It never visited
+    // التصميم/التطريز, so `revertTargetFor` stops at الكوي rather than inventing a stage
+    // the garment was never at (the same reasoning `resolveRevertTarget` applies to a
+    // plain piece).
+    const piece = await shawlPiece.loadPiece(id);
+    if (!piece) return res.status(404).json({ error: 'الطلب غير موجود', code: 'ERR_NOT_FOUND' });
+    if (!staffScopeAllows(req.user, piece.wholesaler_id == null)) {
+      return res.status(403).json({ error: 'هذا الطلب خارج نطاقك', code: 'ERR_FORBIDDEN' });
+    }
+    const back = shawlPiece.revertTargetFor(piece);
+    if (!back) return res.status(409).json({ error: 'لا يمكن التراجع عن هذه الحالة', code: 'ERR_INVALID_TRANSITION' });
+    if (!canStaffTransition(req.user, piece.status, back)) {
+      return res.status(403).json({ error: 'ممنوع', code: 'ERR_FORBIDDEN' });
+    }
+    const moved = await tx(async (client) => {
+      const { rows } = await client.query(
+        `UPDATE sash_shawl_pieces
+            SET status = $1, working_staff_id = NULL, working_since = NULL, updated_at = NOW()
+          WHERE id = $2 RETURNING id, status::text AS status`,
+        [back, piece.id]
+      );
+      await client.query(
+        `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
+         VALUES ($1, 'status_revert', 'shawl_piece', $2, $3)`,
+        [req.user.id, piece.id,
+         JSON.stringify({ from: piece.status, to: back, carrier_order_id: piece.carrier_order_id })]
+      );
+      return rows[0];
+    });
+    emitOrderChanged(piece.carrier_order_id, moved.status);
+    return res.json({ data: moved });
+  }
   const order = cur.rows[0];
   if (!staffScopeAllows(req.user, order.wholesaler_id == null)) {
     return res.status(403).json({ error: 'هذا الطلب خارج نطاقك', code: 'ERR_FORBIDDEN' });
@@ -1502,7 +1776,40 @@ async function claim(req, res) {
      WHERE o.id = $1`,
     [id]
   );
-  if (!cur.rows.length) return res.status(404).json({ error: 'الطلب غير موجود', code: 'ERR_NOT_FOUND' });
+  if (!cur.rows.length) {
+    // A شال امريكي piece. Presence works the same way for it — two workers must not both
+    // think they have the garment — but it is stored on `sash_shawl_pieces`, and its claim
+    // is NOT written to `staff_activity_log`: that table's order_id is FK'd to `orders`, and
+    // logging the claim against the CARRIER would make «who is on this وشاح» name someone
+    // who is holding the shawl instead. The heartbeat is enough; the audit of a shawl's
+    // MOVES lives in audit_log (performShawlAdvance).
+    const piece = await shawlPiece.loadPiece(id);
+    if (!piece) return res.status(404).json({ error: 'الطلب غير موجود', code: 'ERR_NOT_FOUND' });
+    if (!staffScopeAllows(req.user, piece.wholesaler_id == null)) {
+      return res.status(403).json({ error: 'هذا الطلب خارج نطاقك', code: 'ERR_FORBIDDEN' });
+    }
+    const ageSeconds = piece.working_since
+      ? (Date.now() - new Date(piece.working_since).getTime()) / 1000
+      : null;
+    const takenByOther =
+      piece.working_staff_id &&
+      piece.working_staff_id !== req.user.id &&
+      ageSeconds != null && ageSeconds < PRESENCE_TTL_SECONDS;
+    if (takenByOther) {
+      return res.json({
+        data: {
+          claimed: false,
+          working_staff_id: piece.working_staff_id,
+          working_staff_name: piece.working_staff_name_raw,
+        },
+      });
+    }
+    await query(
+      `UPDATE sash_shawl_pieces SET working_staff_id = $1, working_since = NOW() WHERE id = $2`,
+      [req.user.id, id]
+    );
+    return res.json({ data: { claimed: true, working_staff_id: req.user.id, working_staff_name: req.user.name } });
+  }
   const row = cur.rows[0];
   if (!staffScopeAllows(req.user, row.wholesaler_id == null)) {
     return res.status(403).json({ error: 'هذا الطلب خارج نطاقك', code: 'ERR_FORBIDDEN' });
@@ -1558,7 +1865,19 @@ async function release(req, res) {
      FROM orders o JOIN students s ON s.id = o.student_id WHERE o.id = $1`,
     [id]
   );
-  if (!cur.rows.length) return res.status(404).json({ error: 'الطلب غير موجود', code: 'ERR_NOT_FOUND' });
+  if (!cur.rows.length) {
+    // A شال امريكي piece — same rule, its own table. See claim()'s fallback.
+    const piece = await shawlPiece.loadPiece(id);
+    if (!piece) return res.status(404).json({ error: 'الطلب غير موجود', code: 'ERR_NOT_FOUND' });
+    if (!isManager(req.user) && piece.working_staff_id !== req.user.id) {
+      return res.status(403).json({ error: 'ممنوع', code: 'ERR_FORBIDDEN' });
+    }
+    await query(
+      `UPDATE sash_shawl_pieces SET working_staff_id = NULL, working_since = NULL WHERE id = $1`,
+      [id]
+    );
+    return res.json({ data: { released: true } });
+  }
   const order = cur.rows[0];
   // Only the claimer or a manager/admin may release
   if (!isManager(req.user) && order.working_staff_id !== req.user.id) {
