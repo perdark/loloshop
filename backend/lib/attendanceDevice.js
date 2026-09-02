@@ -25,6 +25,13 @@ const { localParts, DEFAULT_TZ } = require('./shopTime');
 
 const REASON_UNMAPPED = 'رقم الجهاز غير مرتبط بأي موظف';
 const REASON_OVERRIDDEN = 'اليوم بحالة معدَّلة من الإدارة، ما ينلمس';
+// ⚠️ THE ONE THING AN `overridden` DAY STILL ACCEPTS. An admin who corrects a check-in has
+// ruled on when the worker ARRIVED; they have not declared the day finished. Before this,
+// every departure punch on a repaired day was stored and ignored, so nobody checked out —
+// measured on prod 2026-09-01, when repairing seven collapsed batch timestamps froze the
+// whole day and محمد عادل's 22:41 خروج vanished. See the guard in applyPunch for what stays
+// frozen: check_in_at, late_minutes, status, and every break (breaks post to salary).
+const REASON_OVERRIDDEN_OUT = 'خروج مسجّل على يوم معدَّل من الإدارة';
 const REASON_NOT_REQUIRED = 'الموظف معفى من شرط البصمة';
 const REASON_BETWEEN = 'بصمة وقعت بين وقتي الدخول والخروج المسجلين';
 // A break edge is NOT an error — the reason column doubles as "what this punch meant", and
@@ -100,13 +107,20 @@ async function markPunch(client, punchId, { userId = null, attendanceId = null, 
  * scheduled end — plus any break still `out` inside it, flagged `auto_closed` so an admin can
  * tell it apart from a real عودة.
  *
- * ⚠️ Only touches days STRICTLY BEFORE the one starting now, and never an `overridden` row.
- * A day the admin has ruled on stays exactly as they left it, open or not.
+ * ⚠️ Only touches days STRICTLY BEFORE the one starting now.
+ *
+ * ⚠️ AN `overridden` DAY IS CLOSED TOO — owner decision 2026-09-01, reversing the original
+ * rule. It used to be excluded on the reasoning that "a day the admin has ruled on stays
+ * exactly as they left it, open or not", and the cost of that was a repaired day nobody could
+ * ever close: derivation refused the departure punch (rule 5) AND this refused to close it, so
+ * the row stayed open forever and kept tripping the openTooLong alert. An override says when
+ * someone ARRIVED; it does not say the day never ended. Only `check_out_at` is written here —
+ * check_in_at, late_minutes and status are still untouchable.
  */
 async function closeStaleOpenDay(client, userId, newWorkDate, settings, timeZone) {
   const { rows } = await client.query(
     `SELECT * FROM staff_attendance_records
-      WHERE user_id = $1 AND work_date < $2 AND check_out_at IS NULL AND status <> 'overridden'
+      WHERE user_id = $1 AND work_date < $2 AND check_out_at IS NULL
       ORDER BY work_date DESC
       LIMIT 1
       FOR UPDATE`,
@@ -265,15 +279,57 @@ async function applyPunch(client, punch) {
 
   const row = existing.rows[0];
 
-  // Rule 5 — an admin has ruled on this day. Never touch it, whatever the punch says.
-  if (row.status === 'overridden') {
-    await markPunch(client, punch.id, { userId, attendanceId: row.id, ignoredReason: REASON_OVERRIDDEN });
-    return 'ignored';
-  }
-
   const punchedAtMs = punchedAt.getTime();
   const checkInAtMs = new Date(row.check_in_at).getTime();
   const checkOutAtMs = row.check_out_at ? new Date(row.check_out_at).getTime() : null;
+
+  // "Is the shop shut for this worker" — the clock test the sequence rule below is built on.
+  // Computed HERE rather than beside that rule because rule 5 needs it too: it is the whole
+  // difference between a departure and a break edge on an `overridden` day.
+  const hasHours = !!(shift.start_time && shift.end_time);
+  let shiftIsOver = false;
+  if (hasHours) {
+    const startM = schedule.timeToMinutes(shift.start_time);
+    const endM = schedule.timeToMinutes(shift.end_time) + (shift.crosses_midnight ? 24 * 60 : 0);
+    // Same normalisation lateMinutesFor uses: after midnight on a crossing shift, "minutes
+    // since midnight" is tiny and would read as long before the start.
+    const nowM = shift.crosses_midnight && shift.minutes_now < startM
+      ? shift.minutes_now + 24 * 60
+      : shift.minutes_now;
+    shiftIsOver = nowM >= endM;
+  }
+
+  // ─── Rule 5 — an admin has ruled on this day ─────────────────────────────────────────
+  // Almost nothing may touch it. The ONE exception is the worker going home: an override
+  // fixes when someone ARRIVED, it does not declare the day over, and freezing the whole row
+  // meant a repaired day could never be checked out of by anybody (prod, 2026-09-01).
+  //
+  // ⚠️ DELIBERATELY NARROWER THAN A NORMAL DAY, and each exclusion is load-bearing:
+  //   · Only when `check_out_at IS NULL` — a checkout the admin already wrote is never moved.
+  //   · Only once the shift is over. A mid-shift punch on a normal day opens a خروج مؤقت, and
+  //     break minutes ARE posted to salary (lib/attendanceBreak.js); an overridden day never
+  //     grew those break rows, so inventing them here would bill against hours an admin set
+  //     by hand. Money stays out of an override.
+  //   · check_in_at, late_minutes, deduction_amount and status are never rewritten — the
+  //     admin's correction is exactly what this rule exists to protect.
+  // A worker on a midnight-crossing shift can therefore still not close their own day; that
+  // is not a gap, it is closeStaleOpenDay's job, on an overridden row as on any other.
+  if (row.status === 'overridden') {
+    if (checkOutAtMs == null && shiftIsOver && punchedAtMs > checkInAtMs) {
+      await client.query(
+        `UPDATE staff_attendance_records SET check_out_at = $2, updated_at = NOW() WHERE id = $1`,
+        [row.id, punchedAt]
+      );
+      await markPunch(client, punch.id, {
+        userId,
+        attendanceId: row.id,
+        ignoredReason: REASON_OVERRIDDEN_OUT,
+      });
+      return 'extended';
+    }
+    await markPunch(client, punch.id, { userId, attendanceId: row.id, ignoredReason: REASON_OVERRIDDEN });
+    return 'ignored';
+  }
 
   // ─────────────────────────────────────────────────────────────────────────────────────
   // THE SEQUENCE RULE — owner decision 2026-08-30. A day reads:
@@ -295,18 +351,7 @@ async function applyPunch(client, punch) {
   // every break the moment the shop stopped using the phone's request flow. There is no إذن
   // to ask for at a sensor: the finger IS the record. (`ffcb0ce` removes الإذن from the money
   // rule outright; this line is what keeps the two consistent until that branch merges.)
-  const hasHours = !!(shift.start_time && shift.end_time);
-  let shiftIsOver = false;
-  if (hasHours) {
-    const startM = schedule.timeToMinutes(shift.start_time);
-    const endM = schedule.timeToMinutes(shift.end_time) + (shift.crosses_midnight ? 24 * 60 : 0);
-    // Same normalisation lateMinutesFor uses: after midnight on a crossing shift, "minutes
-    // since midnight" is tiny and would read as long before the start.
-    const nowM = shift.crosses_midnight && shift.minutes_now < startM
-      ? shift.minutes_now + 24 * 60
-      : shift.minutes_now;
-    shiftIsOver = nowM >= endM;
-  }
+  // (`hasHours` / `shiftIsOver` are computed above rule 5, which needs the same test.)
 
   // A punch that is not the earliest of the day and lands while the shop is still open is a
   // break edge. `openBreakFor` is scoped to the worker, not the day, which is what closes a

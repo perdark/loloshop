@@ -484,24 +484,88 @@ test('8b. an unclaimed punch still LISTS and still REPLAYS — it carries REASON
   fx.pins.push(orphanPin);
 });
 
-test('9. a record with status=overridden is left completely untouched by a later punch', async () => {
-  const userId = await mkStaff();
+/**
+ * RULE 5 — what an `overridden` day does and does not accept.
+ *
+ * The day is frozen against derivation with exactly one hole in it: the worker going home.
+ * Before that hole existed, repairing a day's check-in froze it so hard that NOBODY could
+ * check out of it — measured on prod 2026-09-01, seven workers, zero checkouts. Each test
+ * below pins one edge of the hole, and 9a is the original "never touched" assertion kept
+ * intact for the mid-shift case it still covers.
+ *
+ * ⚠️ These use replay(), not ingest(): ingest stamps punched_at with NOW, so «is the shift
+ * over» would be decided by the wall clock the suite happens to run at.
+ */
+async function overriddenDay(punchLocal, { checkOut = null } = {}) {
+  const userId = await mkStaff();               // 09:00 → 22:00, grace 0
   const pin = await mkPin(userId);
-  const p1 = mkPunch(pin, '2027-01-17 09:04:00');
-  await ingest([p1]);
-
+  await replay([mkPunch(pin, '2027-01-17 09:04:00')]);
   await query(
-    `UPDATE staff_attendance_records SET status = 'overridden', check_out_at = NULL, admin_note_ar = $2
+    `UPDATE staff_attendance_records
+        SET status = 'overridden', check_out_at = $3, admin_note_ar = $2
       WHERE user_id = $1`,
-    [userId, `${TAG}-admin ruled on this day`]
+    [userId, `${TAG}-admin ruled on this day`, checkOut]
   );
   const before = (await query(`SELECT * FROM staff_attendance_records WHERE user_id = $1`, [userId])).rows[0];
-
-  const p2 = mkPunch(pin, '2027-01-17 20:00:00');
-  await ingest([p2]);
-
+  const actions = (await replay([mkPunch(pin, punchLocal)])).actions;
   const after = (await query(`SELECT * FROM staff_attendance_records WHERE user_id = $1`, [userId])).rows[0];
-  assert.deepEqual(after, before, 'an overridden row must never be written to by a device punch');
+  return { userId, pin, before, after, actions };
+}
+
+test('9a. an overridden day ignores a punch while the shop is still open (no break is invented)', async () => {
+  const { userId, before, after, actions } = await overriddenDay('2027-01-17 20:00:00');
+  assert.deepEqual(after, before, 'an overridden row must not be written to mid-shift');
+  assert.deepEqual(actions, ['ignored']);
+  const { rows } = await query(`SELECT count(*)::int AS n FROM staff_attendance_breaks WHERE user_id = $1`, [userId]);
+  assert.equal(rows[0].n, 0, 'break minutes post to salary — an override must never grow one');
+});
+
+test('9b. an overridden day with no checkout DOES accept the departure punch', async () => {
+  const { before, after, actions } = await overriddenDay('2027-01-17 22:10:00');
+  assert.deepEqual(actions, ['extended']);
+  assert.equal(
+    new Date(after.check_out_at).toISOString(),
+    zonedToUtc('2027-01-17 22:10:00', 'Asia/Baghdad').toISOString(),
+    'the departure punch must land as the checkout'
+  );
+  // Everything the admin ruled on is still theirs.
+  assert.equal(new Date(after.check_in_at).getTime(), new Date(before.check_in_at).getTime());
+  assert.equal(after.late_minutes, before.late_minutes);
+  assert.equal(after.deduction_amount, before.deduction_amount);
+  assert.equal(after.status, 'overridden');
+  assert.equal(after.admin_note_ar, before.admin_note_ar);
+});
+
+test('9c. an overridden day that already has a checkout is never moved', async () => {
+  const { before, after, actions } = await overriddenDay('2027-01-17 23:30:00', {
+    checkOut: zonedToUtc('2027-01-17 22:05:00', 'Asia/Baghdad'),
+  });
+  assert.deepEqual(after, before, "an admin's own checkout must not be overwritten");
+  assert.deepEqual(actions, ['ignored']);
+});
+
+test('9d. the NEXT day closes an overridden open day at its own scheduled end', async () => {
+  const userId = await mkStaff();               // 09:00 → 22:00
+  const pin = await mkPin(userId);
+  await replay([mkPunch(pin, '2027-01-17 09:04:00')]);
+  await query(
+    `UPDATE staff_attendance_records SET status = 'overridden', check_out_at = NULL WHERE user_id = $1`,
+    [userId]
+  );
+
+  await replay([mkPunch(pin, '2027-01-18 09:04:00')]);
+
+  const { rows } = await query(
+    `SELECT work_date, check_out_at, status FROM staff_attendance_records
+      WHERE user_id = $1 AND work_date = '2027-01-17'`,
+    [userId]
+  );
+  assert.equal(
+    new Date(rows[0].check_out_at).toISOString(),
+    zonedToUtc('2027-01-17 22:00:00', 'Asia/Baghdad').toISOString(),
+    'a repaired day nobody punched out of must still close at the shift end, not stay open forever'
+  );
+  assert.equal(rows[0].status, 'overridden', 'closing it must not clear the admin ruling');
 });
 
 /**
