@@ -268,10 +268,15 @@ export function StaffSidebar({ user, open, onClose }: StaffSidebarProps) {
         : [];
   const baseLinks = getNavLinks(myTypes, isAdmin);
 
-  // Calligraphy tool: admin + manager/designer staff (matches the backend guard
-  // requireStaffType('designer')).
+  // Calligraphy tool: admin + manager/designer/embroiderer staff (mirrors
+  // `backend/lib/calligraphyAccess.js`'s `TOOL_STAFF_TYPES`, not
+  // `requireStaffType('designer')` — embroiderer opens the tool since 2026-09-02 but
+  // still cannot push to embroidery, see `PUSH_STAFF_TYPES` / CalligraphyTool.tsx).
   const canCalligraphy =
-    isAdmin || myTypes.includes("manager") || myTypes.includes("designer");
+    isAdmin ||
+    myTypes.includes("manager") ||
+    myTypes.includes("designer") ||
+    myTypes.includes("embroiderer");
   // أيادي التصميم desk — محمد هيثم (manager) leads it from his staff account
   // (2026-07-15). Backend membership gates the data; the link shows for managers.
   const canDesignSupport = myTypes.includes("manager");

@@ -1,5 +1,41 @@
 # Progress
 
+## 2026-09-02 — ✒️ محمد عماد (مطرّز) صار يفتح أداة الخط العربي
+
+طلب صاحب المحل: «التطريز محمد عماد عنده شغل هواي — خليه يكدر يصمم ويستعمل الخط العربي».
+هذا التغيير يفتح له الأداة **بس** — «تحويل للتطريز» باقي للمصمم، ما تغيّر ولا حرف بيه.
+
+**الباك إند** — `backend/lib/calligraphyAccess.js` (جديد): سؤالين منفصلين عن قصد،
+`mayUseTool` (admin + manager · designer · **embroiderer**) و `mayPushOrder`
+(admin + manager · designer، **بدون** المطرّز). `routes/calligraphy.js` صار يستعملهم بدل
+الشرطين المكتوبين بالإيد. فحص `design_helper` بقاعدة البيانات ما انلمس، وترتيبه تحت
+`mayUseTool` شيء مقصود — `mayUseTool` يرجّع false لدور `design_helper`، فلازم يمرّ عليه أولاً.
+`backend/test/calligraphyAccess.test.js`: ٥ اختبارات، منها المطرّز يفتح الأداة وما يكدر يحوّل،
+والموظف متعدد الأدوار (كوّاي + مطرّز) يفتحها.
+
+**الفرونت إند** — ما بيه package مشترك بين التطبيقين، فالقائمة منسوخة بالإيد بثلاث أماكن:
+· `frontend/app/staff/calligraphy/page.tsx` — شرط `allowed` صار يشمل `embroiderer`، ونص المنع
+  صار «أداة الخط العربي مخصّصة للمصممين والمطرّزين والمديرين فقط».
+· `frontend/components/staff/StaffSidebar.tsx` — نفس الشرط بـ `canCalligraphy`، والتعليق فوقه
+  ما عاد يدّعي إنه يطابق `requireStaffType('designer')` — صار يقول إنه يعكس `TOOL_STAFF_TYPES`.
+· `frontend/components/calligraphy/CalligraphyTool.tsx` — **`canSendOrders` ما انتغيّر، عمداً.**
+  باقي `admin || staff(designer|manager)`. تعليق واحد انضاف يوضّح هذا.
+
+**التحقق (متصفح حقيقي، نسخة قاعدة البيانات المحلية):** دخول محمد عماد → «الخط العربي» تظهر
+بالقائمة، الأداة تفتح، وما بيها ولا زر «تحويل للتطريز» بكل الصفحة. دخول الكوّاي محمد عادل →
+الصفحة تطلع «غير مصرّح»، ما بيه رابط بالقائمة، والـ API يرجّع 403.
+⚠️ **ما انقاس على عرض تلفون (390px).** أداة تصغير النافذة ما تشتغل على هذا الجهاز،
+و`X-Frame-Options: DENY` يمنع الـ iframe حتى محلياً. كل الفحص أعلاه وظيفي بعرض سطح المكتب.
+
+`cd frontend && npx tsc --noEmit && npm run lint` — نظيفين (٠ أخطاء؛ تحذيرات lint الستة كلها
+داخل `android/app/build/…/native-bridge.js` وهو ملف بناء، مو من هذا التغيير).
+
+⚠️ **مولّد ملفات التطريز (DST) مو داخل هذا الفرع.** انشال بطلب صاحب المحل (٢٠٢٦-٠٩-٠٢):
+«drop DST, it's not done yet». الشغل محفوظ كامل على فرع `feat/calligraphy-dst` وما انحذف
+منه شي — بس ما راح يُشحن حتى ينخاط ملف واحد على الماكنة الحقيقية. هذا الفرع يعطي محمد عماد
+الأداة بس، وهذا يخلّي ذاك الفحص ممكن أصلاً؛ قبله ما كان يكدر يفتح `/staff/calligraphy` أبداً.
+
+
 ## 2026-08-31 — 🧣 The American shawl was never تطريز, and the line was hiding work from the people who do it
 
 Owner report, two symptoms: «محمد عادل can't see all the American shawls» and «140 orders at
