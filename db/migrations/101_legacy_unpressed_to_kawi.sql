@@ -12,8 +12,9 @@
 --   oldest affected 2026-06-25  ·  newest affected 2026-07-15  ·  created after 07-15: 0
 --
 -- WHAT THIS MIGRATION DOES, AND THE THREE THINGS IT REFUSES TO TOUCH.
--- It moves the 248 still sitting at 'preparing' back to 'pressing' so they enter المكوجي's
--- queue. It deliberately leaves alone:
+-- It moves the ~248 still sitting at 'preparing' back to 'pressing' so they enter المكوجي's
+-- queue (249 on the live run — one more order had reached التجهيز in the meantime). It
+-- deliberately leaves alone:
 --
 --   · 43 at 'ready' and 1 'delivered' — a delivered garment cannot be un-delivered, and pulling
 --     «جاهز» backwards would tell a student their finished order regressed. If any of those were
@@ -42,8 +43,9 @@ BEGIN;
 -- person here is the exact mistake this whole finding was about.
 ALTER TABLE staff_activity_log ALTER COLUMN user_id DROP NOT NULL;
 
--- The undo. Keyed by batch so one UPDATE puts every row back exactly where it was, which
--- matters because 248 orders is 248 students who can see their own status.
+-- The undo. Every moved order is recorded with the status it had, so one UPDATE puts them all
+-- back — see the statement at the foot of this file, and read the note there about why it is
+-- keyed on the table rather than on `batch_id`.
 CREATE TABLE IF NOT EXISTS legacy_pressing_restore_log (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   batch_id    uuid NOT NULL,
@@ -120,11 +122,16 @@ END $$;
 
 COMMIT;
 
--- UNDO (one statement, run it against the batch_id printed above):
+-- UNDO — keyed on the TABLE, not on a batch_id, and that is deliberate. This file is a
+-- one-time correction, so every row in that log belongs to it; and the first prod run went
+-- through db/schema.sql's copy, which used `SELECT gen_random_uuid(), …` and therefore stamped
+-- 249 rows with 249 different batch ids (fixed there now, but those rows stay as they are). A
+-- rollback that depends on a single batch would have undone exactly one order. `batch_id` is
+-- kept for grouping, never as the key to the undo.
 --
 --   UPDATE orders o SET status = l.old_status::order_status
 --     FROM legacy_pressing_restore_log l
---    WHERE o.id = l.order_id AND l.batch_id = '<batch>' AND o.status::text = l.new_status;
+--    WHERE o.id = l.order_id AND o.status::text = l.new_status;
 --   DELETE FROM staff_activity_log
 --    WHERE action = 'route_fix'
---      AND order_id IN (SELECT order_id FROM legacy_pressing_restore_log WHERE batch_id = '<batch>');
+--      AND order_id IN (SELECT order_id FROM legacy_pressing_restore_log);

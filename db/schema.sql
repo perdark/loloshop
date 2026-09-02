@@ -1899,8 +1899,18 @@ CREATE TABLE IF NOT EXISTS legacy_pressing_restore_log (
 CREATE INDEX IF NOT EXISTS idx_legacy_pressing_restore_batch
   ON legacy_pressing_restore_log (batch_id);
 
+-- ⚠️ ONE batch_id FOR THE WHOLE RUN, WHICH IS WHY THIS IS A DO BLOCK AND NOT A PLAIN INSERT.
+-- `gen_random_uuid()` is VOLATILE, so `SELECT gen_random_uuid(), o.id, …` evaluates it once PER
+-- ROW: the first prod run of this file stamped 249 rows with 249 different batch ids, which made
+-- the one-statement rollback below undo exactly one order. The data was never at risk — every
+-- order_id and old_status is recorded either way — but a rollback recipe that does not work is
+-- worse than none, because it is discovered while trying to use it. The undo is keyed on the
+-- table, not on a batch, for the same reason.
+DO $legacy101$
+DECLARE v_batch uuid := gen_random_uuid();
+BEGIN
 INSERT INTO legacy_pressing_restore_log (batch_id, order_id, old_status, new_status)
-SELECT gen_random_uuid(), o.id, 'preparing', 'pressing'
+SELECT v_batch, o.id, 'preparing', 'pressing'
   FROM orders o
   JOIN products p ON p.id = o.product_id
  WHERE o.status = 'preparing'
@@ -1914,6 +1924,8 @@ SELECT gen_random_uuid(), o.id, 'preparing', 'pressing'
                     WHERE a.entity = 'order' AND a.entity_id = o.id
                       AND a.action IN ('status_change', 'status_revert')
                       AND (a.details->>'to' = 'pressing' OR a.details->>'from' = 'pressing'));
+END
+$legacy101$;
 
 -- NULL user = «the system corrected a route», never a worker. See the staff_activity_log header.
 INSERT INTO staff_activity_log (user_id, action, order_id, from_stage, to_stage)
@@ -1926,3 +1938,62 @@ UPDATE orders o
    SET status = 'pressing', working_staff_id = NULL, working_since = NULL
   FROM legacy_pressing_restore_log l
  WHERE o.id = l.order_id AND o.status = 'preparing' AND l.new_status = 'pressing';
+
+-- =====================================================
+-- 102 — LEGACY شال امريكي: WRONG needs_pressing FLAG, SO 101 COULD NOT SEE THEM
+-- =====================================================
+-- ⚠️ REPEATED FROM db/migrations/102_legacy_shawls_to_kawi.sql — the 077/080/093/101 pattern.
+-- Read that file's header for the measurement. In one line: 101 filtered on
+-- `needs_pressing = TRUE` (which is what correctly keeps 452 CAPS out of الكوي), and that same
+-- filter excluded 57 شال whose flag is simply wrong — every shawl created since the 2026-07-15
+-- routing change carries TRUE, and 500+ of them are standing in الكوي right now.
+--
+-- ⚠️ THE FLAG IS CORRECTED TOO, AND THAT IS THE HALF THAT LASTS. `nextStageFor` reads
+-- `needs_pressing` on every advance out of التطريز and `resolveRevertTarget` on every step back;
+-- moving the piece without fixing the flag would be right once and wrong forever after.
+--
+-- ⚠️ `type = 'shawl'` IS SPELLED OUT, NOT `type <> 'cap'`. This is a claim about one garment
+-- whose flag was measured to be wrong — not a licence to normalise the column catalogue-wide.
+ALTER TABLE legacy_pressing_restore_log
+  ADD COLUMN IF NOT EXISTS old_needs_pressing BOOLEAN;
+
+DO $legacy102$
+DECLARE
+  v_batch uuid := gen_random_uuid();
+BEGIN
+  CREATE TEMP TABLE _legacy_shawls ON COMMIT DROP AS
+    SELECT o.id
+      FROM orders o
+      JOIN products p ON p.id = o.product_id
+     WHERE o.status = 'preparing'
+       AND p.type = 'shawl'
+       AND o.needs_pressing = FALSE
+       AND o.created_at < DATE '2026-07-16'
+       AND NOT EXISTS (SELECT 1 FROM staff_activity_log l
+                        WHERE l.order_id = o.id
+                          AND (l.from_stage = 'pressing' OR l.to_stage = 'pressing'))
+       AND NOT EXISTS (SELECT 1 FROM audit_log a
+                        WHERE a.entity = 'order' AND a.entity_id = o.id
+                          AND a.action IN ('status_change', 'status_revert')
+                          AND (a.details->>'to' = 'pressing' OR a.details->>'from' = 'pressing'));
+
+  IF (SELECT count(*) FROM _legacy_shawls) = 0 THEN RETURN; END IF;
+
+  INSERT INTO legacy_pressing_restore_log (batch_id, order_id, old_status, new_status, old_needs_pressing)
+  SELECT v_batch, id, 'preparing', 'pressing', FALSE FROM _legacy_shawls;
+
+  UPDATE orders o
+     SET status = 'pressing', needs_pressing = TRUE,
+         working_staff_id = NULL, working_since = NULL
+    FROM _legacy_shawls t WHERE o.id = t.id;
+
+  INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
+  SELECT NULL, 'status_change', 'order', id,
+         jsonb_build_object('by', 'migration:102-legacy-shawls', 'from', 'preparing',
+           'to', 'pressing', 'needs_pressing', 'false→true', 'batch_id', v_batch)
+    FROM _legacy_shawls;
+
+  INSERT INTO staff_activity_log (user_id, action, order_id, from_stage, to_stage)
+  SELECT NULL, 'route_fix', id, 'preparing', 'pressing' FROM _legacy_shawls;
+END
+$legacy102$;
