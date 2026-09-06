@@ -51,6 +51,10 @@ ALTER TYPE order_status ADD VALUE IF NOT EXISTS 'preparing';
 -- Migration 012: digitizing stage (تحويل التصميم لتطريز) sits between design_complete and embroidery.
 ALTER TYPE order_status ADD VALUE IF NOT EXISTS 'converting';
 
+-- Migration 105: «التجميع» — a rep SASH's two embroidered halves are sewn together here,
+-- between embroidery and pressing. Rep sashes only; never robes, caps or تجزئة pieces.
+ALTER TYPE order_status ADD VALUE IF NOT EXISTS 'assembly';
+
 -- Staff job-types (Migration 010). Meaningful only when users.role = 'staff'.
 -- Migration 012 adds 'digitizer' (محوّل التطريز) — owns the 'converting' stage.
 -- Migration 028 adds 'tailor' (مفصل) — a read-only view role (student name + sash +
@@ -60,6 +64,8 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 ALTER TYPE staff_type ADD VALUE IF NOT EXISTS 'digitizer';
 ALTER TYPE staff_type ADD VALUE IF NOT EXISTS 'tailor';
+-- Migration 105 adds 'assembler' (مجمّع) — owns the 'assembly' stage.
+ALTER TYPE staff_type ADD VALUE IF NOT EXISTS 'assembler';
 
 -- Migration 013: student study schedule (صباحي/مسائي), now mandatory at signup.
 DO $$ BEGIN
