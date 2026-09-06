@@ -36,6 +36,7 @@ import { SearchField } from "@/components/ui/SearchField";
 const STAGES: OrderStatus[] = [
   "design_complete",
   "embroidery",
+  "assembly",
   "pressing",
   "preparing",
   "ready",
@@ -49,6 +50,7 @@ const STAGE_PILL: Record<OrderStatus, string> = {
   design_complete: "bg-peach/70 text-orange-ink",
   converting:      "bg-orange/15 text-orange-ink",
   embroidery:      "bg-orange-ink/15 text-orange-ink",
+  assembly:        "bg-peach/60 text-orange-ink",
   pressing:        "bg-amber-100 text-amber-800",
   preparing:       "bg-ink/8 text-ink-soft",
   ready:           "bg-emerald-100 text-emerald-700",
@@ -65,6 +67,7 @@ const RAIL_BAR: Partial<Record<OrderStatus, string>> = {
   design_complete: "bg-orange/40",
   converting:      "bg-orange/60",
   embroidery:      "bg-orange-ink",
+  assembly:        "bg-orange/70",
   pressing:        "bg-amber-500",
   preparing:       "bg-ink-soft",
   ready:           "bg-emerald-500",
@@ -88,7 +91,7 @@ function isOverdue(item: ProductionQueueItem): boolean {
 }
 
 function isMissingDesign(item: ProductionQueueItem): boolean {
-  const postDesignStages: OrderStatus[] = ["embroidery", "pressing", "preparing", "ready"];
+  const postDesignStages: OrderStatus[] = ["embroidery", "assembly", "pressing", "preparing", "ready"];
   if (!postDesignStages.includes(item.status)) return false;
   if (!item.has_embroidery && !item.design_id) return false;
   // The design lives on the order's spec-line images (auto-attached calligraphy plates /

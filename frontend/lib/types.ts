@@ -15,6 +15,7 @@ export type OrderStatus =
   | "staff_review"
   | "printing"
   | "embroidery"
+  | "assembly"
   | "pressing"
   | "preparing"
   | "ready"
@@ -23,7 +24,7 @@ export type OrderStatus =
 
 /** Staff job-types (production pipeline). Meaningful only when role === "staff".
  *  "tailor" (مفصل) is a read-only view role: sees only student name + sash + American-shawl info. */
-export type StaffType = "designer" | "digitizer" | "embroiderer" | "presser" | "preparer" | "manager" | "tailor";
+export type StaffType = "designer" | "digitizer" | "embroiderer" | "assembler" | "presser" | "preparer" | "manager" | "tailor";
 /** Student study schedule (mandatory at signup). */
 export type StudyType = "morning" | "evening";
 export type SalaryTxnType = "salary_set" | "bonus" | "deduction";

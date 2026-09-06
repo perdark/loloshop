@@ -90,6 +90,7 @@ export function isPieceOverdue(deadline: string | null): boolean {
 
 /** Arabic label for "this piece moved on" after an advance, keyed on the new status. */
 export function advancedLabelFor(status: string): string {
+  if (status === "assembly") return "انتقلت إلى التجميع";
   if (status === "pressing") return "انتقلت إلى الكوي";
   if (status === "preparing") return "انتقلت إلى التجهيز";
   if (status === "ready") return "أصبحت جاهزة";

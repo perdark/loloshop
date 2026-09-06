@@ -17,6 +17,7 @@ const STATUS_BADGE: Partial<Record<string, string>> = {
   staff_review:    "bg-orange-ink/10 text-orange-ink border border-orange-ink/25",
   printing:        "bg-orange-ink/15 text-orange-ink border border-orange-ink/30",
   embroidery:      "bg-orange-ink/15 text-orange-ink border border-orange-ink/30",
+  assembly:        "bg-peach/60 text-orange-ink border border-orange-ink/25",
   pressing:        "bg-orange-ink/10 text-orange-ink border border-orange-ink/25",
   preparing:       "bg-surface-sink text-ink-soft border border-line",
   ready:           "bg-surface-sink text-ink-soft border border-line",

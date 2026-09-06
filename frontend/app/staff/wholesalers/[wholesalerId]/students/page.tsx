@@ -34,6 +34,7 @@ const STATUS_PILL: Partial<Record<OrderStatus, string>> = {
   staff_review: "bg-ink/5 text-muted",
   printing: "bg-ink/5 text-muted",
   embroidery: "bg-orange-ink/15 text-orange-ink",
+  assembly: "bg-peach/60 text-orange-ink",
   pressing: "bg-amber-100 text-amber-800",
   preparing: "bg-ink/8 text-ink-soft",
   ready: "bg-emerald-100 text-emerald-700",
