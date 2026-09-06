@@ -51,7 +51,7 @@ ALTER TYPE order_status ADD VALUE IF NOT EXISTS 'preparing';
 -- Migration 012: digitizing stage (تحويل التصميم لتطريز) sits between design_complete and embroidery.
 ALTER TYPE order_status ADD VALUE IF NOT EXISTS 'converting';
 
--- Migration 105: «التجميع» — a rep SASH's two embroidered halves are sewn together here,
+-- Migration 106: «التجميع» — a rep SASH's two embroidered halves are sewn together here,
 -- between embroidery and pressing. Rep sashes only; never robes, caps or تجزئة pieces.
 ALTER TYPE order_status ADD VALUE IF NOT EXISTS 'assembly';
 
@@ -64,7 +64,7 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 ALTER TYPE staff_type ADD VALUE IF NOT EXISTS 'digitizer';
 ALTER TYPE staff_type ADD VALUE IF NOT EXISTS 'tailor';
--- Migration 105 adds 'assembler' (مجمّع) — owns the 'assembly' stage.
+-- Migration 106 adds 'assembler' (مجمّع) — owns the 'assembly' stage.
 ALTER TYPE staff_type ADD VALUE IF NOT EXISTS 'assembler';
 
 -- Migration 013: student study schedule (صباحي/مسائي), now mandatory at signup.
@@ -2067,7 +2067,7 @@ WITH targets AS (
              SELECT 1 FROM option_groups g
               WHERE g.product_id = p.id AND g.name_ar = 'ملاحظة'
            )
-       -- ⚠️ Migration 105: a VARIANT already renders its parent's groups
+       -- ⚠️ Migration 106: a VARIANT already renders its parent's groups
        -- (`buildProductFull` loads parent groups, then the child's own), so giving it its own
        -- note is what put a SECOND identical box on every variant page. Skip a product whose
        -- parent already carries one; a variant whose parent is not a قبعة/وشاح still gets its
@@ -2138,7 +2138,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS option_groups_one_note_per_product
     ON option_groups (product_id)
  WHERE name_ar = 'ملاحظة';
 
--- ── «ملاحظة» للأب فقط — Migration 105 ─────────────────────────────────────────────────
+-- ── «ملاحظة» للأب فقط — Migration 106 ─────────────────────────────────────────────────
 -- ⚠️ REPEATED FROM db/migrations/105_note_group_parent_only.sql ON PURPOSE (077/080/093).
 -- Must sit AFTER 103's seed and 104's index. A variant renders its PARENT's groups as well as
 -- its own, so seeding the note onto both is what showed two identical boxes on every variant.

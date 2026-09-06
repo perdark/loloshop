@@ -359,7 +359,7 @@ async function persistFullSetOrder({ student, body, actorUserId, approval }) {
   const itemFlags = {
     // Plain (no design work) sash/robe start at الكوي — المكوجي gets everything except
     // caps (user 2026-07-15). Plain caps keep entering at التجهيز.
-    // A REP sash goes through «التجميع» before الكوي (migration 105, 2026-09-06) — the owner
+    // A REP sash goes through «التجميع» before الكوي (migration 106, 2026-09-06) — the owner
     // says no rep sash is ever sold without تطريز, so this branch is the safety net that keeps
     // one from ever bypassing برزان. Admin-created retail sets keep الكوي.
     sash: { has_embroidery: sashHasEmb, status: sashHasDesign ? 'design_complete' : (student.wholesaler_id ? 'assembly' : 'pressing') },

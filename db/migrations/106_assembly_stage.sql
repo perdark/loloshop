@@ -1,4 +1,4 @@
--- Migration 105 — «التجميع» (2026-09-06). For a ممثل SASH, التطريز produces two sub-pieces
+-- Migration 106 — «التجميع» (2026-09-06). For a ممثل SASH, التطريز produces two sub-pieces
 -- (وشاح من الخلف, وشاح من الأمام) that برزان sews into one garment before الكوي. The stage sits
 -- between embroidery and pressing FOR REP SASHES ONLY (productionController.nextStageFor /
 -- isAssemblyPiece): a تجزئة piece, and a rep robe or cap, never enter it (owner 2026-09-06:

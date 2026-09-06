@@ -34,7 +34,7 @@ const TRANSITIONS = {
   design_complete: ['converting', 'embroidery', 'designing', 'cancelled'],
   converting: ['embroidery', 'design_complete', 'cancelled'], // drain-only
   embroidery: ['assembly', 'pressing', 'preparing', 'design_complete', 'cancelled'],
-  // «التجميع» (migration 105, 2026-09-06): a ممثل SASH's two embroidered halves are sewn into
+  // «التجميع» (migration 106, 2026-09-06): a ممثل SASH's two embroidered halves are sewn into
   // one garment here before الكوي. Rep sashes only — productionController.isAssemblyPiece is
   // the single fork; every other piece keeps embroidery→pressing/preparing.
   assembly: ['pressing', 'preparing', 'embroidery', 'cancelled'],

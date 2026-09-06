@@ -71,7 +71,7 @@ const QUEUE_STAGES = {
   designer: ['design_complete'],
   digitizer: ['converting'],
   embroiderer: ['embroidery'],
-  // مجمّع (برزان) — sews a rep sash's embroidered halves together before الكوي (migration 105).
+  // مجمّع (برزان) — sews a rep sash's embroidered halves together before الكوي (migration 106).
   assembler: ['assembly'],
   presser: ['pressing'],
   // Preparer also sees تم التسليم (delivered) — they're the ones who hand orders over,
