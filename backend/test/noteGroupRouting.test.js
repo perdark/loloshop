@@ -125,12 +125,23 @@ test('the note is retail-only, on every active قبعة and وشاح', async (t)
   assert.strictEqual(g.embroidery_leak, 0, 'every note group must carry is_embroidery = FALSE');
   assert.strictEqual(g.wrong_audience, 0, 'every note group must be «الطلاب العاديين فقط»');
 
-  const { rows: missing } = await query(
-    `SELECT count(*)::int AS n FROM products p
-      WHERE p.active AND p.type IN ('cap', 'sash')
-        AND NOT EXISTS (
-          SELECT 1 FROM option_groups g WHERE g.product_id = p.id AND g.name_ar = 'ملاحظة'
-        )`
+  // ⚠️ COUNT WHAT THE CONFIGURATOR RENDERS, NOT WHAT THE ROW HOLDS (migration 105).
+  // `buildProductFull` loads the PARENT's groups and then the child's own, so a variant with
+  // its own note row shows TWO boxes — which is exactly the bug that shipped on 2026-09-06 and
+  // was invisible to a per-row count. Every active قبعة/وشاح must see exactly one: its own if
+  // it is a parent, its parent's if it is a variant.
+  const { rows: seen } = await query(
+    `SELECT count(*) FILTER (WHERE n <> 1)::int AS wrong, count(*)::int AS total FROM (
+       SELECT (SELECT count(*) FROM option_groups g
+                WHERE g.product_id = p.id AND g.name_ar = 'ملاحظة')
+            + (SELECT count(*) FROM option_groups pg
+                WHERE pg.product_id = p.parent_id AND pg.name_ar = 'ملاحظة') AS n
+         FROM products p
+        WHERE p.active AND p.type IN ('cap', 'sash')) x`
   );
-  assert.strictEqual(missing[0].n, 0, 'some active قبعة/وشاح has no note group');
+  assert.strictEqual(
+    seen[0].wrong,
+    0,
+    `${seen[0].wrong} of ${seen[0].total} active قبعة/وشاح render a number of note boxes other than one`
+  );
 });

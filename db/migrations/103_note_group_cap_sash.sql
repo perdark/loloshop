@@ -43,6 +43,15 @@ WITH targets AS (
              SELECT 1 FROM option_groups g
               WHERE g.product_id = p.id AND g.name_ar = 'ملاحظة'
            )
+       -- ⚠️ Migration 105: a VARIANT already renders its parent's groups
+       -- (`buildProductFull` loads parent groups, then the child's own), so giving it its own
+       -- note is what put a SECOND identical box on every variant page. Skip a product whose
+       -- parent already carries one; a variant whose parent is not a قبعة/وشاح still gets its
+       -- own, because there is nothing for it to inherit.
+       AND NOT EXISTS (
+             SELECT 1 FROM option_groups pg
+              WHERE pg.product_id = p.parent_id AND pg.name_ar = 'ملاحظة'
+           )
 ), created AS (
     INSERT INTO option_groups
         (product_id, name_ar, input_type, sort, required, requires_customer_text,

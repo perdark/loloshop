@@ -2061,6 +2061,15 @@ WITH targets AS (
              SELECT 1 FROM option_groups g
               WHERE g.product_id = p.id AND g.name_ar = 'ملاحظة'
            )
+       -- ⚠️ Migration 105: a VARIANT already renders its parent's groups
+       -- (`buildProductFull` loads parent groups, then the child's own), so giving it its own
+       -- note is what put a SECOND identical box on every variant page. Skip a product whose
+       -- parent already carries one; a variant whose parent is not a قبعة/وشاح still gets its
+       -- own, because there is nothing for it to inherit.
+       AND NOT EXISTS (
+             SELECT 1 FROM option_groups pg
+              WHERE pg.product_id = p.parent_id AND pg.name_ar = 'ملاحظة'
+           )
 ), created AS (
     INSERT INTO option_groups
         (product_id, name_ar, input_type, sort, required, requires_customer_text,
@@ -2122,3 +2131,23 @@ DELETE FROM option_groups g
 CREATE UNIQUE INDEX IF NOT EXISTS option_groups_one_note_per_product
     ON option_groups (product_id)
  WHERE name_ar = 'ملاحظة';
+
+-- ── «ملاحظة» للأب فقط — Migration 105 ─────────────────────────────────────────────────
+-- ⚠️ REPEATED FROM db/migrations/105_note_group_parent_only.sql ON PURPOSE (077/080/093).
+-- Must sit AFTER 103's seed and 104's index. A variant renders its PARENT's groups as well as
+-- its own, so seeding the note onto both is what showed two identical boxes on every variant.
+-- The seed above now skips a product whose parent has one; this clears the rows that already
+-- exist. It never touches a group an order references — read 105's header for why.
+DELETE FROM option_groups g
+ USING products p
+ WHERE g.product_id = p.id
+   AND g.name_ar = 'ملاحظة'
+   AND p.parent_id IS NOT NULL
+   AND EXISTS (
+         SELECT 1 FROM option_groups pg
+          WHERE pg.product_id = p.parent_id AND pg.name_ar = 'ملاحظة'
+       )
+   AND NOT EXISTS (
+         SELECT 1 FROM order_items oi WHERE oi.group_id = g.id
+       );
+
