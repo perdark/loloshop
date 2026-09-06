@@ -417,9 +417,11 @@ longer stranded on a branch · the laptop's loose credentials are filed in
    proxy landmine). Nothing was lost after all: the K40 held its buffer and replayed back to
    08-29 22:52 the moment it could reach us.
    **Three small things still open, all data, none blocking:**
-   · **PINs 1, 7 and 8 have 6 unclaimed punches** on «أرقام جهاز بلا اسم». There is no
-     «تجاهل» button — `assignUnmapped` is the only action on that list — so dismissing them
-     needs a small endpoint + button. Harmless until then.
+   · ✅ **The «تجاهل» button EXISTS** (`f4fae7e`, marker `unmapped_dismissed`). PIN 12 — the
+     owner's own test finger, 20 punches — was dismissed 2026-09-06. Still unclaimed:
+     **1 (5) · 7 (5) · 8 (2)**. ⚠️ Never map one of these to a real worker without dismissing
+     the test punches first: `linkPin` REPLAYS every stored punch onto their attendance, so
+     an installer's old taps become that person's day.
    · **The Arabic names have never been pushed to the device**: all 7 PINs sit at
      `push_state = 'pending'` with **zero** rows in `device_commands`, because
      `queueOnActiveDevices` had no active device when they were saved. **Re-save one PIN now
@@ -494,6 +496,73 @@ longer stranded on a branch · the laptop's loose credentials are filed in
 ---
 
 ## 💣 LANDMINES
+
+- **⚠️ THE DEVICE NOW SAYS WHAT A PUNCH MEANS, AND THE MAP WAS MEASURED, NOT READ (2026-09-06).**
+  `PUNCH_STATE` in `lib/attendanceDevice.js`: **255 = nobody pressed · 0 ▲ دخول · 1 ▼ خروج
+  نهائي · 4 ← أطلع مؤقت · 5 → رجعت**. Confirmed by pressing each key against a real finger on
+  `GED7251600256` and reading `punch_raw` — every punch before this date carried `raw_status = 0`
+  because «Punch State» was off, which is why the server had to guess from the clock and why
+  five separate money bugs existed at once.
+  · ⚠️ **4 AND 5 ARE INVERTED FROM THE DEVICE'S OWN ENGLISH LABELS, ON THE OWNER'S INSTRUCTION.**
+    ZKTeco calls ← "Break-In" and → "Break-Out"; the shop's Arabic sticker calls ← «أطلع» and
+    → «رجعت». "Correcting" the map against the ZK documentation swaps the start and end of every
+    break, and the salary follows the break. Pinned by tests P1–P6.
+  · ⚠️ **EVERY UNKNOWN VALUE FALLS BACK TO THE CLOCK RULE ON PURPOSE.** 255, null and anything
+    unrecognised derive exactly as they did before, which is the only reason this shipped the
+    same day it was measured — and it is what keeps every pre-2026-09-06 punch meaning what it
+    meant. Do not "tidy" that fallback away (test P5).
+  · **Punch State Required is ON with a 10s timeout** (the firmware's maximum). A refused punch
+    leaves **NO ROW ANYWHERE** — the only symptom is a worker whose day has no دخول. There is
+    no admin alert for that yet; build one before trusting the data.
+
+- **⚠️ THE 5-MINUTE COOLDOWN READS `device_ts`, NEVER `punched_at` (2026-09-06).** It describes
+  a FINGER on a SENSOR, and only the device's own clock can see that. Since 2026-08-30
+  `punched_at` is the ARRIVAL instant, so a buffered replay gives an entire batch one identical
+  timestamp: on 2026-09-01 the K40 came back from an outage, uploaded **21 punches all stamped
+  20:39**, and this rule destroyed **12 of them** — every worker's day collapsed to its first
+  punch, their real خروج was thrown away as a "duplicate", and seven records had to be repaired
+  with hand-written SQL. It also compares `raw_status`, so two DIFFERENT deliberate keys six
+  seconds apart both count while a repeat of the same key does not (test P6).
+
+- **⚠️ `overridden_at` IS THE ADMIN'S RULING; `status = 'overridden'` IS A FREEZE. TWO THINGS
+  (2026-09-06).** They shared one flag until now, and «إلغاء مبلغ التأخير» — a pure money
+  waiver — set it, freezing the whole day against the device: on 2026-09-04 محمد عماد's 18:21,
+  18:32 and 23:02 were all discarded as «ما ينلمس» and his checkout was fabricated at 00:00 by
+  `closeStaleOpenDay`. `overrideRecord` now takes `freeze_day` (**default TRUE**, so every
+  pre-existing caller is unchanged) and the button sends `false`. `applyPunch`'s rule 3 reads
+  `overridden_at`, not `status`, so an earlier punch can move a check-in back without
+  re-charging a تأخير a human cancelled. Tests F1–F2.
+
+- **⚠️ A خروج AFTER MIDNIGHT CLOSES YESTERDAY — TWO BOUNDS, BOTH GUESSES (2026-09-06).** The
+  shop shuts at 22:00 and people punch out at 23:48 / 00:14 / 00:17, and a 10:00→22:00 shift
+  does not cross midnight, so `resolveStamp` alone filed every one of those under the NEXT date:
+  محمد عماد's 09-02 خروج at 00:17 became his 09-03 check-in and 09-02 was auto-closed at a
+  fabricated 22:00; محمد عادل's record says he "arrived" 09-06 at 05:12.
+  `previousDayDeparture` now carries such a punch back, bounded by
+  **`LATE_DEPARTURE_WINDOW_MINUTES` (6h after the shift end)** and
+  **`LATE_DEPARTURE_CUTOFF_MINUTES` (nothing from 08:00 local counts as a departure)**. The
+  cutoff is what stops a night-shift worker's AFTERNOON ARRIVAL being read as yesterday's
+  departure — do not remove it. An explicit ▼ skips the cutoff (the worker said what it is) but
+  not the window. Tests M1–M3.
+
+- **⚠️ THE +24h WRAP IS GATED ON `belongs_to_previous_day` (`schedule.stampMinutes`, 2026-09-06).**
+  A midnight-crossing shift has two ways for a stamp to read earlier than its start and they
+  mean opposite things: 00:10 inside the after-midnight window is genuinely late (add the day),
+  while 10:53 after that window closed is someone arriving ELEVEN HOURS EARLY for tonight. The
+  old rule wrapped both, so مضر محمد was recorded **1410 · 845 · 994 · 993 · 742** minutes late
+  on five consecutive days — every one an early arrival. `shiftIsOver` in `attendanceDevice.js`
+  MUST keep calling `stampMinutes` rather than re-deriving it; a second copy is how this
+  happened. Tests N1–N2.
+  · ⚠️ **مضر محمد's stored hours are still 22:16 → 10:15 and his rate is 0** — the owner is
+    asking the client. Until that row is right his numbers stay wrong, and it is DATA, not code.
+
+- **⚠️ THE BREAK ALLOWANCE IS 300 MINUTES (5h), CHANGED FROM 600 ON 2026-09-06**, and it is read
+  LIVE by `recomputeMonth` — so lowering it RE-CHARGES past breaks the next time anything
+  recomputes that worker's month. That is not hypothetical: علي اديب's phantom 640-minute break
+  had to be cancelled BEFORE he took his next break, or his 40,000 IQD deduction would have
+  recomputed to **~370,000**. Anyone changing this number again must sweep the month's existing
+  breaks first.
+
 
 - **⚠️ «صورة الشال» / «صورة القبعة» ARE PRODUCT PICKERS, NOT EMBROIDERY — migration 096, and the
   flag has NO admin UI.** `priceSelections` used to route an order to التصميم → التطريز from ANY
@@ -593,9 +662,12 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   two doors onto the same controller, and removing one would have left the other working with
   nothing on screen to explain it. `attendanceController.checkIn`/`checkOut` are deliberately
   KEPT and unrouted (breaks and tests call them); re-exposing them is a route line, so do not
-  delete the controller half as dead code. Breaks stay on the phone because the device's break
-  keys are on **`ffcb0ce`, still unmerged** — merge that before removing the break UI, or
-  workers have no way to record one. If the device dies, only an admin can fix a day
+  delete the controller half as dead code. ✅ **2026-09-06: THE DEVICE HAS BREAK KEYS NOW** —
+  ← «أطلع مؤقت» and → «رجعت», read from `raw_status` (4 and 5 — see the PUNCH_STATE
+  landmine). Proven on prod with a real finger: punch 187, PIN 11, 17:37:03, status 4 → an
+  open `staff_attendance_breaks` row. This line used to say breaks were phone-only pending
+  `ffcb0ce`; they are not any more. The phone flow still works and is the fallback for a
+  worker who forgets the key. If the device dies, only an admin can fix a day
   (`PATCH /admin/attendance/records/:id/override`); there is no worker-facing fallback, by
   design.
 
