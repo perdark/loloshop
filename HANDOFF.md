@@ -497,6 +497,18 @@ longer stranded on a branch · the laptop's loose credentials are filed in
 
 ## 💣 LANDMINES
 
+- **⚠️ «التجميع» IS FOR A REP SASH ONLY, AND `isAssemblyPiece` IS THE ONLY FORK (migration 106,
+  2026-09-06).** Owner: «just sashes for this stage, no cap and robe». `nextStageFor` and
+  `resolveRevertTarget` both ask that one predicate; a second copy is how a piece gets advanced
+  into a station it can never be reverted into. Three things that look wrong and are not:
+  · a legacy rep sash at الكوي reverts INTO التجميع though it never visited it (D9: nothing was
+    backfilled) — it simply shows on برزان's board as fully arrived;
+  · the board (`GET /production/assembly`) never writes status — it reads `embroidery_zones`
+    for «واصلة» and `status = 'assembly'` for «جاهزة»; moving is `advance`/`revert`;
+  · `applyZoneTick` now emits on EVERY tick, not only the auto-advance — the board needs it.
+  Adding a staff type also means `adminController.STAFF_TYPES` — it is a closed allowlist and
+  the /staff/team picker silently 400s without it.
+
 - **⚠️ `/api/catalog/products/:id/full` IS A COMPOSED VIEW, NOT A TABLE DUMP — A VARIANT RENDERS
   ITS PARENT'S OPTION GROUPS PLUS ITS OWN (2026-09-06).** `buildProductFull` loads parent groups
   first, then the child's. So seeding an option group onto every active product of a type gives
