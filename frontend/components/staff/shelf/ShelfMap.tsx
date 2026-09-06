@@ -138,8 +138,23 @@ export function ShelfMap({ shelves, search, matchedStudents, onSlotClick }: Shel
                         : `الخانة ${slot.slot_code} فارغة`
                     }
                   >
-                    <span className="font-mono text-[10px] font-black text-[#ded7cd]">
-                      {slot.slot_code}
+                    {/* ⚠️ The piece label rides on EVERY bin, not just the ones holding
+                        something. A shelf can carry two sections in one flat grid — shelf C is
+                        قبعة then شال — and since migration 108 gave each of them 10 خانات the
+                        boundary sits invisibly between C10 and C11. The rail on the left only
+                        says «قبعة · شال» for the whole row, so without this a worker reads an
+                        empty C11 as another cap bin and stacks a قبعة where the شال goes.
+                        An occupied bin repeats it inside its own count line below, which is
+                        the readable place for it once there is something to count. */}
+                    <span className="flex items-baseline justify-between gap-1">
+                      <span className="font-mono text-[10px] font-black text-[#ded7cd]">
+                        {slot.slot_code}
+                      </span>
+                      {slot.count === 0 && (
+                        <span className="truncate text-[8px] text-[#8f887d]" dir="rtl">
+                          {slot.piece_label}
+                        </span>
+                      )}
                     </span>
                     {slot.count > 0 ? (
                       <>

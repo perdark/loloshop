@@ -12,6 +12,13 @@ export const VARIANT_LABEL: Record<CalVariant, string> = {
 
 export interface CalPlate {
   id: string;
+  /**
+   * Which generation batch this plate came from. The grid holds the CURRENT job's plates plus
+   * the 60 newest done plates shop-wide (`getRecentPlates`, so the page survives a refresh),
+   * so this is the only thing that tells «my batch» from «somebody else's earlier batch».
+   * Without it «تنزيل إلى مجلد…» saved both and the designer got other reps' students.
+   */
+  job_id?: string | null;
   render_text: string;
   status: "pending" | "done" | "failed";
   plate_path: string | null;

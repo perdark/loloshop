@@ -23,21 +23,22 @@ test('sections derive consecutive slot ranges; شال sits after the cap section
   const cap = s.find((x) => x.piece_type === 'cap');
   const shawl = s.find((x) => x.piece_type === 'shawl');
 
-  assert.deepStrictEqual([robe.slot_from, robe.slot_to], [1, 10]);
-  assert.deepStrictEqual([sash.slot_from, sash.slot_to], [1, 15]);
-  assert.deepStrictEqual([cap.slot_from, cap.slot_to], [1, 6]);
-  // The whole point of per-section config: شال shares shelf C but starts AFTER the caps.
-  assert.deepStrictEqual([shawl.slot_from, shawl.slot_to], [7, 7]);
-  assert.strictEqual(shawl.mode, 'shared');
-  assert.strictEqual(shawl.max_per_slot, null);
+  // Migration 108 (owner 2026-09-06): every section is 10 خانة, 30 per خانة, and COMMUNAL.
+  // Asserted against the live DB so a database that missed the migration fails here, loudly,
+  // instead of quietly going back to «الخانة مشغولة بطالب آخر» on the second piece.
+  for (const sec of [robe, sash, cap, shawl]) {
+    assert.strictEqual(sec.slot_count, 10, `${sec.piece_type} slot_count`);
+    assert.strictEqual(sec.max_per_slot, 30, `${sec.piece_type} max_per_slot`);
+    assert.strictEqual(sec.mode, 'shared', `${sec.piece_type} mode`);
+  }
 
-  // Migration 085 — the sash shelf is COMMUNAL and capped; روب/قبعة stay one-student bins.
-  // Asserted so a database that missed the migration fails here, loudly, instead of quietly
-  // going back to «الخانة مشغولة بطالب آخر» on the second sash.
-  assert.strictEqual(sash.mode, 'shared');
-  assert.strictEqual(sash.max_per_slot, 20);
-  assert.strictEqual(robe.mode, 'exclusive');
-  assert.strictEqual(cap.mode, 'exclusive');
+  assert.deepStrictEqual([robe.slot_from, robe.slot_to], [1, 10]);
+  assert.deepStrictEqual([sash.slot_from, sash.slot_to], [1, 10]);
+  assert.deepStrictEqual([cap.slot_from, cap.slot_to], [1, 10]);
+  // The whole point of per-section config: شال shares shelf C but starts AFTER the caps.
+  // It moved from C07 to C11 when قبعة grew 6 → 10 — ranges are DERIVED, never stored, so
+  // migration 108 had to carry any open شال bin across with it.
+  assert.deepStrictEqual([shawl.slot_from, shawl.slot_to], [11, 20]);
 });
 
 test('suggestSlot: empty section → lowest free index', async () => {
@@ -49,8 +50,25 @@ test('suggestSlot: empty section → lowest free index', async () => {
   });
 });
 
-test('suggestSlot: reuses the student OWN bin and flags it over at max', async () => {
-  const robe = (await shelf.loadSections()).find((x) => x.piece_type === 'robe');
+// ── The exclusive branch still EXISTS in suggestSlot/placePiece, it just has no section
+// pointing at it since migration 108 made every section communal. These three tests build the
+// section object by hand rather than reading one from the DB, so the branch keeps its cover:
+// «طالب واحد لكل خانة» is one UPDATE away from coming back for a section, and if it does, the
+// code behind it must still be right. Do not delete them as dead — delete them only if the
+// branch itself is deleted.
+const EXCLUSIVE_ROBE = {
+  id: -1, shelf_code: 'A', piece_type: 'robe', label_ar: 'روب',
+  slot_count: 10, max_per_slot: 10, mode: 'exclusive', sort_order: 1,
+  slot_from: 1, slot_to: 10,
+};
+const EXCLUSIVE_CAP = {
+  id: -2, shelf_code: 'C', piece_type: 'cap', label_ar: 'قبعة',
+  slot_count: 6, max_per_slot: 4, mode: 'exclusive', sort_order: 1,
+  slot_from: 1, slot_to: 6,
+};
+
+test('suggestSlot: reuses the student OWN bin and flags it over at max (exclusive)', () => {
+  const robe = EXCLUSIVE_ROBE;
   const own = [{ shelf_code: 'A', slot_index: 2, student_id: 'S1', live_count: 10 }];
   assert.deepStrictEqual(shelf.suggestSlot(robe, 'S1', own), {
     shelf_code: 'A',
@@ -59,8 +77,8 @@ test('suggestSlot: reuses the student OWN bin and flags it over at max', async (
   });
 });
 
-test('suggestSlot: a DIFFERENT student bin is skipped, never reused', async () => {
-  const robe = (await shelf.loadSections()).find((x) => x.piece_type === 'robe');
+test('suggestSlot: a DIFFERENT student bin is skipped, never reused (exclusive)', () => {
+  const robe = EXCLUSIVE_ROBE;
   const other = [{ shelf_code: 'A', slot_index: 1, student_id: 'OTHER', live_count: 1 }];
   assert.deepStrictEqual(shelf.suggestSlot(robe, 'S1', other), {
     shelf_code: 'A',
@@ -69,8 +87,8 @@ test('suggestSlot: a DIFFERENT student bin is skipped, never reused', async () =
   });
 });
 
-test('suggestSlot: full section → null («بلا خانة»)', async () => {
-  const cap = (await shelf.loadSections()).find((x) => x.piece_type === 'cap');
+test('suggestSlot: full section → null («بلا خانة») (exclusive)', () => {
+  const cap = EXCLUSIVE_CAP;
   const full = Array.from({ length: 6 }, (_, i) => ({
     shelf_code: 'C',
     slot_index: i + 1,
@@ -80,10 +98,18 @@ test('suggestSlot: full section → null («بلا خانة»)', async () => {
   assert.strictEqual(shelf.suggestSlot(cap, 'S1', full), null);
 });
 
-test('suggestSlot: an UNCAPPED shared bin always returns its slot regardless of student or depth', async () => {
-  const shawl = (await shelf.loadSections()).find((x) => x.piece_type === 'shawl');
+test('suggestSlot: an UNCAPPED shared bin always returns its slot regardless of student or depth', () => {
+  // شال carried `max_per_slot = NULL` (the bottomless single bin) until migration 108 gave it
+  // 10 خانات and a max of 30 like everything else. The NULL branch is still live code — a max
+  // is nullable and an admin can clear one from /admin/shelf — so it is covered here with a
+  // hand-built section instead of being dropped along with the only row that used to hit it.
+  const bottomless = {
+    id: -3, shelf_code: 'C', piece_type: 'shawl', label_ar: 'شال',
+    slot_count: 1, max_per_slot: null, mode: 'shared', sort_order: 2,
+    slot_from: 7, slot_to: 7,
+  };
   const deep = [{ shelf_code: 'C', slot_index: 7, student_id: null, live_count: 40 }];
-  assert.deepStrictEqual(shelf.suggestSlot(shawl, 'anyone', deep), {
+  assert.deepStrictEqual(shelf.suggestSlot(bottomless, 'anyone', deep), {
     shelf_code: 'C',
     slot_index: 7,
     over: false, // a section with no max can never be over
@@ -97,8 +123,8 @@ test('suggestSlot: an UNCAPPED shared bin always returns its slot regardless of 
 
 test('suggestSlot: a CAPPED shared bin takes any student until it hits its max', async () => {
   const sash = (await shelf.loadSections()).find((x) => x.piece_type === 'sash');
-  const partly = [{ shelf_code: 'B', slot_index: 1, student_id: null, live_count: 19 }];
-  // Nineteen strangers' sashes in B01 and the twentieth still joins them — the exact move
+  const partly = [{ shelf_code: 'B', slot_index: 1, student_id: null, live_count: 29 }];
+  // Twenty-nine strangers' sashes in B01 and the thirtieth still joins them — the exact move
   // that used to fail with «B01 مشغولة بطالب آخر».
   assert.deepStrictEqual(shelf.suggestSlot(sash, 'A-STUDENT', partly), {
     shelf_code: 'B',
@@ -114,14 +140,14 @@ test('suggestSlot: a CAPPED shared bin takes any student until it hits its max',
 
 test('suggestSlot: a FULL communal bin spills into the next one, not onto the worker', async () => {
   const sash = (await shelf.loadSections()).find((x) => x.piece_type === 'sash');
-  const full = [{ shelf_code: 'B', slot_index: 1, student_id: null, live_count: 20 }];
+  const full = [{ shelf_code: 'B', slot_index: 1, student_id: null, live_count: 30 }];
   assert.deepStrictEqual(shelf.suggestSlot(sash, 'S1', full), {
     shelf_code: 'B',
     slot_index: 2,
     over: false,
   });
   // …and keeps walking. B01 and B02 full → B03.
-  const two = [...full, { shelf_code: 'B', slot_index: 2, student_id: null, live_count: 20 }];
+  const two = [...full, { shelf_code: 'B', slot_index: 2, student_id: null, live_count: 30 }];
   assert.strictEqual(shelf.suggestSlot(sash, 'S1', two).slot_index, 3);
 });
 
@@ -130,15 +156,15 @@ test('suggestSlot: every communal bin full → the LAST one, flagged — never �
   // D4 for a communal section: a full shelf must never leave a piece homeless, because the
   // worker is holding it and has to put it SOMEWHERE. Exclusive sections return null here;
   // this one returns the last bin with over=true so the sheet can say so out loud.
-  const allFull = Array.from({ length: 15 }, (_, i) => ({
+  const allFull = Array.from({ length: 10 }, (_, i) => ({
     shelf_code: 'B',
     slot_index: i + 1,
     student_id: null,
-    live_count: 20,
+    live_count: 30,
   }));
   assert.deepStrictEqual(shelf.suggestSlot(sash, 'S1', allFull), {
     shelf_code: 'B',
-    slot_index: 15,
+    slot_index: 10,
     over: true,
   });
 });
@@ -169,15 +195,21 @@ test('live: place → board shows the bin → release frees it', async (t) => {
 
   try {
     const placed = await shelf.placePiece(order.id, USER);
-    assert.match(placed.slot_code, /^C0[1-6]$/, 'cap must land in the cap section C01–C06');
+    assert.match(placed.slot_code, /^C(0[1-9]|10)$/, 'cap must land in the cap section C01–C10');
     assert.strictEqual(placed.over, false);
 
     const board = await shelf.buildBoard();
     const shelfC = board.shelves.find((s) => s.code === 'C');
     const bin = shelfC.slots.find((s) => s.slot_code === placed.slot_code);
     assert.strictEqual(bin.count, 1);
-    assert.strictEqual(bin.student_id, order.student_id);
-    assert.ok(['ready', 'waiting'].includes(bin.state));
+    // ⚠️ Migration 108: قبعة is COMMUNAL now, so the BIN has no owner — `student_id` is NULL
+    // by design (see the D2 landmine). Whose piece this is lives on the PIECE, which is what
+    // ShelfMap searches. Asserting the owner on the bin is exactly the mistake that would
+    // reintroduce «one student claims a 30-piece خانة».
+    assert.strictEqual(bin.student_id, null, 'a communal bin must have no owner');
+    assert.strictEqual(bin.pieces.length, 1);
+    assert.strictEqual(bin.pieces[0].student_id, order.student_id);
+    assert.strictEqual(bin.state, 'shared');
 
     // The piece must have left the inbox now that it has an address.
     assert.ok(!board.inbox.some((i) => i.order_id === order.id));
@@ -204,7 +236,11 @@ test('live: place → board shows the bin → release frees it', async (t) => {
   }
 });
 
-test('live: an exclusive bin refuses a SECOND student', async (t) => {
+test('live: a قبعة bin now ACCEPTS a second student — nothing refuses a placement', async (t) => {
+  // Migration 108 made every section communal on the owner's «خليهم بس يحطون القطع». This is
+  // the inverted twin of the old «an exclusive bin refuses a SECOND student» test, kept as the
+  // same scenario so the change of contract is visible in the diff rather than silent: the
+  // exact call that used to throw ERR_SLOT_TAKEN must now succeed into the SAME خانة.
   const { rows } = await query(
     `SELECT o.id, o.student_id
        FROM orders o
@@ -223,9 +259,20 @@ test('live: an exclusive bin refuses a SECOND student', async (t) => {
   try {
     const placed = await shelf.placePiece(a.id, user);
     const idx = Number(placed.slot_code.slice(1));
-    await assert.rejects(
-      () => shelf.placePiece(b.id, user, { shelf_code: 'C', slot_index: idx }),
-      (err) => err instanceof shelf.ShelfError && err.code === 'ERR_SLOT_TAKEN'
+    const second = await shelf.placePiece(b.id, user, { shelf_code: 'C', slot_index: idx });
+    assert.strictEqual(second.slot_code, placed.slot_code, 'both caps share one خانة');
+    assert.strictEqual(second.over, false, '2 pieces is far under the max of 30');
+
+    const board = await shelf.buildBoard();
+    const bin = board.shelves
+      .find((s) => s.code === 'C')
+      .slots.find((s) => s.slot_code === placed.slot_code);
+    assert.strictEqual(bin.count, 2);
+    assert.strictEqual(bin.student_id, null);
+    assert.deepStrictEqual(
+      [...new Set(bin.pieces.map((p) => p.student_id))].sort(),
+      [a.student_id, b.student_id].sort(),
+      'both students must be findable ON THE PIECES, since the bin has no owner'
     );
   } finally {
     await query('DELETE FROM shelf_placements WHERE order_id = ANY($1)', [[a.id, b.id]]);
@@ -409,9 +456,10 @@ test('live: board is retail-only and internally consistent', async () => {
   const a = board.shelves.find((s) => s.code === 'A');
   const c = board.shelves.find((s) => s.code === 'C');
   assert.strictEqual(a.slots.length, 10);
-  assert.strictEqual(c.slots.length, 7); // 6 cap + 1 شال
-  assert.strictEqual(c.slots[6].mode, 'shared');
-  assert.strictEqual(c.slots[6].piece_type, 'shawl');
+  assert.strictEqual(c.slots.length, 20); // migration 108: 10 قبعة + 10 شال
+  assert.strictEqual(c.slots[9].piece_type, 'cap');  // C10 is the last قبعة
+  assert.strictEqual(c.slots[10].piece_type, 'shawl'); // C11 is where شال now starts
+  assert.strictEqual(c.slots[10].mode, 'shared');
 
   // Every set must classify, and a ready set must have no upstream piece.
   for (const s of board.sets) {
@@ -510,5 +558,62 @@ test('live: a placed piece carries its student_id and the student’s typed text
       `DELETE FROM shelf_slot_occupancy so
         WHERE NOT EXISTS (SELECT 1 FROM shelf_placements sp WHERE sp.occupancy_id = so.id)`
     );
+  }
+});
+
+// ── Migration 108's re-flow carry ────────────────────────────────────────────────────────
+// The dev DB has never had an open شال bin, so the one statement in 108 that only fires on
+// production — carrying an open bin across when a lower section GROWS underneath it — has no
+// natural coverage. This test manufactures the exact prod shape: قبعة back at 6 خانات with a
+// شال bin sitting at C07, then re-applies the migration and checks the bin arrived at C11.
+//
+// Why it matters: section ranges are DERIVED (loadSections walks slot_count in sort_order),
+// never stored. Leave the bin at C07 after قبعة grows to 10 and it reads as a قبعة bin — its
+// section_id says شال while its slot_index falls inside قبعة's range — and placePiece refuses
+// to add to it with ERR_WRONG_SECTION. The شال on the shelf becomes unreachable, and nothing
+// on any screen says why.
+test('live: migration 108 carries an open bin when the section below it grows', async () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const sql = fs.readFileSync(
+    path.join(__dirname, '..', '..', 'db', 'migrations', '108_open_shelf_layout.sql'),
+    'utf8'
+  );
+  const cap = (await shelf.loadSections()).find((x) => x.piece_type === 'cap');
+  const shawlSec = (await shelf.loadSections()).find((x) => x.piece_type === 'shawl');
+
+  try {
+    // Rewind to the pre-108 shelf C: قبعة 6 خانات, so شال starts at C07.
+    await query('UPDATE shelf_sections SET slot_count = 6 WHERE id = $1', [cap.id]);
+    await query('UPDATE shelf_sections SET slot_count = 1 WHERE id = $1', [shawlSec.id]);
+    const back = await shelf.loadSections();
+    assert.strictEqual(back.find((x) => x.piece_type === 'shawl').slot_from, 7);
+
+    const bin = await query(
+      `INSERT INTO shelf_slot_occupancy (shelf_code, slot_index, student_id, section_id)
+       VALUES ('C', 7, NULL, $1) RETURNING id`,
+      [shawlSec.id]
+    );
+    const binId = bin.rows[0].id;
+
+    await query(sql);
+
+    const after = await shelf.loadSections();
+    assert.strictEqual(after.find((x) => x.piece_type === 'cap').slot_count, 10);
+    assert.deepStrictEqual(
+      [after.find((x) => x.piece_type === 'shawl').slot_from,
+       after.find((x) => x.piece_type === 'shawl').slot_to],
+      [11, 20]
+    );
+    const moved = await query('SELECT slot_index FROM shelf_slot_occupancy WHERE id = $1', [binId]);
+    assert.strictEqual(
+      Number(moved.rows[0].slot_index), 11,
+      'the شال bin must follow its section from C07 to C11, not be left inside قبعة'
+    );
+
+    await query('DELETE FROM shelf_slot_occupancy WHERE id = $1', [binId]);
+  } finally {
+    await query("DELETE FROM shelf_slot_occupancy WHERE shelf_code = 'C' AND student_id IS NULL AND NOT EXISTS (SELECT 1 FROM shelf_placements sp WHERE sp.occupancy_id = shelf_slot_occupancy.id)");
+    await query('UPDATE shelf_sections SET slot_count = 10 WHERE slot_count <> 10');
   }
 });

@@ -93,7 +93,12 @@ export function CustomerImageUpload({
             ? "اكتب التفاصيل المطلوبة وارفع صورة مرجعية — كلاهما مطلوب."
             : needsText
               ? "اكتب التفاصيل المطلوبة."
-              : "اكتب التفاصيل إن رغبت — يمكنك إضافة صورة مرجعية أيضاً."
+              // Optional typed field. Only offer a photo when one is actually accepted —
+              // «ملاحظة» (migration 103/107) is text-only, so promising a reference photo
+              // there points at a picker that is not rendered.
+              : allowImage
+                ? "اكتب التفاصيل إن رغبت — يمكنك إضافة صورة مرجعية أيضاً."
+                : "اكتب إن رغبت — هذا الحقل اختياري."
           : "ارفع صورة مرجعية للطباعة."}
       </p>
 
