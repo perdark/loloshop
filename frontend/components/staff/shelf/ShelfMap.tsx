@@ -46,11 +46,21 @@ function Spines({ count, max }: { count: number; max: number | null }) {
 interface ShelfMapProps {
   shelves: Shelf[];
   search: string;
+  /**
+   * Every student the console's one search box matched, or null when nothing is being
+   * searched. The map no longer runs its own name match: the query is answered against the
+   * whole board upstream (name + تطريز + free-text answers), so a وشاح found by what is
+   * EMBROIDERED on it lights that student's روب and قبعة bins too — which is the point.
+   * Matching here again, on the name alone, would light only the bins whose label already
+   * said the name and quietly undo that.
+   */
+  matchedStudents: Set<string> | null;
   onSlotClick: (slot: ShelfSlot) => void;
 }
 
-export function ShelfMap({ shelves, search, onSlotClick }: ShelfMapProps) {
+export function ShelfMap({ shelves, search, matchedStudents, onSlotClick }: ShelfMapProps) {
   const q = search.trim();
+  const searching = q.length > 0 && matchedStudents != null;
 
   return (
     <div className="rounded-2xl bg-[#211f1b] p-3 sm:p-5">
@@ -87,19 +97,27 @@ export function ShelfMap({ shelves, search, onSlotClick }: ShelfMapProps) {
               </span>
             </div>
 
+            {/* ⚠️ NOT a fixed column count. This used to be
+                `repeat(min(slots,15), minmax(0,1fr))`, which on a 390px phone — the device
+                every preparer actually holds — divided ~320px by 15 and drew 20px bins:
+                the slot code, the spines and the student's name were all unreadable, and the
+                tap target was a quarter of the 44px minimum. auto-fit keeps the desktop row
+                (all bins fit, tracks stretch) and wraps on a phone at a legible 58px floor. */}
             <div
               className="grid flex-1 gap-1.5"
               dir="ltr"
-              style={{
-                gridTemplateColumns: `repeat(${Math.min(shelf.slots.length, 15)}, minmax(0, 1fr))`,
-              }}
+              style={{ gridTemplateColumns: "repeat(auto-fit, minmax(58px, 1fr))" }}
             >
               {shelf.slots.map((slot) => {
                 const style = STATE_STYLE[slot.state] ?? STATE_STYLE.empty;
+                // A bin is a hit when it holds a matched student's piece — or when the
+                // worker typed the خانة code itself («B01»), which is the other half of how
+                // this screen is used: reading a code off a physical bin and finding it here.
                 const hit =
-                  q.length > 0 &&
-                  slot.pieces.some((p) => matchesAr(p.student_name, q));
-                const dimmed = q.length > 0 && !hit;
+                  searching &&
+                  (slot.pieces.some((p) => matchedStudents!.has(p.student_id)) ||
+                    matchesAr(slot.slot_code, q));
+                const dimmed = searching && !hit;
                 return (
                   <button
                     key={slot.slot_code}

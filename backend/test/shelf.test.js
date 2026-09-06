@@ -449,3 +449,66 @@ test('live: the board never shows historical backlog — only what was actually 
     'the inbox must never be the whole backlog'
   );
 });
+
+// ---------- search (owner request 2026-09-06) ----------
+// A preparer holding a وشاح reads the تطريز off the fabric, not a student id — and the sash
+// is the only piece that carries that text. So the board must (a) ship the typed text and
+// (b) say WHOSE each placed piece is, which is what lets one matched sash light up the same
+// student's روب/قبعة bins. Both are contract with the console; neither is visible on screen,
+// so nothing else would catch their removal.
+test('live: a placed piece carries its student_id and the student’s typed text', async (t) => {
+  const { rows } = await query(
+    `SELECT o.id, o.student_id,
+            (SELECT string_agg(DISTINCT oi.customer_text, ' ')
+               FROM order_items oi
+              WHERE oi.order_id = o.id
+                AND oi.customer_text IS NOT NULL
+                AND oi.customer_text <> '') AS typed
+       FROM orders o
+       JOIN students st ON st.id = o.student_id
+       JOIN products p  ON p.id  = o.product_id
+      WHERE st.wholesaler_id IS NULL AND p.type = 'sash' AND o.status = 'preparing'
+      LIMIT 20`
+  );
+  const order = rows.find((r) => r.typed && r.typed.trim().length > 3);
+  if (!order) return t.skip('no retail sash with typed text at preparing in this snapshot');
+
+  const admin = await query("SELECT id FROM users WHERE role = 'admin' LIMIT 1");
+  const user = { id: admin.rows[0].id };
+
+  try {
+    const placed = await shelf.placePiece(order.id, user);
+    const board = await shelf.buildBoard();
+
+    const bin = board.shelves
+      .flatMap((s) => s.slots)
+      .find((s) => s.slot_code === placed.slot_code);
+    const piece = bin.pieces.find((p) => p.order_id === order.id);
+    assert.ok(piece, 'the placed sash must appear in its bin');
+
+    // The sash shelf is COMMUNAL, so the bin itself owns nobody — which is exactly why the
+    // id has to live on the piece. Asserted together so a future "tidy-up" that moves it
+    // back onto the bin fails here rather than silently un-grouping the طقم.
+    assert.strictEqual(bin.student_id, null, 'a communal sash bin claims no owner');
+    assert.strictEqual(piece.student_id, order.student_id);
+
+    const word = order.typed.trim().split(/\s+/)[0];
+    assert.ok(
+      piece.search_text && piece.search_text.includes(word),
+      'the piece must carry what the student typed on it'
+    );
+
+    // The same text must reach the set, so «جاهز للتغليف» is searchable by the تطريز too.
+    const set = board.sets.find((s) => s.pieces.some((p) => p.order_id === order.id));
+    if (set) {
+      const setPiece = set.pieces.find((p) => p.order_id === order.id);
+      assert.ok(setPiece.search_text && setPiece.search_text.includes(word));
+    }
+  } finally {
+    await query('DELETE FROM shelf_placements WHERE order_id = $1', [order.id]);
+    await query(
+      `DELETE FROM shelf_slot_occupancy so
+        WHERE NOT EXISTS (SELECT 1 FROM shelf_placements sp WHERE sp.occupancy_id = so.id)`
+    );
+  }
+});
