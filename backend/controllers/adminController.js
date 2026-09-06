@@ -53,7 +53,7 @@ function pricingOrderIsValid(adminPrice, sellingPrice, addons) {
 // or «ربح الممثلين» mean.
 const { billableOrderSql, shopIncomeExpr, repMarginExpr } = counts;
 
-const STAFF_TYPES = ['designer', 'embroiderer', 'presser', 'preparer', 'manager', 'digitizer', 'tailor'];
+const STAFF_TYPES = ['designer', 'embroiderer', 'assembler', 'presser', 'preparer', 'manager', 'digitizer', 'tailor'];
 const STAFF_SCOPES = ['retail', 'wholesaler', 'both'];
 
 // Multi-role (Migration 029): accept either staff_types[] (preferred) or a single
