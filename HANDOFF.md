@@ -497,6 +497,25 @@ longer stranded on a branch · the laptop's loose credentials are filed in
 
 ## 💣 LANDMINES
 
+- **⚠️ `/api/catalog/products/:id/full` IS A COMPOSED VIEW, NOT A TABLE DUMP — A VARIANT RENDERS
+  ITS PARENT'S OPTION GROUPS PLUS ITS OWN (2026-09-06).** `buildProductFull` loads parent groups
+  first, then the child's. So seeding an option group onto every active product of a type gives
+  each VARIANT two of it — one inherited, one its own — while the table holds exactly one row per
+  product and looks perfect. That is what «ملاحظة» did on the day it shipped: 16 of 16 قبعة/وشاح
+  showed two identical note boxes, and a per-row `count(*)` said 19 groups on 19 products.
+  · **Migration 104 was written from the endpoint's output and fixed nothing** — its dedupe DELETE
+    matched zero rows, and the unique index it added was true but beside the point. Migration 105
+    is the real fix: the note lives on the PARENT only, and 103's seed now skips a product whose
+    parent already carries one. Do not re-add a per-variant seed.
+  · The rule this cost a deploy to learn: **read the TABLE before writing a migration against a
+    symptom seen through an API.** A count taken from a composed endpoint counts what the
+    configurator renders, never what is stored.
+  · `test/noteGroupRouting.test.js` now asserts the RENDERED count (parent + own = 1), because the
+    per-row count is exactly what was blind to this.
+  · `order_items.group_id` is **ON DELETE SET NULL**: deleting an option group does not delete a
+    student's typed note, it silently unhooks it and leaves the text in `customer_text` pointing
+    at nothing. Any cleanup of option groups must skip rows an order references — 105 does.
+
 - **⚠️ THE DEVICE NOW SAYS WHAT A PUNCH MEANS, AND THE MAP WAS MEASURED, NOT READ (2026-09-06).**
   `PUNCH_STATE` in `lib/attendanceDevice.js`: **255 = nobody pressed · 0 ▲ دخول · 1 ▼ خروج
   نهائي · 4 ← أطلع مؤقت · 5 → رجعت**. Confirmed by pressing each key against a real finger on
