@@ -26,6 +26,7 @@ const STATUS_AR = {
   staff_review: 'مراجعة الموظف',
   printing: 'قيد الطباعة',
   embroidery: 'قيد التطريز',
+  assembly: 'قيد التجميع',
   pressing: 'قيد الكوي',
   preparing: 'قيد التجهيز',
   ready: 'جاهز للاستلام',

@@ -19,7 +19,7 @@ const { addClient } = require('../lib/eventBus');
 const { secretMatches } = require('../lib/secretCompare');
 
 const TZ = 'Asia/Baghdad';
-const MANAGER_STAGES = ['design_complete', 'converting', 'embroidery', 'pressing', 'preparing', 'ready'];
+const MANAGER_STAGES = ['design_complete', 'converting', 'embroidery', 'assembly', 'pressing', 'preparing', 'ready'];
 const PRESENCE_TTL_SECONDS = 90;
 const TOTAL_PROVINCES = 18; // Iraq governorates — the conquest denominator
 const OWNER_TITLE_DEFAULT = 'صاحب لولو شوب';

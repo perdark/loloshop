@@ -488,7 +488,7 @@ function comparableStoredSelections(lines, orderQuantity) {
 }
 
 const DESIGN_PASSED_STAGES = new Set([
-  'converting', 'embroidery', 'pressing', 'preparing', 'ready', 'delivered',
+  'converting', 'embroidery', 'assembly', 'pressing', 'preparing', 'ready', 'delivered',
 ]);
 // Stages from which an EXPLICIT «أرجع الطلب إلى بانتظار التصميم» is meaningful. Includes
 // design_complete itself (there the rework is a reset: zones + artwork cleared, shelf slot

@@ -28,6 +28,7 @@ const STAGE_AR = {
   design_complete: 'بانتظار التصميم',
   converting: 'قيد التحويل',
   embroidery: 'في التطريز',
+  assembly: 'في التجميع',
   pressing: 'في الكوي',
   preparing: 'في التجهيز',
   ready: 'جاهز',

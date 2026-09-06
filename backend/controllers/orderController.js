@@ -9,7 +9,7 @@ const memoCache = require('../lib/memoCache');
 
 const ALL_STATUSES = [
   'pending_approval', 'designing', 'design_complete', 'converting',
-  'staff_review', 'printing', 'embroidery', 'pressing', 'preparing',
+  'staff_review', 'printing', 'embroidery', 'assembly', 'pressing', 'preparing',
   'ready', 'delivered', 'cancelled',
 ];
 
@@ -18,7 +18,7 @@ const ALL_STATUSES = [
 // «ألغِ الطلب» read as the furthest-forward stage there is.
 const STAGE_ORDER = [
   'pending_approval', 'designing', 'design_complete', 'converting',
-  'staff_review', 'printing', 'embroidery', 'pressing', 'preparing',
+  'staff_review', 'printing', 'embroidery', 'assembly', 'pressing', 'preparing',
   'ready', 'delivered',
 ];
 

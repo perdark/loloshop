@@ -2243,7 +2243,7 @@ async function monitor(req, res) {
      FROM orders o
      JOIN students s ON s.id = o.student_id
      JOIN users u ON u.id = s.user_id
-     WHERE o.status IN ('design_complete', 'converting', 'embroidery', 'pressing', 'preparing') ${sc}
+     WHERE o.status IN ('design_complete', 'converting', 'embroidery', 'assembly', 'pressing', 'preparing') ${sc}
      ORDER BY o.updated_at ASC LIMIT 20`
   );
   // Currently claimed orders (within last 30 min) — shared with GET /production/presence.
