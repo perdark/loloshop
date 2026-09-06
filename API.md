@@ -570,6 +570,14 @@ Validation: required option groups (via `priceSelections`), measurements 25–80
 ### PATCH `/admin/checkout-groups/:id` (admin)
 Edit intake: `deposit` (واصل), `event_date`, phones, address, `customer_name`, `instagram_username`, `notes`. Audit-logged.
 
+### GET `/production/assembly` (staff — any line staff type, manager, admin; مفصل → 403)
+«التجميع» board (برزان). Rep **sashes** only (migration 105): `{ data: { arriving: Row[], ready: Row[] } }`.
+`arriving` = status `embroidery` with ≥1 ticked zone (a half is on the table); `ready` = status `assembly`.
+`Row = { id, status, student_id, student_name, wholesaler_name, batch_name, deadline, checkout_group_id,
+product_name, product_type, needs_pressing, updated_at, zones: {key,label,done}[], done_count, total_count,
+can_advance, advance_label }`. Never money, never phones. Read-only — moving a piece is `advance`/`revert`.
+Rep-approval + returned-to-customer gates are inherited by the WHERE.
+
 ### Intake surfaced in
 - `GET /admin/orders?group=bundle` → `bundle.intake {…}` (null for legacy cart bundles).
 - `GET /production/orders/:id` → `order.intake {…}` — `deposit` only for manager/embroiderer/admin; presser receives `{ event_date }` only.

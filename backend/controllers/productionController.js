@@ -455,6 +455,63 @@ function resolveRevertTarget(order) {
   return REVERT_MAP[order.status] ?? null;
 }
 
+// ---------- «التجميع» board — sub-pieces arriving, garments ready to sew ----------
+// برزان's screen. A rep SASH is «arriving» from its FIRST ticked embroidery zone (the back or
+// the front is physically on his table while the other half is still under the needle) and
+// «ready» once its status is 'assembly' — which the last tick sets through the normal
+// auto-advance. This endpoint READS status + embroidery_zones and never derives status from
+// zones (D1), and it never writes: moving a piece is `advance`/`revert`, same as any station.
+//
+// The rep-approval and returned-to-customer gates are inherited by the WHERE, exactly as
+// getQueue applies them, so «بانتظار موافقة الممثل» can never surface here as sewing work.
+// No money, no contact — line staff never receive either (D7).
+async function getAssemblyBoard(req, res) {
+  const u = req.user;
+  if (!(isManager(u) || staffTypesOf(u).some((t) => LINE_STAFF.includes(t)))) {
+    return res.status(403).json({ error: 'ممنوع', code: 'ERR_FORBIDDEN' });
+  }
+  const { rows } = await query(
+    `SELECT o.id, o.status::text AS status, o.needs_pressing, o.embroidery_zones, o.checkout_group_id,
+            o.design_id, o.has_embroidery, o.updated_at,
+            s.id AS student_id, s.wholesaler_id, u.name AS student_name,
+            p.name_ar AS product_name, p.type::text AS product_type,
+            wu.name AS wholesaler_name, b.name_ar AS batch_name, b.deadline
+       FROM orders o
+       JOIN students s ON s.id = o.student_id
+       JOIN users u ON u.id = s.user_id
+       JOIN products p ON p.id = o.product_id
+       LEFT JOIN wholesalers w ON w.id = s.wholesaler_id
+       LEFT JOIN users wu ON wu.id = w.user_id
+       LEFT JOIN batches b ON b.id = o.batch_id
+      WHERE s.wholesaler_id IS NOT NULL
+        AND p.type = 'sash'
+        AND o.wholesaler_approval = 'approved' AND o.returned_to_customer = FALSE
+        AND (o.status::text = 'assembly'
+             OR (o.status::text = 'embroidery'
+                 AND EXISTS (SELECT 1 FROM jsonb_each_text(COALESCE(o.embroidery_zones, '{}'::jsonb)) z
+                              WHERE z.value = 'true')))
+      ORDER BY b.deadline ASC NULLS LAST, u.name ASC, o.updated_at ASC`
+  );
+  const progressById = new Map(rows.map((r) => [r.id, r.embroidery_zones || {}]));
+  const zonesById = await detectZonesForOrders(rows.map((r) => r.id), progressById);
+  const out = { arriving: [], ready: [] };
+  for (const r of rows) {
+    const zones = (zonesById.get(r.id) || []).map(({ key, label, done }) => ({ key, label, done: !!done }));
+    const ready = r.status === 'assembly';
+    const to = ready ? nextStageFor(r) : null;
+    out[ready ? 'ready' : 'arriving'].push({
+      id: r.id, status: r.status, student_id: r.student_id, student_name: r.student_name,
+      wholesaler_name: r.wholesaler_name, batch_name: r.batch_name, deadline: r.deadline,
+      checkout_group_id: r.checkout_group_id, product_name: r.product_name, product_type: r.product_type,
+      needs_pressing: !!r.needs_pressing, updated_at: r.updated_at, zones,
+      done_count: zones.filter((z) => z.done).length, total_count: zones.length,
+      can_advance: ready && !!to && canStaffTransition(u, 'assembly', to),
+      advance_label: ready && to ? (ADVANCE_LABEL_AR[`assembly→${to}`] ?? null) : null,
+    });
+  }
+  res.json({ data: out });
+}
+
 // ---------- Stage-scoped work queue for the requesting staff member ----------
 async function getQueue(req, res) {
   const u = req.user;
@@ -2332,7 +2389,7 @@ async function deleteOrder(req, res) {
 }
 
 module.exports = {
-  getQueue, getOrder, advance, advanceBulk, deliver, revert, returnToCustomer, claim, release, completed, uploadFinalDesign, monitor, presence,
+  getQueue, getAssemblyBoard, getOrder, advance, advanceBulk, deliver, revert, returnToCustomer, claim, release, completed, uploadFinalDesign, monitor, presence,
   issueEventsTicket, streamEvents, nextStageFor, markEmbroideryZone, markEmbroideryZoneBulk,
   tailorQueue, tailorComplete, tailorReopen, tailorCompleteBulk, tailorSummary,
   deleteOrder,

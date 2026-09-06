@@ -14,6 +14,9 @@ router.get('/events', authQuery, requireRole('admin', 'staff'), c.streamEvents);
 router.use(authRequired, requireRole('admin', 'staff'));
 
 router.get('/queue', c.getQueue);
+// «التجميع» board (برزان): rep sashes arriving from التطريز + ready to sew. Line-wide read,
+// same rule as the queue; the controller refuses مفصل/non-line types itself.
+router.get('/assembly', c.getAssemblyBoard);
 router.get('/monitor', requireStaffType(), c.monitor); // no types → manager staff_type + admin only
 // «يعمل الآن» alone, for the admin dashboard's 30s poll. SAME guard as /monitor —
 // it is a slice of the same data, so it must not be reachable by anyone /monitor isn't.
