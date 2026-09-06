@@ -23,10 +23,17 @@ export interface ShelfSection {
   slot_to: number;
 }
 
-export interface ShelfSlotPiece {
+/** Every word the student typed on a piece (embroidery text + free-text option answers),
+ *  flattened server-side for the search box. Never displayed — it is a search index. */
+type Searchable = { search_text: string | null };
+
+export interface ShelfSlotPiece extends Searchable {
   order_id: string;
   piece_type: PieceType;
   piece_label: string;
+  /** Whose piece — carried on the PIECE because a communal خانة has no owner of its own.
+   *  This is what lets one matched sash light up its student's robe and cap bins too. */
+  student_id: string;
   student_name: string;
   placed_at: string | null;
 }
@@ -55,7 +62,7 @@ export interface Shelf {
   slots: ShelfSlot[];
 }
 
-export interface ShelfSetPiece {
+export interface ShelfSetPiece extends Searchable {
   order_id: string;
   piece_type: PieceType;
   piece_label: string;
@@ -84,7 +91,7 @@ export interface ShelfSuggestion {
   over: boolean;
 }
 
-export interface ShelfInboxItem {
+export interface ShelfInboxItem extends Searchable {
   order_id: string;
   student_id: string;
   student_name: string;
@@ -96,7 +103,7 @@ export interface ShelfInboxItem {
 }
 
 /** A piece taken off the shelf. Collecting advances it to «جاهز», so it leaves every other list. */
-export interface ShelfCollectedItem {
+export interface ShelfCollectedItem extends Searchable {
   order_id: string;
   set_key: string;
   student_id: string;

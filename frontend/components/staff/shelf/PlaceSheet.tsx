@@ -79,8 +79,12 @@ export function PlaceSheet({
       aria-modal="true"
       aria-label="تسكين القطعة"
     >
+      {/* Scrolls inside itself on a phone. With the picker open this sheet is title + big
+          target + a 5-wide grid of خانات + two buttons, which runs past a 390px screen —
+          and «تم — سكّنها» was the part below the fold. `overscroll-contain` keeps the page
+          behind it still while the worker scrolls the sheet. */}
       <div
-        className="w-full max-w-lg rounded-t-3xl bg-[#FFF8F0] p-5 shadow-2xl sm:rounded-3xl"
+        className="max-h-[90dvh] w-full max-w-lg overflow-y-auto overscroll-contain rounded-t-3xl bg-[#FFF8F0] p-5 shadow-2xl sm:max-h-[90vh] sm:rounded-3xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 text-center">

@@ -638,6 +638,15 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
   const [wholesalersLoaded, setWholesalersLoaded] = useState(false);
   const [selectedWid, setSelectedWid] = useState("");
   const [grabRows, setGrabRows] = useState<CalGrabRow[]>([]);
+  // ── WHICH BATCH the grid is showing ──────────────────────────────────────────
+  // The grid is fed from TWO places: the current job (runCreatedJob/getCalJob) and
+  // `getRecentPlates(60)`, which returns the 60 newest done plates SHOP-WIDE so the page
+  // survives a refresh. They land in one `plates` array, and «تنزيل إلى مجلد…» saves whatever
+  // is visible — so a designer who generated 8 names for one ممثل got those 8 plus up to 60
+  // other students' plates in the folder, with nothing on screen suggesting it would.
+  // Scoping the GRID (not just the download) is the fix: one concept, and the designer can
+  // never be looking at one set of plates while the button acts on another.
+  const [gridScope, setGridScope] = useState<"batch" | "all">("batch");
   const [grabLoading, setGrabLoading] = useState(false);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   // زون filter for the wholesaler grab list — امامي / خلف / قبعة (cap+cap_side grouped)
@@ -1359,6 +1368,11 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
     return list;
   }, [plates]);
 
+  // Only meaningful once there IS a batch. With no job on screen (a fresh session that only
+  // restored recent plates) «الدفعة» would filter everything away, so the scope goes inert and
+  // the toggle hides itself rather than showing an empty grid the designer cannot explain.
+  const batchScoped = gridScope === "batch" && Boolean(jobId);
+
   const visibleGroups = useMemo(() => {
     const q = searchText.trim();
     return groups
@@ -1383,8 +1397,16 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
           ? { ...g, plates: g.plates.filter((p) => matchesAr(p.render_text, q)) }
           : g
       )
+      // Batch scope is per-PLATE, never per-group: one student's order can carry a zone
+      // generated in this batch beside a zone generated last week, and hiding the whole order
+      // because of the older one would lose work the designer just paid for.
+      .map((g) =>
+        batchScoped
+          ? { ...g, plates: g.plates.filter((p) => p.job_id === jobId) }
+          : g
+      )
       .filter((g) => g.plates.length > 0);
-  }, [groups, gridFilter, gridWid, searchText, orderZones]);
+  }, [groups, gridFilter, gridWid, searchText, orderZones, batchScoped, jobId]);
 
   const visiblePlates = useMemo(
     () => visibleGroups.flatMap((g) => g.plates),
@@ -1411,8 +1433,15 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
 
   // ── «تنزيل إلى مجلد…» — write every visible done plate into a user-picked folder
   //    (File System Access API, Chrome/Edge desktop). Fallback: ZIP of the same set.
+  // ONE definition of «what the download will write», read by both the button label and the
+  // handler. Two definitions is how the label and the action drifted apart in the first place.
+  const downloadTargets = useMemo(
+    () => visiblePlates.filter((p) => p.status === "done" && p.plate_path),
+    [visiblePlates]
+  );
+
   async function downloadToFolder() {
-    const target = visiblePlates.filter((p) => p.status === "done" && p.plate_path);
+    const target = downloadTargets;
     if (!target.length) {
       toast.error("لا توجد صور جاهزة ضمن الفلترة الحالية");
       return;
@@ -1544,6 +1573,35 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
               {controlsOpen ? "إخفاء التوليد ▴" : "توليد المزيد ▾"}
             </Button>
 
+            {/* ── batch scope ──────────────────────────────────────────────────
+                Shown only when there IS a batch to scope to. This is the control that
+                stops «تنزيل إلى مجلد…» from quietly saving other reps' students: the
+                grid and the button always act on the same set, and the set is named. */}
+            {jobId && (
+              <div className="flex items-center gap-1.5" role="group" aria-label="نطاق العرض">
+                {(
+                  [
+                    { id: "batch" as const, label: "هذه الدفعة" },
+                    { id: "all" as const, label: "كل الصور" },
+                  ]
+                ).map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    aria-pressed={gridScope === f.id}
+                    onClick={() => setGridScope(f.id)}
+                    className={`min-h-9 rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                      gridScope === f.id
+                        ? "bg-ink text-white"
+                        : "border border-line bg-surface text-ink-soft hover:border-ink/40 hover:text-ink"
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
             {/* status filter chips */}
             <div className="flex flex-wrap items-center gap-1.5">
               {(
@@ -1590,14 +1648,17 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
               className="min-h-9 w-40 grow rounded-full border border-line bg-surface px-3.5 py-1 text-xs text-ink placeholder:text-ink/40 focus:border-orange-ink focus:outline-none sm:w-48 sm:grow-0"
             />
 
+            {/* The count is part of the label on purpose. «تنزيل إلى مجلد…» used to say
+                nothing about how many files it was about to write or whose they were, which
+                is how a batch of 8 turned into a folder of 60 without anyone noticing. */}
             <Button
               size="sm"
               variant="secondary"
               loading={folderSaving}
-              disabled={folderSaving}
+              disabled={folderSaving || downloadTargets.length === 0}
               onClick={downloadToFolder}
             >
-              تنزيل إلى مجلد…
+              {`تنزيل ${downloadTargets.length} ${batchScoped ? "من هذه الدفعة" : "من المعروض"} إلى مجلد…`}
             </Button>
           </div>
         </div>
@@ -2184,7 +2245,7 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
             disabled={!!zipSaving}
             onClick={() => downloadJobZip(false)}
           >
-            تنزيل الكل (ZIP)
+            تنزيل هذه الدفعة (ZIP)
           </Button>
           <Button
             variant="ghost"
@@ -2192,8 +2253,20 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
             disabled={!!zipSaving}
             onClick={() => downloadJobZip(true)}
           >
-            تنزيل الكل مع الأوراق
+            مع الأوراق الأصلية
           </Button>
+          {/* ⚠️ The SHEETS are shared, and that is by design — `calligraphyEngine.js`'s
+              cross-job top-up fills a half-empty sheet with pending plates from OTHER jobs,
+              because a sheet costs the same $0.10 whether it carries 1 name or 10 (the
+              2026-08-18 cost audit). So a sheet legitimately shows names from other ممثلين.
+              The plates in `sheets/` are still only this batch's; it is the page behind them
+              that is shared. Said out loud here because finding a stranger's name in a
+              download is exactly the thing that made this whole screen look broken. */}
+          <p className="basis-full text-xs leading-relaxed text-ink-soft">
+            «الأوراق الأصلية» هي صور التوليد الكاملة — الورقة الواحدة تحمل حتى ١٠ أسماء وقد
+            تضم أسماء من دفعات ممثلين آخرين، لأن الورقة بنفس الكلفة سواء كتبنا فيها اسماً أو
+            عشرة. الصور المقصوصة في هذا الملف كلها من هذه الدفعة فقط.
+          </p>
         </section>
       )}
 

@@ -882,20 +882,55 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   `sudo -u postgres pg_dump -d loloshop -Fc -f /tmp/x.dump` (write to `/tmp`, then `mv` — the
   `postgres` user cannot write to `/root`). Dropping the leftover backfill table would also fix
   it, but check with the owner first: it is the rollback evidence for that backfill.
-- **⚠️ «ONE STUDENT PER خانة» IS NO LONGER A SHELF-WIDE RULE — it is PER SECTION.** Since
-  migration 085 the وشاح section is `mode = 'shared'` with `max_per_slot = 20`: any student's
-  sash may join a خانة, bins fill to 20 and then spill to the next one. روب (10) and قبعة (4)
-  are still `exclusive` and still enforce D2. So `placePiece`'s «الخانة مشغولة بطالب آخر» now
-  fires for some sections and not others, on purpose, and a reader who assumes D2 everywhere
-  will misread the code. Two things follow and must not be "tidied":
-  · **A communal bin's `student_id` is NULL and must stay NULL.** «وين وشاح فلان؟» is answered by
-    searching each PLACED PIECE's student name (`ShelfMap.tsx`), never the bin's owner. Writing
-    an owner onto a communal bin would make it claim one student while holding twenty.
-  · **`max_per_slot` is a FLAG, not a cap.** `placePiece` never refuses on count; D4 says the
-    worker may always keep stacking. The number only decides when the screen says «فوق الحد».
-    A section with a NULL max (شال) is the bottomless single bin it has always been.
-  The measurements behind the change are in migration 085's header — read them before reverting
-  it: one-student-per-خانة capped the sash shelf at 15 students while 47 sashes were waiting.
+- **⛔ «ONE STUDENT PER خانة» (D2) IS RETIRED — EVERY SECTION IS COMMUNAL (migration 108,
+  owner 2026-09-06).** روب · وشاح · قبعة · شال are all `mode = 'shared'`, **10 خانة each, 30
+  per خانة**. `placePiece`'s `ERR_SLOT_TAKEN` («الخانة مشغولة بطالب آخر») can no longer fire
+  for anything — that is the owner's «خليهم بس يحطون القطع», not an oversight. This entry
+  replaces the 085 one that said the rule had become PER SECTION; it is now per section in
+  name only. Four things that must survive any tidy-up:
+  · **A communal bin's `student_id` is NULL and must stay NULL.** «وين روب فلان؟» is answered
+    by searching each PLACED PIECE's student name (`ShelfMap.tsx`), never the bin's owner —
+    an owner on a 30-piece bin claims one student holds all thirty. 108 clears every open bin.
+  · **`max_per_slot` is a FLAG, not a cap.** `placePiece` never refuses on count (D4); the
+    number only decides when the screen says «فوق الحد».
+  · ⚠️ **SECTION RANGES ARE DERIVED, NEVER STORED** (`loadSections` walks `slot_count` in
+    `sort_order`), so قبعة growing 6 → 10 slid شال from **C07 to C11**. An open bin left behind
+    reads as a قبعة bin — its `section_id` says شال while its `slot_index` sits in قبعة's range
+    — and `placePiece` then refuses to add to it with `ERR_WRONG_SECTION`, with nothing on any
+    screen explaining why. 108 carries every open bin to the same POSITION in its new section,
+    walking sections in DESCENDING `sort_order` so a rising section never lands on a slot its
+    lower sibling has not vacated (`shelf_slot_one_open` is a partial unique index; a transient
+    collision aborts the deploy). The dev DB has no C bins, so `shelf.test.js` manufactures the
+    prod shape to cover it — that test is the only thing exercising this path.
+  · **The `exclusive` branch is still live code with no section pointing at it.** One UPDATE
+    brings it back, so `shelf.test.js` keeps covering it with hand-built section objects. Do
+    not delete it as dead unless the branch in `lib/shelf.js` goes too.
+  The measurements behind the earlier half-step (085, sash only) are in that migration's
+  header: one-student-per-خانة capped the sash shelf at 15 students while 47 sashes waited.
+
+- **⚠️ «تنزيل إلى مجلد…» ON THE CALLIGRAPHY WORKBENCH SAVES WHAT THE GRID SHOWS, AND THE GRID
+  IS FED FROM TWO PLACES (fixed 2026-09-06).** `getRecentPlates(60)` returns the newest done
+  plates **shop-wide** — it exists so the page survives a refresh — and they land in the same
+  `plates` array as the current job's rows. The folder download wrote every visible done plate,
+  so a designer who generated 8 names for one ممثل got those 8 plus up to 60 other students'.
+  Fixed by scoping the GRID (chips «هذه الدفعة» / «كل الصور», default the batch), which is why
+  `toPlate` now exposes **`job_id`** — the only handle the client has on «my batch». Delete
+  that field and the mixing comes back silently: it is optional on `CalPlate`, so `tsc` says
+  nothing. `test/calligraphyBatchScope.test.js` is the guard.
+  · ⚠️ **THE SHEETS GENUINELY CARRY OTHER REPS' STUDENTS AND THAT IS CORRECT.** The cross-job
+    top-up fills a half-empty sheet with pending plates from other jobs, because a sheet costs
+    the same $0.10 whether it holds 1 name or 10 (the 2026-08-18 cost audit). The CROPPED
+    plates in a job ZIP are only that job's; the page behind them is shared. Said out loud in
+    Arabic under «الأوراق الأصلية» — do not "fix" the top-up to make the sheet look tidy.
+
+- **⚠️ TWO SESSIONS KEEP CLAIMING THE SAME MIGRATION NUMBER — CHECK `db/migrations` AND THE
+  WORKING TREE, NOT JUST GIT.** 105 was taken twice (`cb76c14` renumbered التجميع 105 → 106),
+  and on 2026-09-06 **106 was taken twice**: `106_assembly_stage.sql` was committed while an
+  earlier session the same day had an uncommitted `106_note_group_text_optional.sql` sitting in
+  the tree. It is now **107**, renumbered while still unapplied to prod — the only moment
+  renaming a migration is safe, since an applied one matches no history under a new name. The
+  shelf work is **108**. An untracked migration does not show up in `git log`, so
+  `ls db/migrations | tail` is the check that actually works.
 
 - **⚠️ THE TWO ANSWER GUARDS ARE OPPOSITE AND MUST NEVER BE MERGED.** `lib/answerGuard.js`
   (storefront) rejects any IQD figure not in the price book; `lib/adminAnswerGuard.js` (console)
