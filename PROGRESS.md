@@ -1,5 +1,40 @@
 # Progress
 
+## 2026-09-06 — 🧵 ملف الـDST صار يبدأ من المركز، يقفل كل شكل، ويقصّ الخيط بين الحروف
+
+Branch `feat/calligraphy-dst`, `backend/lib/digitize/` only — no migration, no new dependency,
+no route change. The three writer defects the 2026-09-02 profiling found (invisible on every
+preview, each a sew-out defect on the FEIFAN) are closed, plus one the «محمد احمد» test run
+exposed:
+· **Start point = design centre, needle returns to it** (`index.js` translates the runs so the
+  extents are symmetric; header `+X == -X`; `stats.startOffsetMm` / `stats.returnsHome`). Was
+  the corner — 54–111 mm off where the operator lines the hoop up.
+· **Tie-in / tie-off on every shape** (`dst.js` `tieIn`/`tieOff`: 4 stitches of 0.7 mm walked
+  into the first/last segment and back — never outside the ink). ⚠️ 0.4 mm looked safer and
+  put 5.8% of a file under 0.6 mm (the shop's: 1.8%); 0.7 keeps it at 2.0%.
+· **Every travel between shapes is a trim group: ≥3 jumps, each ≤ 7 mm** (`MACHINE_DEFAULTS`).
+  Before: one 12.1 mm-chunked jump, which the machine sews straight across. The shop's files:
+  0 single jumps per file (median), max jump 8.9 mm.
+· **A tatami row turn no longer crosses the opening of a bowl** (`stitches.js` `fillRegion`,
+  `leavesRegion`) — measured 26 mm and 32 mm of thread through the background inside the two
+  د of «محمد احمد». A turn that leaves the region > 1 mm breaks the run; `connectTravel` then
+  routes it through the ink or trims.
+Tests: `test/digitize.test.js` 20 → **24** (7a centre+home · 7b locks · 7c trim groups · 7d
+fill turn, written red first). `writeDst` grew `{lock, trim, home}` options so 1c and 5 test
+the split loop alone.
+**New tool:** `node scripts/dst-profile.js file.DST …` — PASS/FAIL per file against the shop
+band (start_off 0 · tie ≥ 0.5 · no single hops · jump ≤ 9 · satin ≥ 0.80 · short ≤ 4%). Run it
+on every DST before it goes to the embroiderer. (Measured: 179 of the shop's own 417 files pass it
+whole; the rest fail on single-hop count, tie ratio or a jump over 9.5 mm — the shop hops, skips
+locks and jumps longer than this writer ever does, so the gate is stricter than their practice.)
+**Measured on this run** (`~/Desktop/_inbox/dst-test-2026-09-06/`): «محمد احمد» (Amiri, local
+— OpenRouter returned **402 insufficient credits**, so no AI plate could be bought) 5,506 st ·
+6 shapes · satin 0.86 · short 1.6% · 17.8 jumps/1k; a real AI plate «الباحث محمد علي» 8,358 st ·
+52 shapes · satin 0.87 · short 2.0%. Both PASS; shop median satin 0.93 / short 1.8% / 17 per 1k.
+**Still not done:** the scrap sew-out on the FEIFAN 12-needle — the owner's rule for «100%».
+The machine's jump-count-to-trim setting is the one thing the profiler cannot measure; ≥3 is
+what every shop file uses, so it is what we write.
+
 ## 2026-09-02 — ✒️ محمد عماد (مطرّز) صار يفتح أداة الخط العربي
 
 Task 2A.3, frontend half of the embroiderer-access change whose backend half (`mayUseTool` /

@@ -402,7 +402,19 @@ async function digitizePlate(input, opts = {}) {
 
   let ordered = orderRuns(runs);
   ordered = connectTravel(ordered, mask, dist, pxPerMm, Hmm, o.travelMaxMm);
-  const buffer = writeDst(ordered, { label: o.label });
+
+  // ⚠️ THE NEEDLE STARTS AT THE CENTRE OF THE DESIGN, NOT AT ITS CORNER. Every one of the
+  // shop's 417 files has its start point (0,0) at the middle of the extents (+X == -X in the
+  // header) and returns there at the end; the operator lines the hoop up on that point.
+  // Written from the corner, the same file sews 54–111 mm off where the operator placed it.
+  // Translate here — writeDst only knows units — and remember the offset for the readback.
+  let bx0 = Infinity, bx1 = -Infinity, by0 = Infinity, by1 = -Infinity;
+  for (const run of ordered) for (const [x, y] of run) {
+    if (x < bx0) bx0 = x; if (x > bx1) bx1 = x; if (y < by0) by0 = y; if (y > by1) by1 = y;
+  }
+  const ox = (bx0 + bx1) / 2, oy = (by0 + by1) / 2;
+  const centred = ordered.map((run) => run.map(([x, y]) => [x - ox, y - oy]));
+  const buffer = writeDst(centred, { label: o.label });
 
   const { stitches } = readDst(buffer);
 
@@ -414,7 +426,7 @@ async function digitizePlate(input, opts = {}) {
   const shipped = [];
   let curRun = [];
   for (const s of stitches) {
-    const p = [s.x / 10, s.y / 10];
+    const p = [s.x / 10 + ox, s.y / 10 + oy];
     if (s.kind === 'jump') { if (curRun.length > 1) shipped.push(curRun); curRun = [p]; }
     else curRun.push(p);
   }
@@ -427,9 +439,21 @@ async function digitizePlate(input, opts = {}) {
   }
 
   const bbox = mask.bbox();
+  // Machine-manner counters, so the workbench can say «مو مركّز» / «بلا قفل» instead of
+  // finding out on fabric. `shapes` = separately trimmed pieces; the shop's run 25–60.
+  let shapes = 0, trims = 0, inGroup = 0;
+  for (const s of stitches) {
+    if (s.kind === 'jump') { inGroup++; }
+    else { if (inGroup) { trims++; shapes++; inGroup = 0; } }
+  }
+  const last = stitches[stitches.length - 1];
   const stats = {
     stitches: stitches.length,
     jumps: stitches.filter((s) => s.kind === 'jump').length,
+    shapes,
+    trims,
+    startOffsetMm: +Math.hypot(ox - (bx0 + bx1) / 2, oy - (by0 + by1) / 2).toFixed(1),
+    returnsHome: !!last && last.x === 0 && last.y === 0,
     satinColumns: cols.length,
     fillRegions: regions.length,
     patches,

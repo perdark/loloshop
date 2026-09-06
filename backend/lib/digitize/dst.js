@@ -123,11 +123,73 @@ function buildHeader({ label, stitches, minX, maxX, minY, maxY }) {
   return buf;
 }
 
+// ---------------------------------------------------------------- machine manners
+// Measured off the shop's own 417 files («مفرد جاهز 7», 2026-09-02 / 2026-09-06), median:
+//   start point = design CENTRE and the needle RETURNS to it   (start_off 0.0 mm, +X == -X)
+//   tie-in on 65% / tie-off on 57% of shapes                    (≥3 stitches ≤1 mm at each end)
+//   EVERY inter-shape gap = a group of ≥3 jump records ≤ ~9 mm  (0 single jumps per file)
+// A file that starts at the corner sews mis-centred in the hoop; a shape with no lock frays
+// at both ends; a single jump is a HOP the machine sews straight across, so the thread is
+// dragged from letter to letter and clipped by hand. None of the three shows on a preview.
+const MACHINE_DEFAULTS = {
+  lock: true,
+  lockStepMm: 0.7,     // each lock stitch ≤1 mm like the shop's — and NOT under 0.6, which the machine reads as a thread-break risk (measured: 0.4 put 5.8% of a file under 0.6 mm vs the shop's 1.8%)
+  trim: true,
+  trimJumpMm: 7.0,     // ⚠️ ≥3 jumps is what tells the machine to cut; the shop's are ≤9 mm each
+  trimMinJumps: 3,
+  home: true,          // jump back to the start point after the last shape
+};
+
+function unitToward(a, b) {
+  const dx = b[0] - a[0], dy = b[1] - a[1];
+  const d = Math.hypot(dx, dy);
+  return d < 1e-9 ? null : [dx / d, dy / d, d];
+}
+
+/** First point of `run` more than 0.05 mm away from run[0] (or the last one, walking back). */
+function nextDistinct(run, fromEnd) {
+  const n = run.length;
+  if (fromEnd) { for (let i = n - 2; i >= 0; i--) if (Math.hypot(run[i][0] - run[n - 1][0], run[i][1] - run[n - 1][1]) > 0.05) return run[i]; }
+  else { for (let i = 1; i < n; i++) if (Math.hypot(run[i][0] - run[0][0], run[i][1] - run[0][1]) > 0.05) return run[i]; }
+  return null;
+}
+
+/**
+ * Tie-in: four short stitches walked INTO the first segment and back to its start, so
+ * the thread is anchored under stitching that is about to cover it. Never leaves the
+ * segment, so it cannot poke outside the ink. Returns points to sew before run[1].
+ */
+function tieIn(run, stepMm) {
+  const q = nextDistinct(run, false);
+  if (!q) return [];
+  const [ux, uy, d] = unitToward(run[0], q);
+  const s = Math.min(stepMm, d / 2);
+  const [x, y] = run[0];
+  return [[x + ux * s, y + uy * s], [x + ux * 2 * s, y + uy * 2 * s], [x + ux * s, y + uy * s], [x, y]];
+}
+
+/** Tie-off: the mirror image, walked back INTO the last segment and out to its end again. */
+function tieOff(run, stepMm) {
+  const q = nextDistinct(run, true);
+  if (!q) return [];
+  const last = run[run.length - 1];
+  const [ux, uy, d] = unitToward(q, last);
+  const s = Math.min(stepMm, d / 2);
+  const [x, y] = last;
+  return [[x - ux * s, y - uy * s], [x - ux * 2 * s, y - uy * 2 * s], [x - ux * s, y - uy * s], [x, y]];
+}
+
 /**
  * Serialise ordered polylines (mm, y-up) into a DST buffer.
- * The first point of every run after the first is reached by a JUMP; the rest are stitches.
+ *
+ * Every run is ONE SHAPE: reached by a trim (a group of ≥3 short jumps), anchored with a
+ * tie-in, sewn, anchored with a tie-off. The needle starts at (0,0) — `digitizePlate`
+ * centres the design there first — and jumps back to (0,0) after the last shape, which is
+ * what the machine's operator expects and what every one of the shop's files does.
  */
-function writeDst(runs, { label = 'LOLOSHOP' } = {}) {
+function writeDst(runs, opts = {}) {
+  const { label = 'LOLOSHOP' } = opts;
+  const m = { ...MACHINE_DEFAULTS, ...opts };
   const recs = [];
   let cx = 0, cy = 0;
   let minX = 0, maxX = 0, minY = 0, maxY = 0;
@@ -155,20 +217,34 @@ function writeDst(runs, { label = 'LOLOSHOP' } = {}) {
     if (cx < minX) minX = cx; if (cx > maxX) maxX = cx;
     if (cy < minY) minY = cy; if (cy > maxY) maxY = cy;
   };
+  const toUnits = ([x, y]) => [Math.round(x * UNITS_PER_MM), Math.round(y * UNITS_PER_MM)];
 
-  runs.forEach((run, ri) => {
-    run.forEach(([x, y], si) => {
-      const tx = Math.round(x * UNITS_PER_MM);
-      const ty = Math.round(y * UNITS_PER_MM);
-      // ⚠️ `ri > 0` HERE LAID A THREAD FROM THE MACHINE ORIGIN INTO THE DESIGN. The needle
-      // starts at (0,0); the very first point of the very first run is a TRAVEL to the
-      // artwork, exactly like every other run's first point. Calling it 'normal' made the
-      // last ≤12.1 mm of that travel a real stitch — a straight line of thread running out
-      // of the bottom-left corner of every file this module has ever written. It is easy to
-      // miss because the rest of the travel splits into jumps and only the tail shows.
-      emit(tx, ty, si === 0 ? 'jump' : 'normal');
-    });
+  // ⚠️ A TRAVEL IS A GROUP OF ≥3 JUMPS, EACH ≤ trimJumpMm — THAT GROUP IS THE TRIM COMMAND.
+  // One long jump chopped into 12.1 mm pieces is what this used to write, so a 10 mm gap
+  // between two letters became ONE jump record, the machine never cut, and the thread was
+  // sewn straight across the gap. With `trim` off a travel is a plain single move (tests).
+  const travel = (tx, ty) => {
+    if (!m.trim) { emit(tx, ty, 'jump'); return; }
+    const d = Math.hypot(tx - cx, ty - cy);
+    if (d < 1 && !recs.length) return; // the first shape starts on the start point itself
+    const n = Math.max(m.trimMinJumps, Math.ceil(d / (m.trimJumpMm * UNITS_PER_MM)));
+    const sx = cx, sy = cy;
+    for (let i = 1; i <= n; i++) emit(Math.round(sx + ((tx - sx) * i) / n), Math.round(sy + ((ty - sy) * i) / n), 'jump');
+  };
+
+  runs.forEach((run) => {
+    if (!run.length) return;
+    // ⚠️ The needle starts at (0,0); the very first point of the very first run is a
+    // TRAVEL to the artwork, exactly like every other run's first point. Calling it
+    // 'normal' once laid a straight line of thread out of the bottom-left corner.
+    const [x0, y0] = toUnits(run[0]);
+    travel(x0, y0);
+    const body = run.length > 1 && m.lock
+      ? [...tieIn(run, m.lockStepMm), ...run.slice(1), ...tieOff(run, m.lockStepMm)]
+      : run.slice(1);
+    for (const p of body) { const [tx, ty] = toUnits(p); emit(tx, ty, 'normal'); }
   });
+  if (m.home && (cx || cy)) travel(0, 0);
 
   const body = Buffer.concat([...recs, Buffer.from([0x00, 0x00, 0xf3])]);
   const header = buildHeader({ label, stitches: recs.length, minX, maxX, minY, maxY });
@@ -196,4 +272,4 @@ function readDst(buf) {
   return { header, stitches };
 }
 
-module.exports = { encodeStitch, decodeStitch, writeDst, readDst, balancedTernary, asciiLabel, UNITS_PER_MM, MAX_MOVE };
+module.exports = { encodeStitch, decodeStitch, writeDst, readDst, balancedTernary, asciiLabel, tieIn, tieOff, MACHINE_DEFAULTS, UNITS_PER_MM, MAX_MOVE };

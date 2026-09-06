@@ -220,8 +220,30 @@ function fillRegion(region, pxPerMm, opts = {}) {
   // turn at the edge of the shape and stays connected. Using a distance threshold instead
   // looks equivalent and is not — a legitimate 4 mm fill stitch and a 4 mm hole crossing
   // are the same length.
+  // ⚠️ AND THE ROW-TO-ROW TURN IS CHECKED AGAINST THE REGION TOO. "The turn at the edge of
+  // the shape stays connected" is only true of a convex shape. On a bowl whose principal
+  // axis runs along its opening, the last segment of one row and the first of the next sit
+  // on opposite horns, and the turn between them is one straight stitch across the opening
+  // — measured on «محمد احمد»: 26 mm and 32 mm of thread through the background inside the
+  // two د. So a turn that leaves the region for more than `turnOutsideMm` breaks the run;
+  // the caller then routes through the ink or trims, exactly as for a counter.
+  const turnOutsideMm = 1.0;
+  const insideRegion = (x, y) => {
+    const j = Math.round(x * pxPerMm), i = Math.round(y * pxPerMm);
+    return i >= 0 && j >= 0 && i < h && j < w && region.data[i * w + j];
+  };
+  const leavesRegion = (x, y) => {
+    if (!cur.length) return false;
+    const [x0, y0] = cur[cur.length - 1];
+    const d = Math.hypot(x - x0, y - y0);
+    if (d <= turnOutsideMm) return false;
+    const k = Math.ceil(d * pxPerMm);
+    let out = 0;
+    for (let s = 1; s < k; s++) if (!insideRegion(x0 + ((x - x0) * s) / k, y0 + ((y - y0) * s) / k)) out++;
+    return (out / k) * d > turnOutsideMm;
+  };
   const push = (x, y, breakFirst) => {
-    if (breakFirst && cur.length) { if (cur.length > 1) runsOut.push(cur); cur = []; }
+    if ((breakFirst || leavesRegion(x, y)) && cur.length) { if (cur.length > 1) runsOut.push(cur); cur = []; }
     cur.push([x, y]);
   };
   let dir = 1;

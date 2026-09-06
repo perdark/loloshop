@@ -44,7 +44,8 @@ test('1b. a move that cannot fit in one record is rejected, not truncated', () =
 
 test('1c. writeDst splits long travel into jumps instead of losing it', () => {
   // 60 mm apart = 600 units, far beyond one record's +/-121
-  const buf = writeDst([[[0, 0]], [[60, 0]]], { label: 'T' });
+  // machine manners off: this test is about the split loop alone (7a–7c cover the manners)
+  const buf = writeDst([[[0, 0]], [[60, 0]]], { label: 'T', lock: false, trim: false, home: false });
   const { stitches } = readDst(buf);
   const end = stitches[stitches.length - 1];
   assert.equal(end.x, 600, 'the needle must actually arrive at the target');
@@ -341,7 +342,9 @@ test('4c. extendEnds pushes a free end out to the edge of the ink', () => {
 
 test('5. a stitch too long for one record is split into STITCHES, never into travel', () => {
   // 20 mm is wider than the 12.1 mm a single DST record can hold on one axis
-  const buf = writeDst([[[0, 0], [0, 20], [0.4, 0]]], { label: 'LONG' });
+  // A one-point-off-origin run so the FIRST record is the travel this test talks about;
+  // lock/trim/home off because they add records that 7a–7c pin on their own.
+  const buf = writeDst([[[0.1, 0], [0.1, 20], [0.4, 0]]], { label: 'LONG', lock: false, trim: false, home: false });
   const { stitches } = readDst(buf);
   const laid = stitches.filter((s) => s.kind !== 'jump');
   // ⚠️ THE SPLIT LOOP USED TO EMIT `jump` FOR EVERY PART OF AN OVER-LONG MOVE, WHATEVER IT
@@ -414,4 +417,92 @@ test('6. one connected piece of artwork comes out as ONE shape, not many', async
     const { buffer } = await digitizePlate(two, { heightMm: 30, label: 'TWO' });
     assert.ok(shapes(buffer).length >= 2, 'separate artwork must not be joined by thread');
   } finally { fs.unlinkSync(two); }
+});
+
+// ---------------------------------------------------------------- 7. machine manners
+// Measured off the shop's 417 files on 2026-09-06 with the same readDst (median per file):
+// start point = centre of the extents and the needle returns to it (0.0 mm off, +X == -X
+// in 95% of headers) · tie-in on 65% and tie-off on 57% of shapes · EVERY travel between
+// shapes is a group of ≥3 jumps, each ≤ 9 mm, and not one file has a single-jump travel.
+// None of the three is visible on a preview; each is a sew-out defect (mis-centred hoop,
+// frayed shape ends, thread dragged from letter to letter).
+const shapesOf = (stitches) => {
+  const shapes = []; let cur = []; const groups = []; let g = 0;
+  for (const s of stitches) {
+    if (s.kind === 'jump') { g++; if (cur.length) { shapes.push(cur); cur = []; } }
+    else { if (g) { groups.push(g); g = 0; } cur.push(s); }
+  }
+  if (cur.length) shapes.push(cur);
+  if (g) groups.push(g); // the home travel after the last shape
+  return { shapes, groups };
+};
+
+test('7a. the needle starts at the centre of the design and returns to it', async () => {
+  const file = await artwork('<rect x="60" y="120" width="480" height="40" fill="black"/>');
+  try {
+    const { buffer, stats } = await digitizePlate(file, { heightMm: 20, label: 'HOME' });
+    const { header, stitches } = readDst(buffer);
+    const xs = stitches.map((s) => s.x), ys = stitches.map((s) => s.y);
+    const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+    // ⚠️ THE OLD WRITER STARTED AT THE CORNER — 54–111 mm off centre on real names.
+    assert.ok(Math.hypot(cx, cy) <= 5, `start point is ${Math.hypot(cx, cy) / 10} mm off the centre`);
+    assert.ok(Math.abs(Number(header['+X']) - Number(header['-X'])) <= 1, `header +X ${header['+X']} / -X ${header['-X']}`);
+    const last = stitches[stitches.length - 1];
+    assert.equal(last.x, 0); assert.equal(last.y, 0);
+    assert.equal(stats.returnsHome, true);
+  } finally { fs.unlinkSync(file); }
+});
+
+test('7b. every shape is locked at both ends with short stitches inside its own first segment', () => {
+  const zig = []; for (let i = 0; i < 30; i++) zig.push([i * 0.3, i % 2 ? 2.5 : -2.5]);
+  const buf = writeDst([zig, zig.map(([x, y]) => [x + 30, y])], { label: 'LOCK' });
+  const { shapes } = shapesOf(readDst(buf).stitches);
+  assert.equal(shapes.length, 2);
+  for (const sh of shapes) {
+    const head = sh.slice(0, 4).map((s) => Math.hypot(s.dx, s.dy) / 10);
+    const tail = sh.slice(-4).map((s) => Math.hypot(s.dx, s.dy) / 10);
+    assert.ok(head.every((l) => l > 0 && l <= 1), `tie-in stitches ${head.join(',')} must be short`);
+    assert.ok(tail.every((l) => l > 0 && l <= 1), `tie-off stitches ${tail.join(',')} must be short`);
+  }
+  // the lock never leaves the run: the tie-in ends exactly where the run starts
+  const start = readDst(buf).stitches.find((s) => s.kind === 'normal');
+  const afterLock = readDst(buf).stitches.filter((s) => s.kind === 'normal')[3];
+  assert.ok(Math.hypot(afterLock.x - (start.x - start.dx), afterLock.y - (start.y - start.dy)) <= 1,
+    'the fourth lock stitch returns to the first point of the run');
+});
+
+test('7c. every travel between shapes is a trim: ≥3 jumps, each ≤ 7 mm, never a single hop', () => {
+  const bar = (x0) => { const r = []; for (let i = 0; i < 20; i++) r.push([x0 + i * 0.3, i % 2 ? 2 : -2]); return r; };
+  // gaps of 4 mm, 15 mm and 40 mm — the first used to be ONE jump, the last a chain of 12.1 mm
+  const buf = writeDst([bar(0), bar(10), bar(31), bar(77)], { label: 'TRIM' });
+  const { stitches } = readDst(buf);
+  const { shapes, groups } = shapesOf(stitches);
+  assert.equal(shapes.length, 4);
+  assert.equal(groups.length, 4 + 1, 'one travel before each shape and one home');
+  assert.ok(groups.every((g) => g >= 3), `jump groups ${groups.join(',')} — a group under 3 is a hop, not a trim`);
+  const longest = Math.max(...stitches.filter((s) => s.kind === 'jump').map((s) => Math.hypot(s.dx, s.dy) / 10));
+  assert.ok(longest <= 7.05, `longest jump ${longest.toFixed(1)} mm — the shop's are ≤ 9`);
+});
+
+test('7d. a tatami row turn never sews across the opening of a bowl', () => {
+  // A ring open on one side, rotated so its principal axis runs ALONG the opening: the last
+  // segment of one row and the first of the next then sit on opposite horns, and the
+  // boustrophedon turn between them used to be one straight stitch through the background
+  // (measured on «محمد احمد»: 26 mm and 32 mm of thread across the bowls of د).
+  const P = 4, W = 80, H = 80;
+  const m = new Mask(W * P, H * P);
+  for (let i = 0; i < H * P; i++) for (let j = 0; j < W * P; j++) {
+    const x = j / P - W / 2, y = i / P - H / 2, r = Math.hypot(x, y);
+    let a = Math.atan2(y, x) - 0.7; a = Math.atan2(Math.sin(a), Math.cos(a));
+    if (r >= 16 && r <= 30 && Math.abs(a) > 1.0) m.data[i * m.width + j] = 1;
+  }
+  const inside = (x, y) => { const j = Math.round(x * P), i = Math.round(y * P); return i >= 0 && j >= 0 && i < m.height && j < m.width && m.data[i * m.width + j]; };
+  let worst = 0;
+  for (const run of fillRegion(m, P, {})) for (let i = 1; i < run.length; i++) {
+    const [x0, y0] = run[i - 1], [x1, y1] = run[i], d = Math.hypot(x1 - x0, y1 - y0), k = Math.ceil(d * 4) || 1;
+    let out = 0;
+    for (let s = 1; s < k; s++) if (!inside(x0 + ((x1 - x0) * s) / k, y0 + ((y1 - y0) * s) / k)) out++;
+    worst = Math.max(worst, (out / k) * d);
+  }
+  assert.ok(worst <= 1.0, `a fill stitch runs ${worst.toFixed(1)} mm outside the region`);
 });
