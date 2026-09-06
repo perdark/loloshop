@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { PageLoader } from "@/components/ui/Spinner";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { AssemblyBoard } from "@/components/staff/station/AssemblyBoard";
 import { deleteProductionOrder, getQueueScoped } from "@/lib/staff";
 import { getUser } from "@/lib/auth";
 import { getApiErrorMessage } from "@/lib/api";
@@ -1250,6 +1251,14 @@ function ConsoleContent() {
         />
 
         {/* ── Main column (carded panel) ──────────────────────────────────── */}
+        <div className="flex w-full min-w-0 flex-1 flex-col gap-4">
+        {/* «التجميع» — the board (halves arriving + sashes ready to sew) sits above the flat
+            list for anyone looking at that stage, not only برزان (line-wide view rule). */}
+        {stage === "assembly" && (
+          <div className="rounded-2xl border border-line bg-beige p-3">
+            <AssemblyBoard />
+          </div>
+        )}
         <div className="flex w-full min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-line bg-surface">
 
           {/* Toolbar */}
@@ -1483,6 +1492,7 @@ function ConsoleContent() {
               />
             </>
           )}
+        </div>
         </div>
       </div>
     </div>

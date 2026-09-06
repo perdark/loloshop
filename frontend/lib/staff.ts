@@ -23,6 +23,7 @@ import type {
 import type { ConfigureSelectionPayload } from "./orders";
 import {
   mapApiOrderRow,
+  type AssemblyBoardData,
   type MonitorData,
   type ProductionOrderDetail,
   type ProductionQueueItem,
@@ -653,6 +654,12 @@ export async function counterSignupStudent(
     }
     throw e;
   }
+}
+
+/** GET /production/assembly — «التجميع» board: rep sashes arriving from التطريز + ready to sew (برزان). */
+export async function getAssemblyBoard(): Promise<AssemblyBoardData> {
+  const { data } = await api.get<{ data: AssemblyBoardData }>("/production/assembly");
+  return data.data;
 }
 
 /**

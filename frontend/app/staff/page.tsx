@@ -7,6 +7,7 @@ import { OrderCard } from "@/components/staff/OrderCard";
 import { AttendanceReminder } from "@/components/staff/AttendanceReminder";
 import { StationConsole } from "@/components/staff/station/StationConsole";
 import { PrepConsole } from "@/components/staff/prep/PrepConsole";
+import { AssemblyBoard } from "@/components/staff/station/AssemblyBoard";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { PageLoader } from "@/components/ui/Spinner";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -70,6 +71,11 @@ const QUEUE_META: Partial<Record<StaffType, { title: string; subtitle: string; e
     title: "قائمة التطريز",
     subtitle: "طلبات جاهزة للتطريز",
     empty: "لا توجد طلبات تطريز حالياً",
+  },
+  assembler: {
+    title: "لوحة التجميع",
+    subtitle: "أوشحة الممثلين — نص واصل من التطريز، ووشاح جاهز للخياطة",
+    empty: "ما في قطع بالتجميع هسة",
   },
   presser: {
     title: "قائمة الكوي",
@@ -1087,6 +1093,17 @@ function StaffPageContent() {
           kind={staffType === "embroiderer" ? "embroidery" : "pressing"}
           showSourceFilter={showSourceFilter}
         />
+      </>
+    );
+  }
+
+  // التجميع (برزان, 2026-09-06): rep sashes arriving from التطريز as halves, and whole ones
+  // ready to sew before الكوي. Reads the board endpoint; moves through the same `advance`.
+  if (staffType === "assembler") {
+    return (
+      <>
+        <AttendanceReminder className="mb-4" />
+        <AssemblyBoard />
       </>
     );
   }
