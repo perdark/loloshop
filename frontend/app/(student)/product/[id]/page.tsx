@@ -382,11 +382,19 @@ export default function StudentProductPage() {
           // always has an optionId to hang the upload/note on.
           const isShawlGroup =
             product.type === "shawl" && group.nameAr === "صورة الشال";
+          // «ملاحظة» (migration 103): optional free-text on قبعة/وشاح. `needsText` already
+          // covers it once an option is selected, and OptionGroupField auto-selects the sole
+          // one — this is here so the block still renders on the first paint, before that
+          // effect has run, rather than flashing the group empty.
+          const isNoteGroup =
+            (product.type === "cap" || product.type === "sash") &&
+            group.nameAr === "ملاحظة";
           const showUploadBlock =
             needsImage ||
             needsText ||
             isSashTypedField ||
             isShawlGroup ||
+            isNoteGroup ||
             (isCapEmbroideryGroup && needsText);
           const key =
             optionId != null ? selectionKey(group.id, optionId) : null;

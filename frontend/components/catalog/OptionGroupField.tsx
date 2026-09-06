@@ -39,7 +39,12 @@ export function OptionGroupField({
     (isColorGroup && group.requiresCustomerText) || // sash «اللون» (typed); robe/cap «اللون» = swatches
     group.nameAr === "لون التطريز" || // thread color — typed even when optional (sash-only by name)
     group.nameAr.startsWith("تطريز") || // embroidery zones (sash-only by name prefix)
-    group.nameAr === "صورة الشال"; // shawl photo+note — auto-select its sole option, render as upload+note
+    group.nameAr === "صورة الشال" || // shawl photo+note — auto-select its sole option, render as upload+note
+    // «ملاحظة» (migration 103) — the optional note on every قبعة/وشاح. Its sole option carries
+    // nothing a student would ever choose between, so without this line the note box only
+    // appears AFTER they tap a chip labelled «ملاحظة», which reads as a broken control. A
+    // «ملاحظة» group made through the admin UI before 103 sat unused for exactly that reason.
+    group.nameAr === "ملاحظة";
   const soleActiveId =
     group.options.find((o) => o.active)?.id ?? group.options[0]?.id ?? null;
 

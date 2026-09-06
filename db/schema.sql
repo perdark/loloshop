@@ -2040,3 +2040,42 @@ SELECT o.id, 'pressing'::order_status
         AND oi.label_snapshot NOT ILIKE 'إضافة:%'
    )
 ON CONFLICT (order_id) DO NOTHING;
+
+
+-- ── «ملاحظة» على القبعة والوشاح — Migration 103 ───────────────────────────────────────
+-- ⚠️ REPEATED FROM db/migrations/103_note_group_cap_sash.sql ON PURPOSE — the 077/080/093
+-- pattern. `scripts/deploy.sh` applies THIS file on every deploy, to a database that already
+-- holds these products, so the note group has to be seeded from here as well.
+--
+-- The `NOT EXISTS ... name_ar = 'ملاحظة'` guard inside is what makes that safe on a re-run:
+-- it ignores `active`, so once the group exists this is a no-op forever and an admin who
+-- switches the note off, renames its prompt, or edits its audience keeps that decision.
+-- `is_embroidery = FALSE` and `price_role_restriction = 'retail'` are load-bearing — read
+-- the migration's own header before changing either.
+WITH targets AS (
+    SELECT p.id
+      FROM products p
+     WHERE p.type IN ('cap', 'sash')
+       AND p.active = TRUE
+       AND NOT EXISTS (
+             SELECT 1 FROM option_groups g
+              WHERE g.product_id = p.id AND g.name_ar = 'ملاحظة'
+           )
+), created AS (
+    INSERT INTO option_groups
+        (product_id, name_ar, input_type, sort, required, requires_customer_text,
+         customer_text_prompt_ar, customer_text_placeholder_ar, price_role_restriction,
+         is_embroidery)
+    SELECT t.id, 'ملاحظة', 'single_select', 900, FALSE, TRUE,
+           'ملاحظة للمحل (اختياري)',
+           'مثال: أريد الاسم بخط أعرض',
+           'retail'::price_role,
+           FALSE
+      FROM targets t
+    RETURNING id
+)
+-- The sole option exists so the typed text has a row to hang on: `order_items` is keyed by
+-- (group_id, option_id), and the configurator auto-selects this option rather than showing it
+-- (see OptionGroupField's typed-field list). price_delta 0 — a note is never a paid extra.
+INSERT INTO options (group_id, label_ar, price_delta, sort)
+SELECT c.id, 'ملاحظة', 0, 0 FROM created c;
