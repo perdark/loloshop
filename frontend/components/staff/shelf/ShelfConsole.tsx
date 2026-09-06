@@ -28,6 +28,8 @@ import { usePolling } from "@/lib/hooks/usePolling";
 import { useScrollRestore } from "@/hooks/useScrollRestore";
 import { PlaceSheet } from "./PlaceSheet";
 import { ShelfMap } from "./ShelfMap";
+import { SearchField } from "@/components/ui/SearchField";
+import { matchesAr } from "@/lib/arabic";
 
 const STORAGE_KEY = "loloshop-shelf-console";
 
@@ -98,11 +100,58 @@ export function ShelfConsole() {
     setTimeout(() => setToast(null), 2600);
   }, []);
 
-  const readySets = useMemo(
-    () => (board?.sets ?? []).filter((s) => s.state === "ready"),
-    [board],
+  const q = search.trim();
+
+  // ── ONE search box for the whole screen ───────────────────────────────────
+  // A preparer holding a وشاح cannot read a student id off it — they read the تطريز. So the
+  // query is matched against a per-STUDENT haystack built from every word the shop holds
+  // about them anywhere on this board: their name, and every piece's `search_text` (the
+  // embroidery line and any free-text option answer), from all four zones.
+  //
+  // Matching per STUDENT rather than per PIECE is the whole point of «لكَيت الوشاح، ورّيني
+  // الطقم»: the تطريز only exists on the sash, so a per-piece match would light the sash bin
+  // and leave the روب and القبعة dark — which is the one thing the worker needed to find.
+  // One student's hit therefore lights every piece of theirs, in every zone.
+  const matchedStudents = useMemo(() => {
+    if (!q || !board) return null;
+    const hay = new Map<string, string[]>();
+    const add = (id: string | null | undefined, ...parts: (string | null | undefined)[]) => {
+      if (!id) return;
+      const list = hay.get(id) ?? [];
+      for (const part of parts) if (part) list.push(part);
+      hay.set(id, list);
+    };
+    for (const set of board.sets) {
+      add(
+        set.student_id,
+        set.student_name,
+        ...set.pieces.flatMap((p) => [p.search_text, p.product_name]),
+      );
+    }
+    for (const i of board.inbox) add(i.student_id, i.student_name, i.search_text, i.product_name);
+    for (const shelf of board.shelves)
+      for (const slot of shelf.slots)
+        for (const piece of slot.pieces) add(piece.student_id, piece.student_name, piece.search_text);
+    for (const c of board.collected) add(c.student_id, c.student_name, c.search_text);
+
+    const out = new Set<string>();
+    for (const [id, parts] of hay) if (matchesAr(parts.join(" "), q)) out.add(id);
+    return out;
+  }, [board, q]);
+
+  const isHit = useCallback(
+    (studentId: string | null | undefined) =>
+      !matchedStudents || (!!studentId && matchedStudents.has(studentId)),
+    [matchedStudents],
   );
-  const waitingCount = (board?.sets ?? []).length - readySets.length;
+
+  const readySets = useMemo(
+    () => (board?.sets ?? []).filter((s) => s.state === "ready" && isHit(s.student_id)),
+    [board, isHit],
+  );
+  const waitingCount = (board?.sets ?? []).filter(
+    (s) => s.state !== "ready" && isHit(s.student_id),
+  ).length;
 
   // Collected pieces grouped per student (bundle), newest group first. Grouping matters:
   // a student's robe/cap/شال were collected seconds apart, and three separate rows would
@@ -119,6 +168,7 @@ export function ShelfConsole() {
       }
     >();
     for (const c of board?.collected ?? []) {
+      if (!isHit(c.student_id)) continue;
       let g = groups.get(c.set_key);
       if (!g) {
         g = {
@@ -135,10 +185,13 @@ export function ShelfConsole() {
       g.latest = Math.max(g.latest, new Date(c.collected_at).getTime());
     }
     return [...groups.values()].sort((a, b) => b.latest - a.latest);
-  }, [board]);
+  }, [board, isHit]);
 
-  const inbox = board?.inbox ?? [];
-  const shownInbox = showAllInbox ? inbox : inbox.slice(0, 12);
+  // التسكين is searchable too — «وين أسكّن وشاح فلان؟» is asked of the arrivals list, not of
+  // the shelf. The 12-item cap is a browsing convenience; while a query is active it would
+  // hide the very row that was searched for, so a search always shows every match.
+  const inbox = (board?.inbox ?? []).filter((i) => isHit(i.student_id));
+  const shownInbox = showAllInbox || q ? inbox : inbox.slice(0, 12);
   const unplaceable = inbox.filter((i) => !i.suggestion).length;
 
   async function doPlace(item: ShelfInboxItem, target?: { shelf_code: string; slot_index: number }) {
@@ -207,6 +260,33 @@ export function ShelfConsole() {
     return <div className="p-8 text-center text-[#6b6356]">جاري تحميل الرف…</div>;
   }
 
+  // A FAILED FIRST LOAD IS NOT A CRASH. `error` and `board` are independent: a later poll
+  // that fails sets `error` while the last good board keeps rendering (right — the worker
+  // keeps working). But when the FIRST load fails there is no board at all, and the zones
+  // below dereference it — which took the whole screen to the error boundary instead of
+  // showing the banner that was already sitting right there. Retry, don't crash.
+  if (!board) {
+    return (
+      <div className="mx-auto w-full max-w-md px-4 py-10 text-center" dir="rtl">
+        <p className="rounded-xl bg-[#9f382d] px-4 py-3 text-sm font-bold text-white">
+          {error}
+        </p>
+        <button
+          type="button"
+          onClick={() => void load()}
+          className="mt-4 min-h-12 w-full rounded-full bg-[#1A1A1A] font-extrabold text-white transition active:scale-[.98]"
+        >
+          إعادة المحاولة
+        </button>
+      </div>
+    );
+  }
+
+  // «nothing matched» must be asked of the MATCH SET, not of the visible lists: a hit whose
+  // set is still waiting shows up only as a lit bin on the map, and calling that «ما لكَينا شي»
+  // while the bin is glowing would be the screen contradicting itself.
+  const nothingMatched = !!q && matchedStudents?.size === 0;
+
   return (
     <div className="mx-auto w-full max-w-[1500px] px-3 py-4 sm:px-5" dir="rtl">
       {error ? (
@@ -214,6 +294,29 @@ export function ShelfConsole() {
           {error}
         </div>
       ) : null}
+
+      {/* ── One search box for the whole screen ──────────────────────────────
+          It sits ABOVE the zones, not inside الرف, because it now filters all four of
+          them — التسكين included. A worker searching «وين وشاح فلان» must not have to
+          know which zone the piece happens to be sitting in. */}
+      <div className="mb-4">
+        <SearchField
+          value={search}
+          onChange={setSearch}
+          placeholder="دوّر باسم الطالب أو بتطريز الوشاح…"
+          ariaLabel="بحث في الرف والتسكين"
+          variant="pill"
+          className="w-full"
+          inputClassName="min-h-12 border-[#ded6c8] bg-white px-5 text-base text-[#1A1A1A] focus:border-[#F47B42]"
+        />
+        {q ? (
+          <p className="mt-2 px-1 text-xs text-[#6b6356]">
+            {nothingMatched
+              ? "ما لكَينا شي بهذا البحث — جرّب اسم أقصر أو كلمة من التطريز."
+              : "يعرض كل قطع الطالب — الوشاح والروب والقبعة والشال سوة."}
+          </p>
+        ) : null}
+      </div>
 
       {/* ── Zone 1: جاهز للتغليف (hero) ─────────────────────────── */}
       <section className="mb-6">
@@ -362,16 +465,12 @@ export function ShelfConsole() {
 
       {/* ── Zone 3: الرف ─────────────────────────────────────────── */}
       <section>
-        <div className="mb-3">
-          <input
-            type="search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="دوّر على طالب داخل الرف…"
-            className="min-h-12 w-full rounded-full border border-[#ded6c8] bg-white px-5 text-sm text-[#1A1A1A] outline-none focus:border-[#F47B42]"
-          />
-        </div>
-        <ShelfMap shelves={board!.shelves} search={search} onSlotClick={setOpenSlot} />
+        <ShelfMap
+          shelves={board.shelves}
+          search={q}
+          matchedStudents={matchedStudents}
+          onSlotClick={setOpenSlot}
+        />
       </section>
 
       {/* ── جُمعت — everything taken off the shelf, grouped per student ──────── */}
@@ -379,7 +478,10 @@ export function ShelfConsole() {
         <section className="mt-8 border-t border-[#ded6c8] pt-6">
           <header className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
             <h2 className="text-xl font-black text-[#1A1A1A]">
-              جُمعت <span className="text-[#256347]">{board!.collected.length}</span>
+              جُمعت{" "}
+              <span className="text-[#256347]">
+                {collectedGroups.reduce((n, g) => n + g.pieces.length, 0)}
+              </span>
             </h2>
             <p className="text-xs text-[#6b6356]">
               {collectedGroups.length} طالب · الأحدث أولاً
@@ -450,8 +552,12 @@ export function ShelfConsole() {
           role="dialog"
           aria-modal="true"
         >
+          {/* max-h + overflow: a communal وشاح خانة holds up to 20 pieces, and the sheet grew
+              past the top of a 390px phone with nothing scrollable — the worker could see
+              neither the last students nor «إغلاق». The dialog scrolls INSIDE itself; the
+              page behind it must not, which is why the cap is on this box and not on the ul. */}
           <div
-            className="w-full max-w-md rounded-t-3xl bg-[#FFF8F0] p-5 sm:rounded-3xl"
+            className="max-h-[85dvh] w-full max-w-md overflow-y-auto overscroll-contain rounded-t-3xl bg-[#FFF8F0] p-5 sm:max-h-[85vh] sm:rounded-3xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-3 flex items-baseline justify-between">
@@ -475,10 +581,20 @@ export function ShelfConsole() {
               <p className="py-6 text-center text-sm text-[#6b6356]">الخانة فارغة</p>
             ) : (
               <ul className="space-y-2">
-                {openSlot.pieces.map((p) => (
+                {/* A communal وشاح خانة holds up to 20 sashes. Opening it after a search and
+                    then hunting the list by eye is the same problem the search just solved,
+                    so the matched student's piece is lifted to the top and outlined. */}
+                {[...openSlot.pieces]
+                  .sort((a, b) => Number(isHit(b.student_id)) - Number(isHit(a.student_id)))
+                  .map((p) => {
+                  const matched = !!matchedStudents && matchedStudents.has(p.student_id);
+                  return (
                   <li
                     key={p.order_id}
-                    className="flex items-center justify-between gap-2 rounded-xl border border-[#ded6c8] bg-white p-2.5"
+                    className={[
+                      "flex items-center justify-between gap-2 rounded-xl border bg-white p-2.5",
+                      matched ? "border-2 border-[#F47B42]" : "border-[#ded6c8]",
+                    ].join(" ")}
                   >
                     <div className="min-w-0">
                       <p className="truncate text-sm font-bold text-[#1A1A1A]">
@@ -513,7 +629,8 @@ export function ShelfConsole() {
                       </button>
                     </div>
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             )}
 

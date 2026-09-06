@@ -33,6 +33,7 @@ interface NavLink {
 // was removed 2026-07-15 and only legacy rows sit there.
 const MENU_STAGES: OrderStatus[] = [
   "embroidery",
+  "assembly",
   "pressing",
   "preparing",
   "ready",
@@ -138,6 +139,7 @@ const HOME_LABELS: Partial<Record<StaffType, string>> = {
   designer: "مراجعة التصاميم",
   digitizer: "قائمة التحويل",
   embroiderer: "قائمة التطريز",
+  assembler: "لوحة التجميع",
   presser: "قائمة الكوي",
   preparer: "قائمة التجهيز",
 };

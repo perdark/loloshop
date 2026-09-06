@@ -417,9 +417,11 @@ longer stranded on a branch · the laptop's loose credentials are filed in
    proxy landmine). Nothing was lost after all: the K40 held its buffer and replayed back to
    08-29 22:52 the moment it could reach us.
    **Three small things still open, all data, none blocking:**
-   · **PINs 1, 7 and 8 have 6 unclaimed punches** on «أرقام جهاز بلا اسم». There is no
-     «تجاهل» button — `assignUnmapped` is the only action on that list — so dismissing them
-     needs a small endpoint + button. Harmless until then.
+   · ✅ **The «تجاهل» button EXISTS** (`f4fae7e`, marker `unmapped_dismissed`). PIN 12 — the
+     owner's own test finger, 20 punches — was dismissed 2026-09-06. Still unclaimed:
+     **1 (5) · 7 (5) · 8 (2)**. ⚠️ Never map one of these to a real worker without dismissing
+     the test punches first: `linkPin` REPLAYS every stored punch onto their attendance, so
+     an installer's old taps become that person's day.
    · **The Arabic names have never been pushed to the device**: all 7 PINs sit at
      `push_state = 'pending'` with **zero** rows in `device_commands`, because
      `queueOnActiveDevices` had no active device when they were saved. **Re-save one PIN now
@@ -494,6 +496,104 @@ longer stranded on a branch · the laptop's loose credentials are filed in
 ---
 
 ## 💣 LANDMINES
+
+- **⚠️ «التجميع» IS FOR A REP SASH ONLY, AND `isAssemblyPiece` IS THE ONLY FORK (migration 106,
+  2026-09-06).** Owner: «just sashes for this stage, no cap and robe». `nextStageFor` and
+  `resolveRevertTarget` both ask that one predicate; a second copy is how a piece gets advanced
+  into a station it can never be reverted into. Three things that look wrong and are not:
+  · a legacy rep sash at الكوي reverts INTO التجميع though it never visited it (D9: nothing was
+    backfilled) — it simply shows on برزان's board as fully arrived;
+  · the board (`GET /production/assembly`) never writes status — it reads `embroidery_zones`
+    for «واصلة» and `status = 'assembly'` for «جاهزة»; moving is `advance`/`revert`;
+  · `applyZoneTick` now emits on EVERY tick, not only the auto-advance — the board needs it.
+  Adding a staff type also means `adminController.STAFF_TYPES` — it is a closed allowlist and
+  the /staff/team picker silently 400s without it.
+
+- **⚠️ `/api/catalog/products/:id/full` IS A COMPOSED VIEW, NOT A TABLE DUMP — A VARIANT RENDERS
+  ITS PARENT'S OPTION GROUPS PLUS ITS OWN (2026-09-06).** `buildProductFull` loads parent groups
+  first, then the child's. So seeding an option group onto every active product of a type gives
+  each VARIANT two of it — one inherited, one its own — while the table holds exactly one row per
+  product and looks perfect. That is what «ملاحظة» did on the day it shipped: 16 of 16 قبعة/وشاح
+  showed two identical note boxes, and a per-row `count(*)` said 19 groups on 19 products.
+  · **Migration 104 was written from the endpoint's output and fixed nothing** — its dedupe DELETE
+    matched zero rows, and the unique index it added was true but beside the point. Migration 105
+    is the real fix: the note lives on the PARENT only, and 103's seed now skips a product whose
+    parent already carries one. Do not re-add a per-variant seed.
+  · The rule this cost a deploy to learn: **read the TABLE before writing a migration against a
+    symptom seen through an API.** A count taken from a composed endpoint counts what the
+    configurator renders, never what is stored.
+  · `test/noteGroupRouting.test.js` now asserts the RENDERED count (parent + own = 1), because the
+    per-row count is exactly what was blind to this.
+  · `order_items.group_id` is **ON DELETE SET NULL**: deleting an option group does not delete a
+    student's typed note, it silently unhooks it and leaves the text in `customer_text` pointing
+    at nothing. Any cleanup of option groups must skip rows an order references — 105 does.
+
+- **⚠️ THE DEVICE NOW SAYS WHAT A PUNCH MEANS, AND THE MAP WAS MEASURED, NOT READ (2026-09-06).**
+  `PUNCH_STATE` in `lib/attendanceDevice.js`: **255 = nobody pressed · 0 ▲ دخول · 1 ▼ خروج
+  نهائي · 4 ← أطلع مؤقت · 5 → رجعت**. Confirmed by pressing each key against a real finger on
+  `GED7251600256` and reading `punch_raw` — every punch before this date carried `raw_status = 0`
+  because «Punch State» was off, which is why the server had to guess from the clock and why
+  five separate money bugs existed at once.
+  · ⚠️ **4 AND 5 ARE INVERTED FROM THE DEVICE'S OWN ENGLISH LABELS, ON THE OWNER'S INSTRUCTION.**
+    ZKTeco calls ← "Break-In" and → "Break-Out"; the shop's Arabic sticker calls ← «أطلع» and
+    → «رجعت». "Correcting" the map against the ZK documentation swaps the start and end of every
+    break, and the salary follows the break. Pinned by tests P1–P6.
+  · ⚠️ **EVERY UNKNOWN VALUE FALLS BACK TO THE CLOCK RULE ON PURPOSE.** 255, null and anything
+    unrecognised derive exactly as they did before, which is the only reason this shipped the
+    same day it was measured — and it is what keeps every pre-2026-09-06 punch meaning what it
+    meant. Do not "tidy" that fallback away (test P5).
+  · **Punch State Required is ON with a 10s timeout** (the firmware's maximum). A refused punch
+    leaves **NO ROW ANYWHERE** — the only symptom is a worker whose day has no دخول. There is
+    no admin alert for that yet; build one before trusting the data.
+
+- **⚠️ THE 5-MINUTE COOLDOWN READS `device_ts`, NEVER `punched_at` (2026-09-06).** It describes
+  a FINGER on a SENSOR, and only the device's own clock can see that. Since 2026-08-30
+  `punched_at` is the ARRIVAL instant, so a buffered replay gives an entire batch one identical
+  timestamp: on 2026-09-01 the K40 came back from an outage, uploaded **21 punches all stamped
+  20:39**, and this rule destroyed **12 of them** — every worker's day collapsed to its first
+  punch, their real خروج was thrown away as a "duplicate", and seven records had to be repaired
+  with hand-written SQL. It also compares `raw_status`, so two DIFFERENT deliberate keys six
+  seconds apart both count while a repeat of the same key does not (test P6).
+
+- **⚠️ `overridden_at` IS THE ADMIN'S RULING; `status = 'overridden'` IS A FREEZE. TWO THINGS
+  (2026-09-06).** They shared one flag until now, and «إلغاء مبلغ التأخير» — a pure money
+  waiver — set it, freezing the whole day against the device: on 2026-09-04 محمد عماد's 18:21,
+  18:32 and 23:02 were all discarded as «ما ينلمس» and his checkout was fabricated at 00:00 by
+  `closeStaleOpenDay`. `overrideRecord` now takes `freeze_day` (**default TRUE**, so every
+  pre-existing caller is unchanged) and the button sends `false`. `applyPunch`'s rule 3 reads
+  `overridden_at`, not `status`, so an earlier punch can move a check-in back without
+  re-charging a تأخير a human cancelled. Tests F1–F2.
+
+- **⚠️ A خروج AFTER MIDNIGHT CLOSES YESTERDAY — TWO BOUNDS, BOTH GUESSES (2026-09-06).** The
+  shop shuts at 22:00 and people punch out at 23:48 / 00:14 / 00:17, and a 10:00→22:00 shift
+  does not cross midnight, so `resolveStamp` alone filed every one of those under the NEXT date:
+  محمد عماد's 09-02 خروج at 00:17 became his 09-03 check-in and 09-02 was auto-closed at a
+  fabricated 22:00; محمد عادل's record says he "arrived" 09-06 at 05:12.
+  `previousDayDeparture` now carries such a punch back, bounded by
+  **`LATE_DEPARTURE_WINDOW_MINUTES` (6h after the shift end)** and
+  **`LATE_DEPARTURE_CUTOFF_MINUTES` (nothing from 08:00 local counts as a departure)**. The
+  cutoff is what stops a night-shift worker's AFTERNOON ARRIVAL being read as yesterday's
+  departure — do not remove it. An explicit ▼ skips the cutoff (the worker said what it is) but
+  not the window. Tests M1–M3.
+
+- **⚠️ THE +24h WRAP IS GATED ON `belongs_to_previous_day` (`schedule.stampMinutes`, 2026-09-06).**
+  A midnight-crossing shift has two ways for a stamp to read earlier than its start and they
+  mean opposite things: 00:10 inside the after-midnight window is genuinely late (add the day),
+  while 10:53 after that window closed is someone arriving ELEVEN HOURS EARLY for tonight. The
+  old rule wrapped both, so مضر محمد was recorded **1410 · 845 · 994 · 993 · 742** minutes late
+  on five consecutive days — every one an early arrival. `shiftIsOver` in `attendanceDevice.js`
+  MUST keep calling `stampMinutes` rather than re-deriving it; a second copy is how this
+  happened. Tests N1–N2.
+  · ⚠️ **مضر محمد's stored hours are still 22:16 → 10:15 and his rate is 0** — the owner is
+    asking the client. Until that row is right his numbers stay wrong, and it is DATA, not code.
+
+- **⚠️ THE BREAK ALLOWANCE IS 300 MINUTES (5h), CHANGED FROM 600 ON 2026-09-06**, and it is read
+  LIVE by `recomputeMonth` — so lowering it RE-CHARGES past breaks the next time anything
+  recomputes that worker's month. That is not hypothetical: علي اديب's phantom 640-minute break
+  had to be cancelled BEFORE he took his next break, or his 40,000 IQD deduction would have
+  recomputed to **~370,000**. Anyone changing this number again must sweep the month's existing
+  breaks first.
+
 
 - **⚠️ «صورة الشال» / «صورة القبعة» ARE PRODUCT PICKERS, NOT EMBROIDERY — migration 096, and the
   flag has NO admin UI.** `priceSelections` used to route an order to التصميم → التطريز from ANY
@@ -593,9 +693,12 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   two doors onto the same controller, and removing one would have left the other working with
   nothing on screen to explain it. `attendanceController.checkIn`/`checkOut` are deliberately
   KEPT and unrouted (breaks and tests call them); re-exposing them is a route line, so do not
-  delete the controller half as dead code. Breaks stay on the phone because the device's break
-  keys are on **`ffcb0ce`, still unmerged** — merge that before removing the break UI, or
-  workers have no way to record one. If the device dies, only an admin can fix a day
+  delete the controller half as dead code. ✅ **2026-09-06: THE DEVICE HAS BREAK KEYS NOW** —
+  ← «أطلع مؤقت» and → «رجعت», read from `raw_status` (4 and 5 — see the PUNCH_STATE
+  landmine). Proven on prod with a real finger: punch 187, PIN 11, 17:37:03, status 4 → an
+  open `staff_attendance_breaks` row. This line used to say breaks were phone-only pending
+  `ffcb0ce`; they are not any more. The phone flow still works and is the fallback for a
+  worker who forgets the key. If the device dies, only an admin can fix a day
   (`PATCH /admin/attendance/records/:id/override`); there is no worker-facing fallback, by
   design.
 
@@ -779,20 +882,55 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   `sudo -u postgres pg_dump -d loloshop -Fc -f /tmp/x.dump` (write to `/tmp`, then `mv` — the
   `postgres` user cannot write to `/root`). Dropping the leftover backfill table would also fix
   it, but check with the owner first: it is the rollback evidence for that backfill.
-- **⚠️ «ONE STUDENT PER خانة» IS NO LONGER A SHELF-WIDE RULE — it is PER SECTION.** Since
-  migration 085 the وشاح section is `mode = 'shared'` with `max_per_slot = 20`: any student's
-  sash may join a خانة, bins fill to 20 and then spill to the next one. روب (10) and قبعة (4)
-  are still `exclusive` and still enforce D2. So `placePiece`'s «الخانة مشغولة بطالب آخر» now
-  fires for some sections and not others, on purpose, and a reader who assumes D2 everywhere
-  will misread the code. Two things follow and must not be "tidied":
-  · **A communal bin's `student_id` is NULL and must stay NULL.** «وين وشاح فلان؟» is answered by
-    searching each PLACED PIECE's student name (`ShelfMap.tsx`), never the bin's owner. Writing
-    an owner onto a communal bin would make it claim one student while holding twenty.
-  · **`max_per_slot` is a FLAG, not a cap.** `placePiece` never refuses on count; D4 says the
-    worker may always keep stacking. The number only decides when the screen says «فوق الحد».
-    A section with a NULL max (شال) is the bottomless single bin it has always been.
-  The measurements behind the change are in migration 085's header — read them before reverting
-  it: one-student-per-خانة capped the sash shelf at 15 students while 47 sashes were waiting.
+- **⛔ «ONE STUDENT PER خانة» (D2) IS RETIRED — EVERY SECTION IS COMMUNAL (migration 108,
+  owner 2026-09-06).** روب · وشاح · قبعة · شال are all `mode = 'shared'`, **10 خانة each, 30
+  per خانة**. `placePiece`'s `ERR_SLOT_TAKEN` («الخانة مشغولة بطالب آخر») can no longer fire
+  for anything — that is the owner's «خليهم بس يحطون القطع», not an oversight. This entry
+  replaces the 085 one that said the rule had become PER SECTION; it is now per section in
+  name only. Four things that must survive any tidy-up:
+  · **A communal bin's `student_id` is NULL and must stay NULL.** «وين روب فلان؟» is answered
+    by searching each PLACED PIECE's student name (`ShelfMap.tsx`), never the bin's owner —
+    an owner on a 30-piece bin claims one student holds all thirty. 108 clears every open bin.
+  · **`max_per_slot` is a FLAG, not a cap.** `placePiece` never refuses on count (D4); the
+    number only decides when the screen says «فوق الحد».
+  · ⚠️ **SECTION RANGES ARE DERIVED, NEVER STORED** (`loadSections` walks `slot_count` in
+    `sort_order`), so قبعة growing 6 → 10 slid شال from **C07 to C11**. An open bin left behind
+    reads as a قبعة bin — its `section_id` says شال while its `slot_index` sits in قبعة's range
+    — and `placePiece` then refuses to add to it with `ERR_WRONG_SECTION`, with nothing on any
+    screen explaining why. 108 carries every open bin to the same POSITION in its new section,
+    walking sections in DESCENDING `sort_order` so a rising section never lands on a slot its
+    lower sibling has not vacated (`shelf_slot_one_open` is a partial unique index; a transient
+    collision aborts the deploy). The dev DB has no C bins, so `shelf.test.js` manufactures the
+    prod shape to cover it — that test is the only thing exercising this path.
+  · **The `exclusive` branch is still live code with no section pointing at it.** One UPDATE
+    brings it back, so `shelf.test.js` keeps covering it with hand-built section objects. Do
+    not delete it as dead unless the branch in `lib/shelf.js` goes too.
+  The measurements behind the earlier half-step (085, sash only) are in that migration's
+  header: one-student-per-خانة capped the sash shelf at 15 students while 47 sashes waited.
+
+- **⚠️ «تنزيل إلى مجلد…» ON THE CALLIGRAPHY WORKBENCH SAVES WHAT THE GRID SHOWS, AND THE GRID
+  IS FED FROM TWO PLACES (fixed 2026-09-06).** `getRecentPlates(60)` returns the newest done
+  plates **shop-wide** — it exists so the page survives a refresh — and they land in the same
+  `plates` array as the current job's rows. The folder download wrote every visible done plate,
+  so a designer who generated 8 names for one ممثل got those 8 plus up to 60 other students'.
+  Fixed by scoping the GRID (chips «هذه الدفعة» / «كل الصور», default the batch), which is why
+  `toPlate` now exposes **`job_id`** — the only handle the client has on «my batch». Delete
+  that field and the mixing comes back silently: it is optional on `CalPlate`, so `tsc` says
+  nothing. `test/calligraphyBatchScope.test.js` is the guard.
+  · ⚠️ **THE SHEETS GENUINELY CARRY OTHER REPS' STUDENTS AND THAT IS CORRECT.** The cross-job
+    top-up fills a half-empty sheet with pending plates from other jobs, because a sheet costs
+    the same $0.10 whether it holds 1 name or 10 (the 2026-08-18 cost audit). The CROPPED
+    plates in a job ZIP are only that job's; the page behind them is shared. Said out loud in
+    Arabic under «الأوراق الأصلية» — do not "fix" the top-up to make the sheet look tidy.
+
+- **⚠️ TWO SESSIONS KEEP CLAIMING THE SAME MIGRATION NUMBER — CHECK `db/migrations` AND THE
+  WORKING TREE, NOT JUST GIT.** 105 was taken twice (`cb76c14` renumbered التجميع 105 → 106),
+  and on 2026-09-06 **106 was taken twice**: `106_assembly_stage.sql` was committed while an
+  earlier session the same day had an uncommitted `106_note_group_text_optional.sql` sitting in
+  the tree. It is now **107**, renumbered while still unapplied to prod — the only moment
+  renaming a migration is safe, since an applied one matches no history under a new name. The
+  shelf work is **108**. An untracked migration does not show up in `git log`, so
+  `ls db/migrations | tail` is the check that actually works.
 
 - **⚠️ THE TWO ANSWER GUARDS ARE OPPOSITE AND MUST NEVER BE MERGED.** `lib/answerGuard.js`
   (storefront) rejects any IQD figure not in the price book; `lib/adminAnswerGuard.js` (console)

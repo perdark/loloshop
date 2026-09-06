@@ -119,7 +119,7 @@ async function listStudents(req, res) {
   const { rows } = await query(
     `SELECT s.id, u.name, u.phone, s.status, s.university_name, s.department,
        lo.status AS order_status,
-       (lo.status IN ('design_complete', 'staff_review', 'printing', 'embroidery', 'pressing', 'preparing', 'ready', 'delivered')) AS is_completed
+       (lo.status IN ('design_complete', 'staff_review', 'printing', 'embroidery', 'assembly', 'pressing', 'preparing', 'ready', 'delivered')) AS is_completed
      FROM students s
      JOIN users u ON u.id = s.user_id
      LEFT JOIN LATERAL (

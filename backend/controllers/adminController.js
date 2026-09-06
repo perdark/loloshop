@@ -53,7 +53,7 @@ function pricingOrderIsValid(adminPrice, sellingPrice, addons) {
 // or «ربح الممثلين» mean.
 const { billableOrderSql, shopIncomeExpr, repMarginExpr } = counts;
 
-const STAFF_TYPES = ['designer', 'embroiderer', 'presser', 'preparer', 'manager', 'digitizer', 'tailor'];
+const STAFF_TYPES = ['designer', 'embroiderer', 'assembler', 'presser', 'preparer', 'manager', 'digitizer', 'tailor'];
 const STAFF_SCOPES = ['retail', 'wholesaler', 'both'];
 
 // Multi-role (Migration 029): accept either staff_types[] (preferred) or a single
@@ -542,7 +542,7 @@ async function wholesalerStudents(req, res) {
   const { rows } = await query(
     `SELECT s.id, u.name, u.phone, s.status, s.university_name, s.department,
        lo.status AS order_status,
-       (lo.status IN ('design_complete', 'staff_review', 'printing', 'embroidery', 'pressing', 'preparing', 'ready', 'delivered')) AS is_completed
+       (lo.status IN ('design_complete', 'staff_review', 'printing', 'embroidery', 'assembly', 'pressing', 'preparing', 'ready', 'delivered')) AS is_completed
      FROM students s
      JOIN users u ON u.id = s.user_id
      LEFT JOIN LATERAL (

@@ -75,10 +75,23 @@ function computeCharge({ minutes, approved, remainingBefore, perMinute }) {
   return { freeMinutes, deductedMinutes, amount: deductedMinutes * rate };
 }
 
+/**
+ * `work_date` → 'YYYY-MM-DD'.
+ *
+ * ⚠️ NEVER `toISOString()` ON A DATE FROM THE DRIVER. `pg` hands a `date` column back as a JS
+ * Date at the SERVER's local midnight, and prod runs Europe/Berlin — so a 2026-09-02 break
+ * became `2026-09-01T22:00:00Z` and every reader lost a day. That is why علي اديب's live
+ * 40,000 IQD deduction reads «بتاريخ 2026-09-01» for a break he took on the 2nd, and the same
+ * value feeds serializeBreak, i.e. what the worker is shown. Read the calendar fields instead;
+ * they are already the date the driver parsed.
+ */
 function dateOnly(value) {
   if (!value) return '';
   if (typeof value === 'string') return value.slice(0, 10);
-  return new Date(value).toISOString().slice(0, 10);
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 function deductionReason(row) {

@@ -28,6 +28,7 @@ const STAGE_AR = {
   design_complete: 'بانتظار التصميم',
   converting: 'قيد التحويل',
   embroidery: 'في التطريز',
+  assembly: 'في التجميع',
   pressing: 'في الكوي',
   preparing: 'في التجهيز',
   ready: 'جاهز',
@@ -400,6 +401,17 @@ async function buildBoard() {
            p.type AS piece_type, p.name_ar AS product_name,
            u.name AS student_name, st.university_name, st.department,
            sp.collected_at, sp.placed_at, so.shelf_code, so.slot_index,
+           -- Everything the STUDENT typed on this piece, flattened for the console's search
+           -- box. The headline case is the sash's تطريز: a preparer holding a وشاح searches
+           -- for what is WRITTEN on it, not for a name they cannot read off the fabric — and
+           -- a screen cannot search text it was never sent. Same expression (and the same
+           -- reasoning) as productionController's search_text; deliberately «every word the
+           -- student wrote», since customer_text also carries free-text option answers.
+           (SELECT string_agg(DISTINCT oi.customer_text, ' ')
+              FROM order_items oi
+             WHERE oi.order_id = o.id
+               AND oi.customer_text IS NOT NULL
+               AND oi.customer_text <> '') AS search_text,
            (o.id IN (SELECT order_id FROM arrived)) AS arrived_recently
       FROM orders o
       JOIN students st ON st.id = o.student_id
@@ -434,6 +446,7 @@ async function buildBoard() {
       piece_type: r.piece_type,
       piece_label: PIECE_LABEL_AR[r.piece_type] || r.piece_type,
       product_name: r.product_name,
+      search_text: r.search_text || null,
       status: r.status,
       stage_ar: STAGE_AR[r.status] || r.status,
       slot_code: r.shelf_code ? slotCode(r.shelf_code, Number(r.slot_index)) : null,
@@ -498,6 +511,7 @@ async function buildBoard() {
         piece_type: r.piece_type,
         piece_label: PIECE_LABEL_AR[r.piece_type] || r.piece_type,
         product_name: r.product_name,
+        search_text: r.search_text || null,
         suggestion: suggestion
           ? { ...suggestion, slot_code: slotCode(suggestion.shelf_code, suggestion.slot_index) }
           : null,
@@ -559,7 +573,13 @@ async function buildBoard() {
             order_id: p.id,
             piece_type: p.piece_type,
             piece_label: PIECE_LABEL_AR[p.piece_type] || p.piece_type,
+            // WHOSE piece, on the piece itself — not just on the bin. A communal خانة has no
+            // owner (`bin.student_id` is NULL by design), so without this the screen cannot
+            // tell which of twenty sashes belongs to the student it just matched, and «find
+            // the sash, light up the whole طقم» has nothing to join on.
+            student_id: p.student_id,
             student_name: p.student_name || 'طالب',
+            search_text: p.search_text || null,
             placed_at: p.placed_at,
           })),
         });
@@ -578,6 +598,11 @@ async function buildBoard() {
   const collectedRes = await query(
     `SELECT o.id, o.status, o.checkout_group_id, o.student_id,
             p.type AS piece_type, u.name AS student_name,
+            (SELECT string_agg(DISTINCT oi.customer_text, ' ')
+               FROM order_items oi
+              WHERE oi.order_id = o.id
+                AND oi.customer_text IS NOT NULL
+                AND oi.customer_text <> '') AS search_text,
             sp.collected_at, so.shelf_code, so.slot_index
        FROM shelf_placements sp
        JOIN orders o    ON o.id  = sp.order_id
@@ -598,6 +623,7 @@ async function buildBoard() {
     student_name: r.student_name || 'طالب',
     piece_type: r.piece_type,
     piece_label: PIECE_LABEL_AR[r.piece_type] || r.piece_type,
+    search_text: r.search_text || null,
     slot_code: r.shelf_code ? slotCode(r.shelf_code, Number(r.slot_index)) : null,
     collected_at: r.collected_at,
     status: r.status,

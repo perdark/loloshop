@@ -71,13 +71,15 @@ const QUEUE_STAGES = {
   designer: ['design_complete'],
   digitizer: ['converting'],
   embroiderer: ['embroidery'],
+  // مجمّع (برزان) — sews a rep sash's embroidered halves together before الكوي (migration 106).
+  assembler: ['assembly'],
   presser: ['pressing'],
   // Preparer also sees تم التسليم (delivered) — they're the ones who hand orders over,
   // so the "done" column lives in their queue (recency-capped in getQueue).
   preparer: ['preparing', 'ready', 'delivered'],
   // مفصل (tailor) — read-only viewer of every in-production order (recognises sashes by
   // name). No transitions exist for tailor, so available_actions stays empty (read-only).
-  tailor: ['design_complete', 'converting', 'embroidery', 'pressing', 'preparing', 'ready'],
+  tailor: ['design_complete', 'converting', 'embroidery', 'assembly', 'pressing', 'preparing', 'ready'],
 };
 // What every LINE staff member's queue shows and may act on: the whole line minus التصميم.
 //
@@ -91,9 +93,9 @@ const QUEUE_STAGES = {
 //
 // التصميم is the named exception and stays with the designer (QUEUE_STAGES.designer adds it
 // back for them). `delivered` is included and is bounded to 90 days in getQueue's WHERE.
-const LINE_VIEW_STAGES = ['converting', 'embroidery', 'pressing', 'preparing', 'ready', 'delivered'];
+const LINE_VIEW_STAGES = ['converting', 'embroidery', 'assembly', 'pressing', 'preparing', 'ready', 'delivered'];
 
-const MANAGER_STAGES = ['design_complete', 'converting', 'embroidery', 'pressing', 'preparing', 'ready'];
+const MANAGER_STAGES = ['design_complete', 'converting', 'embroidery', 'assembly', 'pressing', 'preparing', 'ready'];
 // What a manager/admin SEES in the production console — same as MANAGER_STAGES plus the
 // تم التسليم "done" column. Kept separate so monitor()'s WIP math stays on the 6 live stages.
 const MANAGER_VIEW_STAGES = [...MANAGER_STAGES, 'delivered'];
@@ -318,6 +320,24 @@ async function detectZonesForOrders(ids, progressById) {
 // STAGE-2 REMOVED (user 2026-07-15): «تحويل التصميم لتطريز» (converting) is no longer part of
 // the live pipeline — design goes straight to التطريز; conversion happens inside that station.
 // The 'converting' case below is DRAIN-ONLY (legacy rows + orders created by prod before deploy).
+// ---------- «التجميع» — the ONE fork between the rep-sash route and everything else ----------
+// A ممثل SASH comes out of التطريز as two sub-pieces (من الخلف, من الأمام) that برزان sews into
+// one garment before الكوي (owner 2026-09-02, narrowed to sashes only on 2026-09-06: «no cap
+// and robe», and «there is no sash without تطريز»). Retail sashes, rep robes, rep caps and the
+// شال امريكي (its own ladder in lib/shawlPiece.js) never enter it.
+//
+// Queue rows carry `source`, loadAdvanceRow/revert rows carry `wholesaler_id`; accept either so
+// no caller has to change shape. `product_type` is required — a row without it is NOT an
+// assembly piece, which fails safe onto the old route rather than inventing a stage.
+//
+// ⚠️ This predicate decides the FORWARD edge (nextStageFor) AND the BACKWARD edge
+// (resolveRevertTarget). Never add a second copy: two definitions that drift are exactly how a
+// piece gets advanced into a station it can never be reverted into (see revertTarget.test.js).
+function isAssemblyPiece(order) {
+  if (!order || order.product_type !== 'sash') return false;
+  return order.wholesaler_id != null || order.source === 'wholesaler';
+}
+
 function nextStageFor(order) {
   const { status, design_id, needs_pressing, design_approval_status } = order;
   switch (status) {
@@ -332,6 +352,10 @@ function nextStageFor(order) {
     case 'converting': // drain-only
       return 'embroidery';
     case 'embroidery':
+      if (isAssemblyPiece(order)) return 'assembly';
+      return needs_pressing ? 'pressing' : 'preparing';
+    case 'assembly':
+      // Same rule as leaving التطريز: a piece that needs no pressing goes straight to التجهيز.
       return needs_pressing ? 'pressing' : 'preparing';
     case 'pressing':
       return 'preparing';
@@ -352,6 +376,7 @@ const REVERT_MAP = {
   ready: 'preparing',
   preparing: 'embroidery',
   pressing: 'embroidery',
+  assembly: 'embroidery',
   embroidery: 'design_complete', // stage-2 (converting) removed — one step back = the design desk
   converting: 'design_complete', // drain-only
   design_complete: 'designing',
@@ -372,6 +397,9 @@ const ADVANCE_LABEL_AR = {
   'converting→embroidery':      'إنهاء التحويل، نقل للتطريز', // drain-only
   'embroidery→pressing':        'إنهاء التطريز، نقل للكوي',
   'embroidery→preparing':       'إنهاء التطريز، نقل للتجهيز',
+  'embroidery→assembly':        'إنهاء التطريز، نقل للتجميع',
+  'assembly→pressing':          'إنهاء التجميع، نقل للكوي',
+  'assembly→preparing':         'إنهاء التجميع، نقل للتجهيز',
   'pressing→preparing':         'إنهاء الكوي، نقل للتجهيز',
   'preparing→ready':            'إنهاء التجهيز، تحديد جاهز',
   'ready→delivered':            'تأكيد التسليم',
@@ -382,8 +410,8 @@ function isFirstProductionStage(order) {
   return designed
     ? (order.status === 'designing' || order.status === 'design_complete')
     // Plain pieces: non-cap now starts at الكوي ('pressing'); caps (and legacy rows)
-    // start at التجهيز ('preparing').
-    : (order.status === 'preparing' || order.status === 'pressing');
+    // start at التجهيز ('preparing'); a plain REP SASH starts at التجميع (2026-09-06).
+    : (order.status === 'preparing' || order.status === 'pressing' || order.status === 'assembly');
 }
 
 // One-step-back target, aware of PLAIN pieces (no design/embroidery): they never visited
@@ -400,17 +428,88 @@ function isFirstProductionStage(order) {
 // التطريز→الكوي→التجهيز just to put the piece back where he wanted it. `nextStageFor` has
 // always keyed the forward edge on `needs_pressing`; this is the same question asked backwards,
 // so the two now agree. TRANSITIONS + STAGE_AUTHZ already allow preparing→pressing for LINE_STAFF.
+//
+// A REP SASH came through التجميع (2026-09-06), so that is what sits before الكوي for it — the
+// same `isAssemblyPiece` fork nextStageFor uses, asked backwards. A legacy rep sash that was
+// already past التطريز when the stage shipped (D9: no backfill) still reverts INTO التجميع
+// even though it never visited it; that is expected — it simply shows on برزان's board as
+// fully arrived. A plain rep sash (born at التجميع) has nothing behind it there.
 function resolveRevertTarget(order) {
   const plain = !order.design_id && !order.has_embroidery;
+  const viaAssembly = isAssemblyPiece(order);
   if (order.status === 'preparing') {
     // Pressed pieces came from الكوي, embroidered or not. A piece that skips الكوي goes back
-    // to التطريز — unless it is plain, in which case التجهيز was its FIRST stage (a cap, or a
-    // legacy row opened there before 2026-07-15) and there is nothing behind it.
+    // to التجميع (rep sash) or التطريز — unless it is plain, in which case التجهيز was its
+    // FIRST stage (a cap, or a legacy row opened there before 2026-07-15) and there is nothing
+    // behind it.
     if (order.needs_pressing) return 'pressing';
+    if (viaAssembly) return 'assembly';
     return plain ? null : REVERT_MAP.preparing;
   }
-  if (plain && order.status === 'pressing') return null; // first stage for plain non-cap
+  if (order.status === 'pressing') {
+    if (viaAssembly) return 'assembly';
+    if (plain) return null; // first stage for plain non-cap
+    return REVERT_MAP.pressing;
+  }
+  if (order.status === 'assembly' && plain) return null; // first stage for a plain rep sash
   return REVERT_MAP[order.status] ?? null;
+}
+
+// ---------- «التجميع» board — sub-pieces arriving, garments ready to sew ----------
+// برزان's screen. A rep SASH is «arriving» from its FIRST ticked embroidery zone (the back or
+// the front is physically on his table while the other half is still under the needle) and
+// «ready» once its status is 'assembly' — which the last tick sets through the normal
+// auto-advance. This endpoint READS status + embroidery_zones and never derives status from
+// zones (D1), and it never writes: moving a piece is `advance`/`revert`, same as any station.
+//
+// The rep-approval and returned-to-customer gates are inherited by the WHERE, exactly as
+// getQueue applies them, so «بانتظار موافقة الممثل» can never surface here as sewing work.
+// No money, no contact — line staff never receive either (D7).
+async function getAssemblyBoard(req, res) {
+  const u = req.user;
+  if (!(isManager(u) || staffTypesOf(u).some((t) => LINE_STAFF.includes(t)))) {
+    return res.status(403).json({ error: 'ممنوع', code: 'ERR_FORBIDDEN' });
+  }
+  const { rows } = await query(
+    `SELECT o.id, o.status::text AS status, o.needs_pressing, o.embroidery_zones, o.checkout_group_id,
+            o.design_id, o.has_embroidery, o.updated_at,
+            s.id AS student_id, s.wholesaler_id, u.name AS student_name,
+            p.name_ar AS product_name, p.type::text AS product_type,
+            wu.name AS wholesaler_name, b.name_ar AS batch_name, b.deadline
+       FROM orders o
+       JOIN students s ON s.id = o.student_id
+       JOIN users u ON u.id = s.user_id
+       JOIN products p ON p.id = o.product_id
+       LEFT JOIN wholesalers w ON w.id = s.wholesaler_id
+       LEFT JOIN users wu ON wu.id = w.user_id
+       LEFT JOIN batches b ON b.id = o.batch_id
+      WHERE s.wholesaler_id IS NOT NULL
+        AND p.type = 'sash'
+        AND o.wholesaler_approval = 'approved' AND o.returned_to_customer = FALSE
+        AND (o.status::text = 'assembly'
+             OR (o.status::text = 'embroidery'
+                 AND EXISTS (SELECT 1 FROM jsonb_each_text(COALESCE(o.embroidery_zones, '{}'::jsonb)) z
+                              WHERE z.value = 'true')))
+      ORDER BY b.deadline ASC NULLS LAST, u.name ASC, o.updated_at ASC`
+  );
+  const progressById = new Map(rows.map((r) => [r.id, r.embroidery_zones || {}]));
+  const zonesById = await detectZonesForOrders(rows.map((r) => r.id), progressById);
+  const out = { arriving: [], ready: [] };
+  for (const r of rows) {
+    const zones = (zonesById.get(r.id) || []).map(({ key, label, done }) => ({ key, label, done: !!done }));
+    const ready = r.status === 'assembly';
+    const to = ready ? nextStageFor(r) : null;
+    out[ready ? 'ready' : 'arriving'].push({
+      id: r.id, status: r.status, student_id: r.student_id, student_name: r.student_name,
+      wholesaler_name: r.wholesaler_name, batch_name: r.batch_name, deadline: r.deadline,
+      checkout_group_id: r.checkout_group_id, product_name: r.product_name, product_type: r.product_type,
+      needs_pressing: !!r.needs_pressing, updated_at: r.updated_at, zones,
+      done_count: zones.filter((z) => z.done).length, total_count: zones.length,
+      can_advance: ready && !!to && canStaffTransition(u, 'assembly', to),
+      advance_label: ready && to ? (ADVANCE_LABEL_AR[`assembly→${to}`] ?? null) : null,
+    });
+  }
+  res.json({ data: out });
 }
 
 // ---------- Stage-scoped work queue for the requesting staff member ----------
@@ -613,6 +712,8 @@ async function getQueue(req, res) {
           design_id: r.design_id,
           needs_pressing: r.needs_pressing,
           design_approval_status: r.approval_status,
+          product_type: r.product_type,
+          source: r.source, // isAssemblyPiece: a rep sash leaves التطريز for التجميع
         });
         r.next_status = next;
         r.can_advance = !!next && next !== 'delivered' && canStaffTransition(u, r.status, next);
@@ -1042,8 +1143,10 @@ async function loadAdvanceRow(id) {
   const cur = await query(
     `SELECT o.id, o.status, o.design_id, o.has_embroidery, o.needs_pressing,
             o.wholesaler_approval, o.returned_to_customer,
-            s.user_id, s.wholesaler_id, d.approval_status AS design_approval_status
+            s.user_id, s.wholesaler_id, d.approval_status AS design_approval_status,
+            p.type::text AS product_type
      FROM orders o JOIN students s ON s.id = o.student_id
+     JOIN products p ON p.id = o.product_id
      LEFT JOIN designs d ON d.id = o.design_id
      WHERE o.id = $1`,
     [id]
@@ -1365,6 +1468,9 @@ async function applyZoneTick(user, id, zone, done) {
     `UPDATE orders SET embroidery_zones = embroidery_zones || $1::jsonb WHERE id = $2`,
     [JSON.stringify({ [zone]: !!done }), id]
   );
+  // The «التجميع» board shows a rep sash as «واصلة» from its FIRST ticked zone (D1), so it has
+  // to hear about every tick, not only the auto-advance at the last one.
+  emitOrderChanged(id, 'embroidery');
   await query(
     `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
      VALUES ($1, 'embroidery_zone', 'order', $2, $3)`,
@@ -1596,8 +1702,10 @@ async function deliver(req, res) {
 async function revert(req, res) {
   const { id } = req.params;
   const cur = await query(
-    `SELECT o.id, o.status, o.design_id, o.has_embroidery, o.needs_pressing, s.user_id, s.wholesaler_id
-     FROM orders o JOIN students s ON s.id = o.student_id WHERE o.id = $1`,
+    `SELECT o.id, o.status, o.design_id, o.has_embroidery, o.needs_pressing, s.user_id, s.wholesaler_id,
+            p.type::text AS product_type
+     FROM orders o JOIN students s ON s.id = o.student_id JOIN products p ON p.id = o.product_id
+     WHERE o.id = $1`,
     [id]
   );
   if (!cur.rows.length) {
@@ -2192,7 +2300,7 @@ async function monitor(req, res) {
      FROM orders o
      JOIN students s ON s.id = o.student_id
      JOIN users u ON u.id = s.user_id
-     WHERE o.status IN ('design_complete', 'converting', 'embroidery', 'pressing', 'preparing') ${sc}
+     WHERE o.status IN ('design_complete', 'converting', 'embroidery', 'assembly', 'pressing', 'preparing') ${sc}
      ORDER BY o.updated_at ASC LIMIT 20`
   );
   // Currently claimed orders (within last 30 min) — shared with GET /production/presence.
@@ -2281,13 +2389,13 @@ async function deleteOrder(req, res) {
 }
 
 module.exports = {
-  getQueue, getOrder, advance, advanceBulk, deliver, revert, returnToCustomer, claim, release, completed, uploadFinalDesign, monitor, presence,
+  getQueue, getAssemblyBoard, getOrder, advance, advanceBulk, deliver, revert, returnToCustomer, claim, release, completed, uploadFinalDesign, monitor, presence,
   issueEventsTicket, streamEvents, nextStageFor, markEmbroideryZone, markEmbroideryZoneBulk,
   tailorQueue, tailorComplete, tailorReopen, tailorCompleteBulk, tailorSummary,
   deleteOrder,
   // Shared with the calligraphy workbench («تحويل للتطريز» reuses the real state machine).
   loadAdvanceRow, performAdvance, advanceBlockReason, ADVANCE_LABEL_AR, detectZonesWithImages,
-  QUEUE_STAGES, LINE_VIEW_STAGES,
+  QUEUE_STAGES, LINE_VIEW_STAGES, isAssemblyPiece,
   // Exported for tests: the التجهيز spec partitioning is pure, so it is asserted directly
   // rather than through an HTTP round trip. See test/prepSpec.test.js.
   buildPieceSpec,

@@ -791,11 +791,29 @@ async function calendar(req, res) {
   res.json({ data: { from, to, days: Array.from(byDate.values()) } });
 }
 
+/**
+ * PATCH /admin/attendance/records/:id/override
+ *
+ * ⚠️ `freeze_day` SPLITS TWO ADMIN INTENTS THAT USED TO SHARE ONE FLAG, AND THE CONFUSION COST
+ * REAL PUNCHES. `status = 'overridden'` means "the admin has ruled on this day, derivation must
+ * not touch it" — lib/attendanceDevice.js reads it that way. But «إلغاء مبلغ التأخير» on
+ * /admin/attendance is a MONEY waiver, not a statement about the hours, and it was setting the
+ * same flag: the day froze, and every punch after it was dropped. Measured on prod 2026-09-04 —
+ * محمد عماد's 18:21 · 18:32 · 23:02 all discarded as «ما ينلمس», and his checkout was then
+ * fabricated at 00:00 by closeStaleOpenDay. Same for محمد عادل's 23:03.
+ *
+ * So: `freeze_day: false` waives the money and leaves the day live. `overridden_at` is still
+ * stamped either way, and applyPunch's rule 3 reads THAT — not `status` — to know it must never
+ * recompute a تأخير a human has already cancelled.
+ *
+ * Default TRUE, so every pre-existing caller keeps the behaviour it had.
+ */
 async function overrideRecord(req, res) {
   const { id } = req.params;
   const note = req.body.note_ar ? String(req.body.note_ar).trim() : null;
   const late = req.body.late_minutes == null ? null : Number(req.body.late_minutes);
   const deduction = req.body.deduction_amount == null ? null : Number(req.body.deduction_amount);
+  const freezeDay = req.body.freeze_day === false ? false : true;
   if ((late != null && (!Number.isInteger(late) || late < 0)) || (deduction != null && (!Number.isInteger(deduction) || deduction < 0))) {
     return res.status(400).json({ error: 'قيم التصحيح غير صالحة', code: 'ERR_VALIDATION' });
   }
@@ -814,14 +832,14 @@ async function overrideRecord(req, res) {
           SET late_minutes = COALESCE($2, late_minutes),
               deduction_amount = COALESCE($3, 0),
               deduction_transaction_id = NULL,
-              status = 'overridden',
+              status = CASE WHEN $6 THEN 'overridden' ELSE status END,
               admin_note_ar = $4,
               overridden_by = $5,
               overridden_at = NOW(),
               updated_at = NOW()
         WHERE id = $1
         RETURNING *`,
-      [id, late, deduction, note, req.user.id]
+      [id, late, deduction, note, req.user.id, freezeDay]
     );
     return updated.rows[0];
   });

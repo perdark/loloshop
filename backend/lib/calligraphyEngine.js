@@ -21,6 +21,12 @@ const promptVariant = (v) => (v === 'cap_side' ? 'cap' : v);
 function toPlate(r) {
   return {
     id: r.id, render_text: r.render_text, status: r.status,
+    // WHICH BATCH this plate came from. The workbench grid holds the current job's plates AND
+    // the 60 most recent done plates shop-wide (GET /recent, so the page survives a refresh),
+    // and without this field it could not tell them apart — «تنزيل إلى مجلد…» saved BOTH, so a
+    // designer downloading their batch got other reps' students mixed in with no sign of it.
+    // Exposed, not hidden: the workbench needs to SHOW the difference, not just filter on it.
+    job_id: r.job_id,
     variant: r.variant, element_text: r.element_text,
     // Style id from the closed list, or null for the shop default (migration 083). The card
     // shows it so a designer can see WHY two plates of the same zone look different.

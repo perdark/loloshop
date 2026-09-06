@@ -32,7 +32,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { matchesQueueSearch } from "@/lib/queue-search";
@@ -48,6 +47,7 @@ import { GARMENT_FILTER_ORDER, PRODUCT_TYPE_LABELS, STUDY_TYPE_LABELS } from "@/
 import { toArabicDigits } from "@/lib/format";
 import type { ProductionQueueItem } from "@/lib/staff-types";
 import type { OrderStatus } from "@/lib/types";
+import { SearchField } from "@/components/ui/SearchField";
 
 type View = "preparing" | "ready";
 type SourceFilter = "" | "retail" | "wholesaler";
@@ -485,13 +485,11 @@ export function PrepConsole({ showSourceFilter }: { showSourceFilter: boolean })
 
       {/* Filters */}
       <div className="surface-card space-y-3 rounded-2xl p-3.5">
-        <Input
-          type="search"
-          placeholder="بحث بالاسم أو الجامعة أو التطريز…"
+        <SearchField
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={setSearch}
+          placeholder="بحث بالاسم أو الجامعة أو التطريز…"
           className="w-full"
-          aria-label="بحث بالاسم أو الجامعة أو التطريز"
         />
         {showSourceFilter && (
           <div className="flex gap-2">

@@ -5,7 +5,7 @@ const { nextStageFor, QUEUE_STAGES } = require('./productionController');
 const { moneyCalculations, calculationFor } = require('../lib/moneyCalculation');
 const staffPresence = require('../lib/staffPresence');
 
-const COMPLETED_STATUSES = ['design_complete', 'staff_review', 'printing', 'embroidery', 'pressing', 'preparing', 'ready', 'delivered'];
+const COMPLETED_STATUSES = ['design_complete', 'staff_review', 'printing', 'embroidery', 'assembly', 'pressing', 'preparing', 'ready', 'delivered'];
 // "Done" for the orders console = handed over or ready to hand over.
 const DONE_STATUSES = new Set(['ready', 'delivered']);
 

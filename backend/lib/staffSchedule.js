@@ -148,16 +148,35 @@ function resolveStamp(now, { week, settings, holidays = {}, timeZone = DEFAULT_T
 }
 
 /**
+ * "Minutes since the shift's own midnight" — the ONE normalisation every clock comparison on a
+ * midnight-crossing shift must use. Exported because `lateMinutesFor` and the device's
+ * `shiftIsOver` test both need it and a second copy is how the bug below happened.
+ *
+ * ⚠️ THE +24h WRAP IS GATED ON `belongs_to_previous_day`, NOT ON `minutesNow < start`.
+ * A crossing shift (مضر's 22:16 → 10:15 on prod) has TWO ways for a stamp to read earlier than
+ * its start, and they mean opposite things:
+ *   · 00:10, inside the after-midnight window — genuinely late, add the day. resolveStamp has
+ *     already filed it under YESTERDAY and set the flag.
+ *   · 10:53, after that window closed — the person arrived ELEVEN HOURS EARLY for tonight's
+ *     shift. resolveStamp filed it under TODAY and left the flag false.
+ * The old rule could not tell them apart and wrapped both, so every daytime arrival on a night
+ * shift was billed a whole extra day of تأخير: مضر was recorded 1410 · 845 · 994 · 993 · 742
+ * minutes late on five consecutive prod days, each one an EARLY arrival. Measured 2026-09-06.
+ */
+function stampMinutes(shift, minutesNow) {
+  const start = timeToMinutes(shift.start_time);
+  const wraps = shift.crosses_midnight && shift.belongs_to_previous_day === true && minutesNow < start;
+  return wraps ? minutesNow + 24 * 60 : minutesNow;
+}
+
+/**
  * Minutes late for a stamp, honouring the grace period and the "never late on a day off" rule.
  * Returns 0 — not a negative — for an early arrival, matching the previous behaviour.
  */
 function lateMinutesFor(shift, minutesNow, graceMinutes) {
   if (!shift.counts_lateness) return 0;
   const start = timeToMinutes(shift.start_time);
-  // On a midnight-crossing shift a stamp can land AFTER midnight and still be on time; its
-  // minutes-since-midnight is tiny, so add a day before comparing or 00:10 reads as "early".
-  const now = shift.crosses_midnight && minutesNow < start ? minutesNow + 24 * 60 : minutesNow;
-  return Math.max(0, now - start - Number(graceMinutes || 0));
+  return Math.max(0, stampMinutes(shift, minutesNow) - start - Number(graceMinutes || 0));
 }
 
 module.exports = {
@@ -167,6 +186,7 @@ module.exports = {
   shiftForDate,
   resolveStamp,
   lateMinutesFor,
+  stampMinutes,
   shiftMinutes,
   crossesMidnight,
   timeToMinutes,

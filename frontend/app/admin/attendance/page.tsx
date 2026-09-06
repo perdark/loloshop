@@ -240,6 +240,11 @@ export default function AdminAttendancePage() {
         lateMinutes: 0,
         deductionAmount: 0,
         noteAr: "إلغاء مبلغ التأخير من الأدمن",
+        // ⚠️ Waiving the fine must NOT freeze the day. It used to, and the rest of that day's
+        // بصمات were then silently dropped by the device pipeline — محمد عماد lost three
+        // punches on 2026-09-04 and got a fabricated midnight checkout because of this one
+        // flag. The تأخير stays cancelled either way; `overridden_at` protects it.
+        freezeDay: false,
       });
       setRecords((prev) => prev.map((r) => (r.id === next.id ? next : r)));
       toast.success("تم تصحيح سجل البصمة");

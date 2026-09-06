@@ -36,13 +36,13 @@ import { usePolling } from "@/lib/hooks/usePolling";
 import { useProductionEvents } from "@/hooks/useProductionEvents";
 import { useScrollRestore } from "@/hooks/useScrollRestore";
 import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StudentSheet } from "./StudentSheet";
 import { Lightbox } from "./Lightbox";
 import { matchesAr } from "@/lib/arabic";
+import { SearchField } from "@/components/ui/SearchField";
 import {
   advancedLabelFor,
   isPieceOverdue,
@@ -81,7 +81,7 @@ const META: Record<ConsoleKind, { title: string; subtitle: string; empty: string
 // move every stage except التصميم, so a station console is no longer one stage. This array is
 // display order only; what a person may SEE is decided by the backend's stage list and what
 // they may MOVE by each row's own `can_advance`.
-const LINE_ORDER = ["converting", "embroidery", "pressing", "preparing", "ready", "delivered"];
+const LINE_ORDER = ["converting", "embroidery", "assembly", "pressing", "preparing", "ready", "delivered"];
 
 // Canonical zone order — mirrors the backend's ZONE_DEFS so chips read الوشاح → القبعة → الروب.
 const ZONE_ORDER = [
@@ -783,13 +783,11 @@ export function StationConsole({
       {/* Filters */}
       {view !== "done" && (
         <div className="surface-card space-y-3 rounded-2xl p-3.5">
-          <Input
-            type="search"
-            placeholder="بحث باسم الطالب…"
+          <SearchField
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={setSearch}
+            placeholder="بحث باسم الطالب…"
             className="w-full"
-            aria-label="بحث باسم الطالب"
           />
           {kind !== "tailor" && (
             <>
@@ -1197,13 +1195,11 @@ function DoneList({
   return (
     <div className="space-y-3">
       <div className="surface-card rounded-2xl p-3.5">
-        <Input
-          type="search"
-          placeholder="بحث باسم الطالب…"
+        <SearchField
           value={search}
-          onChange={(e) => onSearch(e.target.value)}
+          onChange={onSearch}
+          placeholder="بحث باسم الطالب…"
           className="w-full"
-          aria-label="بحث باسم الطالب"
         />
       </div>
       {loading ? (

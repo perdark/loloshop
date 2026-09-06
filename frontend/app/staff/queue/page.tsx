@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { PageLoader } from "@/components/ui/Spinner";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { AssemblyBoard } from "@/components/staff/station/AssemblyBoard";
 import { deleteProductionOrder, getQueueScoped } from "@/lib/staff";
 import { getUser } from "@/lib/auth";
 import { getApiErrorMessage } from "@/lib/api";
@@ -27,6 +28,7 @@ import { usePolling } from "@/lib/hooks/usePolling";
 import { useScrollRestore } from "@/hooks/useScrollRestore";
 import type { ProductionQueueItem } from "@/lib/staff-types";
 import type { OrderStatus, StaffType } from "@/lib/types";
+import { SearchField } from "@/components/ui/SearchField";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -35,6 +37,7 @@ import type { OrderStatus, StaffType } from "@/lib/types";
 const STAGES: OrderStatus[] = [
   "design_complete",
   "embroidery",
+  "assembly",
   "pressing",
   "preparing",
   "ready",
@@ -48,6 +51,7 @@ const STAGE_PILL: Record<OrderStatus, string> = {
   design_complete: "bg-peach/70 text-orange-ink",
   converting:      "bg-orange/15 text-orange-ink",
   embroidery:      "bg-orange-ink/15 text-orange-ink",
+  assembly:        "bg-peach/60 text-orange-ink",
   pressing:        "bg-amber-100 text-amber-800",
   preparing:       "bg-ink/8 text-ink-soft",
   ready:           "bg-emerald-100 text-emerald-700",
@@ -64,6 +68,7 @@ const RAIL_BAR: Partial<Record<OrderStatus, string>> = {
   design_complete: "bg-orange/40",
   converting:      "bg-orange/60",
   embroidery:      "bg-orange-ink",
+  assembly:        "bg-orange/70",
   pressing:        "bg-amber-500",
   preparing:       "bg-ink-soft",
   ready:           "bg-emerald-500",
@@ -87,7 +92,7 @@ function isOverdue(item: ProductionQueueItem): boolean {
 }
 
 function isMissingDesign(item: ProductionQueueItem): boolean {
-  const postDesignStages: OrderStatus[] = ["embroidery", "pressing", "preparing", "ready"];
+  const postDesignStages: OrderStatus[] = ["embroidery", "assembly", "pressing", "preparing", "ready"];
   if (!postDesignStages.includes(item.status)) return false;
   if (!item.has_embroidery && !item.design_id) return false;
   // The design lives on the order's spec-line images (auto-attached calligraphy plates /
@@ -1246,6 +1251,14 @@ function ConsoleContent() {
         />
 
         {/* ── Main column (carded panel) ──────────────────────────────────── */}
+        <div className="flex w-full min-w-0 flex-1 flex-col gap-4">
+        {/* «التجميع» — the board (halves arriving + sashes ready to sew) sits above the flat
+            list for anyone looking at that stage, not only برزان (line-wide view rule). */}
+        {stage === "assembly" && (
+          <div className="rounded-2xl border border-line bg-beige p-3">
+            <AssemblyBoard />
+          </div>
+        )}
         <div className="flex w-full min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-line bg-surface">
 
           {/* Toolbar */}
@@ -1289,14 +1302,13 @@ function ConsoleContent() {
               <div className="flex-1" />
 
               {/* Search */}
-              <input
-                type="search"
-                placeholder="بحث بالاسم أو الجامعة أو التطريز…"
+              <SearchField
                 value={search}
-                onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-                aria-label="بحث بالاسم أو الجامعة أو التطريز"
-                dir="rtl"
-                className="min-h-11 w-full min-w-0 rounded-full border border-line bg-surface px-3 py-1 text-sm text-ink placeholder:text-muted focus:border-orange-ink focus:outline-none sm:w-52"
+                onChange={(v) => { setSearch(v); setPage(1); }}
+                placeholder="بحث بالاسم أو الجامعة أو التطريز…"
+                variant="pill"
+                className="w-full min-w-0 sm:w-52"
+                inputClassName="px-3"
               />
             </div>
 
@@ -1480,6 +1492,7 @@ function ConsoleContent() {
               />
             </>
           )}
+        </div>
         </div>
       </div>
     </div>

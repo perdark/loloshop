@@ -382,11 +382,20 @@ export default function StudentProductPage() {
           // always has an optionId to hang the upload/note on.
           const isShawlGroup =
             product.type === "shawl" && group.nameAr === "صورة الشال";
+          // «ملاحظة» (migration 103): optional free-text on قبعة/وشاح. Since migration 107 the
+          // group carries `requires_customer_text = FALSE` — a note nobody writes must never
+          // block checkout — so `needsText` is false and this flag is the ONLY thing that
+          // renders the box (via `allowOptionalText` below). It also covers the first paint,
+          // before OptionGroupField's auto-select effect has run.
+          const isNoteGroup =
+            (product.type === "cap" || product.type === "sash") &&
+            group.nameAr === "ملاحظة";
           const showUploadBlock =
             needsImage ||
             needsText ||
             isSashTypedField ||
             isShawlGroup ||
+            isNoteGroup ||
             (isCapEmbroideryGroup && needsText);
           const key =
             optionId != null ? selectionKey(group.id, optionId) : null;
@@ -414,7 +423,7 @@ export default function StudentProductPage() {
                     setCustomerTexts((prev) => ({ ...prev, [key]: text }));
                     setConfirmed(null);
                   }}
-                  allowOptionalText={isShawlGroup || (isSashTypedField && !needsText)}
+                  allowOptionalText={isShawlGroup || isNoteGroup || (isSashTypedField && !needsText)}
                   allowOptionalImage={
                     isShawlGroup ||
                     isSashEmbroideryZone ||

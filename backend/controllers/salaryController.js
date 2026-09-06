@@ -9,6 +9,7 @@ const schedule = require('../lib/staffSchedule');
 const breaks = require('../lib/attendanceBreak');
 const attendance = require('./attendanceController');
 const { localParts, DEFAULT_TZ } = require('../lib/shopTime');
+const { activityFor, monthBounds } = require('../lib/staffActivity');
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -348,37 +349,26 @@ async function removeTransaction(req, res) {
 }
 
 /**
- * GET /admin/staff/:id/activity
- * Return staff_activity_log rows (newest first, limit 200).
- * Joins: orders → products for product_name; orders → students → users for student_name.
+ * GET /admin/staff/:id/activity?month=YYYY-MM
+ * One shared builder (lib/staffActivity) with /payroll/me/activity — stage moves AND
+ * embroidery-zone ticks, newest first, scoped to one calendar month (default: current
+ * month at the shop). See lib/staffActivity.js for why both sources are needed.
  */
 async function getStaffActivity(req, res) {
   const { id } = req.params;
   const { err } = await resolveStaffUser(id);
   if (err) return res.status(err.status).json(err.body);
 
-  const { rows } = await query(
-    `SELECT
-       sal.id,
-       sal.action,
-       sal.from_stage,
-       sal.to_stage,
-       sal.created_at,
-       sal.order_id,
-       p.name_ar  AS product_name,
-       u.name     AS student_name
-     FROM staff_activity_log sal
-     LEFT JOIN orders o         ON o.id = sal.order_id
-     LEFT JOIN products p       ON p.id = o.product_id
-     LEFT JOIN students st      ON st.id = o.student_id
-     LEFT JOIN users u          ON u.id = st.user_id
-     WHERE sal.user_id = $1
-     ORDER BY sal.created_at DESC
-     LIMIT 200`,
-    [id]
-  );
-
-  res.json({ data: rows });
+  let rows;
+  try {
+    rows = await activityFor(id, { month: req.query.month });
+  } catch (e) {
+    if (e.code === 'ERR_VALIDATION') {
+      return res.status(400).json({ error: e.message, code: e.code });
+    }
+    throw e;
+  }
+  res.json({ data: rows, meta: { month: rows[0]?.month ?? monthBounds(req.query.month).key } });
 }
 
 // ─── Staff self endpoints ─────────────────────────────────────────────────────
@@ -395,34 +385,22 @@ async function getMySalary(req, res) {
 }
 
 /**
- * GET /payroll/me/activity  (or /staff/me/activity)
- * Staff member reads their own activity log.
+ * GET /payroll/me/activity  (or /staff/me/activity)  ?month=YYYY-MM
+ * Staff member reads their own activity log — same builder as getStaffActivity above.
  */
 async function getMyActivity(req, res) {
   const userId = req.user.id;
 
-  const { rows } = await query(
-    `SELECT
-       sal.id,
-       sal.action,
-       sal.from_stage,
-       sal.to_stage,
-       sal.created_at,
-       sal.order_id,
-       p.name_ar  AS product_name,
-       u.name     AS student_name
-     FROM staff_activity_log sal
-     LEFT JOIN orders o         ON o.id = sal.order_id
-     LEFT JOIN products p       ON p.id = o.product_id
-     LEFT JOIN students st      ON st.id = o.student_id
-     LEFT JOIN users u          ON u.id = st.user_id
-     WHERE sal.user_id = $1
-     ORDER BY sal.created_at DESC
-     LIMIT 200`,
-    [userId]
-  );
-
-  res.json({ data: rows });
+  let rows;
+  try {
+    rows = await activityFor(userId, { month: req.query.month });
+  } catch (e) {
+    if (e.code === 'ERR_VALIDATION') {
+      return res.status(400).json({ error: e.message, code: e.code });
+    }
+    throw e;
+  }
+  res.json({ data: rows, meta: { month: rows[0]?.month ?? monthBounds(req.query.month).key } });
 }
 
 /** GET /payroll/me/goal — the logged-in staff member's own goal + progress. */

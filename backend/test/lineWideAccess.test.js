@@ -37,7 +37,7 @@ function mockRes() {
 
 const staff = (...types) => ({ role: 'staff', staff_types: types });
 const sorted = (a) => [...a].sort();
-const LINE = ['designer', 'digitizer', 'embroiderer', 'presser', 'preparer'];
+const LINE = ['designer', 'digitizer', 'embroiderer', 'assembler', 'presser', 'preparer'];
 
 test('التصميم is NOT in the line-wide view', () => {
   assert.ok(!LINE_VIEW_STAGES.includes('design_complete'));
@@ -49,6 +49,9 @@ test('every line staff type may advance every non-design edge', () => {
     ['converting', 'embroidery'],
     ['embroidery', 'pressing'],
     ['embroidery', 'preparing'],
+    ['embroidery', 'assembly'],
+    ['assembly', 'pressing'],
+    ['assembly', 'preparing'],
     ['pressing', 'preparing'],
     ['preparing', 'ready'],
     ['ready', 'delivered'],
@@ -66,7 +69,7 @@ test('THE CASE THIS WAS FOR — المكوجي can push a shawl out of التط�
 });
 
 test('التصميم stays closed to everyone but the designer', () => {
-  for (const type of ['digitizer', 'embroiderer', 'presser', 'preparer']) {
+  for (const type of ['digitizer', 'embroiderer', 'assembler', 'presser', 'preparer']) {
     assert.ok(!canStaffTransition(staff(type), 'design_complete', 'embroidery'), `${type} must NOT leave التصميم`);
     assert.ok(!canStaffTransition(staff(type), 'design_complete', 'designing'), `${type} must NOT reopen التصميم`);
   }

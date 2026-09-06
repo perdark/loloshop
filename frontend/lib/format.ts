@@ -90,3 +90,38 @@ export function getJoinUrl(referralCode: string): string {
   }
   return `${window.location.origin}/join/${referralCode}`;
 }
+
+const MONTHS_AR = [
+  "كانون الثاني", "شباط", "آذار", "نيسان", "أيار", "حزيران",
+  "تموز", "آب", "أيلول", "تشرين الأول", "تشرين الثاني", "كانون الأول",
+];
+
+/** 'YYYY-MM' → «آب 2026». */
+export function monthLabel(monthKey: string): string {
+  const [y, m] = monthKey.split("-").map(Number);
+  return `${MONTHS_AR[m - 1]} ${y}`;
+}
+
+/**
+ * The current month at the shop (Asia/Baghdad) plus `back` previous ones, newest first, ready
+ * for a `<Select>` — shared by `/staff/team` and `/staff/me`'s activity month picker so the
+ * two screens can never drift on which months are offered. No date library on purpose, same
+ * as `MyMonthPanel`'s `shiftMonth`.
+ */
+export function recentMonthOptions(back = 5): { value: string; label: string }[] {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Baghdad",
+    year: "numeric",
+    month: "2-digit",
+  }).formatToParts(new Date());
+  const y0 = Number(parts.find((p) => p.type === "year")!.value);
+  const m0 = Number(parts.find((p) => p.type === "month")!.value);
+  const out: { value: string; label: string }[] = [];
+  for (let i = 0; i <= back; i++) {
+    const total = y0 * 12 + (m0 - 1) - i;
+    const y = Math.floor(total / 12);
+    const m = (total % 12) + 1;
+    out.push({ value: `${y}-${String(m).padStart(2, "0")}`, label: `${MONTHS_AR[m - 1]} ${y}` });
+  }
+  return out;
+}

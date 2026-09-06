@@ -23,6 +23,7 @@ import type {
 import type { ConfigureSelectionPayload } from "./orders";
 import {
   mapApiOrderRow,
+  type AssemblyBoardData,
   type MonitorData,
   type ProductionOrderDetail,
   type ProductionQueueItem,
@@ -655,6 +656,12 @@ export async function counterSignupStudent(
   }
 }
 
+/** GET /production/assembly — «التجميع» board: rep sashes arriving from التطريز + ready to sew (برزان). */
+export async function getAssemblyBoard(): Promise<AssemblyBoardData> {
+  const { data } = await api.get<{ data: AssemblyBoardData }>("/production/assembly");
+  return data.data;
+}
+
 /**
  * POST /production/orders/:id/advance
  * Advances the order to the next pipeline stage.
@@ -1173,11 +1180,13 @@ export async function getPresence(
 
 // ─── Staff self-service payroll + activity (GET /payroll/me/*) ─────────────────
 
-/** An activity row enriched with product/student names for the staff self view. */
-export interface MyActivityRow extends StaffActivity {
-  productName: string | null;
-  studentName: string | null;
-}
+/**
+ * The self-view activity row is now the exact same shape as the admin one — both come from
+ * `backend/lib/staffActivity.js`'s one shared builder. Kept as a named alias (not just calling
+ * everything `StaffActivity`) because `/staff/me/page.tsx` already imports the name and it
+ * reads better there as "my" row.
+ */
+export type MyActivityRow = StaffActivity;
 
 /** GET /payroll/me/salary — the logged-in staff member's own salary + ledger. */
 export async function getMySalary(): Promise<StaffSalary> {
@@ -1391,25 +1400,31 @@ export async function getMyStatement(month?: string): Promise<MyStatement | null
   return data.data;
 }
 
-export async function getMyActivity(): Promise<MyActivityRow[]> {
+/** `month` is 'YYYY-MM'. Omit it for the current month at the shop (Asia/Baghdad). */
+export async function getMyActivity(month?: string): Promise<MyActivityRow[]> {
   const { data } = await api.get<{
     data: {
       id: string;
+      source: "stage" | "audit";
       action: string;
       from_stage: string | null;
       to_stage: string | null;
+      zone: string | null;
       created_at: string;
       order_id: string | null;
       product_name: string | null;
       student_name: string | null;
     }[];
-  }>("/payroll/me/activity");
+    meta: { month: string };
+  }>("/payroll/me/activity", { params: month ? { month } : undefined });
   return (data.data ?? []).map((r) => ({
     id: r.id,
+    source: r.source,
     action: r.action,
     orderId: r.order_id,
     fromStage: (r.from_stage as OrderStatus | null) ?? null,
     toStage: (r.to_stage as OrderStatus | null) ?? null,
+    zone: r.zone,
     createdAt: r.created_at,
     productName: r.product_name,
     studentName: r.student_name,

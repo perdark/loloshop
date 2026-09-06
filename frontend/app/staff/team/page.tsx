@@ -9,9 +9,10 @@ import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
 import { getApiErrorMessage } from "@/lib/api";
 import { Select } from "@/components/ui/Select";
+import { ActivityList } from "@/components/staff/ActivityList";
 import type { SalaryTxnType, StaffActivity, StaffGoal, StaffOrderScope, StaffSalary, StaffType, User } from "@/lib/types";
 import { ORDER_SCOPE_LABELS, SALARY_TXN_LABELS, STAFF_TYPE_LABELS, PASSWORD_MIN_PRIVILEGED } from "@/lib/constants";
-import { formatDateShort, formatIQD } from "@/lib/format";
+import { formatDateShort, formatIQD, monthLabel, recentMonthOptions } from "@/lib/format";
 import {
   addStaffBonus,
   addStaffDeduction,
@@ -43,6 +44,10 @@ function txnSign(type: SalaryTxnType): string {
   return "=";
 }
 
+// This month + the previous 5, computed once when the module loads. Shared by every worker's
+// panel so the picker never drifts mid-session.
+const MONTH_OPTIONS = recentMonthOptions();
+
 // ─── Salary panel ─────────────────────────────────────────────────────────────
 
 interface SalaryPanelProps {
@@ -53,8 +58,11 @@ interface SalaryPanelProps {
 function SalaryPanel({ userId, userName }: SalaryPanelProps) {
   const [salary, setSalaryData] = useState<StaffSalary | null>(null);
   const [activity, setActivity] = useState<StaffActivity[]>([]);
+  const [month, setMonth] = useState(MONTH_OPTIONS[0].value);
   const [loadingSalary, setLoadingSalary] = useState(false);
+  const [loadingActivity, setLoadingActivity] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [txnsExpanded, setTxnsExpanded] = useState(false);
 
   // Modals
   const [setSalaryOpen, setSetSalaryOpen] = useState(false);
@@ -83,7 +91,7 @@ function SalaryPanel({ userId, userName }: SalaryPanelProps) {
     try {
       const [salaryData, activityData, goalData] = await Promise.all([
         getStaffSalary(userId),
-        getStaffActivity(userId),
+        getStaffActivity(userId, month),
         getStaffGoal(userId),
       ]);
       setSalaryData(salaryData);
@@ -95,6 +103,9 @@ function SalaryPanel({ userId, userName }: SalaryPanelProps) {
     } finally {
       setLoadingSalary(false);
     }
+    // Only the initial (first-expand) load — a later month switch goes through
+    // `handleMonthChange`, which refreshes only the activity list, not the whole panel.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
   useEffect(() => {
@@ -102,6 +113,18 @@ function SalaryPanel({ userId, userName }: SalaryPanelProps) {
       loadSalary();
     }
   }, [expanded, salary, loadSalary]);
+
+  async function handleMonthChange(next: string) {
+    setMonth(next);
+    setLoadingActivity(true);
+    try {
+      setActivity(await getStaffActivity(userId, next));
+    } catch {
+      toast.error("تعذر تحميل نشاط هذا الشهر");
+    } finally {
+      setLoadingActivity(false);
+    }
+  }
 
   async function handleSetSalary() {
     const amount = Number.parseInt(newBaseSalary.replace(/[^\d]/g, ""), 10);
@@ -375,7 +398,7 @@ function SalaryPanel({ userId, userName }: SalaryPanelProps) {
                     سجل المعاملات ({salary.transactions.length})
                   </p>
                   <ul className="divide-y divide-line">
-                    {salary.transactions.slice(0, 10).map((txn) => (
+                    {(txnsExpanded ? salary.transactions : salary.transactions.slice(0, 10)).map((txn) => (
                       <li key={txn.id} className="flex items-center gap-3 px-3 py-2.5">
                         <span
                           className={`shrink-0 w-6 text-center font-bold text-base ${txnTypeColor(txn.type)}`}
@@ -413,33 +436,44 @@ function SalaryPanel({ userId, userName }: SalaryPanelProps) {
                       </li>
                     ))}
                   </ul>
+                  {salary.transactions.length > 10 && (
+                    <button
+                      type="button"
+                      onClick={() => setTxnsExpanded((v) => !v)}
+                      className="flex min-h-11 w-full items-center justify-center border-t border-line bg-surface-sink text-xs font-semibold text-orange-ink"
+                    >
+                      {txnsExpanded ? "إخفاء" : `عرض الكل (${salary.transactions.length})`}
+                    </button>
+                  )}
                 </div>
               )}
 
-              {/* Recent activity */}
-              {activity.length > 0 && (
-                <div className="rounded-xl border border-line overflow-hidden">
-                  <p className="border-b border-line bg-surface-sink px-3 py-2 text-xs font-semibold text-muted">
-                    النشاط الأخير ({activity.length})
+              {/* Activity — one month at a time, grouped by day */}
+              <div className="rounded-xl border border-line overflow-hidden">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-surface-sink px-3 py-2">
+                  <p className="min-w-0 text-xs font-semibold text-muted">
+                    النشاط — {monthLabel(month)} ({activity.length})
                   </p>
-                  <ul className="divide-y divide-line">
-                    {activity.slice(0, 8).map((act) => (
-                      <li key={act.id} className="flex items-start gap-3 px-3 py-2.5 text-sm">
-                        <span className="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-orange-ink/60 ring-2 ring-orange-ink/20" aria-hidden />
-                        <div className="min-w-0 flex-1">
-                          <p className="font-medium text-ink">{act.action}</p>
-                          {act.fromStage && act.toStage && (
-                            <p className="text-xs text-muted">
-                              {act.fromStage} ← {act.toStage}
-                            </p>
-                          )}
-                        </div>
-                        <span className="shrink-0 text-xs text-muted">{formatDateShort(act.createdAt)}</span>
-                      </li>
+                  <select
+                    value={month}
+                    onChange={(e) => handleMonthChange(e.target.value)}
+                    disabled={loadingActivity}
+                    aria-label={`شهر نشاط ${userName}`}
+                    className="min-h-11 shrink-0 rounded-lg border border-line bg-beige px-2 py-1 text-xs text-ink outline-none focus:border-orange-ink disabled:opacity-60"
+                  >
+                    {MONTH_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
                     ))}
-                  </ul>
+                  </select>
                 </div>
-              )}
+                <div className="p-2">
+                  {loadingActivity ? (
+                    <div className="skeleton h-16 w-full rounded-xl" />
+                  ) : (
+                    <ActivityList rows={activity} />
+                  )}
+                </div>
+              </div>
             </>
           ) : (
             <div className="rounded-xl border border-line bg-surface-sink px-4 py-6 text-center">

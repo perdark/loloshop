@@ -698,3 +698,290 @@ test('10. allocatePin returns the lowest free number, skipping taken ones', asyn
   assert.equal(pinC, pinB);
   assert.notEqual(pinC, pinA);
 });
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════════════════
+ * THE PUNCH STATE KEYS — 2026-09-06.
+ *
+ * Until this date every punch the shop had ever taken carried `raw_status = 0`, because the
+ * K40's «Punch State» feature was off, and the server guessed a punch's meaning from the
+ * clock. The owner enabled it and mapped four keys; these values were MEASURED against a
+ * real finger, not read from a manual (see PUNCH_STATE in lib/attendanceDevice.js):
+ *
+ *   255 nobody pressed · 0 ▲ دخول · 1 ▼ خروج نهائي · 4 ← أطلع مؤقت · 5 → رجعت
+ *
+ * ⚠️ 4/5 are INVERTED from the device's own English labels, on the owner's instruction.
+ * Every test below states the Arabic meaning, which is what the sticker on the device says.
+ */
+const IN = 0, OUT = 1, BREAK_START = 4, BREAK_END = 5, NO_STATE = 255;
+
+test('P1. → «أطلع مؤقت» opens a break even AFTER the shift end — the clock could never do that', async () => {
+  const userId = await mkStaff();                       // 09:00 → 22:00
+  const pin = await mkPin(userId);
+  await replay([
+    mkPunch(pin, '2027-03-08 09:04:00', { status: IN }),
+    // 22:40 is past the shift end. Under the clock rule this HAD to be «خروج نهائي»; the
+    // worker pressing → says otherwise, and the worker wins.
+    mkPunch(pin, '2027-03-08 22:40:00', { status: BREAK_START }),
+  ]);
+  const { rows } = await query(
+    `SELECT state, left_at FROM staff_attendance_breaks WHERE user_id = $1`, [userId]
+  );
+  assert.equal(rows.length, 1, 'the key must open a break regardless of the hour');
+  assert.equal(rows[0].state, 'out');
+  const rec = (await query(`SELECT check_out_at FROM staff_attendance_records WHERE user_id = $1`, [userId])).rows[0];
+  assert.equal(rec.check_out_at, null, 'and it must NOT have closed the day');
+});
+
+test('P2. ← «رجعت» closes the break at the punch, to the exact minute', async () => {
+  const userId = await mkStaff();
+  const pin = await mkPin(userId);
+  await replay([
+    mkPunch(pin, '2027-03-09 09:04:00', { status: IN }),
+    mkPunch(pin, '2027-03-09 13:00:00', { status: BREAK_START }),
+    mkPunch(pin, '2027-03-09 13:37:00', { status: BREAK_END }),
+  ]);
+  const { rows } = await query(
+    `SELECT state, minutes, auto_closed FROM staff_attendance_breaks WHERE user_id = $1`, [userId]
+  );
+  assert.equal(rows[0].state, 'returned');
+  assert.equal(rows[0].minutes, 37, '13:00 → 13:37 is 37 minutes, not a rounded guess');
+  assert.equal(rows[0].auto_closed, false, 'the worker named the minute — nothing was auto-closed');
+});
+
+test('P3. ▼ «خروج نهائي» before the shift ends closes the DAY — the accepted flaw is gone', async () => {
+  const userId = await mkStaff();                       // 09:00 → 22:00
+  const pin = await mkPin(userId);
+  await replay([
+    mkPunch(pin, '2027-03-10 09:04:00', { status: IN }),
+    // 19:00 — three hours before closing. The clock rule opened a خروج مؤقت here and the
+    // worker's day stayed open all night; that was documented as "the accepted flaw".
+    mkPunch(pin, '2027-03-10 19:00:00', { status: OUT }),
+  ]);
+  const rec = (await query(
+    `SELECT check_out_at FROM staff_attendance_records WHERE user_id = $1`, [userId]
+  )).rows[0];
+  assert.equal(
+    new Date(rec.check_out_at).toISOString(),
+    zonedToUtc('2027-03-10 19:00:00', 'Asia/Baghdad').toISOString(),
+    'going home early must be a checkout, not a break'
+  );
+  const brk = await query(`SELECT count(*)::int n FROM staff_attendance_breaks WHERE user_id = $1`, [userId]);
+  assert.equal(brk.rows[0].n, 0, 'and no break may be invented');
+});
+
+test('P4. ▼ with a break still running closes that break at the SHIFT END, flagged auto_closed', async () => {
+  const userId = await mkStaff();                       // 09:00 → 22:00
+  const pin = await mkPin(userId);
+  await replay([
+    mkPunch(pin, '2027-03-11 09:04:00', { status: IN }),
+    mkPunch(pin, '2027-03-11 11:22:00', { status: BREAK_START }),
+    // He forgot ←. This is علي اديب's shape (prod 2026-09-02): the departure punch found a
+    // break that had been open since 11:22.
+    mkPunch(pin, '2027-03-11 22:02:00', { status: OUT }),
+  ]);
+  const { rows } = await query(
+    `SELECT state, minutes, auto_closed, returned_at FROM staff_attendance_breaks WHERE user_id = $1`,
+    [userId]
+  );
+  assert.equal(rows[0].state, 'returned');
+  assert.equal(
+    new Date(rows[0].returned_at).toISOString(),
+    zonedToUtc('2027-03-11 22:00:00', 'Asia/Baghdad').toISOString(),
+    'the shift end, not the departure punch'
+  );
+  assert.equal(rows[0].auto_closed, true, 'the shop closed it, not the worker — the admin must see that');
+  const rec = (await query(`SELECT check_out_at FROM staff_attendance_records WHERE user_id = $1`, [userId])).rows[0];
+  assert.equal(
+    new Date(rec.check_out_at).toISOString(),
+    zonedToUtc('2027-03-11 22:02:00', 'Asia/Baghdad').toISOString(),
+    'and the same punch still closes the day at its own time'
+  );
+});
+
+test('P5. 255 — nobody pressed a key — falls back to the clock rule, unchanged', async () => {
+  const userId = await mkStaff();                       // 09:00 → 22:00
+  const pin = await mkPin(userId);
+  await replay([
+    mkPunch(pin, '2027-03-12 09:04:00', { status: NO_STATE }),
+    // Mid-shift with no key: the old rule says this is a break edge, and it must stay that way
+    // or every punch taken before 2026-09-06 changes meaning retroactively.
+    mkPunch(pin, '2027-03-12 14:00:00', { status: NO_STATE }),
+  ]);
+  const { rows } = await query(
+    `SELECT state FROM staff_attendance_breaks WHERE user_id = $1`, [userId]
+  );
+  assert.equal(rows.length, 1, 'an unknown state must derive exactly as it did before');
+  assert.equal(rows[0].state, 'out');
+});
+
+test('P6. the 5-minute cooldown drops a repeat of the SAME key, never two different ones', async () => {
+  const userId = await mkStaff();
+  const pin = await mkPin(userId);
+  const { actions } = await replay([
+    mkPunch(pin, '2027-03-13 09:04:00', { status: IN }),
+    mkPunch(pin, '2027-03-13 13:00:00', { status: BREAK_START }),
+    // Six seconds later, the other key. This is the owner's own acceptance test on the real
+    // device (16:36:35 then 16:36:39) — a deliberate pair, not one finger read twice.
+    mkPunch(pin, '2027-03-13 13:00:06', { status: BREAK_END }),
+    // And now the same key twice inside the window: that IS one touch.
+    mkPunch(pin, '2027-03-13 13:00:20', { status: BREAK_END }),
+  ]);
+  assert.deepEqual(actions, ['created', 'break_start', 'break_end', 'ignored']);
+});
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════════════════
+ * THE NIGHT SHIFT — the +24h wrap must follow `belongs_to_previous_day`, not the clock.
+ */
+test('N1. a night-shift worker arriving in the MORNING is early, not 742 minutes late', async () => {
+  // مضر محمد's shift as it stands on prod: 22:16 → 10:15.
+  const userId = await mkStaff({ start: '22:16', end: '10:15' });
+  const pin = await mkPin(userId);
+  // 10:53 — after his shift's end, so it is tonight's arrival, eleven hours EARLY.
+  await replay([mkPunch(pin, '2027-03-14 10:53:00', { status: IN })]);
+  const rec = (await query(
+    `SELECT late_minutes, deduction_amount, status FROM staff_attendance_records WHERE user_id = $1`,
+    [userId]
+  )).rows[0];
+  assert.equal(rec.late_minutes, 0, 'prod recorded 742 here, five days running');
+  assert.equal(Number(rec.deduction_amount), 0);
+  assert.equal(rec.status, 'present');
+});
+
+test('N2. but a night-shift stamp AFTER midnight is still late — the wrap has to survive', async () => {
+  const userId = await mkStaff({ start: '22:16', end: '10:15' });
+  const pin = await mkPin(userId);
+  // 00:10 is inside the after-midnight window, so it belongs to the PREVIOUS day's shift and
+  // is genuinely 1h54 late. Deleting the wrap entirely would forgive this.
+  // ⚠️ April, not March: test 7 above makes 2027-03-15 a shop holiday, and a holiday scores
+  // 0 lateness by design — this test would then pass for the wrong reason.
+  await replay([mkPunch(pin, '2027-04-16 00:10:00', { status: IN })]);
+  const rec = (await query(
+    `SELECT work_date, late_minutes FROM staff_attendance_records WHERE user_id = $1`, [userId]
+  )).rows[0];
+  assert.equal(rec.late_minutes, 114, '22:16 → 00:10 is 114 minutes');
+});
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════════════════
+ * AFTER MIDNIGHT — the shop shuts at 22:00 and people punch out at 00:17.
+ */
+test('M1. a خروج after midnight closes YESTERDAY — it must not open a phantom day', async () => {
+  const userId = await mkStaff();                       // 09:00 → 22:00, does not cross midnight
+  const pin = await mkPin(userId);
+  await replay([
+    mkPunch(pin, '2027-03-17 09:04:00', { status: IN }),
+    mkPunch(pin, '2027-03-18 00:17:00', { status: NO_STATE }),
+  ]);
+  const { rows } = await query(
+    `SELECT work_date, check_in_at, check_out_at FROM staff_attendance_records
+      WHERE user_id = $1 ORDER BY work_date`,
+    [userId]
+  );
+  assert.equal(rows.length, 1, 'prod grew a second record here and called 00:17 a check-IN');
+  assert.equal(
+    new Date(rows[0].check_out_at).toISOString(),
+    zonedToUtc('2027-03-18 00:17:00', 'Asia/Baghdad').toISOString(),
+    'the real punch, not a 22:00 fabricated by closeStaleOpenDay'
+  );
+});
+
+test('M2. an early ARRIVAL the next morning still opens a new day', async () => {
+  const userId = await mkStaff();                       // 09:00 → 22:00
+  const pin = await mkPin(userId);
+  await replay([
+    mkPunch(pin, '2027-03-19 09:04:00', { status: IN }),
+    // 08:40 the next morning is past the window AND past the 08:00 cutoff. Reading it as
+    // yesterday's departure would eat the worker's whole day.
+    mkPunch(pin, '2027-03-20 08:40:00', { status: NO_STATE }),
+  ]);
+  const { rows } = await query(
+    `SELECT work_date, check_out_at FROM staff_attendance_records WHERE user_id = $1 ORDER BY work_date`,
+    [userId]
+  );
+  assert.equal(rows.length, 2);
+  assert.equal(
+    new Date(rows[0].check_out_at).toISOString(),
+    zonedToUtc('2027-03-19 22:00:00', 'Asia/Baghdad').toISOString(),
+    'yesterday still closes at its own scheduled end'
+  );
+});
+
+test('M3. an explicit ▼ skips the 08:00 cutoff — a night shift really does end in the morning', async () => {
+  const userId = await mkStaff({ start: '16:00', end: '04:00' });
+  const pin = await mkPin(userId);
+  await replay([
+    mkPunch(pin, '2027-03-21 16:04:00', { status: IN }),
+    // 09:00 is past the cutoff but only five hours past a 04:00 shift end. Without the key
+    // this opens a new day; with ▼ the worker has said what it is.
+    mkPunch(pin, '2027-03-22 09:00:00', { status: OUT }),
+  ]);
+  const { rows } = await query(
+    `SELECT work_date, check_out_at FROM staff_attendance_records WHERE user_id = $1 ORDER BY work_date`,
+    [userId]
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(
+    new Date(rows[0].check_out_at).toISOString(),
+    zonedToUtc('2027-03-22 09:00:00', 'Asia/Baghdad').toISOString()
+  );
+});
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════════════════
+ * «إلغاء مبلغ التأخير» WAIVES MONEY WITHOUT FREEZING THE DAY (see overrideRecord's freeze_day).
+ */
+test('F1. a waived تأخير leaves the rest of the day live — breaks and the checkout still land', async () => {
+  const userId = await mkStaff();                       // 09:00 → 22:00
+  const pin = await mkPin(userId);
+  await replay([mkPunch(pin, '2027-03-23 09:40:00', { status: IN })]);
+  // Exactly what the button does now: zero the money, stamp overridden_at, leave `status`.
+  await query(
+    `UPDATE staff_attendance_records
+        SET late_minutes = 0, deduction_amount = 0, overridden_at = NOW(),
+            admin_note_ar = 'إلغاء مبلغ التأخير من الأدمن'
+      WHERE user_id = $1`,
+    [userId]
+  );
+  const { actions } = await replay([
+    mkPunch(pin, '2027-03-23 18:21:00', { status: BREAK_START }),
+    mkPunch(pin, '2027-03-23 18:32:00', { status: BREAK_END }),
+    mkPunch(pin, '2027-03-23 23:02:00', { status: OUT }),
+  ]);
+  assert.deepEqual(actions, ['break_start', 'break_end', 'extended'],
+    'prod dropped all three of these as «ما ينلمس» and fabricated a midnight checkout');
+  const rec = (await query(
+    `SELECT check_out_at, late_minutes FROM staff_attendance_records WHERE user_id = $1`, [userId]
+  )).rows[0];
+  assert.equal(
+    new Date(rec.check_out_at).toISOString(),
+    zonedToUtc('2027-03-23 23:02:00', 'Asia/Baghdad').toISOString()
+  );
+  assert.equal(rec.late_minutes, 0, 'and the waiver still stands');
+});
+
+test('F2. an EARLIER punch never re-charges a تأخير the admin already cancelled', async () => {
+  const userId = await mkStaff();                       // 09:00 → 22:00, grace 0, rate 100
+  const pin = await mkPin(userId);
+  await replay([mkPunch(pin, '2027-03-24 11:00:00', { status: IN })]);
+  await query(
+    `UPDATE staff_attendance_records
+        SET late_minutes = 0, deduction_amount = 0, overridden_at = NOW() WHERE user_id = $1`,
+    [userId]
+  );
+  // A punch from 10:00 arrives late (a replay, or a PIN mapped after the fact). Rule 3 moves
+  // the check-in back — and used to recompute 60 minutes of تأخير on top of the waiver.
+  await replay([mkPunch(pin, '2027-03-24 10:00:00', { status: IN })]);
+  const rec = (await query(
+    `SELECT check_in_at, late_minutes, deduction_amount FROM staff_attendance_records WHERE user_id = $1`,
+    [userId]
+  )).rows[0];
+  assert.equal(
+    new Date(rec.check_in_at).toISOString(),
+    zonedToUtc('2027-03-24 10:00:00', 'Asia/Baghdad').toISOString(),
+    'the earlier punch is still the truth about when he arrived'
+  );
+  assert.equal(rec.late_minutes, 0, "but the admin's ruling on the money is untouchable");
+  assert.equal(Number(rec.deduction_amount), 0);
+});

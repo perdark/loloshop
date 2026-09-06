@@ -9,7 +9,7 @@ const memoCache = require('../lib/memoCache');
 
 const ALL_STATUSES = [
   'pending_approval', 'designing', 'design_complete', 'converting',
-  'staff_review', 'printing', 'embroidery', 'pressing', 'preparing',
+  'staff_review', 'printing', 'embroidery', 'assembly', 'pressing', 'preparing',
   'ready', 'delivered', 'cancelled',
 ];
 
@@ -18,7 +18,7 @@ const ALL_STATUSES = [
 // «ألغِ الطلب» read as the furthest-forward stage there is.
 const STAGE_ORDER = [
   'pending_approval', 'designing', 'design_complete', 'converting',
-  'staff_review', 'printing', 'embroidery', 'pressing', 'preparing',
+  'staff_review', 'printing', 'embroidery', 'assembly', 'pressing', 'preparing',
   'ready', 'delivered',
 ];
 
@@ -33,9 +33,13 @@ const TRANSITIONS = {
   designing: ['design_complete', 'cancelled'],
   design_complete: ['converting', 'embroidery', 'designing', 'cancelled'],
   converting: ['embroidery', 'design_complete', 'cancelled'], // drain-only
-  embroidery: ['pressing', 'preparing', 'design_complete', 'cancelled'],
-  pressing: ['preparing', 'cancelled'],
-  preparing: ['ready', 'embroidery', 'pressing', 'cancelled'],
+  embroidery: ['assembly', 'pressing', 'preparing', 'design_complete', 'cancelled'],
+  // «التجميع» (migration 106, 2026-09-06): a ممثل SASH's two embroidered halves are sewn into
+  // one garment here before الكوي. Rep sashes only — productionController.isAssemblyPiece is
+  // the single fork; every other piece keeps embroidery→pressing/preparing.
+  assembly: ['pressing', 'preparing', 'embroidery', 'cancelled'],
+  pressing: ['preparing', 'assembly', 'cancelled'],
+  preparing: ['ready', 'embroidery', 'pressing', 'assembly', 'cancelled'],
   ready: ['delivered', 'preparing', 'cancelled'],
   delivered: ['preparing'],
   cancelled: [],
@@ -46,7 +50,7 @@ const TRANSITIONS = {
 
 // Every staff_type that works the production line. `tailor` (مفصل) is deliberately absent:
 // it is a read-only viewer of the whole line and has never had a transition.
-const LINE_STAFF = ['designer', 'digitizer', 'embroiderer', 'presser', 'preparer'];
+const LINE_STAFF = ['designer', 'digitizer', 'embroiderer', 'assembler', 'presser', 'preparer'];
 
 // Which staff_type may perform each "from→to" edge.
 // admin role and `manager` staff_type bypass this map entirely; cancelling is manager/admin only.
@@ -72,6 +76,9 @@ const STAGE_AUTHZ = {
   'converting→design_complete': ['digitizer', 'designer'], // drain-only, back into التصميم
   'embroidery→pressing': LINE_STAFF,
   'embroidery→preparing': LINE_STAFF,
+  'embroidery→assembly': LINE_STAFF,   // rep sash: التطريز → التجميع
+  'assembly→pressing': LINE_STAFF,
+  'assembly→preparing': LINE_STAFF,
   'pressing→preparing': LINE_STAFF,
   'preparing→ready': LINE_STAFF,
   'ready→delivered': LINE_STAFF,
@@ -83,6 +90,9 @@ const STAGE_AUTHZ = {
   // Revert for a PLAIN piece that came straight from الكوي (never embroidered).
   'preparing→pressing': LINE_STAFF,
   'pressing→embroidery': LINE_STAFF,
+  'assembly→embroidery': LINE_STAFF,   // revert: a rep sash back to التطريز
+  'pressing→assembly': LINE_STAFF,     // revert: a rep sash came through التجميع
+  'preparing→assembly': LINE_STAFF,    // revert: a rep sash that skipped الكوي
   'embroidery→converting': LINE_STAFF, // drain-only
   'embroidery→design_complete': ['embroiderer', 'designer'], // revert: back to the design desk
 };
@@ -105,6 +115,7 @@ const STATUS_LABEL_AR = {
   staff_review: 'قيد المراجعة',
   printing: 'قيد الطباعة',
   embroidery: 'قيد التطريز',
+  assembly: 'قيد التجميع',
   pressing: 'قيد الكوي',
   preparing: 'قيد التجهيز',
   ready: 'جاهز للاستلام',

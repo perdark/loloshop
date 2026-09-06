@@ -44,6 +44,48 @@ const PUNCH_COOLDOWN_MINUTES = 5;
 const REASON_TOO_SOON = 'بصمة مكررة خلال ٥ دقائق من بصمة سابقة';
 const REASON_BREAK_START = 'بصمة خروج مؤقت';
 const REASON_BREAK_END = 'بصمة عودة من الخروج المؤقت';
+const REASON_BREAK_ALREADY_OPEN = 'ضغط «أطلع مؤقت» وهو أصلاً خارج';
+const REASON_NO_BREAK_OPEN = 'ضغط «رجعت» وما عنده خروج مؤقت مفتوح';
+const REASON_OUT_WITHOUT_IN = 'خروج بلا دخول مسجّل لليوم';
+
+/**
+ * ⚠️ WHAT THE K40 ACTUALLY SENDS — MEASURED ON THE REAL DEVICE, NOT READ FROM A MANUAL.
+ *
+ * Until 2026-09-06 every punch this shop ever took arrived with `raw_status = 0`, because the
+ * device's «Punch State» feature was off. The server therefore had to GUESS what a punch meant
+ * from the clock alone — "before the shift end it is a break, at or after it the day is over" —
+ * and every clock-guess bug in this file traces back to that one missing bit of information:
+ * a worker who went home early opened a break instead, a forgotten عودة billed the whole
+ * afternoon (علي اديب, 640 minutes, 40,000 IQD), and a خروج after midnight opened a phantom
+ * next day.
+ *
+ * On 2026-09-06 the owner enabled Punch State (Manual) and mapped four keys. These five values
+ * were then confirmed by pressing each key against a real finger and reading punch_raw:
+ *
+ *   255  the «Welcome» screen — nobody chose a key. NOT the same as 0.
+ *   0    ▲  دخول            (Check-In)
+ *   1    ▼  خروج نهائي      (Check-Out)
+ *   4    ←  أطلع مؤقت       — starts the monthly break clock
+ *   5    →  رجعت            — stops it
+ *
+ * ⚠️ 4 AND 5 ARE INVERTED FROM THE DEVICE'S OWN ENGLISH LABELS, ON THE OWNER'S INSTRUCTION.
+ * The K40 menu calls ← "Break-In" and → "Break-Out"; the shop teaches ← as «أطلع» and → as
+ * «رجعت», and the Arabic sticker on the device is what the workers actually read. Do not
+ * "correct" this map against the ZKTeco documentation — it would silently swap every break's
+ * start and end, and the money follows the break.
+ *
+ * ⚠️ EVERY UNKNOWN VALUE FALLS BACK TO THE CLOCK RULE, DELIBERATELY. 255 (nobody pressed),
+ * null (every punch recorded before this date) and anything unrecognised all return null here
+ * and are derived exactly the way they were before. That fallback is the whole reason this
+ * could ship the same day it was measured.
+ */
+const PUNCH_STATE = { 0: 'in', 1: 'out', 4: 'break_start', 5: 'break_end' };
+const PUNCH_STATE_NONE = 255;
+
+function punchIntent(rawStatus) {
+  if (rawStatus == null) return null;
+  return PUNCH_STATE[Number(rawStatus)] || null;
+}
 
 /**
  * The subset of staff_attendance_settings + a per-user staff_attendance_user_settings override
@@ -103,6 +145,69 @@ async function markPunch(client, punchId, { userId = null, attendanceId = null, 
 }
 
 /**
+ * The instant a stored day's shift was scheduled to END, as a real timestamptz.
+ * Reads the record's OWN `expected_start_time`/`expected_end_time` — the hours that applied on
+ * that day — never today's schedule, or every admin edit to the week would re-date history.
+ */
+async function scheduledEndOf(client, record, timeZone) {
+  const end = record.expected_end_time || '23:59:00';
+  const crosses =
+    schedule.timeToMinutes(end) <= schedule.timeToMinutes(record.expected_start_time || '00:00:00');
+  const { rows } = await client.query(
+    `SELECT (($1::date + $2::time) AT TIME ZONE $3) + ($4 || ' day')::interval AS ts`,
+    [record.work_date, end, timeZone, crosses ? 1 : 0]
+  );
+  return rows[0].ts;
+}
+
+/**
+ * ⚠️ THE LATE-DEPARTURE WINDOW — how long after a shift's scheduled end a punch can still be
+ * that day's خروج rather than the next day's دخول.
+ *
+ * The shop closes at 22:00 and people routinely punch out at 23:48, 00:14, 00:17. Without this
+ * window `resolveStamp` files every one of those under the NEXT calendar date (a 10:00→22:00
+ * shift does not cross midnight, so there is no after-midnight window to catch it) and the
+ * damage is doubled: the real day is auto-closed at a FABRICATED 22:00, and the departure
+ * becomes a phantom next-day دخول. Measured on prod — محمد عماد's 09-02 خروج at 00:17 became
+ * his 09-03 check-in, and محمد عادل's record says he "arrived" 09-06 at 05:12.
+ *
+ * ⚠️ BOTH BOUNDS ARE LOAD-BEARING. The 8h cutoff is the honest half: a punch from 08:00 local
+ * onwards is somebody ARRIVING, whatever is still open behind them, and without that test a
+ * night-shift worker's afternoon arrival gets filed as yesterday's departure. The 6h window is
+ * the other half: it stops a punch a full day later from reaching back.
+ */
+const LATE_DEPARTURE_WINDOW_MINUTES = 6 * 60;
+const LATE_DEPARTURE_CUTOFF_MINUTES = 8 * 60;
+
+/**
+ * "Is this punch the previous, still-open day going home?" Returns that record, or null.
+ * Called ONLY on the path that would otherwise INSERT a brand-new day.
+ */
+async function previousDayDeparture(client, userId, shift, punchedAt, timeZone, intent = null) {
+  // ⚠️ AN EXPLICIT ▼ SKIPS THE 08:00 CUTOFF. The cutoff is a guess — "nobody goes home in the
+  // morning" — and it exists only to stop a night-shift worker's afternoon ARRIVAL being read
+  // as yesterday's departure. When the worker pressed «خروج نهائي» there is nothing left to
+  // guess about, so the window alone bounds it.
+  const explicitOut = intent === 'out';
+  if (!explicitOut && shift.minutes_now >= LATE_DEPARTURE_CUTOFF_MINUTES) return null;
+  const { rows } = await client.query(
+    `SELECT * FROM staff_attendance_records
+      WHERE user_id = $1 AND work_date < $2 AND check_out_at IS NULL
+      ORDER BY work_date DESC
+      LIMIT 1
+      FOR UPDATE`,
+    [userId, shift.date]
+  );
+  if (!rows.length) return null;
+  const prev = rows[0];
+  const endAt = await scheduledEndOf(client, prev, timeZone);
+  const afterEndMinutes = (punchedAt.getTime() - new Date(endAt).getTime()) / 60000;
+  if (afterEndMinutes <= 0 || afterEndMinutes > LATE_DEPARTURE_WINDOW_MINUTES) return null;
+  if (punchedAt.getTime() <= new Date(prev.check_in_at).getTime()) return null;
+  return prev;
+}
+
+/**
  * Close the worker's most recent still-open day when a NEW shift day begins, at that day's own
  * scheduled end — plus any break still `out` inside it, flagged `auto_closed` so an admin can
  * tell it apart from a real عودة.
@@ -131,13 +236,7 @@ async function closeStaleOpenDay(client, userId, newWorkDate, settings, timeZone
 
   // The stored expected_end_time is the hours that applied on THAT day — reading today's
   // schedule instead would re-date history every time the admin edits the week.
-  const end = stale.expected_end_time || '23:59:00';
-  const crosses = schedule.timeToMinutes(end) <= schedule.timeToMinutes(stale.expected_start_time || '00:00:00');
-  const { rows: at } = await client.query(
-    `SELECT (($1::date + $2::time) AT TIME ZONE $3) + ($4 || ' day')::interval AS ts`,
-    [stale.work_date, end, timeZone, crosses ? 1 : 0]
-  );
-  const closeAt = at[0].ts;
+  const closeAt = await scheduledEndOf(client, stale, timeZone);
 
   const open = await breaks.openBreakFor(client, userId);
   if (open && open.state === 'out' && open.attendance_id === stale.id) {
@@ -156,6 +255,34 @@ async function closeStaleOpenDay(client, userId, newWorkDate, settings, timeZone
   await client.query(
     `UPDATE staff_attendance_records SET check_out_at = $2, updated_at = NOW() WHERE id = $1`,
     [stale.id, closeAt]
+  );
+}
+
+/**
+ * Open a خروج مؤقت from a device punch.
+ *
+ * ⚠️ `approval = 'approved'` ON PURPOSE, AND IT IS A MONEY DECISION. computeCharge gives an
+ * UNAPPROVED break zero free minutes — every minute deducted — so creating these as pending
+ * would quietly bill every worker for every break the moment the shop stopped using the
+ * phone's request flow. There is no إذن to ask for at a sensor: the finger IS the record.
+ *
+ * One writer, called from both the explicit-key path and the clock-guess path, so the two can
+ * never drift into writing different rows for the same event.
+ */
+async function openDeviceBreak(client, { userId, row, shift, punchedAt, settings, timeZone }) {
+  await client.query(
+    `INSERT INTO staff_attendance_breaks
+       (user_id, attendance_id, work_date, month_key, left_at, state, approval,
+        left_without_approval, requested_at, deduction_per_minute)
+     VALUES ($1, $2, $3, $4, $5, 'out', 'approved', FALSE, $5, $6)`,
+    [
+      userId,
+      row.id,
+      shift.date,
+      breaks.monthKeyFor(punchedAt, timeZone),
+      punchedAt,
+      Number(settings.deduction_per_minute || 0),
+    ]
   );
 }
 
@@ -182,6 +309,9 @@ async function applyPunch(client, punch) {
 
   const timeZone = settings.timezone || DEFAULT_TZ;
   const punchedAt = punch.punched_at instanceof Date ? punch.punched_at : new Date(punch.punched_at);
+  // What the WORKER said this punch means, or null when nobody chose (255) and for every
+  // punch taken before the device's state keys were switched on. See PUNCH_STATE.
+  const intent = punchIntent(punch.raw_status);
 
   // ─── The per-worker cooldown ──────────────────────────────────────────────────────────
   // A finger resting on the sensor reads twice, and under the sequence rule below a stray
@@ -196,17 +326,48 @@ async function applyPunch(client, punch) {
   // rejected ones lets a worker who taps every four minutes lock themselves out for the whole
   // day: 10:15 accepted → 10:16 and 10:17 both rejected (the owner's example), and 10:21 is
   // accepted because it is more than five minutes past 10:15, not past 10:17.
-  const { rows: recent } = await client.query(
-    `SELECT punched_at FROM punch_raw
-      WHERE user_id = $1
-        AND id <> $2
-        AND punched_at <= $3
-        AND punched_at > $3::timestamptz - ($4 || ' minutes')::interval
-        AND (ignored_reason IS NULL OR ignored_reason <> $5)
-      ORDER BY punched_at DESC
-      LIMIT 1`,
-    [userId, punch.id, punchedAt, String(PUNCH_COOLDOWN_MINUTES), REASON_TOO_SOON]
-  );
+  //
+  // ⚠️ MEASURED ON `device_ts`, NEVER ON `punched_at`. The cooldown describes a FINGER on a
+  // SENSOR — two reads of one touch — and only the device's own clock can see that. Since
+  // 2026-08-30 `punched_at` is the instant the punch REACHED US, so a buffered replay gives
+  // an ENTIRE batch one identical timestamp: on prod 2026-09-01 the K40 came back from an
+  // outage and uploaded 21 punches all stamped 20:39, and this rule then destroyed **12 of
+  // them** — every worker's day collapsed to its first punch and their real خروج was thrown
+  // away as a "duplicate". Seven records had to be repaired by hand-written SQL.
+  // `device_ts` keeps the device's verbatim reading precisely so a batch stays legible.
+  //
+  // ⚠️ AND IT ONLY DROPS A REPEAT OF THE SAME KEY. Since 2026-09-06 the worker chooses what a
+  // punch means (see PUNCH_STATE), so ← then → six seconds apart is a real, deliberate pair —
+  // the owner's own acceptance test did exactly that — while a finger read twice reports the
+  // SAME status both times. Comparing the status is what tells the two apart.
+  const cooldownAt = punch.device_ts || null;
+  const rawStatus = punch.raw_status == null ? null : Number(punch.raw_status);
+  const { rows: recent } = cooldownAt
+    ? await client.query(
+        `SELECT device_ts FROM punch_raw
+          WHERE user_id = $1
+            AND id <> $2
+            AND device_ts <= $3
+            AND device_ts > $3::timestamp - ($4 || ' minutes')::interval
+            AND (ignored_reason IS NULL OR ignored_reason <> $5)
+            AND raw_status IS NOT DISTINCT FROM $6
+          ORDER BY device_ts DESC
+          LIMIT 1`,
+        [userId, punch.id, cooldownAt, String(PUNCH_COOLDOWN_MINUTES), REASON_TOO_SOON, rawStatus]
+      )
+    : // No device reading at all (a hand-made row): fall back to arrival time rather than
+      // skipping the guard, which is the pre-2026-09-06 behaviour for exactly this case.
+      await client.query(
+        `SELECT punched_at FROM punch_raw
+          WHERE user_id = $1
+            AND id <> $2
+            AND punched_at <= $3
+            AND punched_at > $3::timestamptz - ($4 || ' minutes')::interval
+            AND (ignored_reason IS NULL OR ignored_reason <> $5)
+          ORDER BY punched_at DESC
+          LIMIT 1`,
+        [userId, punch.id, punchedAt, String(PUNCH_COOLDOWN_MINUTES), REASON_TOO_SOON]
+      );
   if (recent.length) {
     await markPunch(client, punch.id, { userId, ignoredReason: REASON_TOO_SOON });
     return 'ignored';
@@ -235,6 +396,32 @@ async function applyPunch(client, punch) {
   );
 
   if (!existing.rows.length) {
+    // ⚠️ BEFORE opening a new day: is this the PREVIOUS day going home? See
+    // previousDayDeparture — the shop closes at 22:00 and the خروج routinely lands after
+    // midnight, which `resolveStamp` alone files under tomorrow.
+    const prev = await previousDayDeparture(client, userId, shift, punchedAt, timeZone, intent);
+    if (prev) {
+      const open = await breaks.openBreakFor(client, userId);
+      if (open && open.state === 'out' && open.attendance_id === prev.id) {
+        await breaks.finishBreak(client, open, {
+          returnedAt: punchedAt,
+          perMinute: settings.deduction_per_minute,
+          autoClosed: false,
+        });
+        await breaks.recomputeMonth(client, {
+          userId,
+          monthKey: breaks.monthKeyFor(punchedAt, timeZone),
+          allowanceMinutes: breaks.effectiveAllowance(settings),
+        });
+      }
+      await client.query(
+        `UPDATE staff_attendance_records SET check_out_at = $2, updated_at = NOW() WHERE id = $1`,
+        [prev.id, punchedAt]
+      );
+      await markPunch(client, punch.id, { userId, attendanceId: prev.id });
+      return 'extended';
+    }
+
     const inserted = await client.query(
       `INSERT INTO staff_attendance_records
          (user_id, work_date, check_in_at, expected_start_time, expected_end_time, grace_minutes,
@@ -289,14 +476,12 @@ async function applyPunch(client, punch) {
   const hasHours = !!(shift.start_time && shift.end_time);
   let shiftIsOver = false;
   if (hasHours) {
-    const startM = schedule.timeToMinutes(shift.start_time);
     const endM = schedule.timeToMinutes(shift.end_time) + (shift.crosses_midnight ? 24 * 60 : 0);
-    // Same normalisation lateMinutesFor uses: after midnight on a crossing shift, "minutes
-    // since midnight" is tiny and would read as long before the start.
-    const nowM = shift.crosses_midnight && shift.minutes_now < startM
-      ? shift.minutes_now + 24 * 60
-      : shift.minutes_now;
-    shiftIsOver = nowM >= endM;
+    // schedule.stampMinutes, never a local copy — the wrap is gated on
+    // `belongs_to_previous_day`, and re-deriving it from `minutes_now < start` is what made a
+    // night-shift worker's morning arrival read as "the shift is already over" (and cost مضر
+    // محمد five days of phantom تأخير). One rule, one file.
+    shiftIsOver = schedule.stampMinutes(shift, shift.minutes_now) >= endM;
   }
 
   // ─── Rule 5 — an admin has ruled on this day ─────────────────────────────────────────
@@ -331,6 +516,83 @@ async function applyPunch(client, punch) {
     return 'ignored';
   }
 
+  // ─── THE WORKER SAID WHAT THIS PUNCH IS — 2026-09-06 ─────────────────────────────────
+  // An explicit key beats the clock, always. This whole block exists so that the guesses
+  // below never have to run on a punch whose meaning we were TOLD. Note what it does NOT
+  // consult: `shiftIsOver`. A worker who goes home at 19:00 presses ▼ and goes home; one who
+  // steps out at 23:00 presses ← and is on a break. That is the exact pair the clock rule
+  // cannot tell apart, and it is why the owner mapped the keys.
+  //
+  // `intent === 'in'` deliberately falls through: an extra ▲ mid-day is either a duplicate
+  // arrival (harmless, rule 4 stores it) or an EARLIER arrival than the one on record, which
+  // rule 3 must handle. Neither is something to special-case here.
+  if (intent === 'break_start' && punchedAtMs > checkInAtMs) {
+    const open = await breaks.openBreakFor(client, userId);
+    if (open && open.state === 'out') {
+      // Already out. Re-opening would abandon the running break and lose its minutes.
+      await markPunch(client, punch.id, {
+        userId, attendanceId: row.id, ignoredReason: REASON_BREAK_ALREADY_OPEN,
+      });
+      return 'ignored';
+    }
+    await openDeviceBreak(client, { userId, row, shift, punchedAt, settings, timeZone });
+    await markPunch(client, punch.id, { userId, attendanceId: row.id, ignoredReason: REASON_BREAK_START });
+    return 'break_start';
+  }
+
+  if (intent === 'break_end') {
+    const open = await breaks.openBreakFor(client, userId);
+    if (!open || open.state !== 'out') {
+      await markPunch(client, punch.id, {
+        userId, attendanceId: row.id, ignoredReason: REASON_NO_BREAK_OPEN,
+      });
+      return 'ignored';
+    }
+    // ⚠️ CLOSED AT THE PUNCH, NEVER CAPPED AT THE SHIFT END. The cap below exists for a break
+    // nobody ended; here the worker pressed «رجعت» and named the minute themselves.
+    await breaks.finishBreak(client, open, {
+      returnedAt: punchedAt, perMinute: settings.deduction_per_minute, autoClosed: false,
+    });
+    await breaks.recomputeMonth(client, {
+      userId,
+      monthKey: breaks.monthKeyFor(punchedAt, timeZone),
+      allowanceMinutes: breaks.effectiveAllowance(settings),
+    });
+    await markPunch(client, punch.id, { userId, attendanceId: row.id, ignoredReason: REASON_BREAK_END });
+    return 'break_end';
+  }
+
+  if (intent === 'out' && punchedAtMs > checkInAtMs) {
+    // A break still running when the worker goes home was never ended — they forgot ←. Close
+    // it at the shift's own end (owner's rule), which is the same stand-in closeStaleOpenDay
+    // uses, rather than billing the whole rest of the day to this punch.
+    const open = await breaks.openBreakFor(client, userId);
+    if (open && open.state === 'out') {
+      const endAt = shiftIsOver ? await scheduledEndOf(client, row, timeZone) : punchedAt;
+      const capped = new Date(endAt).getTime() > new Date(open.left_at).getTime();
+      await breaks.finishBreak(client, open, {
+        returnedAt: capped ? endAt : punchedAt,
+        perMinute: settings.deduction_per_minute,
+        autoClosed: capped,
+      });
+      await breaks.recomputeMonth(client, {
+        userId,
+        monthKey: breaks.monthKeyFor(punchedAt, timeZone),
+        allowanceMinutes: breaks.effectiveAllowance(settings),
+      });
+    }
+    if (checkOutAtMs == null || punchedAtMs > checkOutAtMs) {
+      await client.query(
+        `UPDATE staff_attendance_records SET check_out_at = $2, updated_at = NOW() WHERE id = $1`,
+        [row.id, punchedAt]
+      );
+      await markPunch(client, punch.id, { userId, attendanceId: row.id });
+      return 'extended';
+    }
+    await markPunch(client, punch.id, { userId, attendanceId: row.id, ignoredReason: REASON_BETWEEN });
+    return 'ignored';
+  }
+
   // ─────────────────────────────────────────────────────────────────────────────────────
   // THE SEQUENCE RULE — owner decision 2026-08-30. A day reads:
   //   بصمة ١ دخول · ٢ خروج مؤقت · ٣ عودة · ٤ خروج   (or just دخول + خروج)
@@ -359,8 +621,16 @@ async function applyPunch(client, punch) {
   if (hasHours && punchedAtMs > checkInAtMs) {
     const open = await breaks.openBreakFor(client, userId);
     if (open && open.state === 'out') {
-      // عودة — always closes the break, even past the shift end. A return is a return; if the
-      // shift is also over, the same instant closes the day below.
+      // عودة — always closes the break, at THIS punch. A return is a return; if the shift is
+      // also over, the same instant closes the day below.
+      //
+      // ⚠️ NO SHIFT-END CAP ON THIS PATH, AND THAT IS DELIBERATE. It is tempting: علي اديب's
+      // 640-minute break (prod 2026-09-02, a forgotten عودة that cost him 40,000 IQD) came
+      // through here. But capping does not save him — his break started 11:22 and the shift
+      // ends 22:00, so the bill is the same either way — while it DOES shave real minutes off
+      // every honest worker who walks back in at 22:02 (measured: 32 → 30). The forgotten-عودة
+      // case is answered by the device's → key, not by a guess made here. The cap belongs only
+      // where we KNOW nobody returned: an explicit ▼, handled above.
       await breaks.finishBreak(client, open, {
         returnedAt: punchedAt,
         perMinute: settings.deduction_per_minute,
@@ -377,20 +647,7 @@ async function applyPunch(client, punch) {
       }
     } else if (!shiftIsOver) {
       // خروج مؤقت — the shop is still open, so leaving is a break, not the end of the day.
-      await client.query(
-        `INSERT INTO staff_attendance_breaks
-           (user_id, attendance_id, work_date, month_key, left_at, state, approval,
-            left_without_approval, requested_at, deduction_per_minute)
-         VALUES ($1, $2, $3, $4, $5, 'out', 'approved', FALSE, $5, $6)`,
-        [
-          userId,
-          row.id,
-          shift.date,
-          breaks.monthKeyFor(punchedAt, timeZone),
-          punchedAt,
-          Number(settings.deduction_per_minute || 0),
-        ]
-      );
+      await openDeviceBreak(client, { userId, row, shift, punchedAt, settings, timeZone });
       await markPunch(client, punch.id, { userId, attendanceId: row.id, ignoredReason: REASON_BREAK_START });
       return 'break_start';
     }
@@ -403,12 +660,24 @@ async function applyPunch(client, punch) {
   if (punchedAtMs < checkInAtMs) {
     const newCheckOut =
       checkOutAtMs == null || checkInAtMs > checkOutAtMs ? row.check_in_at : row.check_out_at;
+    // ⚠️ AN ADMIN'S NUMBERS SURVIVE AN EARLIER PUNCH. `overridden_at` — not `status` — is the
+    // mark that a human ruled on this day's تأخير, because «إلغاء مبلغ التأخير» waives the
+    // money WITHOUT freezing the day (see overrideRecord's `freeze_day`). Recomputing
+    // late_minutes here would silently re-charge a fine the admin just cancelled.
+    const adminRuled = !!row.overridden_at;
     await client.query(
       `UPDATE staff_attendance_records
           SET check_in_at = $2, check_out_at = $3, late_minutes = $4, deduction_amount = $5,
               status = $6, updated_at = NOW()
         WHERE id = $1`,
-      [row.id, punchedAt, newCheckOut, lateMinutes, deduction, status]
+      [
+        row.id,
+        punchedAt,
+        newCheckOut,
+        adminRuled ? row.late_minutes : lateMinutes,
+        adminRuled ? row.deduction_amount : deduction,
+        adminRuled ? row.status : status,
+      ]
     );
     await markPunch(client, punch.id, { userId, attendanceId: row.id });
     return 'moved_in';

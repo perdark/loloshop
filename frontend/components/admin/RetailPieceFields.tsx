@@ -87,9 +87,16 @@ export function RetailPieceOptions({
           product.type === "cap" &&
           (group.nameAr === "القبعة من الجانب" || group.nameAr === "القبعة من الأعلى");
         const isShawl = product.type === "shawl" && group.nameAr === "صورة الشال";
+        // «ملاحظة» (103) — optional free text on قبعة/وشاح. Migration 107 made the text itself
+        // optional (`requires_customer_text = FALSE`), so `needsText` no longer renders it and
+        // this flag has to. The student's configurator does the same; a privileged editor that
+        // could not see the note would silently drop it on every save.
+        const isNote =
+          (product.type === "cap" || product.type === "sash") && group.nameAr === "ملاحظة";
         const showDetails =
           !!optionId &&
-          (needsImage || needsText || isSashEmbroidery || isSashThread || isCapEmbroidery || isShawl);
+          (needsImage || needsText || isSashEmbroidery || isSashThread || isCapEmbroidery ||
+            isShawl || isNote);
         const key = optionId ? selectionKey(group.id, optionId) : null;
         return (
           <div key={group.id}>
@@ -108,7 +115,7 @@ export function RetailPieceOptions({
                 onChange={(url) => setCustomerImages((prev) => ({ ...prev, [key]: url }))}
                 textValue={customerTexts[key]}
                 onTextChange={(text) => setCustomerTexts((prev) => ({ ...prev, [key]: text }))}
-                allowOptionalText={isShawl || ((isSashEmbroidery || isSashThread) && !needsText)}
+                allowOptionalText={isShawl || isNote || ((isSashEmbroidery || isSashThread) && !needsText)}
                 allowOptionalImage={isShawl || isSashEmbroidery || isCapEmbroidery}
                 showErrors={showErrors}
                 uploadImage={uploadImage}

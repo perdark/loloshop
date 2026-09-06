@@ -195,6 +195,35 @@ export interface PieceSpecRow {
   image_url: string | null;
 }
 
+/**
+ * One row on برزان's «التجميع» board (GET /production/assembly). A rep SASH only: «arriving»
+ * while its status is still التطريز with ≥1 ticked zone, «ready» once its status is
+ * `assembly`. Never money, never phones. See backend getAssemblyBoard.
+ */
+export interface AssemblyRow {
+  id: string;
+  status: OrderStatus;
+  student_id: string;
+  student_name: string;
+  wholesaler_name: string | null;
+  batch_name: string | null;
+  deadline: string | null;
+  checkout_group_id: string | null;
+  product_name: string;
+  product_type: string;
+  needs_pressing: boolean;
+  updated_at: string;
+  zones: { key: string; label: string; done: boolean }[];
+  done_count: number;
+  total_count: number;
+  can_advance: boolean;
+  advance_label: string | null;
+}
+export interface AssemblyBoardData {
+  arriving: AssemblyRow[];
+  ready: AssemblyRow[];
+}
+
 /** One embroidery zone on a station-console queue row. */
 export interface StationZone {
   key: string;

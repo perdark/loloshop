@@ -17,13 +17,13 @@ import {
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 import { formatIQD } from "@/lib/format";
 import { Count } from "@/components/ui/Count";
 import { CalculationDetails } from "@/components/admin/CalculationDetails";
 // RosterTab still searches student names only — a roster has no piece and no تطريز on it.
 import { matchesAr } from "@/lib/arabic";
+import { SearchField } from "@/components/ui/SearchField";
 
 // ─── Shared status pill (warm brand palette, no blue/purple) ──────────────────
 const STATUS_PILL: Partial<Record<OrderStatus, string>> = {
@@ -34,6 +34,7 @@ const STATUS_PILL: Partial<Record<OrderStatus, string>> = {
   staff_review: "bg-ink/5 text-muted",
   printing: "bg-ink/5 text-muted",
   embroidery: "bg-orange-ink/15 text-orange-ink",
+  assembly: "bg-peach/60 text-orange-ink",
   pressing: "bg-amber-100 text-amber-800",
   preparing: "bg-ink/8 text-ink-soft",
   ready: "bg-emerald-100 text-emerald-700",
@@ -527,13 +528,11 @@ function OrdersTab({
             </Button>
           ))}
         </div>
-        <Input
-          type="search"
-          placeholder="بحث بالاسم أو القطعة أو التطريز…"
+        <SearchField
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={setSearch}
+          placeholder="بحث بالاسم أو القطعة أو التطريز…"
           className="w-full"
-          aria-label="بحث بالاسم أو القطعة أو التطريز"
         />
       </div>
 
@@ -1018,13 +1017,11 @@ function RosterTab({
   return (
     <div className="space-y-4">
       <div className="surface-card space-y-3 rounded-2xl p-3.5">
-        <Input
-          type="search"
-          placeholder="بحث باسم الطالب…"
+        <SearchField
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={setSearch}
+          placeholder="بحث باسم الطالب…"
           className="w-full"
-          aria-label="بحث باسم الطالب"
         />
         <div className="space-y-2">
           <p className="text-xs font-medium text-muted">حالة الموافقة</p>

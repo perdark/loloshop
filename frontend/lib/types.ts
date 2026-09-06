@@ -15,6 +15,7 @@ export type OrderStatus =
   | "staff_review"
   | "printing"
   | "embroidery"
+  | "assembly"
   | "pressing"
   | "preparing"
   | "ready"
@@ -23,7 +24,7 @@ export type OrderStatus =
 
 /** Staff job-types (production pipeline). Meaningful only when role === "staff".
  *  "tailor" (مفصل) is a read-only view role: sees only student name + sash + American-shawl info. */
-export type StaffType = "designer" | "digitizer" | "embroiderer" | "presser" | "preparer" | "manager" | "tailor";
+export type StaffType = "designer" | "digitizer" | "embroiderer" | "assembler" | "presser" | "preparer" | "manager" | "tailor";
 /** Student study schedule (mandatory at signup). */
 export type StudyType = "morning" | "evening";
 export type SalaryTxnType = "salary_set" | "bonus" | "deduction";
@@ -492,13 +493,22 @@ export interface StaffGoal {
   createdAt: string;
 }
 
-/** One auto-recorded staff production action. */
+/**
+ * One auto-recorded staff production action — a stage move (`staff_activity_log`) or an
+ * embroidery-zone tick (`audit_log`), unioned server-side by `backend/lib/staffActivity.js`.
+ * Never carries money, price, cost, profit, phone or email — this is read by the worker
+ * looking at their own log AND by an admin looking at someone else's.
+ */
 export interface StaffActivity {
   id: string;
+  source: "stage" | "audit";
   action: string;
   orderId: string | null;
   fromStage: OrderStatus | null;
   toStage: OrderStatus | null;
+  zone: string | null;
+  productName: string | null;
+  studentName: string | null;
   createdAt: string;
 }
 
