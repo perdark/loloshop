@@ -25,6 +25,7 @@ const QUEUE_STAGES = {
   designer: ['design_complete'],
   digitizer: ['converting'],
   embroiderer: ['embroidery'],
+  assembler: ['assembly'],
   presser: ['pressing'],
   preparer: ['preparing', 'ready', 'delivered'],
 };
