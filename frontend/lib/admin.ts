@@ -1457,7 +1457,15 @@ export async function getAttendanceCalendar(params: {
 
 export async function overrideAttendanceRecord(
   id: string,
-  input: { lateMinutes?: number; deductionAmount?: number; noteAr?: string }
+  // `freezeDay: false` waives the money WITHOUT freezing the day against the fingerprint
+  // device. Leaving it undefined keeps the old behaviour (the day is frozen) — see
+  // overrideRecord in backend/controllers/attendanceController.js for why the two are split.
+  input: {
+    lateMinutes?: number;
+    deductionAmount?: number;
+    noteAr?: string;
+    freezeDay?: boolean;
+  }
 ): Promise<StaffAttendanceRecord> {
   const { data } = await api.patch<{ data: ApiAttendanceRecord }>(
     `/admin/attendance/records/${id}/override`,
@@ -1465,6 +1473,7 @@ export async function overrideAttendanceRecord(
       late_minutes: input.lateMinutes,
       deduction_amount: input.deductionAmount,
       note_ar: input.noteAr || undefined,
+      freeze_day: input.freezeDay,
     }
   );
   return mapAttendanceRecord(data.data);
