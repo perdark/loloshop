@@ -2079,3 +2079,46 @@ WITH targets AS (
 -- (see OptionGroupField's typed-field list). price_delta 0 — a note is never a paid extra.
 INSERT INTO options (group_id, label_ar, price_delta, sort)
 SELECT c.id, 'ملاحظة', 0, 0 FROM created c;
+
+
+-- ── واحدة «ملاحظة» لكل منتج — Migration 104 ───────────────────────────────────────────
+-- ⚠️ REPEATED FROM db/migrations/104_note_group_dedupe.sql ON PURPOSE — the 077/080/093
+-- pattern. It has to sit AFTER 103's seed above, in this order: de-duplicate, then constrain.
+--
+-- The UNIQUE INDEX is the real fix and the seed's `NOT EXISTS` is now only an optimisation:
+-- 103 produced two note groups per product on production even though its guard is provably
+-- idempotent and the deploy applied the schema exactly once. A read-then-write guard cannot
+-- exclude a concurrent writer; an index can. Read 104's header before touching either.
+-- ── STEP 1: keep ONE note group per product ──────────────────────────────────────────────
+-- ⚠️ WHICH ONE IS KEPT IS A DATA DECISION, NOT A COIN FLIP. `order_items.group_id` is
+-- ON DELETE SET NULL, so deleting the wrong row does not delete a student's note — it silently
+-- unhooks it from its group, leaving the typed text in `order_items.customer_text` pointing at
+-- nothing. The note group has been live on production for about an hour, which is long enough
+-- for a real student to have typed into it. So: keep whichever row ORDERS ACTUALLY REFERENCE,
+-- and only fall back to the oldest when neither has been used.
+WITH ranked AS (
+    SELECT g.id,
+           g.product_id,
+           row_number() OVER (
+             PARTITION BY g.product_id
+             ORDER BY (SELECT count(*) FROM order_items oi WHERE oi.group_id = g.id) DESC,
+                      g.created_at ASC,
+                      g.id ASC
+           ) AS rn
+      FROM option_groups g
+     WHERE g.name_ar = 'ملاحظة'
+)
+DELETE FROM option_groups g
+ USING ranked r
+ WHERE g.id = r.id
+   AND r.rn > 1;
+
+-- ── STEP 2: make a second one impossible ─────────────────────────────────────────────────
+-- Partial on purpose. A product legitimately carries many groups, and other groups repeat a
+-- name across products; this says only «a product has at most one ملاحظة». Any future re-run
+-- of 103's seed — from `db/schema.sql`, from a replayed migration, from two of them at once —
+-- now fails loudly on the constraint instead of quietly doubling the box, and the seed's own
+-- NOT EXISTS keeps that from ever being reached on the normal path.
+CREATE UNIQUE INDEX IF NOT EXISTS option_groups_one_note_per_product
+    ON option_groups (product_id)
+ WHERE name_ar = 'ملاحظة';
