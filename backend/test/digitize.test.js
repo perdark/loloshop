@@ -506,3 +506,44 @@ test('7d. a tatami row turn never sews across the opening of a bowl', () => {
   }
   assert.ok(worst <= 1.0, `a fill stitch runs ${worst.toFixed(1)} mm outside the region`);
 });
+
+// ---------------------------------------------------------------- 8. sewing order
+// Measured on 403 shop files: the first shape is on the RIGHT in 86% and the sequence runs
+// right-to-left in 84% — reading order. And a letter is sewn whole before its dot: hopping
+// letter → dot → letter costs two trims and two tails for nothing (measured on «الباحث
+// محمد علي» at 111 mm: 28 of 58 shapes were pieces of a letter that had been interrupted).
+const shapesRtl = (buffer) => {
+  const { stitches } = readDst(buffer);
+  const shapes = []; let cur = [];
+  for (const s of stitches) { if (s.kind === 'jump') { if (cur.length) { shapes.push(cur); cur = []; } } else cur.push(s); }
+  if (cur.length) shapes.push(cur);
+  return shapes.filter((sh) => sh.length >= 20).map((sh) => sh.reduce((a, s) => a + s.x, 0) / sh.length / 10);
+};
+
+test('8a. shapes are sewn right to left, in reading order', async () => {
+  const file = await artwork(
+    '<rect x="40" y="120" width="120" height="40" fill="black"/>' +
+    '<rect x="240" y="120" width="120" height="40" fill="black"/>' +
+    '<rect x="440" y="120" width="120" height="40" fill="black"/>'
+  );
+  try {
+    const { buffer } = await digitizePlate(file, { heightMm: 20, label: 'RTL' });
+    const xs = shapesRtl(buffer);
+    assert.equal(xs.length, 3, `expected 3 shapes, got ${xs.length}`);
+    for (let i = 1; i < xs.length; i++) assert.ok(xs[i] < xs[i - 1], `shape ${i} at x=${xs[i].toFixed(0)} sewn after x=${xs[i - 1].toFixed(0)} — not right-to-left`);
+  } finally { fs.unlinkSync(file); }
+});
+
+test('8b. a dot beside a letter does not interrupt the letter', async () => {
+  // a long curved stroke with a dot sitting close to its middle: nearest-neighbour ordering
+  // used to leave the stroke for the dot and come back, splitting the stroke in two
+  const file = await artwork(
+    '<path d="M60 220 C 160 60, 300 60, 380 200 S 520 260, 560 120" stroke="black" stroke-width="30" fill="none" stroke-linecap="round"/>' +
+    '<circle cx="300" cy="200" r="16" fill="black"/>'
+  );
+  try {
+    const { buffer, stats } = await digitizePlate(file, { heightMm: 60, label: 'DOT' });
+    const xs = shapesRtl(buffer);
+    assert.equal(xs.length, 2, `expected 2 shapes (stroke, dot), got ${xs.length} — stats ${JSON.stringify(stats)}`);
+  } finally { fs.unlinkSync(file); }
+});

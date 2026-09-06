@@ -183,7 +183,15 @@ function rasterRuns(runs, w, h, pxPerMm, threadMm = 0.42) {
  * jump when the two points are in genuinely different pieces of artwork — a separate
  * letter, a dot, a hamza. That is exactly where the shop's files jump too.
  */
-function connectTravel(runs, mask, dist, pxPerMm, Hmm, maxMm = 9, routeMaxMm = 45) {
+// ⚠️ routeMaxMm WAS 45 AND THAT IS WHAT MADE A 60 mm BAR TWO SHAPES. Every refused join
+// on «الباحث محمد علي» was 40–64 mm apart with both ends on the same ink: the satin walks to
+// one end of a stroke and the next run starts at the other, so the hidden travel back is as
+// long as the stroke. That run costs ~25 stitches nobody sees; the trim it replaces costs a
+// stop, a cut and a tail. The same went for the "3.5× the straight line" detour gate — going
+// AROUND a bowl under the satin is exactly the travel Wilcom lays, and refusing it is a trim
+// across the bowl's opening instead. A route is now refused only when it is genuinely long
+// (past a whole ligature) or when the search window would be unreasonable.
+function connectTravel(runs, mask, dist, pxPerMm, Hmm, maxMm = 9, routeMaxMm = 150) {
   const { width: w, height: h } = mask;
   const toPx = (p) => [Math.round(p[0] * pxPerMm), Math.round((Hmm - p[1]) * pxPerMm)];
   const toMm = (j, i) => [j / pxPerMm, Hmm - i / pxPerMm];
@@ -236,11 +244,13 @@ function connectTravel(runs, mask, dist, pxPerMm, Hmm, maxMm = 9, routeMaxMm = 4
     const sa = snap(a), sb = snap(b);
     if (!sa || !sb) return null;
     const [aj, ai] = sa, [bj, bi] = sb;
-    const pad = Math.ceil(routeMaxMm * pxPerMm);
+    // the window is the box around the two points plus room for one detour around a bowl —
+    // not routeMaxMm, which at 12 px/mm would make every search a 3,600-px-wide flood
+    const pad = Math.ceil(25 * pxPerMm);
     const x0 = Math.max(0, Math.min(aj, bj) - pad), x1 = Math.min(w - 1, Math.max(aj, bj) + pad);
     const y0 = Math.max(0, Math.min(ai, bi) - pad), y1 = Math.min(h - 1, Math.max(ai, bi) + pad);
     const ww = x1 - x0 + 1, hh = y1 - y0 + 1;
-    if (ww * hh > 4_000_000) return null;
+    if (ww * hh > 6_000_000) return null;
     const prev = new Int32Array(ww * hh).fill(-1);
     const seen = new Uint8Array(ww * hh);
     const q = new Int32Array(ww * hh);
@@ -274,9 +284,8 @@ function connectTravel(runs, mask, dist, pxPerMm, Hmm, maxMm = 9, routeMaxMm = 4
     px.reverse();
     // length gate: a route that wanders far further than the straight line is not a
     // travel, it is a detour around the outside of a bowl — jump instead.
-    const straight = Math.hypot(b[0] - a[0], b[1] - a[1]);
     const len = px.length / pxPerMm;
-    if (len > routeMaxMm || (len > 12 && len > straight * 3.5)) return null;
+    if (len > routeMaxMm) return null;
     // sample it down to running stitches
     const out = [];
     const step = Math.max(1, Math.round(2.2 * pxPerMm));
@@ -301,11 +310,57 @@ function connectTravel(runs, mask, dist, pxPerMm, Hmm, maxMm = 9, routeMaxMm = 4
       // then any path through the ink, and only then give up and trim.
       const r = route(from, run[0], true) || route(from, run[0], false);
       if (r) { cur.push(...r, ...run.slice(1)); continue; }
+      if (process.env.DGZ_DEBUG) {
+        const sa = snap(from), sb = snap(run[0]);
+        console.log('JOIN FAIL', 'from', from.map((v) => v.toFixed(1)), 'to', run[0].map((v) => v.toFixed(1)), 'straight', Math.hypot(run[0][0] - from[0], run[0][1] - from[1]).toFixed(1), 'snapA', !!sa, 'snapB', !!sb, 'curLen', cur.length, 'runLen', run.length);
+      }
       out.push(cur);
     }
     cur = run.slice();
   }
   if (cur) out.push(cur);
+  return out;
+}
+
+/**
+ * Sew one piece of ink at a time, right to left.
+ *
+ * ⚠️ THE ORDER IS WHAT DECIDES THE SHAPE COUNT, MORE THAN THE ROUTER DOES. A plain
+ * nearest-neighbour walk hops from a letter to the dot beside it and back, and every such
+ * detour is two trims and two tails — measured on «الباحث محمد علي» at 111 mm: 28 of the 58
+ * shapes were pieces of a letter that had been interrupted, against 32 shapes in the
+ * embroiderer's own file. So runs are grouped by the connected piece of ink they lie on,
+ * the pieces are taken in READING ORDER (rightmost first — 86% of the shop's files start on
+ * the right and 84% run right-to-left), and inside a piece the walk starts at its right edge.
+ * `connectTravel` then only ever has to join runs that really share ink.
+ */
+function orderByComponent(runs, mask, pxPerMm, Hmm) {
+  const { width: w, height: h } = mask;
+  const { labels } = label(mask);
+  const at = (x, y) => {
+    const j0 = Math.round(x * pxPerMm), i0 = Math.round((Hmm - y) * pxPerMm);
+    const r = Math.max(2, Math.round(1.5 * pxPerMm));
+    let best = 0, bestD = Infinity;
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      const j = j0 + dx, i = i0 + dy;
+      if (i < 0 || j < 0 || i >= h || j >= w || !labels[i * w + j]) continue;
+      const d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; best = labels[i * w + j]; }
+    }
+    return best;
+  };
+  const groups = new Map();
+  for (const run of runs) {
+    const mid = run[Math.floor(run.length / 2)];
+    const id = at(mid[0], mid[1]) || at(run[0][0], run[0][1]);
+    if (!groups.has(id)) groups.set(id, { runs: [], maxX: -Infinity, sumY: 0, n: 0 });
+    const g = groups.get(id);
+    g.runs.push(run);
+    for (const [x, y] of run) { if (x > g.maxX) g.maxX = x; g.sumY += y; g.n++; }
+  }
+  const order = [...groups.values()].sort((a, b) => b.maxX - a.maxX);
+  const out = [];
+  for (const g of order) out.push(...orderRuns(g.runs, [g.maxX + 5, g.sumY / g.n]));
   return out;
 }
 
@@ -400,7 +455,7 @@ async function digitizePlate(input, opts = {}) {
     runs = runs.concat(added);
   }
 
-  let ordered = orderRuns(runs);
+  let ordered = orderByComponent(runs, mask, pxPerMm, Hmm);
   ordered = connectTravel(ordered, mask, dist, pxPerMm, Hmm, o.travelMaxMm);
 
   // ⚠️ THE NEEDLE STARTS AT THE CENTRE OF THE DESIGN, NOT AT ITS CORNER. Every one of the

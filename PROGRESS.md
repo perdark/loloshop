@@ -1,5 +1,28 @@
 # Progress
 
+## 2026-09-06 (b) — 🧵 الملف يُخاط من اليمين لليسار، حرف حرف، وبعرض ساتان ما ينزل عن 1.8 مم
+
+Same branch (`feat/calligraphy-dst`), `backend/lib/digitize/` only. The embroiderer sent his
+OWN Wilcom file of «الباحث محمد علي» (`~/Desktop/885555.DST` — his lettering, not our plate, so
+no shape-by-shape diff) and three gaps showed against it AND against the whole library:
+· **Reading order.** 86% of the shop's 403 usable files start on the RIGHT and 84% run
+  right-to-left; ours started at the far left (`orderRuns` seeded at the origin). Now
+  `orderByComponent` (index.js): runs are grouped by the connected piece of ink they lie on,
+  pieces are taken rightmost-first, and the walk inside a piece starts at its right edge.
+· **Shape count 58 → 33** at 111 mm (his: 32). Two causes, both fixed: nearest-neighbour hopped
+  letter → dot → letter (28 of the 58 were pieces of an interrupted letter), and
+  `connectTravel` refused every hidden travel over 45 mm or 3.5× the straight line — which is
+  exactly the run Wilcom lays under the satin along a stroke. `routeMaxMm` 45 → 150, ratio gate
+  dropped, BFS window bounded at 25 mm around the pair instead. No shape under 100 stitches now.
+· **Satin floor 1.2 → 1.8 mm** (`DEFAULTS.minWidthMm`): the library's 2nd percentile is 1.8 and
+  10th is 2.5; his never goes under 2.5; ours ran 1.4 at p10 over the AI plates' hairlines.
+Tests 24 → **26** (8a right-to-left, 8b a dot does not interrupt its letter — both red first).
+`DGZ_DEBUG=1` prints every refused join from `connectTravel`.
+**Owner question, not changed:** every one of the shop's 417 files is exactly **421 × 111 mm**
+— he scales each name to fill the sash panel, stretching a little horizontally. Ours keeps the
+artwork's aspect (361 × 111 at that height) and defaults to 70 mm tall. If the panel box is the
+rule, `digitizePlate` needs a `fitMm` option; say so and it is a small change.
+
 ## 2026-09-06 — 🧵 ملف الـDST صار يبدأ من المركز، يقفل كل شكل، ويقصّ الخيط بين الحروف
 
 Branch `feat/calligraphy-dst`, `backend/lib/digitize/` only — no migration, no new dependency,

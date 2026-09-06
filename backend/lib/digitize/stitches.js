@@ -11,7 +11,12 @@
 const DEFAULTS = {
   spacingMm: 0.20,     // advance along the stroke per stitch  (shop measured)
   pullMm: 0.22,        // pull compensation — stitch wider than the artwork («التثخين»)
-  minWidthMm: 1.2,
+  // ⚠️ 1.8 IS THE SHOP'S FLOOR, NOT A TASTE. Measured per file across the library, the 2nd
+  // percentile of satin width has a median of 1.8 mm and the 10th 2.5 mm; ours ran 1.4 at p10,
+  // because the AI plates carry hairline flourishes and a 1.2 mm column over one of those
+  // reads on fabric as a running stitch, not a stroke. The embroiderer's own file of «الباحث
+  // محمد علي» (885555.DST, 2026-09-06) never goes under 2.5.
+  minWidthMm: 1.8,
   // ⚠️ 8.0 HERE WAS NOT THE SHOP'S NUMBER. Measured across all 417 files, the widest
   // satin column per file has a median of 10.3 mm and a p90 of 11.35 mm — they satin
   // almost everything and hardly ever fill. At 8.0 every letter bowl was being carved
@@ -306,12 +311,16 @@ function travelStitches(from, to, stepMm = 2.2) {
   return out;
 }
 
-/** Greedy nearest-neighbour ordering so the machine does not cross the hoop repeatedly. */
-function orderRuns(runs) {
+/**
+ * Greedy nearest-neighbour ordering so the machine does not cross the hoop repeatedly.
+ * `seed` is where the needle is when the first run is chosen — the caller passes the RIGHT
+ * edge of a letter so a component is sewn in reading order (see index.js `orderByComponent`).
+ */
+function orderRuns(runs, seed = [0, 0]) {
   if (!runs.length) return [];
   const rem = runs.map((r, i) => i);
   const out = [];
-  let cx = 0, cy = 0;
+  let [cx, cy] = seed;
   while (rem.length) {
     let best = 0, bestD = Infinity, rev = false;
     for (let k = 0; k < rem.length; k++) {
