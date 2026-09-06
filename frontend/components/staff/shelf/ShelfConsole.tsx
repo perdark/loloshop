@@ -28,6 +28,7 @@ import { usePolling } from "@/lib/hooks/usePolling";
 import { useScrollRestore } from "@/hooks/useScrollRestore";
 import { PlaceSheet } from "./PlaceSheet";
 import { ShelfMap } from "./ShelfMap";
+import { SearchField } from "@/components/ui/SearchField";
 
 const STORAGE_KEY = "loloshop-shelf-console";
 
@@ -363,12 +364,13 @@ export function ShelfConsole() {
       {/* ── Zone 3: الرف ─────────────────────────────────────────── */}
       <section>
         <div className="mb-3">
-          <input
-            type="search"
+          <SearchField
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={setSearch}
             placeholder="دوّر على طالب داخل الرف…"
-            className="min-h-12 w-full rounded-full border border-[#ded6c8] bg-white px-5 text-sm text-[#1A1A1A] outline-none focus:border-[#F47B42]"
+            variant="pill"
+            className="w-full"
+            inputClassName="min-h-12 border-[#ded6c8] bg-white px-5 text-[#1A1A1A] focus:border-[#F47B42]"
           />
         </div>
         <ShelfMap shelves={board!.shelves} search={search} onSlotClick={setOpenSlot} />

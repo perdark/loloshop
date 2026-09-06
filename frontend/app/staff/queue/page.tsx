@@ -27,6 +27,7 @@ import { usePolling } from "@/lib/hooks/usePolling";
 import { useScrollRestore } from "@/hooks/useScrollRestore";
 import type { ProductionQueueItem } from "@/lib/staff-types";
 import type { OrderStatus, StaffType } from "@/lib/types";
+import { SearchField } from "@/components/ui/SearchField";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -1289,14 +1290,13 @@ function ConsoleContent() {
               <div className="flex-1" />
 
               {/* Search */}
-              <input
-                type="search"
-                placeholder="بحث بالاسم أو الجامعة أو التطريز…"
+              <SearchField
                 value={search}
-                onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-                aria-label="بحث بالاسم أو الجامعة أو التطريز"
-                dir="rtl"
-                className="min-h-11 w-full min-w-0 rounded-full border border-line bg-surface px-3 py-1 text-sm text-ink placeholder:text-muted focus:border-orange-ink focus:outline-none sm:w-52"
+                onChange={(v) => { setSearch(v); setPage(1); }}
+                placeholder="بحث بالاسم أو الجامعة أو التطريز…"
+                variant="pill"
+                className="w-full min-w-0 sm:w-52"
+                inputClassName="px-3"
               />
             </div>
 

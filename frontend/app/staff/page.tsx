@@ -39,6 +39,7 @@ import { useScrollRestore } from "@/hooks/useScrollRestore";
 import type { ProductionQueueItem, MonitorData } from "@/lib/staff-types";
 import type { StaffOrderScope, StaffType, OrderStatus } from "@/lib/types";
 import Link from "next/link";
+import { SearchField } from "@/components/ui/SearchField";
 
 // ─── Skeletons ────────────────────────────────────────────────────────────────
 
@@ -411,32 +412,13 @@ function QueueView({
           source/zone filters already fetched, so «تجزئة» searches only retail rows and
           «ممثلين» only rep students, with no extra request per keystroke. */}
       <div className="mb-3">
-        {/* The ✕ is OURS, not the browser's. `type="search"` renders a native clear control in
-            a desktop browser, but this screen also runs inside the Capacitor WebView on the
-            iPad and on phones, where that control is not guaranteed to appear — and a worker
-            who cannot clear a query sees a queue that looks empty. 44px, and only present
-            when there is something to clear. */}
-        <div className="relative w-full sm:w-80">
-          <input
-            type="search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="ابحث بالاسم أو الجامعة أو القسم أو الممثل أو التطريز…"
-            aria-label="ابحث بالاسم أو الجامعة أو القسم أو الممثل أو التطريز"
-            dir="rtl"
-            className="min-h-11 w-full rounded-full border border-line bg-surface px-4 py-1 text-sm text-ink placeholder:text-muted focus:border-orange-ink focus:outline-none [&::-webkit-search-cancel-button]:appearance-none"
-          />
-          {search !== "" && (
-            <button
-              type="button"
-              onClick={() => setSearch("")}
-              aria-label="مسح البحث"
-              className="absolute inset-y-0 end-1 my-auto flex h-11 w-11 items-center justify-center rounded-full text-lg leading-none text-ink-soft transition-colors hover:bg-surface-sink hover:text-ink"
-            >
-              ✕
-            </button>
-          )}
-        </div>
+        <SearchField
+          value={search}
+          onChange={setSearch}
+          placeholder="ابحث بالاسم أو الجامعة أو القسم أو الممثل أو التطريز…"
+          variant="pill"
+          className="w-full sm:w-80"
+        />
       </div>
 
       {/* Tab switcher */}
