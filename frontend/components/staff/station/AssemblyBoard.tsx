@@ -28,6 +28,7 @@ import { advanceOrder, getAssemblyBoard } from "@/lib/staff";
 import { formatDateShort } from "@/lib/format";
 import { usePolling } from "@/lib/hooks/usePolling";
 import { useProductionEvents } from "@/hooks/useProductionEvents";
+import { useCoalesced } from "@/hooks/useCoalesced";
 import { advancedLabelFor } from "@/components/staff/station/types";
 import type { AssemblyRow } from "@/lib/staff-types";
 
@@ -133,8 +134,10 @@ export function AssemblyBoard() {
 
   // Live: every zone tick and every status move emits an `order` event.
   usePolling(() => load({ silent: true }), 20000, true);
+  // Coalesced: one bulk tick by the embroiderer emits an event per piece — see useCoalesced.
+  const liveReload = useCoalesced(() => void load({ silent: true }));
   useProductionEvents((e) => {
-    if (e.type !== "presence") void load({ silent: true });
+    if (e.type !== "presence") liveReload();
   });
 
   const readyGroups = useMemo(() => groupByStudent(ready), [ready]);

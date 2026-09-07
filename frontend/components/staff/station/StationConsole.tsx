@@ -34,6 +34,7 @@ import { PlaceSheet } from "@/components/staff/shelf/PlaceSheet";
 import { PRODUCT_TYPE_LABELS, STUDY_TYPE_LABELS, ORDER_STATUS_LABELS } from "@/lib/constants";
 import { usePolling } from "@/lib/hooks/usePolling";
 import { useProductionEvents } from "@/hooks/useProductionEvents";
+import { useCoalesced } from "@/hooks/useCoalesced";
 import { useScrollRestore } from "@/hooks/useScrollRestore";
 import { Button } from "@/components/ui/Button";
 import { Select } from "@/components/ui/Select";
@@ -354,8 +355,10 @@ export function StationConsole({
   }, [view, kind, loadDone]);
 
   usePolling(() => load({ silent: true }), 15000, view !== "done");
+  // Coalesced: a bulk zone tick / bulk advance emits one event PER PIECE (up to 200).
+  const liveReload = useCoalesced(() => load({ silent: true }));
   useProductionEvents((e) => {
-    if (e.type !== "presence") load({ silent: true });
+    if (e.type !== "presence") liveReload();
   }, kind !== "tailor");
 
   // Selection can only reference pieces that still exist (silent reloads prune it).

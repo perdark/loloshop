@@ -587,6 +587,28 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   · ⚠️ **مضر محمد's stored hours are still 22:16 → 10:15 and his rate is 0** — the owner is
     asking the client. Until that row is right his numbers stay wrong, and it is DATA, not code.
 
+- **⚠️ A PER-STAFF BREAK ALLOWANCE CANNOT BE SET WITHOUT PINNING THAT PERSON'S WHOLE WEEK, AND
+  THERE IS NO UI TO CANCEL A `returned` BREAK (both found 2026-09-07).** Two separate traps that
+  meet whenever someone is asked to «reset the break balance»:
+  · `break_monthly_minutes` lives on `staff_attendance_user_settings`, and the moment a row
+    exists there `loadEffectiveSettings` sets `is_user_override = true` — after which
+    `staffSchedule.shiftForDate` uses that row's SINGLE `start_time`/`end_time` **on every day
+    of the week, الجمعة included**. The shop week is 10:00–22:00 السبت–الخميس but
+    **15:00–00:00 الجمعة**, so creating a row purely to hold an allowance re-breaks the exact
+    Friday-lateness bug migration 093 exists to fix. Only **برزان** (12:00–22:00) and **محمد
+    هيثم** (15:00–22:00) have such a row today, and both are deliberate personal shifts.
+  · `attendanceBreakController.cancelBreak` only accepts `state = 'requested'` — a worker
+    withdrawing a request they never started. **Nothing in the app can cancel a `returned`
+    break**, so forgiving one is SQL on the box (that is how علي اديب's 640 went, and how
+    2026-09-07's whole-month reset went). Check `deduction_transaction_id` before and
+    soft-delete any live `staff_salary_transactions` row yourself — `recomputeMonth` reads
+    only `state = 'returned'`, so once a row is cancelled it stops cleaning up after it.
+  · **September 2026 was reset this way on 2026-09-07** (owner: fresh 5h for everyone): 10
+    `returned` rows → `cancelled`, every staff member back to 0 used / 300 remaining, **zero
+    IQD moved** (all ten already had `deduction_transaction_id = NULL`). Backup first at
+    `/root/loloshop-pre-breakreset-2026-09-07.dump`. برزان's **August** 3,000 IQD deduction was
+    deliberately left alone.
+
 - **⚠️ THE BREAK ALLOWANCE IS 300 MINUTES (5h), CHANGED FROM 600 ON 2026-09-06**, and it is read
   LIVE by `recomputeMonth` — so lowering it RE-CHARGES past breaks the next time anything
   recomputes that worker's month. That is not hypothetical: علي اديب's phantom 640-minute break
