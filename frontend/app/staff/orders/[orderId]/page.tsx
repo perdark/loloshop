@@ -841,6 +841,18 @@ function ProductionOrderDetailContent() {
 
   const { user } = useRequireAuth(["staff", "admin"]);
 
+  // Where this page returns to. Prefer the explicit `?from=` the entry point appended;
+  // else derive it from the referrer; else the role's home.
+  //
+  // ⚠️ EVERY ACTION HANDLER BELOW MUST LEAVE THROUGH `back.href` — never a hardcoded
+  // "/staff". Reported by برزان 2026-09-07: he reverts a piece out of الكوي and the app
+  // drops him on the staff home instead of the list he was working, so he loses his
+  // station, his filters, his search and his scroll position on every single move.
+  // The lists themselves remember all of that (sessionStorage + useScrollRestore) —
+  // the only thing that was broken was WHICH list we sent him back to. Declared here,
+  // above the handlers, so a handler can never close over an undeclared `back`.
+  const back = orderBackTarget(fromParam ?? referrerPath(orderId), user?.role ?? "staff");
+
   const [detail, setDetail] = useState<ProductionOrderDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);
@@ -962,9 +974,7 @@ function ProductionOrderDetailContent() {
       );
       await releaseOrder(orderId).catch(() => undefined);
       hasClaimedRef.current = false;
-      // Invalidate App Router cache before navigating so browser-back shows fresh status.
-      router.refresh();
-      router.push("/staff");
+      router.push(back.href);
     } catch (err) {
       toast.error(getApiErrorMessage(err, "تعذر تحديث الحالة"));
     } finally {
@@ -997,8 +1007,7 @@ function ProductionOrderDetailContent() {
       setDeliverOpen(false);
       await releaseOrder(orderId).catch(() => undefined);
       hasClaimedRef.current = false;
-      router.refresh();
-      router.push("/staff");
+      router.push(back.href);
     } catch (err) {
       toast.error(getApiErrorMessage(err, "تعذر تأكيد التسليم"));
     } finally {
@@ -1013,9 +1022,8 @@ function ProductionOrderDetailContent() {
       await deleteProductionOrder(detail.order.id);
       toast.success("تم حذف القطعة نهائياً");
       setDeleteOpen(false);
-      // The order no longer exists — invalidate the App Router cache and leave the page.
-      router.refresh();
-      router.push("/staff/queue");
+      // The order no longer exists — leave the page.
+      router.push(back.href);
     } catch (err) {
       toast.error(getApiErrorMessage(err, "تعذر حذف القطعة"));
     } finally {
@@ -1063,8 +1071,7 @@ function ProductionOrderDetailContent() {
         `تم الإرجاع إلى: ${ORDER_STATUS_LABELS[updated.status as keyof typeof ORDER_STATUS_LABELS] ?? updated.status}`
       );
       setRevertOpen(false);
-      router.refresh();
-      router.push("/staff");
+      router.push(back.href);
     } catch (err) {
       toast.error(getApiErrorMessage(err, "تعذر إرجاع الطلب"));
     } finally {
@@ -1080,8 +1087,7 @@ function ProductionOrderDetailContent() {
       toast.success("تم إرجاع الطلب للطالب لتعديله");
       setReturnOpen(false);
       setReturnReason("");
-      router.refresh();
-      router.push("/staff");
+      router.push(back.href);
     } catch (err) {
       toast.error(getApiErrorMessage(err, "تعذر إرجاع الطلب للطالب"));
     } finally {
@@ -1095,8 +1101,7 @@ function ProductionOrderDetailContent() {
     try {
       await approveDesign(detail.design.id);
       toast.success("تمت الموافقة على التصميم");
-      router.refresh();
-      router.push("/staff");
+      router.push(back.href);
     } catch (err) {
       toast.error(getApiErrorMessage(err, "تعذر الموافقة على التصميم"));
     } finally {
@@ -1115,8 +1120,7 @@ function ProductionOrderDetailContent() {
       toast.success("تم رفض التصميم");
       setRejectOpen(false);
       setRejectReason("");
-      router.refresh();
-      router.push("/staff");
+      router.push(back.href);
     } catch (err) {
       toast.error(getApiErrorMessage(err, "تعذر رفض التصميم"));
     } finally {
@@ -1124,12 +1128,14 @@ function ProductionOrderDetailContent() {
     }
   }
 
-  // Where the back button returns to. Prefer the explicit `?from=` the entry
-  // point appended; else derive it from the referrer; else the role's home.
-  const back = orderBackTarget(fromParam ?? referrerPath(orderId), user?.role ?? "staff");
-
   const siblingHref = (id: string) =>
     `/staff/orders/${id}?from=${encodeURIComponent(back.href)}`;
+
+  // «تعديل» links must hand the origin on, or the edit round-trip erases it and every
+  // action taken after coming back exits to the role home instead of the worker's list.
+  // The hash goes AFTER the query, or the browser reads it as part of the `from` value.
+  const editHref = (hash = "") =>
+    `/staff/orders/${orderId}/edit?from=${encodeURIComponent(back.href)}${hash}`;
 
   // ── Loading skeleton ──
   if (loading) {
@@ -1783,7 +1789,7 @@ function ProductionOrderDetailContent() {
         )}
         {canEdit ? (
           <Link
-            href={`/staff/orders/${order.id}/edit`}
+            href={editHref()}
             className="inline-flex min-h-11 w-full items-center justify-center rounded-full border border-orange-ink/40 bg-orange-ink/5 px-4 text-sm font-semibold text-orange-ink transition-colors hover:bg-orange-ink/10"
           >
             تعديل الطلب
@@ -2111,7 +2117,7 @@ function ProductionOrderDetailContent() {
                 <h3 className="text-sm font-semibold text-ink">قياسات الروب</h3>
                 {canEdit && (
                   <StructuredEditLink
-                    href={`/staff/orders/${order.id}/edit#measurements`}
+                    href={editHref("#measurements")}
                     label="تعديل قياسات الروب"
                   />
                 )}
@@ -2194,7 +2200,7 @@ function ProductionOrderDetailContent() {
                 <h3 className="text-sm font-semibold text-ink">خيارات الطلب</h3>
                 {canEdit && (
                   <StructuredEditLink
-                    href={`/staff/orders/${order.id}/edit#options`}
+                    href={editHref("#options")}
                     label="تعديل خيارات الطلب"
                   />
                 )}
@@ -2231,7 +2237,7 @@ function ProductionOrderDetailContent() {
                           )}
                           {canEdit && !item.customer_text && item.group_id && (
                             <StructuredEditLink
-                              href={`/staff/orders/${order.id}/edit#options`}
+                              href={editHref("#options")}
                               label={`تعديل ${item.label_snapshot}`}
                             />
                           )}
@@ -2243,7 +2249,7 @@ function ProductionOrderDetailContent() {
                           <ItemArtwork item={item} />
                           {canEdit && item.customer_image_url && (
                             <StructuredEditLink
-                              href={`/staff/orders/${order.id}/edit#options`}
+                              href={editHref("#options")}
                               label={`استبدال صورة ${item.label_snapshot}`}
                             />
                           )}
@@ -2415,7 +2421,7 @@ function ProductionOrderDetailContent() {
               )}
               {canEdit ? (
                 <Link
-                  href={`/staff/orders/${order.id}/edit`}
+                  href={editHref()}
                   className="inline-flex min-h-11 w-full items-center justify-center rounded-full border border-orange-ink/40 bg-orange-ink/5 px-4 text-sm font-semibold text-orange-ink transition-colors hover:bg-orange-ink/10"
                 >
                   تعديل الطلب

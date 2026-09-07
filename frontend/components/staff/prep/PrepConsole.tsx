@@ -42,6 +42,7 @@ import { isPieceOverdue, type AdvancedGhost, type StationPiece } from "@/compone
 import { getQueue, advanceOrder, advanceBulk } from "@/lib/staff";
 import { getApiErrorMessage } from "@/lib/api";
 import { useProductionEvents } from "@/hooks/useProductionEvents";
+import { useCoalesced } from "@/hooks/useCoalesced";
 import { useScrollRestore } from "@/hooks/useScrollRestore";
 import { GARMENT_FILTER_ORDER, PRODUCT_TYPE_LABELS, STUDY_TYPE_LABELS } from "@/lib/constants";
 import { toArabicDigits } from "@/lib/format";
@@ -253,8 +254,9 @@ export function PrepConsole({ showSourceFilter }: { showSourceFilter: boolean })
   }, [load]);
 
   // Live: a piece arriving from الكوي must appear without the worker refreshing.
+  const liveReload = useCoalesced(() => load({ silent: true }));
   useProductionEvents((e) => {
-    if (e.type !== "presence") load({ silent: true });
+    if (e.type !== "presence") liveReload();
   });
 
   const markBusy = (key: string, on: boolean) =>

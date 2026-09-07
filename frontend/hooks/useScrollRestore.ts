@@ -46,6 +46,9 @@ function write(key: string, y: number) {
  */
 export function useScrollRestore(key: string, ready: boolean) {
   const restoredFor = useRef<string | null>(null);
+  // TRUE while the restore below is putting the window back. The save listener must not
+  // write during that window — see the restore effect's header for what it cost.
+  const restoring = useRef(false);
 
   // Save continuously, rAF-throttled. Writing sessionStorage on every raw scroll event
   // is a synchronous string serialisation per frame — measurable jank on the low-end
@@ -66,11 +69,11 @@ export function useScrollRestore(key: string, ready: boolean) {
     let thaw: ReturnType<typeof setTimeout> | undefined;
 
     const onScroll = () => {
-      if (frozen || queued) return;
+      if (frozen || restoring.current || queued) return;
       queued = true;
       requestAnimationFrame(() => {
         queued = false;
-        if (!frozen) write(key, window.scrollY);
+        if (!frozen && !restoring.current) write(key, window.scrollY);
       });
     };
 
@@ -94,16 +97,38 @@ export function useScrollRestore(key: string, ready: boolean) {
   }, [key]);
 
   // Restore once per key, after the list is real.
+  //
+  // ⚠️ `behavior: "instant"` AND THE `restoring` GUARD ARE BOTH LOAD-BEARING — WITHOUT THEM
+  // THE RESTORE DESTROYS THE POSITION IT IS RESTORING. `app/globals.css` sets
+  // `scroll-behavior: smooth` on <html>, so a bare `window.scrollTo(0, y)` ANIMATES: the
+  // browser fires a `scroll` event per frame on the way up, the save listener above writes
+  // each intermediate offset over the good one, and the animation is then cut short by the
+  // route transition's own scroll reset. Measured 2026-09-07 on /staff/queue: saved 765 →
+  // the list came back at the top and sessionStorage held **50** — the point the animation
+  // died. The worker sees exactly the bug this hook exists to fix, and the stored position
+  // is gone, so a second try cannot help either. Next's own dev server warns about this
+  // («Detected `scroll-behavior: smooth` on the <html> element»); that warning is about
+  // route transitions and reads as cosmetic, which is why it sat unread.
   useEffect(() => {
     if (!ready || restoredFor.current === key) return;
     restoredFor.current = key;
     const y = read(key);
     if (y <= 0) return;
+    restoring.current = true;
     // Two frames: the first lets React commit the list, the second lets the row heights
     // settle (zone thumbnails reserve their box, so this does not fight image loading).
     const raf = requestAnimationFrame(() => {
-      requestAnimationFrame(() => window.scrollTo(0, y));
+      requestAnimationFrame(() => {
+        window.scrollTo({ top: y, left: 0, behavior: "instant" });
+        // Release on the NEXT frame, after the scroll event this jump queues has fired.
+        requestAnimationFrame(() => {
+          restoring.current = false;
+        });
+      });
     });
-    return () => cancelAnimationFrame(raf);
+    return () => {
+      cancelAnimationFrame(raf);
+      restoring.current = false;
+    };
   }, [key, ready]);
 }

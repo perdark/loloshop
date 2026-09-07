@@ -36,6 +36,7 @@ import {
 } from "@/lib/constants";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 import { useProductionEvents } from "@/hooks/useProductionEvents";
+import { useCoalesced } from "@/hooks/useCoalesced";
 import { useScrollRestore } from "@/hooks/useScrollRestore";
 import type { ProductionQueueItem, MonitorData } from "@/lib/staff-types";
 import type { StaffOrderScope, StaffType, OrderStatus } from "@/lib/types";
@@ -378,7 +379,9 @@ function QueueView({
   }, [activeTab, load]);
 
   // Real-time: patch presence tags instantly; reload when an order moves stage
-  // (it may enter/leave this queue) or a new order arrives.
+  // (it may enter/leave this queue) or a new order arrives. Presence is patched in place
+  // (no fetch); the reload is coalesced because a bulk action emits one event per piece.
+  const liveReload = useCoalesced(() => load({ silent: true }));
   useProductionEvents((e) => {
     if (activeTab !== "active") return;
     if (e.type === "presence") {
@@ -396,7 +399,7 @@ function QueueView({
         )
       );
     } else {
-      load({ silent: true });
+      liveReload();
     }
   }, activeTab === "active");
 
@@ -663,8 +666,9 @@ function MonitorDashboard({
 
   // Real-time: the manager monitor reflects live presence + stage throughput, so
   // reload quietly on any production event while it's the active tab.
+  const monitorReload = useCoalesced(() => load({ silent: true }));
   useProductionEvents(() => {
-    if (activeTab === "monitor") load({ silent: true });
+    if (activeTab === "monitor") monitorReload();
   }, activeTab === "monitor");
 
   function stageHref(stage: OrderStatus): string {

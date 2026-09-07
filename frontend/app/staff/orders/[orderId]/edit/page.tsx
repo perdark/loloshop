@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 import { getApiErrorMessage } from "@/lib/api";
@@ -26,11 +26,17 @@ import { EmptyState } from "@/components/ui/EmptyState";
 // «تعديل الطلب» — admin/مدير الإنتاج edit a student's full طقم (the same form the rep
 // uses, pre-filled) + the student's info (الاسم، يوزر الانستا، الهواتف). The backend
 // preserves the bundle's rep-approval state across the save.
-export default function StaffOrderEditPage() {
+function StaffOrderEditContent() {
   const params = useParams<{ orderId: string }>();
   const orderId = params.orderId;
   const router = useRouter();
+  // ⚠️ CARRY `?from=` THROUGH THE EDIT ROUND-TRIP. The detail page decides where its
+  // back button AND every action handler exit to from this param; dropping it here made
+  // an edit erase the worker's origin, so the next «إرجاع» dumped them on the staff home
+  // (and «العودة» walked back INTO this form, since the fallback is document.referrer).
+  const fromParam = useSearchParams().get("from");
   const { user, loading: authLoading } = useRequireAuth(["staff", "admin"]);
+  const detailHref = `/staff/orders/${orderId}${fromParam ? `?from=${encodeURIComponent(fromParam)}` : ""}`;
 
   const [ctx, setCtx] = useState<OrderEditContext | null>(null);
   const [loading, setLoading] = useState(true);
@@ -105,7 +111,7 @@ export default function StaffOrderEditPage() {
         group: { phone_primary: phonePrimary.trim(), phone_secondary: phoneSecondary.trim() },
       });
       toast.success("تم حفظ التعديلات");
-      router.push(`/staff/orders/${orderId}`);
+      router.push(detailHref);
     } catch (e) {
       toast.error(getApiErrorMessage(e, "تعذر حفظ التعديلات"));
     } finally {
@@ -134,7 +140,7 @@ export default function StaffOrderEditPage() {
         },
       });
       toast.success("تم حفظ التعديلات");
-      router.push(`/staff/orders/${orderId}`);
+      router.push(detailHref);
     } catch (e) {
       toast.error(getApiErrorMessage(e, "تعذر حفظ التعديلات"));
     } finally {
@@ -171,7 +177,7 @@ export default function StaffOrderEditPage() {
           </p>
         </div>
         <Link
-          href={`/staff/orders/${orderId}`}
+          href={detailHref}
           className="inline-flex min-h-11 shrink-0 items-center rounded-full border border-line bg-beige px-4 text-sm font-semibold text-ink-soft hover:border-orange-ink/40"
         >
           رجوع للطلب
@@ -255,7 +261,7 @@ export default function StaffOrderEditPage() {
             } else if (result.tailorReopened) {
               toast.info("أُعيد فتح مهمة الفصال بسبب تغيير القياسات");
             }
-            router.push(`/staff/orders/${orderId}`);
+            router.push(detailHref);
           }}
         />
       ) : isLimited ? (
@@ -306,5 +312,14 @@ export default function StaffOrderEditPage() {
         </>
       )}
     </div>
+  );
+}
+
+// Suspense boundary required because the content reads `useSearchParams` (?from).
+export default function StaffOrderEditPage() {
+  return (
+    <Suspense fallback={<PageLoader />}>
+      <StaffOrderEditContent />
+    </Suspense>
   );
 }
