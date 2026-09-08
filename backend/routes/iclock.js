@@ -29,6 +29,7 @@ const rateLimit = require('express-rate-limit');
 const { query, tx } = require('../lib/db');
 const { parseAttlog, handshakeBody, userInfoBody } = require('../lib/iclockProtocol');
 const { ingestPunches } = require('../lib/attendanceDevice');
+const { deliverPunchNotices } = require('../lib/attendanceNotices');
 
 const router = express.Router();
 
@@ -97,6 +98,13 @@ router.post('/cdata', async (req, res) => {
 
   const { punches, rejects } = parseAttlog(req.body || '');
   const counts = await tx((client) => ingestPunches(client, sn, punches, rejects));
+  // ⚠️ AFTER THE COMMIT, NEVER INSIDE IT, and never fatal: the device retries a batch it
+  // does not get an OK for, so a failed notification must not turn stored punches into a
+  // re-upload. This is the only thing that tells a worker their break key did nothing —
+  // the reply below is `OK` whatever we decided. See lib/attendanceNotices.js.
+  await deliverPunchNotices(counts.notices).catch((e) =>
+    console.error('[iclock] notice delivery failed:', e.message)
+  );
   console.log(
     `[iclock] ${sn} stored=${counts.stored} dupe=${counts.duplicate} rejected=${counts.rejected} ` +
     `derived=${JSON.stringify(counts.derived)}`

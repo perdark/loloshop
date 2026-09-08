@@ -412,6 +412,13 @@ export interface ProductionOrderDetail {
    *  Derived server-side from the same state machine used by POST handlers. */
   available_actions: {
     advance: { to: string; label: string } | null;
+    /**
+     * WHY `advance` is null, when the reason is the ORDER's own state rather than the
+     * viewer's role. Server-computed (`advanceBlockReason`) so the UI never re-derives it.
+     * null when nothing is blocking. The POST refuses these independently — this only stops
+     * the shop being shown a button that cannot work.
+     */
+    advance_block: { code: string; reason: string; message: string } | null;
     revert: { to: string } | null;
     can_approve: boolean;
     can_reject: boolean;

@@ -807,7 +807,15 @@ async function getOrder(req, res) {
   const uTypes = staffTypesOf(u);
   const mgr = isManager(u);
   const soleRole = (r) => !mgr && uTypes.includes(r) && uTypes.every((t) => t === r);
-  // Presser: no canvas/contact — colour + status only (sash info for الكوي).
+  // Presser (المكوجي): sees the WHOLE record except money — owner ruling 2026-09-08,
+  // «show all details for order». This overturns the 2026-07-15 decision that gave him
+  // name + product photo + sizes + a colour-only design stub: he is the person who
+  // physically handles the whole طقم, so hiding the artwork, the contact, the delivery
+  // block and the sibling pieces cost him the context and cost the shop phone calls.
+  // ⚠️ MONEY DOES NOT MOVE — `canSeeMoney` below stays front-desk/manager only, and it is
+  // enforced three times (order.price, intake.deposit, every line's price_snapshot).
+  // The flag itself is KEPT rather than deleted: `getQueue` and the shawl projection still
+  // ask "is this a sole presser", and the tailor/embroiderer allow-lists sit beside it.
   const presserOnly = soleRole('presser');
   // مفصل (tailor): READ-ONLY فصال view (photo + measurements + sizes). Allow-list rebuilt below.
   const tailorOnly = soleRole('tailor');
@@ -823,13 +831,14 @@ async function getOrder(req, res) {
   const designer = uTypes.includes('designer');
   // Capability flags — also returned to the client so the UI never re-derives visibility
   // (single source of truth, mirrors the available_actions pattern).
-  const canSeeContact = frontDesk || designer;
+  const canSeeContact = frontDesk || designer || presserOnly;
   const canSeeMoney = frontDesk;
   // الفصال needs the robe قياسات; المكوجي needs the sizes too (his station shows
   // name + product photo + sizes + design images — user 2026-07-15).
   const canSeeMeasurements = frontDesk || tailorOnly || presserOnly;
-  const canSeePackage = frontDesk;                    // only front-desk/manager hop between siblings
-  const canSeeDesign = !presserOnly && !tailorOnly && !embroidererOnly;
+  // The presser handles every piece of a طقم at the iron, so he may hop between siblings.
+  const canSeePackage = frontDesk || presserOnly;
+  const canSeeDesign = !tailorOnly && !embroidererOnly;
 
   const base = await query(
     `SELECT o.id, o.status, o.created_at, o.price, o.design_id, o.package_id, o.checkout_group_id,
@@ -844,6 +853,9 @@ async function getOrder(req, res) {
             p.name_ar AS product_name, p.type AS product_type, p.image_url AS product_image_url,
             b.name_ar AS batch_name, b.deadline,
             CASE WHEN s.wholesaler_id IS NULL THEN 'retail' ELSE 'wholesaler' END AS source,
+            -- The three fields advanceBlockReason reads. Selected HERE so the detail page can
+            -- refuse to offer a button the POST would reject — see available_actions below.
+            o.returned_to_customer, o.wholesaler_approval, s.wholesaler_id,
             wu.name AS wholesaler_name,
             wk.name AS working_staff_name,
             cg.customer_name AS intake_customer_name, cg.instagram_username AS intake_instagram,
@@ -906,18 +918,9 @@ async function getOrder(req, res) {
   }
   // MEASUREMENTS: only the tailor (الفصال) + front-desk/manager need the robe قياسات.
   if (!canSeeMeasurements) order.measurements = null;
-  // Presser gets no customer contact/address — just the event date for urgency.
-  if (presserOnly && order.intake) {
-    order.intake = { event_date: order.intake.event_date };
-  }
-  // Delivery details are PII (address + phone of the recipient) — keep them off the
-  // presser view as well (tailor is already stripped by the allow-list above).
-  if (presserOnly) {
-    order.delivery_address = null;
-    order.delivery_phone = null;
-    order.recipient_name = null;
-    order.delivery_notes = null;
-  }
+  // (The presser's intake and delivery block used to be stripped here. Removed 2026-09-08 by
+  // the owner ruling above — he is the one who packs the piece, so the recipient and the
+  // event date are his working context. `intake.deposit` is still gone: canSeeMoney did it.)
   // Tailor (مفصل / الفصال) sees فصال-relevant detail — student name, the catalog photo,
   // measurements/sizes, and university/batch context — but NEVER money or contact. Rebuild
   // `order` from an ALLOW-LIST so nothing else can ever leak via a direct API call (price,
@@ -957,21 +960,14 @@ async function getOrder(req, res) {
     order.intake = null;
   }
 
-  // Design fetch is gated by canSeeDesign (designer/digitizer/manager/admin get the full artwork;
-  // presser gets colour-only; embroiderer/tailor get none).
+  // Design fetch is gated by canSeeDesign (designer/digitizer/manager/admin AND the presser
+  // get the full artwork; embroiderer/tailor get none).
   let design = null;
   if (order.design_id && canSeeDesign) {
     const d = await query(
       `SELECT id, sash_color, left_canvas, right_canvas, logo_url, extra_image_url,
               fonts_used, notes, approval_status, rejection_reason, completed
        FROM designs WHERE id = $1`,
-      [order.design_id]
-    );
-    design = d.rows[0] || null;
-  } else if (order.design_id && presserOnly) {
-    // sash info only — colour + status, NO artwork/canvas/logos.
-    const d = await query(
-      `SELECT id, sash_color, approval_status, completed FROM designs WHERE id = $1`,
       [order.design_id]
     );
     design = d.rows[0] || null;
@@ -993,8 +989,8 @@ async function getOrder(req, res) {
     items = items.map((it) => ({ ...it, price_snapshot: null }));
   }
 
-  // Bundle siblings — only front-desk/manager may hop between the package pieces. Production
-  // stations (embroiderer, designer, digitizer, presser, tailor) see their one piece only.
+  // Bundle siblings — front-desk/manager and the presser may hop between the package pieces.
+  // The other production stations (embroiderer, designer, digitizer, tailor) see one piece.
   let bundle = null;
   const hasBundle = canSeePackage && (order.checkout_group_id != null || order.package_id != null);
   if (hasBundle) {
@@ -1011,7 +1007,11 @@ async function getOrder(req, res) {
       bundle = sib.rows.map((row) => ({
         id: row.id,
         status: row.status,
-        price: row.price,
+        // ⚠️ THE SIBLING'S PRICE OBEYS canSeeMoney, NOT canSeePackage. Until 2026-09-08 the
+        // two were the same set (front-desk only) so this line was safe by coincidence; the
+        // moment the presser was let into the bundle it became a money leak on a screen that
+        // hides `order.price` two lines above. Caught by test/presserOrderDetail.test.js.
+        price: canSeeMoney ? row.price : null,
         product_name: row.product_name,
         product_type: row.product_type,
         is_current: row.id === order.id,
@@ -1105,9 +1105,33 @@ async function getOrder(req, res) {
     at: r.created_at,
   }));
 
+  // ⚠️ NEVER OFFER A BUTTON THE POST WILL REFUSE. `advance` used to ask only
+  // canStaffTransition, which knows about ROLES and nothing about the order's own state — so
+  // an order that `advanceBlockReason` blocks rendered «إنهاء الكوي، نقل للتجهيز», the press
+  // came back 409 «الطلب مُرجَع للطالب», and the worker had no way to act on it because only
+  // the STUDENT can resubmit. Measured on prod 2026-09-08: 11 retail orders sat at الكوي with
+  // `returned_to_customer = TRUE` (and zero rep orders carried the flag anywhere), which is
+  // why the report came in as «it happens on retail students».
+  //
+  // This is the same shape as the embroideryChecklistBlocks note above: a grant computed from
+  // the role alone, and a refusal computed from the row. They have to agree.
+  //
+  // ⚠️ SUPPRESSING THE BUTTON IS NOT THE GATE. `advance`/`advanceBulk`/`sendOrder` still call
+  // advanceBlockReason and still 409 — hiding a control never stops a hand-posted id, and the
+  // «بانتظار موافقة الممثل» landmine says exactly this. This only stops the shop being told
+  // to press something that cannot work.
+  const advanceBlocked = advanceBlockReason(order);
+  // Only now that the block has been read: `source` already tells the client retail-vs-rep,
+  // so the raw id is internal. ⚠️ Deleting it EARLIER silently kills the rep half of
+  // advanceBlockReason — it reads `order.wholesaler_id != null`, and undefined passes.
+  delete order.wholesaler_id;
   const available_actions = {
-    advance: nextTo && canTransition(u, order.status, nextTo) && !(embroideryIncomplete && !isManager(u))
+    advance: !advanceBlocked && nextTo && canTransition(u, order.status, nextTo) && !(embroideryIncomplete && !isManager(u))
       ? { to: nextTo, label: ADVANCE_LABEL_AR[`${order.status}→${nextTo}`] ?? 'تقدم للمرحلة التالية' }
+      : null,
+    // WHY there is no button, in words the floor can read. null when nothing is blocking.
+    advance_block: advanceBlocked
+      ? { code: advanceBlocked.code, reason: advanceBlocked.reason, message: advanceBlocked.message }
       : null,
     revert: revertTo && canTransition(u, order.status, revertTo)
       ? { to: revertTo }
@@ -1149,7 +1173,13 @@ async function getOrder(req, res) {
       // The UI never re-derives visibility from roles — it reads this layout discriminator
       // (mirrors the available_actions single-source pattern).
       view: {
-        layout: embroidererOnly ? 'embroidery' : tailorOnly ? 'tailor' : presserOnly ? 'presser' : 'full',
+        // ⚠️ 'presser' IS GONE — the owner asked for «all details» on 2026-09-08, and a
+        // separate minimal layout is exactly what hid them. The presser now gets the full
+        // page; what he may SEE is decided by the strips above (money) and what he may DO by
+        // `available_actions` (manager-only edit/delete), never by the layout.
+        // `presserOnly` itself is still live — it drives canSeeMeasurements and the shawl
+        // projection — so do not delete the flag along with this branch.
+        layout: embroidererOnly ? 'embroidery' : tailorOnly ? 'tailor' : 'full',
       },
     },
   });
