@@ -853,6 +853,9 @@ async function getOrder(req, res) {
             p.name_ar AS product_name, p.type AS product_type, p.image_url AS product_image_url,
             b.name_ar AS batch_name, b.deadline,
             CASE WHEN s.wholesaler_id IS NULL THEN 'retail' ELSE 'wholesaler' END AS source,
+            -- The three fields advanceBlockReason reads. Selected HERE so the detail page can
+            -- refuse to offer a button the POST would reject — see available_actions below.
+            o.returned_to_customer, o.wholesaler_approval, s.wholesaler_id,
             wu.name AS wholesaler_name,
             wk.name AS working_staff_name,
             cg.customer_name AS intake_customer_name, cg.instagram_username AS intake_instagram,
@@ -1102,9 +1105,33 @@ async function getOrder(req, res) {
     at: r.created_at,
   }));
 
+  // ⚠️ NEVER OFFER A BUTTON THE POST WILL REFUSE. `advance` used to ask only
+  // canStaffTransition, which knows about ROLES and nothing about the order's own state — so
+  // an order that `advanceBlockReason` blocks rendered «إنهاء الكوي، نقل للتجهيز», the press
+  // came back 409 «الطلب مُرجَع للطالب», and the worker had no way to act on it because only
+  // the STUDENT can resubmit. Measured on prod 2026-09-08: 11 retail orders sat at الكوي with
+  // `returned_to_customer = TRUE` (and zero rep orders carried the flag anywhere), which is
+  // why the report came in as «it happens on retail students».
+  //
+  // This is the same shape as the embroideryChecklistBlocks note above: a grant computed from
+  // the role alone, and a refusal computed from the row. They have to agree.
+  //
+  // ⚠️ SUPPRESSING THE BUTTON IS NOT THE GATE. `advance`/`advanceBulk`/`sendOrder` still call
+  // advanceBlockReason and still 409 — hiding a control never stops a hand-posted id, and the
+  // «بانتظار موافقة الممثل» landmine says exactly this. This only stops the shop being told
+  // to press something that cannot work.
+  const advanceBlocked = advanceBlockReason(order);
+  // Only now that the block has been read: `source` already tells the client retail-vs-rep,
+  // so the raw id is internal. ⚠️ Deleting it EARLIER silently kills the rep half of
+  // advanceBlockReason — it reads `order.wholesaler_id != null`, and undefined passes.
+  delete order.wholesaler_id;
   const available_actions = {
-    advance: nextTo && canTransition(u, order.status, nextTo) && !(embroideryIncomplete && !isManager(u))
+    advance: !advanceBlocked && nextTo && canTransition(u, order.status, nextTo) && !(embroideryIncomplete && !isManager(u))
       ? { to: nextTo, label: ADVANCE_LABEL_AR[`${order.status}→${nextTo}`] ?? 'تقدم للمرحلة التالية' }
+      : null,
+    // WHY there is no button, in words the floor can read. null when nothing is blocking.
+    advance_block: advanceBlocked
+      ? { code: advanceBlocked.code, reason: advanceBlocked.reason, message: advanceBlocked.message }
       : null,
     revert: revertTo && canTransition(u, order.status, revertTo)
       ? { to: revertTo }

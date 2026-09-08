@@ -497,6 +497,38 @@ longer stranded on a branch · the laptop's loose credentials are filed in
 
 ## 💣 LANDMINES
 
+- **⚠️ A GRANT COMPUTED FROM THE ROLE AND A REFUSAL COMPUTED FROM THE ROW MUST AGREE — THIS IS
+  THE THIRD TIME (2026-09-08).** `available_actions.advance` asked only `canStaffTransition`,
+  which knows about roles and nothing about the order, so an order `advanceBlockReason` blocks
+  rendered «إنهاء الكوي، نقل للتجهيز» and the press came back **409 «الطلب مُرجَع للطالب»** —
+  with nothing the worker could do, because only the STUDENT can resubmit. Reported as «when
+  I complete الكوي it says the order needs reviewing, on retail students». Found by MEASURING
+  PROD, not by grep: **11 retail orders sat at الكوي with `returned_to_customer = TRUE`, and
+  zero rep orders carried the flag at any stage** — which is the whole of «on retail
+  students», since a returned order is a retail thing (`/returned-orders`).
+  · `embroideryChecklistBlocks`' own header describes the identical shape one gate earlier,
+    and the «بانتظار موافقة الممثل» landmine a third. **Any new refusal inside `advance` has
+    to be mirrored into `available_actions` in the same commit.**
+  · ⚠️ **SUPPRESSING THE BUTTON IS NOT THE GATE.** `advance`/`advanceBulk`/`sendOrder` still
+    call `advanceBlockReason` and still 409. `test/advanceBlockSurfaced.test.js` asserts both
+    halves together on purpose — deleting the "still 409" half leaves a hand-posted id free.
+  · ⚠️ **`delete order.wholesaler_id` MUST run AFTER the block is read.** `advanceBlockReason`
+    tests `order.wholesaler_id != null` and `undefined` passes it, so moving that delete one
+    line earlier silently disables the ENTIRE rep-approval half while every test about retail
+    keeps passing. There is a test whose only job is that ordering.
+  · `getQueue` already filters these rows out (`AND o.returned_to_customer = FALSE`), so the
+    entry point is the DETAIL page — a link from `/admin/orders`, or a stale tab. Do not
+    "fix" it by adding the filter to `getOrder`: an order you cannot open is worse than one
+    that explains itself.
+
+- **⚠️ «يرجى مراجعة الطلب» WAS NEVER A STRING — the search for it cost most of a session.**
+  It does not exist in the repo or in the built bundle on the box; it was the admin's own
+  paraphrase of the 409 above. When a message is reported second-hand and grep finds nothing,
+  **stop grepping and measure the data for the audience named in the report** — «it's on
+  retail students» was the entire clue, and one `GROUP BY source, status, returned_to_customer`
+  answered it. Reproducing the happy path in a browser (twice, correctly) proved only that the
+  happy path was fine.
+
 - **⚠️ A SIBLING'S PRICE OBEYS `canSeeMoney`, NOT `canSeePackage` — AND THAT ONLY BECAME TRUE
   ON 2026-09-08.** `getOrder`'s bundle mapped `price: row.price` unconditionally. It was safe
   by COINCIDENCE, because the only role allowed into the bundle was front-desk/manager, who

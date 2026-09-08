@@ -296,6 +296,40 @@ function EventChip({ eventDate }: { eventDate: string | null }) {
   );
 }
 
+/**
+ * WHY there is no «تقدم للمرحلة التالية» button.
+ *
+ * An order can be un-advanceable for a reason that has nothing to do with the viewer: it was
+ * handed back to the student («الطلب مُرجَع للطالب») or its ممثل has not approved it yet.
+ * Until 2026-09-08 the button rendered anyway and the press came back 409 — reported from the
+ * floor as «completing الكوي says the order needs reviewing», on retail orders, because
+ * `returned_to_customer` is in practice a retail thing (measured on prod: 11 retail orders at
+ * الكوي carried it and zero rep orders carried it anywhere).
+ *
+ * The text is server-authored (`available_actions.advance_block.message`) so the UI can never
+ * hold a second, drifting copy of the rule — same discipline as available_actions itself.
+ */
+function AdvanceBlockNotice({
+  block,
+}: {
+  block: ProductionOrderDetail["available_actions"]["advance_block"];
+}) {
+  if (!block) return null;
+  const hint =
+    block.reason === "returned_to_customer"
+      ? "الطالب يعدّل طلبه ويعيد إرساله — بعدها ترجع القطعة للخط."
+      : "الممثل لازم يوافق على الطلب أول. ما إلك شغل بيها هسة.";
+  return (
+    <div
+      role="status"
+      className="rounded-2xl border border-orange-ink/30 bg-orange-ink/[0.07] p-4 text-sm"
+    >
+      <p className="font-bold text-ink">{block.message}</p>
+      <p className="mt-1 text-ink-soft">{hint}</p>
+    </div>
+  );
+}
+
 // ─── Intake Card ──────────────────────────────────────────────────────────────
 
 function IntakeCard({
@@ -1210,6 +1244,8 @@ function ProductionOrderDetailContent() {
   const canApprove = available_actions.can_approve;
   const canReject = available_actions.can_reject;
   const showAdvance = !!available_actions.advance;
+  // Why the button is missing, when the reason is the order and not the role.
+  const advanceBlock = available_actions.advance_block ?? null;
   const showRevert = !!available_actions.revert;
   const showReturnToCustomer = !!available_actions.return_to_customer;
   const canDelete = !!available_actions.can_delete;
@@ -1453,8 +1489,9 @@ function ProductionOrderDetailContent() {
             )
           )}
 
-          {(showAdvance || showRevert || showReturnToCustomer || canDelete) && (
+          {(showAdvance || showRevert || showReturnToCustomer || canDelete || advanceBlock) && (
             <div className="flex flex-col gap-2">
+              <AdvanceBlockNotice block={advanceBlock} />
               {showAdvance && (
                 <Button fullWidth loading={actionLoading} onClick={onPrimaryAction}>
                   {advanceLabel}
@@ -1592,6 +1629,7 @@ function ProductionOrderDetailContent() {
           Always rendered: every order shows either «تعديل الطلب» (canEdit = manager/
           admin) or «نسخ بيانات الطلب» (everyone else) at minimum. */}
       <div className="mb-4 flex flex-col gap-2 sm:hidden">
+        <AdvanceBlockNotice block={advanceBlock} />
         {showPrimaryAction && (
           <Button
             fullWidth
@@ -2233,6 +2271,7 @@ function ProductionOrderDetailContent() {
           <article className="hidden sm:block rounded-[var(--radius-card)] border border-orange-ink/15 bg-warm-veil p-5 shadow-[var(--shadow-soft)]">
             <h3 className="mb-4 font-display-ar text-base font-bold text-ink">الإجراءات</h3>
             <div className="flex flex-col gap-2">
+              <AdvanceBlockNotice block={advanceBlock} />
               {showPrimaryAction && (
                 <Button fullWidth loading={actionLoading} onClick={onPrimaryAction}>
                   {primaryLabel}
