@@ -49,6 +49,20 @@ const REASON_NO_BREAK_OPEN = 'ضغط «رجعت» وما عنده خروج مؤ�
 const REASON_OUT_WITHOUT_IN = 'خروج بلا دخول مسجّل لليوم';
 
 /**
+ * Record something a human needs to hear about this punch.
+ *
+ * ⚠️ COLLECTED HERE, DELIVERED AFTER THE COMMIT (lib/attendanceNotices.js, called by
+ * routes/iclock.js). Writing a notification inside the punch transaction would let one bad
+ * recipient abort the whole batch — the rule attendanceBreakController's notify helpers
+ * already state. `notices` is optional on purpose: `assignUnmapped` REPLAYS stored punches
+ * through applyPunch, and re-announcing a week-old press to a worker's phone would be noise.
+ * A caller that wants the notices passes an array; one that does not, does not.
+ */
+function note(notices, kind, userId, at) {
+  if (Array.isArray(notices)) notices.push({ kind, user_id: userId, at });
+}
+
+/**
  * ⚠️ WHAT THE K40 ACTUALLY SENDS — MEASURED ON THE REAL DEVICE, NOT READ FROM A MANUAL.
  *
  * Until 2026-09-06 every punch this shop ever took arrived with `raw_status = 0`, because the
@@ -269,7 +283,7 @@ async function closeStaleOpenDay(client, userId, newWorkDate, settings, timeZone
  * One writer, called from both the explicit-key path and the clock-guess path, so the two can
  * never drift into writing different rows for the same event.
  */
-async function openDeviceBreak(client, { userId, row, shift, punchedAt, settings, timeZone }) {
+async function openDeviceBreak(client, { userId, row, shift, punchedAt, settings, timeZone, notices }) {
   await client.query(
     `INSERT INTO staff_attendance_breaks
        (user_id, attendance_id, work_date, month_key, left_at, state, approval,
@@ -284,6 +298,10 @@ async function openDeviceBreak(client, { userId, row, shift, punchedAt, settings
       Number(settings.deduction_per_minute || 0),
     ]
   );
+  // The phone flow has always called notifyAdmins on a break; the device flow told nobody,
+  // which is half of «الخروج المؤقت ما يظهر عندي». Delivered after COMMIT — see
+  // lib/attendanceNotices.js.
+  note(notices, 'break_started', userId, punchedAt);
 }
 
 /**
@@ -294,7 +312,7 @@ async function openDeviceBreak(client, { userId, row, shift, punchedAt, settings
  *
  * Returns which of the five things happened — see module header.
  */
-async function applyPunch(client, punch) {
+async function applyPunch(client, punch, notices = null) {
   const userId = await findUserForPin(client, punch.device_pin);
   if (!userId) {
     await markPunch(client, punch.id, { ignoredReason: REASON_UNMAPPED });
@@ -533,9 +551,10 @@ async function applyPunch(client, punch) {
       await markPunch(client, punch.id, {
         userId, attendanceId: row.id, ignoredReason: REASON_BREAK_ALREADY_OPEN,
       });
+      note(notices, 'break_start_already_out', userId, punchedAt);
       return 'ignored';
     }
-    await openDeviceBreak(client, { userId, row, shift, punchedAt, settings, timeZone });
+    await openDeviceBreak(client, { userId, row, shift, punchedAt, settings, timeZone, notices });
     await markPunch(client, punch.id, { userId, attendanceId: row.id, ignoredReason: REASON_BREAK_START });
     return 'break_start';
   }
@@ -546,6 +565,9 @@ async function applyPunch(client, punch) {
       await markPunch(client, punch.id, {
         userId, attendanceId: row.id, ignoredReason: REASON_NO_BREAK_OPEN,
       });
+      // The commonest failure on prod: 5 of 14 break presses in 2026-09-06..08 were this,
+      // and the device beeped OK on every one of them. See lib/attendanceNotices.js.
+      note(notices, 'break_end_no_open', userId, punchedAt);
       return 'ignored';
     }
     // ⚠️ CLOSED AT THE PUNCH, NEVER CAPPED AT THE SHIFT END. The cap below exists for a break
@@ -647,7 +669,7 @@ async function applyPunch(client, punch) {
       }
     } else if (!shiftIsOver) {
       // خروج مؤقت — the shop is still open, so leaving is a break, not the end of the day.
-      await openDeviceBreak(client, { userId, row, shift, punchedAt, settings, timeZone });
+      await openDeviceBreak(client, { userId, row, shift, punchedAt, settings, timeZone, notices });
       await markPunch(client, punch.id, { userId, attendanceId: row.id, ignoredReason: REASON_BREAK_START });
       return 'break_start';
     }
@@ -751,6 +773,9 @@ async function ingestPunches(client, deviceSn, punches = [], rejects = []) {
   let duplicate = 0;
   let rejected = 0;
   const derived = { created: 0, extended: 0, moved_in: 0, ignored: 0, unmapped: 0 };
+  // Things a human has to hear about — a break key that did nothing, a break that opened.
+  // Handed back to the caller and delivered AFTER the commit; see lib/attendanceNotices.js.
+  const notices = [];
 
   for (const r of rejects || []) {
     await client.query(
@@ -762,6 +787,9 @@ async function ingestPunches(client, deviceSn, punches = [], rejects = []) {
 
   for (const punch of punches || []) {
     await client.query('SAVEPOINT punch_ingest_sp');
+    // A rolled-back punch must not leave its notice behind — the array is plain JS and
+    // SAVEPOINT knows nothing about it.
+    const noticeMark = notices.length;
     try {
       const { rows } = await client.query(
         `INSERT INTO punch_raw
@@ -786,12 +814,15 @@ async function ingestPunches(client, deviceSn, punches = [], rejects = []) {
         // `punched_at` is overridden here too, not just in the INSERT: applyPunch resolves
         // the shift and the تأخير from it, so handing it the device's reading would derive
         // the day from a clock we just decided not to trust.
-        const action = await applyPunch(client, { ...punch, id: rows[0].id, punched_at: receivedAt });
+        const action = await applyPunch(
+          client, { ...punch, id: rows[0].id, punched_at: receivedAt }, notices
+        );
         derived[action] = (derived[action] || 0) + 1;
       }
       await client.query('RELEASE SAVEPOINT punch_ingest_sp');
     } catch (e) {
       await client.query('ROLLBACK TO SAVEPOINT punch_ingest_sp');
+      notices.length = noticeMark;
       await client.query('RELEASE SAVEPOINT punch_ingest_sp');
       rejected += 1;
       await client.query(
@@ -806,7 +837,7 @@ async function ingestPunches(client, deviceSn, punches = [], rejects = []) {
     [deviceSn]
   );
 
-  return { stored, duplicate, rejected, derived };
+  return { stored, duplicate, rejected, derived, notices };
 }
 
 /** The lowest pin not already in staff_device_pins, starting at 1. */

@@ -218,12 +218,6 @@ function serializeRecord(row, now = new Date()) {
   };
 }
 
-function dateKey(value) {
-  if (!value) return '';
-  if (typeof value === 'string') return value.slice(0, 10);
-  return new Date(value).toISOString().slice(0, 10);
-}
-
 function verificationEvidence(req, settings, location) {
   const ip = clientIp(req);
   const ranges = Array.isArray(settings.allowed_ip_ranges) ? settings.allowed_ip_ranges : [];
@@ -747,8 +741,15 @@ async function calendar(req, res) {
     userClause = `AND r.user_id = $${params.length}`;
   }
 
+  // ⚠️ THE GROUPING KEY COMES FROM POSTGRES, NEVER FROM THE DRIVER'S Date. `pg` hands a
+  // `date` column back as a JS Date at the SERVER's local midnight, and prod runs
+  // Europe/Berlin — so `new Date(work_date).toISOString().slice(0,10)` turned 2026-09-08 into
+  // 2026-09-07 and filed every day's totals in the PREVIOUS calendar cell, while today's
+  // square read «لا توجد بصمات». Measured on prod 2026-09-08. Same trap the `dateOnly` header
+  // in lib/attendanceBreak.js documents, and the same fix salaryController already uses.
   const { rows } = await query(
-    `SELECT r.*, u.name AS staff_name, ${BREAK_MINUTES_SQL}
+    `SELECT r.*, u.name AS staff_name, ${BREAK_MINUTES_SQL},
+            to_char(r.work_date, 'YYYY-MM-DD') AS work_date_key
        FROM staff_attendance_records r
        JOIN users u ON u.id = r.user_id
       WHERE r.work_date BETWEEN $1 AND $2 ${userClause}
@@ -759,7 +760,7 @@ async function calendar(req, res) {
   const byDate = new Map();
   for (const row of rows) {
     const record = serializeRecord(row);
-    const key = dateKey(row.work_date);
+    const key = row.work_date_key;
     if (!byDate.has(key)) {
       byDate.set(key, {
         date: key,

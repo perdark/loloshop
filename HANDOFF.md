@@ -497,6 +497,46 @@ longer stranded on a branch · the laptop's loose credentials are filed in
 
 ## 💣 LANDMINES
 
+- **⚠️ THE K40 ALWAYS BEEPS OK, SO A DISCARDED PUNCH MUST NOTIFY OR IT NEVER HAPPENED
+  (`lib/attendanceNotices.js`, 2026-09-08, on `fix/attendance-break-visibility`).**
+  `routes/iclock.js` answers `OK: n` to every upload — ADMS, not our choice — so the device
+  greenlights any valid finger and the worker walks away believing it registered. What the
+  punch actually DID is decided later in `applyPunch` and went into `punch_raw.ignored_reason`,
+  a column **nothing read**: `listRejects` reads `punch_reject` (unparseable LINES), and
+  `listUnmapped` reads unknown PINs. Measured 2026-09-06 → 09-08: **5 of 14 break presses by
+  mapped workers were thrown away in silence**, all «رجعت» with no open break; مضر's next act
+  19 seconds later was to open a phone break request, i.e. he found out by accident. That is
+  the whole of «البصمة ما تشتغل ولا تظهر».
+  · `applyPunch(client, punch, notices)` — the third argument is **optional on purpose**:
+    `assignUnmapped` REPLAYS stored punches through it, and re-announcing a week-old press
+    would be noise. A caller that wants notices passes an array.
+  · **Delivered AFTER the commit, never inside it** — a failed notification INSERT aborts the
+    whole Postgres transaction and would take the punch batch with it, and the device re-uploads
+    any batch it does not get an OK for. `ingestPunches` truncates the notice array on a
+    SAVEPOINT rollback; the array is plain JS and SAVEPOINT knows nothing about it.
+  · ⚠️ **THE ARROWS IN THE ARABIC COPY ARE LOAD-BEARING. (←) STARTS the break, (→) ENDS it** —
+    the shop's sticker, owner-confirmed twice (2026-09-06, 2026-09-08), and **inverted from
+    ZKTeco's own English "Break-In"/"Break-Out"**. Every string names the key to press next, so
+    "correcting" them against the manual teaches the mistake instead of fixing it. Same ruling
+    that pins `PUNCH_STATE`.
+  · A device break now notifies the admin the way the phone flow always did (`notifyAdmins`);
+    the **return** deliberately does not, or the volume doubles for something the breaks table
+    already shows.
+
+- **⚠️ NEVER `toISOString()` A `date` COLUMN — PROD RUNS Europe/Berlin AND `pg` HANDS IT BACK AT
+  THE SERVER'S LOCAL MIDNIGHT (second occurrence, 2026-09-08).** `attendanceController.dateKey`
+  did exactly that and turned 2026-09-08 into 2026-09-07, so the admin's monthly attendance
+  calendar filed **every day's totals in the previous cell** and today's square read «لا توجد
+  بصمات» with 8 people present. Proven by running it on the box. `lib/attendanceBreak.js`'s
+  `dateOnly` header has documented this trap since the 40,000 IQD deduction that printed the
+  wrong date — the fix simply never reached the other controller. **The grouping key now comes
+  from Postgres (`to_char(work_date,'YYYY-MM-DD')`), which is what `salaryController` already
+  did and why the STAFF month view was right while the ADMIN one was wrong.**
+  · The guard is `test/attendanceVisibility.test.js`, and its **first statement** is
+    `process.env.TZ = 'Europe/Berlin'`. The bug is invisible on a UTC box and CI runs on UTC —
+    move that line below the `require`s and the test goes green against broken code.
+  · Anything else reading a `date` column into JS is suspect: check for `to_char` first.
+
 - **⚠️ «التجميع» IS FOR A REP SASH ONLY, AND `isAssemblyPiece` IS THE ONLY FORK (migration 106,
   2026-09-06).** Owner: «just sashes for this stage, no cap and robe». `nextStageFor` and
   `resolveRevertTarget` both ask that one predicate; a second copy is how a piece gets advanced
