@@ -13,6 +13,7 @@ import { getApiErrorMessage } from "@/lib/api";
 import { isAuthenticated, getUser } from "@/lib/auth";
 import { safeFileName, saveFile, saveFromUrl } from "@/lib/download";
 import { matchesAr } from "@/lib/arabic";
+import { toArabicDigits } from "@/lib/format";
 import {
   absUrl,
   CAL_REROLL_LIMIT,
@@ -926,6 +927,17 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
         try {
           const job = await getCalJob(savedJobId);
           setJobId(job.job_id);
+          // ⚠️ RESTORING A JOB TURNS THE GRID SCOPE ON, AND THAT IS WHY THE CHIPS COUNT.
+          // `gridScope` defaults to "batch", so setting `jobId` here silently scopes the
+          // grid to a batch the user may have run YESTERDAY — filtering away the 60 recent
+          // plates the block below goes on to load. Measured on prod 2026-09-08 for محمد
+          // عماد (المطرّز): 4 of 60 plates visible after a reload, 56 hidden. That reads as
+          // «الصور ما تظهر» — every plate is there and on disk, the grid just will not show
+          // them. Defaulting to "all" here was the obvious fix and is the WRONG one: it
+          // re-opens the 2026-09-06 defect where «تنزيل إلى مجلد…» quietly saved other
+          // reps' students, since the download writes exactly what the grid shows. The
+          // scope stays; what changed is that both chips now carry their COUNT, so a grid
+          // showing 4 of 60 says so instead of looking like the work is gone.
           setPlates(job.plates);
           setDone(job.done);
           setTotal(job.total);
@@ -1055,6 +1067,16 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
   }
 
   // ── generate loop ────────────────────────────────────────────────────────────
+  // ONE definition of «the user just started this batch»: remember it across a reload AND
+  // point the grid at it. Both halves belong to the same fact, and all three generate paths
+  // need both — writing them separately at three call sites is how a scope and a download
+  // button come to act on different sets. The RESTORE path deliberately does neither: see
+  // the note beside `setGridScope("all")` in the mount effect.
+  function beginBatch(job: CalJob) {
+    localStorage.setItem("cal_last_job", job.job_id);
+    setGridScope("batch");
+  }
+
   async function runJob(body: CreateJobBody) {
     setRunning(true);
     try {
@@ -1062,7 +1084,7 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
       if (job.dropped && job.dropped.length) {
         toast.message(`تم استبعاد ${job.dropped.length} نص — غير صالح أو تعليمات للمحل`);
       }
-      localStorage.setItem("cal_last_job", job.job_id);
+      beginBatch(job);
       await runCreatedJob(job);
     } catch (e) {
       toast.error(getApiErrorMessage(e, "فشل التوليد"));
@@ -1076,7 +1098,7 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
     setRunning(true);
     try {
       const job = await generateFromQueue(variant, mode, queueWid || null);
-      localStorage.setItem("cal_last_job", job.job_id);
+      beginBatch(job);
       await runCreatedJob(job);
       await refreshQueue();
     } catch (e) {
@@ -1105,7 +1127,7 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
           variant: item.variant,
         }],
       });
-      localStorage.setItem("cal_last_job", job.job_id);
+      beginBatch(job);
       await runCreatedJob(job);
       await refreshQueue();
     } catch (e) {
@@ -1378,7 +1400,10 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
   // the toggle hides itself rather than showing an empty grid the designer cannot explain.
   const batchScoped = gridScope === "batch" && Boolean(jobId);
 
-  const visibleGroups = useMemo(() => {
+  // ONE filter, called twice: once for what the grid renders, once per chip to say how many
+  // plates that chip would reveal. Two copies of this chain is how a chip comes to promise a
+  // count the grid then does not show.
+  const filterGroups = useCallback((scoped: boolean) => {
     const q = searchText.trim();
     return groups
       .filter((g) => {
@@ -1406,12 +1431,26 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
       // generated in this batch beside a zone generated last week, and hiding the whole order
       // because of the older one would lose work the designer just paid for.
       .map((g) =>
-        batchScoped
+        scoped
           ? { ...g, plates: g.plates.filter((p) => p.job_id === jobId) }
           : g
       )
       .filter((g) => g.plates.length > 0);
-  }, [groups, gridFilter, gridWid, searchText, orderZones, batchScoped, jobId]);
+  }, [groups, gridFilter, gridWid, searchText, orderZones, jobId]);
+
+  const visibleGroups = useMemo(
+    () => filterGroups(batchScoped),
+    [filterGroups, batchScoped]
+  );
+
+  // What each scope chip would show, so «هذه الدفعة» hiding 56 plates says so on its face.
+  // This is the whole fix for «الصور ما تظهر»: the scope was already correct and already
+  // reversible — it just gave the user no way to tell a scoped grid from a lost one.
+  const scopeCounts = useMemo(() => {
+    const count = (gs: ReturnType<typeof filterGroups>) =>
+      gs.reduce((n, g) => n + g.plates.length, 0);
+    return { batch: jobId ? count(filterGroups(true)) : 0, all: count(filterGroups(false)) };
+  }, [filterGroups, jobId]);
 
   const visiblePlates = useMemo(
     () => visibleGroups.flatMap((g) => g.plates),
@@ -1581,13 +1620,17 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
             {/* ── batch scope ──────────────────────────────────────────────────
                 Shown only when there IS a batch to scope to. This is the control that
                 stops «تنزيل إلى مجلد…» from quietly saving other reps' students: the
-                grid and the button always act on the same set, and the set is named. */}
+                grid and the button always act on the same set, and the set is named.
+                ⚠️ EACH CHIP CARRIES ITS COUNT ON PURPOSE (2026-09-08). Restoring a job
+                from localStorage turns this scope on without anyone pressing it, so a
+                designer reopening the page saw 4 plates where 60 had been and reported
+                the images as missing. The count is what separates «scoped» from «gone». */}
             {jobId && (
               <div className="flex items-center gap-1.5" role="group" aria-label="نطاق العرض">
                 {(
                   [
-                    { id: "batch" as const, label: "هذه الدفعة" },
-                    { id: "all" as const, label: "كل الصور" },
+                    { id: "batch" as const, label: "هذه الدفعة", n: scopeCounts.batch },
+                    { id: "all" as const, label: "كل الصور", n: scopeCounts.all },
                   ]
                 ).map((f) => (
                   <button
@@ -1601,7 +1644,7 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
                         : "border border-line bg-surface text-ink-soft hover:border-ink/40 hover:text-ink"
                     }`}
                   >
-                    {f.label}
+                    {f.label} ({toArabicDigits(f.n)})
                   </button>
                 ))}
               </div>
