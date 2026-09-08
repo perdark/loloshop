@@ -1251,7 +1251,6 @@ function ProductionOrderDetailContent() {
   const layout = detail.view?.layout ?? "full";
   const isTailorOnly = layout === "tailor";
   const isEmbroideryOnly = layout === "embroidery";
-  const isPresserOnly = layout === "presser";
 
   // Embroidery-zone checklist (FEATURE 1): visible to the embroiderer + manager/admin
   // when the backend supplies zones (only at the embroidery stage).
@@ -1517,178 +1516,13 @@ function ProductionOrderDetailContent() {
     );
   }
 
-  // ── كوي (presser / المكوجي): minimal station ────────────────────────────────
-  // Name + product photo + design images + sizes/قياسات + the one advance button.
-  // Contact/money/bio are stripped server-side and deliberately never rendered here.
-  if (isPresserOnly) {
-    const m = order.measurements;
-    const measureRows: { label: string; value: number }[] = m
-      ? [
-          ...(m.shoulder_cm != null ? [{ label: "الكتف", value: m.shoulder_cm }] : []),
-          ...(m.chest_cm != null ? [{ label: "محيط الصدر", value: m.chest_cm }] : []),
-          ...(m.robe_length_cm != null ? [{ label: "طول الروب", value: m.robe_length_cm }] : []),
-          ...(m.sleeve_length_cm != null ? [{ label: "طول الردن", value: m.sleeve_length_cm }] : []),
-        ]
-      : [];
-    const specItems = items.filter(
-      (i) => i.label_snapshot && (i.group_id !== null || !!i.customer_text)
-    );
-
-    return (
-      <div dir="rtl" lang="ar">
-        <div className="mb-4">
-          <Link
-            href={back.href}
-            className="inline-flex min-h-[44px] items-center gap-1 text-sm font-medium text-orange-ink hover:underline"
-          >
-            <span aria-hidden>→</span> {back.label}
-          </Link>
-        </div>
-        <PageHeader
-          title={order.student_name}
-          subtitle={`${ORDER_STATUS_LABELS[order.status] ?? order.status} · ${order.product_name}`}
-        />
-
-        <div className="mx-auto max-w-xl space-y-4">
-          {presenceOwner && (
-            <div
-              role="alert"
-              className="flex items-center gap-2 rounded-xl border border-orange-ink/25 bg-orange-ink/8 px-4 py-3 text-sm font-medium text-orange-ink"
-            >
-              <span aria-hidden>⚠</span>
-              الموظف {presenceOwner} يعمل على هذا الطلب
-            </div>
-          )}
-
-          {/* Catalog product photo */}
-          <ProductPhotoCard imageUrl={order.product_image_url} productName={order.product_name} />
-
-          {/* The design — zone plates / reference photos / legacy final design */}
-          <DesignGallery items={items} finalDesignUrl={order.final_design_url} />
-
-          {/* Sash colour (colour-only design payload for this role) */}
-          {design?.sash_color && (
-            <div className="flex items-center gap-4 rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
-              <span
-                className="h-12 w-12 shrink-0 rounded-xl border border-line shadow-[var(--shadow-soft)]"
-                style={{ backgroundColor: design.sash_color }}
-                aria-hidden
-              />
-              <div>
-                <p className="text-xs font-medium text-muted">لون الوشاح</p>
-                <p className="mt-0.5 font-bold text-ink" dir="ltr">{design.sash_color}</p>
-              </div>
-            </div>
-          )}
-
-          {/* Sizes + spec lines (text only — the images live in the gallery above) */}
-          {specItems.length > 0 && (
-            <article className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
-              <h3 className="mb-3 text-sm font-semibold text-ink">تفاصيل الطلب والمقاسات</h3>
-              <ul className="space-y-2.5">
-                {specItems.map((item, idx) => (
-                  <li
-                    key={idx}
-                    className={`flex items-center justify-between gap-2 text-sm ${
-                      idx < specItems.length - 1 ? "border-b border-line pb-2.5" : ""
-                    }`}
-                  >
-                    <span className="text-ink-soft">{item.label_snapshot}</span>
-                    {item.customer_text && (
-                      <span className="font-semibold text-ink">{item.customer_text}</span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </article>
-          )}
-
-          {/* Robe measurements */}
-          {measureRows.length > 0 && (
-            <article className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">
-              <h3 className="mb-3 text-sm font-semibold text-ink">قياسات الروب</h3>
-              <dl className="space-y-2 text-sm">
-                {measureRows.map((row, idx) => (
-                  <div
-                    key={row.label}
-                    className={`flex justify-between gap-4 ${
-                      idx < measureRows.length - 1 ? "border-b border-line pb-2" : ""
-                    }`}
-                  >
-                    <dt className="text-muted">{row.label}</dt>
-                    <dd className="font-medium text-ink" dir="ltr">{row.value} cm</dd>
-                  </div>
-                ))}
-              </dl>
-            </article>
-          )}
-
-          {/* Actions — the one advance button (+ guarded extras) */}
-          {(showPrimaryAction || showRevert || showReturnToCustomer) && (
-            <div className="flex flex-col gap-2">
-              {showPrimaryAction && (
-                <Button fullWidth loading={actionLoading} onClick={onPrimaryAction}>
-                  {primaryLabel}
-                </Button>
-              )}
-              {showRevert && (
-                <Button variant="ghost" fullWidth onClick={() => setRevertOpen(true)}>
-                  إرجاع للمرحلة السابقة
-                </Button>
-              )}
-              {showReturnToCustomer && (
-                <Button variant="ghost" fullWidth onClick={() => setReturnOpen(true)}>
-                  إرجاع للزبون لتعديله
-                </Button>
-              )}
-            </div>
-          )}
-        </div>
-
-        <Modal
-          open={revertOpen}
-          onClose={() => setRevertOpen(false)}
-          title="إرجاع الطلب للمرحلة السابقة"
-          footer={
-            <>
-              <Button variant="ghost" onClick={() => setRevertOpen(false)}>إلغاء</Button>
-              <Button variant="danger" loading={revertSubmitting} onClick={handleRevert}>تأكيد الإرجاع</Button>
-            </>
-          }
-        >
-          <p className="text-sm text-ink-soft">سيعود الطلب إلى مرحلة الإنتاج السابقة ليُعدّل ثم يُستكمل.</p>
-        </Modal>
-
-        <Modal
-          open={returnOpen}
-          onClose={() => setReturnOpen(false)}
-          title="إرجاع الطلب للزبون لتعديله"
-          footer={
-            <>
-              <Button variant="ghost" onClick={() => setReturnOpen(false)}>إلغاء</Button>
-              <Button variant="danger" loading={returnSubmitting} onClick={handleReturnToCustomer}>
-                تأكيد الإرجاع للزبون
-              </Button>
-            </>
-          }
-        >
-          <div className="space-y-3">
-            <p className="text-sm text-ink-soft">
-              سيُعاد الطلب للزبون ليعدّله ويعيد إرساله، ويختفي من قائمة الإنتاج حتى يُرسل من جديد.
-            </p>
-            <textarea
-              value={returnReason}
-              onChange={(e) => setReturnReason(e.target.value)}
-              rows={3}
-              dir="rtl"
-              placeholder="سبب الإرجاع (اختياري)"
-              className="w-full rounded-xl border border-line bg-surface px-3 py-2.5 text-sm text-ink focus:border-orange-ink focus:outline-none"
-            />
-          </div>
-        </Modal>
-      </div>
-    );
-  }
+  // ── كوي (presser / المكوجي) ─────────────────────────────────────────────────
+  // The presser used to render a minimal station here: name + product photo + design
+  // images + قياسات and nothing else. REMOVED 2026-09-08 — the owner asked for «all
+  // details», so `view.layout` no longer returns 'presser' and he falls through to the
+  // full page below. Money is not rendered because the API strips it (`order.price`,
+  // `intake.deposit` and every `price_snapshot` are absent), and `showPrice` is false
+  // when the field is undefined — the visibility rule lives on the server, once.
 
   return (
     <div dir="rtl" lang="ar">
@@ -2100,13 +1934,18 @@ function ProductionOrderDetailContent() {
           {intake && (
             <>
               <IntakeCard intake={intake} totalPrice={order.price} />
-              <InstaCopyButton
-                intake={intake}
-                order={order}
-                currentItems={items}
-                currentType={order.product_type}
-                bundle={bundle}
-              />
+              {/* The Instagram text IS a money summary (total + deposit + remaining), so it
+                  belongs to whoever may see money. Before the presser reached this layout
+                  (2026-09-08) that was true by coincidence; now it has to be said. */}
+              {showPrice && (
+                <InstaCopyButton
+                  intake={intake}
+                  order={order}
+                  currentItems={items}
+                  currentType={order.product_type}
+                  bundle={bundle}
+                />
+              )}
             </>
           )}
 

@@ -497,6 +497,41 @@ longer stranded on a branch · the laptop's loose credentials are filed in
 
 ## 💣 LANDMINES
 
+- **⚠️ A SIBLING'S PRICE OBEYS `canSeeMoney`, NOT `canSeePackage` — AND THAT ONLY BECAME TRUE
+  ON 2026-09-08.** `getOrder`'s bundle mapped `price: row.price` unconditionally. It was safe
+  by COINCIDENCE, because the only role allowed into the bundle was front-desk/manager, who
+  may see money anyway. The moment the presser was let into «الباقة الكاملة» (owner ruling,
+  below) that one line leaked every sibling's price onto a screen that deletes `order.price`
+  two lines above it. Caught by `test/presserOrderDetail.test.js`, not by review.
+  · The same shape exists wherever two capability flags happen to name the same people today.
+    `canSeeContact` / `canSeeMoney` / `canSeePackage` / `canSeeDesign` / `canSeeMeasurements`
+    are FIVE independent questions — never assume one implies another.
+  · «نسخ بيانات الطلبية (انستا)» is money too: its text is total + deposit + remaining. It is
+    behind `showPrice` now, for the same reason.
+
+- **⚠️ `view.layout` NO LONGER RETURNS `'presser'` (owner ruling 2026-09-08: «show all details
+  for order»).** المكوجي gets the FULL order page — design canvas, student contact, the
+  full-set intake, the delivery block and the package siblings — and only money is withheld.
+  This reverses the 2026-07-15 minimal-station decision; the reasoning for the reversal is in
+  `getOrder`'s own comment, and the 170-line presser branch is gone from
+  `frontend/app/staff/orders/[orderId]/page.tsx`.
+  · **`presserOnly` the FLAG is still live** — it drives `canSeeMeasurements` and the shawl
+    projection. Do not delete it along with the layout branch.
+  · What a role SEES is decided by the server strips; what it may DO by `available_actions`.
+    Never by the layout. A future station that needs less must strip fields, not fork a page.
+  · This applies to **every** sole-role presser, so علي مهند sees it too. That is intended.
+
+- **⚠️ THE SHELF PROMPT ONLY EXISTS ON THE STATION BOARD, NOT ON THE ORDER DETAIL PAGE.**
+  `StationConsole.completePiece` calls `offerShelfPlacement` after الكوي → التجهيز; the
+  detail page's `handleAdvance` does not, so a retail piece finished from «التفاصيل» reaches
+  التجهيز with no خانة and nobody is asked where it went. It is not lost — «رف التجهيز»'s
+  inbox still lists it — but nothing prompts.
+  · **Measured on prod 2026-09-08:** at التجهيز, retail pieces with no shelf slot are
+    **457 قبعة (ALL of them)**, 7 وشاح, 7 روب, 5 شال. The قبعة section (C, 10 slots) is
+    completely empty and always has been — **a plain cap starts AT التجهيز and never passes
+    through الكوي**, so the only prompt that exists can never fire for it. Decide whether
+    caps belong on the shelf at all before "fixing" either half.
+
 - **⚠️ THE K40 ALWAYS BEEPS OK, SO A DISCARDED PUNCH MUST NOTIFY OR IT NEVER HAPPENED
   (`lib/attendanceNotices.js`, 2026-09-08, on `fix/attendance-break-visibility`).**
   `routes/iclock.js` answers `OK: n` to every upload — ADMS, not our choice — so the device
