@@ -542,7 +542,34 @@ async function getQueue(req, res) {
   // Embroidery-zone / pleat filter (sash R/L/back · cap side/top · robe pleats).
   const zoneClause = req.query.zone ? orderZoneClause(req.query.zone, 'o') : null;
   const { rows } = await query(
-    `SELECT o.id, o.status, o.created_at, o.design_id, o.checkout_group_id,
+    // ⚠️ THE THREE PER-ROW LOOKUPS BELOW ARE CTEs, NOT CORRELATED SUBQUERIES, AND THAT IS
+    // A MEASUREMENT — do not "simplify" one back inline. This query has no LIMIT (the board
+    // IS the whole queue), so a scalar subquery in the SELECT list runs once PER ROW: on
+    // prod 2026-09-08 that was 4,961 executions each of group_price and search_text, and the
+    // plan spent 39,920 of its 55,678 shared buffers inside them. Aggregating each ONCE and
+    // joining costs one extra pass over `orders`/`order_items` and pays for itself ~5×.
+    // Measured on prod, same 4,961 rows, byte-identical output on every column:
+    //   before  186–199 ms, 55,678 buffers    after  117–121 ms, 23,601 buffers
+    // The two CTEs are unfiltered on purpose: Postgres cannot push the outer WHERE into
+    // them, and restricting them by the stage list would need the predicate duplicated in
+    // three places — the shape that lets two copies drift apart.
+    `WITH gp AS (
+       -- Bundle total per checkout group (see the طقم note on group_price below).
+       SELECT checkout_group_id, SUM(price) AS group_price
+         FROM orders
+        WHERE checkout_group_id IS NOT NULL AND status::text <> 'cancelled'
+        GROUP BY checkout_group_id
+     ), oi AS (
+       -- One pass over order_items feeds BOTH has_design_images and search_text.
+       SELECT order_id,
+              bool_or(plate_image_url IS NOT NULL
+                      OR customer_image_url IS NOT NULL) AS has_design_images,
+              string_agg(DISTINCT customer_text, ' ')
+                FILTER (WHERE customer_text IS NOT NULL AND customer_text <> '') AS search_text
+         FROM order_items
+        GROUP BY order_id
+     )
+     SELECT o.id, o.status, o.created_at, o.design_id, o.checkout_group_id,
             o.student_id, o.needs_pressing, o.embroidery_zones,
             o.working_staff_id, o.working_since,
             o.final_design_url, o.has_embroidery,
@@ -557,15 +584,8 @@ async function getQueue(req, res) {
             -- ~31% of this list and read as free. The bundle total is what the admin means
             -- by "the price of the order", so send it alongside and let the row say which
             -- number it is showing. Uses idx_orders_checkout_group; NULL for a solo piece.
-            CASE WHEN o.checkout_group_id IS NOT NULL THEN (
-              SELECT SUM(o2.price) FROM orders o2
-               WHERE o2.checkout_group_id = o.checkout_group_id
-                 AND o2.status::text <> 'cancelled'
-            ) END AS group_price,
-            EXISTS(SELECT 1 FROM order_items oi2
-                    WHERE oi2.order_id = o.id
-                      AND (oi2.plate_image_url IS NOT NULL
-                           OR oi2.customer_image_url IS NOT NULL)) AS has_design_images,
+            gp.group_price,
+            COALESCE(oi.has_design_images, FALSE) AS has_design_images,
             u.name AS student_name, s.university_name, s.department, s.study_type,
             p.name_ar AS product_name, p.type AS product_type,
             -- Every word the STUDENT typed on this piece, flattened to one string for the
@@ -577,11 +597,7 @@ async function getQueue(req, res) {
             -- to display. Not the zones array, which is station-mode only, carries image URLs
             -- and per-zone progress, and is ~20× the bytes of the words themselves.
             -- Measured on the dev DB: +121 KB across a 1,447-row manager queue (+8.8%).
-            (SELECT string_agg(DISTINCT oi3.customer_text, ' ')
-               FROM order_items oi3
-              WHERE oi3.order_id = o.id
-                AND oi3.customer_text IS NOT NULL
-                AND oi3.customer_text <> '') AS search_text,
+            oi.search_text,
             -- Robe tailoring measurements, for التجهيز only. Gated in SQL rather than sent
             -- to every station: the prep queue is ~480 rows and this JSON rides on each of
             -- them, which is dead weight on a workshop-wifi station that cannot use it.
@@ -607,6 +623,8 @@ async function getQueue(req, res) {
      LEFT JOIN wholesalers w ON w.id = s.wholesaler_id
      LEFT JOIN users wu ON wu.id = w.user_id
      LEFT JOIN users wk ON wk.id = o.working_staff_id
+     LEFT JOIN gp ON gp.checkout_group_id = o.checkout_group_id
+     LEFT JOIN oi ON oi.order_id = o.id
      WHERE o.status::text = ANY($1)
        -- تم التسليم column is bounded to the last 90 days so the console can't grow unbounded.
        -- NULL delivered_at (legacy/migrated rows) is kept so a delivered order never just vanishes.
