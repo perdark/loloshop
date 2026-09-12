@@ -26,11 +26,16 @@ const nextConfig: NextConfig = {
   // the same Wi-Fi). Derived from NEXT_PUBLIC_API_URL so it tracks the machine IP
   // automatically. Dev-only; ignored in production.
   allowedDevOrigins: [apiHost, "localhost", "127.0.0.1"],
-  experimental: {
-    // Wraps client route navigations in document.startViewTransition so
-    // CSS `view-transition-name` shared elements morph between pages.
-    viewTransition: true,
-  },
+  // ⚠️ `experimental.viewTransition` IS GONE AS OF NEXT 16.3 — it is a TYPE ERROR now, and
+  // `next build` fails on it (found 2026-09-12 while patching the sharp/Next advisories).
+  // It used to wrap every client navigation in document.startViewTransition, which is what
+  // made the CSS `view-transition-name` pairs in ShopProductCard / ProductTile /
+  // ProductMediaGallery / StudentNav morph between pages. The replacement is React's own
+  // `<ViewTransition name=…>` (node_modules/next/dist/docs/01-app/02-guides/view-transitions.md):
+  // no config, and route navigations activate it automatically — but it must WRAP the element,
+  // so the four `style={{ viewTransitionName }}` sites need converting before the morph comes
+  // back. Removing the key only removes an option Next no longer reads; it is not what stopped
+  // the animation. Do not re-add it.
   images: {
     remotePatterns: [
       { protocol: "http", hostname: apiHost, pathname: "/uploads/**" },
