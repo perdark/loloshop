@@ -429,6 +429,19 @@ longer stranded on a branch · the laptop's loose credentials are filed in
    · **مضر محمد's shift is set to 22:16 → 10:15**, which is why a 10:19 دخول scores 708
      minutes late. The arithmetic is right; `22:16` looks mistyped.
 
+6e. **📊 «الإحصائيات» IS LIVE AT `/admin/analytics` (deployed 2026-09-13) — AND THE BASELINE
+   IT NEEDS STARTS THE DAY IT DEPLOYED.** One screen for: growth, who opens the app (signed-in
+   only), the install floor, and which pages hold attention. ⚠️ **Turning on the app-only gate
+   is still a separate act** — `NEXT_PUBLIC_APP_ONLY=1` in the prod `frontend/.env.local`
+   **plus a rebuild** (`NEXT_PUBLIC_*` is inlined at build time, so `--update-env` does
+   nothing). Deploying the measurement first was deliberate: `site_visits.platform`
+   (migration 110) is the ONLY place a visitor with no account reveals app-vs-browser, and it
+   has no history, so «هل اشتغلت البوابة؟» is only answerable against days collected before
+   the flip. ⚠️ **NULL in that column means «before 110» and is never `web`** — 34k historical
+   rows must stay in «غير معروف», or the browser collapse the gate is judged on is an artefact.
+   ⚠️ The download count on that screen is a **floor** (install + sign-in + notification
+   permission); the real number is only in the Play and App Store consoles.
+
 7. **Clean the 12 wholesaler `university_name` rows** — one university is spelled three ways
    («بلاد الرافدين» · «بلاد الرفدين» · «كلية بلاد الرافدين»), same for ديالى. The picker was built
    to survive this, but the list reads badly.
