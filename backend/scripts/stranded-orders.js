@@ -225,6 +225,18 @@ async function main() {
        VALUES (NULL, 'status_revert', 'order', $1, $2)`,
       [r.id, JSON.stringify({ from: r.status, to: 'design_complete', by: 'script:stranded-orders' })]
     );
+    // ⚠️ «منو نقلها؟» READS staff_activity_log — an audit row alone leaves the card one stage
+    // short, and a worker reads that as «وصلت لوحدها». The 2026-08-31 run of this script moved
+    // 474 pieces writing only the audit row, and every one of them had a blank line at the top
+    // of its history until getOrder was taught to read both ledgers (2026-09-12). Writing the
+    // row here is the belt to that braces. NULL user on purpose: no human made this move, and
+    // 'route_fix' (never 'advance') keeps it out of payroll and staff goals, which count
+    // action IN ('advance','approve_design').
+    await query(
+      `INSERT INTO staff_activity_log (user_id, action, order_id, from_stage, to_stage)
+       VALUES (NULL, 'route_fix', $1, $2, 'design_complete')`,
+      [r.id, r.status]
+    );
   }
   line(`   ✓ أُرجعت ${rewindable.length} طلب إلى «بانتظار التصميم».`);
 
@@ -251,6 +263,12 @@ async function main() {
       `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
        VALUES (NULL, 'status_change', 'order', $1, $2)`,
       [r.id, JSON.stringify({ from: r.status, to: r.destination, by: 'script:stranded-orders', reason: 'no_embroidery_work' })]
+    );
+    // See the note on the rewind above: the audit row alone is invisible to «منو نقلها؟».
+    await query(
+      `INSERT INTO staff_activity_log (user_id, action, order_id, from_stage, to_stage)
+       VALUES (NULL, 'route_fix', $1, $2, $3)`,
+      [r.id, r.status, r.destination]
     );
   }
   if (parked.length) line(`   ✓ ${parked.length} قطعة انتقلت لمرحلتها الصحيحة.`);

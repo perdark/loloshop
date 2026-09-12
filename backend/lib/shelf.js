@@ -196,6 +196,33 @@ async function releaseForOrder(orderId, client) {
   await run(CLOSE_EMPTY_BINS_SQL);
 }
 
+// The FORWARD twin of releaseForOrder: the piece left التجهيز towards «جاهز», so it was picked
+// UP, not sent back — tick the placement collected (keeping who took it and when) and close the
+// bin if that emptied it.
+//
+// ⚠️ THE DIRECTION DECIDES WHICH OF THE TWO YOU WANT, AND THEY ARE NOT INTERCHANGEABLE.
+// A revert DELETEs, because the garment physically went back up the line and was never packed;
+// this one KEEPS the row, because «منو غلّفها؟» is answered from it. Calling releaseForOrder on a
+// forward move would erase that, and calling this one on a revert would claim a piece was packed
+// when it was actually sent back to الكوي.
+//
+// Why it exists (2026-09-12): `collectPiece` ticks the placement and THEN advances, so the
+// shelf's own «تسليم» was always clean — but a preparer pressing «جاهز» on the station board or
+// on the order page goes straight through `performAdvance`, which freed nothing. The bin then
+// counted a garment that had already left the shop. Measured on prod the day this was written:
+// 14 live placements belonged to orders already at «جاهز». Pinned in test/shelf.test.js.
+// Idempotent by construction (`collected_at IS NULL`), which is what lets `collectPiece` keep
+// calling performAdvance without double-stamping the row it just ticked itself.
+async function collectForOrder(orderId, userId, client) {
+  const run = runner(client);
+  await run(
+    `UPDATE shelf_placements SET collected_at = now(), collected_by = $2
+      WHERE order_id = $1 AND collected_at IS NULL`,
+    [orderId, userId || null]
+  );
+  await run(CLOSE_EMPTY_BINS_SQL);
+}
+
 function guardShelfable(order) {
   if (!order) throw new ShelfError(404, 'ERR_NOT_FOUND', 'القطعة غير موجودة');
   if (order.wholesaler_id != null) {
@@ -385,6 +412,29 @@ async function buildBoard() {
       SELECT DISTINCT order_id
         FROM staff_activity_log
        WHERE to_stage = 'preparing' AND created_at >= $1::timestamptz
+      UNION
+      -- ⚠️ A PLAIN قبعة NEVER MOVES INTO التجهيز — IT OPENS THERE, AND FOR MONTHS THAT MADE IT
+      -- INVISIBLE TO THIS SCREEN (owner ruling 2026-09-12: «القبعات لازم تتسكن»).
+      -- orderController.js starts a piece with no embroidery at الكوي, or at التجهيز when it
+      -- is a cap — so a cap has no to_stage = 'preparing' row to be found by, and «وصلت توّا»
+      -- could never fire for one. Measured on prod 2026-09-12: 483 قبعة standing at التجهيز,
+      -- not ONE of them ever placed, and 214 of them not even reachable by the console's search
+      -- box because their student was out of scope entirely. Section C01–C10 has been empty
+      -- since the shelf shipped, and that emptiness was a bug, not a decision.
+      --
+      -- Opening AT التجهيز after the shelf went live IS arriving. The epoch still applies, on
+      -- purpose and unchanged: a piece older than the shelf is pre-existing backlog nobody
+      -- staged, and it stays on the ordinary قائمة التجهيز exactly as an old روب or وشاح does.
+      SELECT o.id
+        FROM orders o
+        JOIN students st ON st.id = o.student_id
+       WHERE st.wholesaler_id IS NULL
+         AND o.status = 'preparing'
+         AND o.created_at >= $1::timestamptz
+         -- Nothing ever moved it anywhere: if it HAS stage history it is not an "opened here"
+         -- piece, and the branch above is the one that decides about it.
+         AND NOT EXISTS (SELECT 1 FROM staff_activity_log l
+                          WHERE l.order_id = o.id AND l.to_stage IS NOT NULL)
     ),
     in_scope AS (
       SELECT sp.student_id
@@ -646,5 +696,6 @@ module.exports = {
   collectPiece,
   closeSet,
   releaseForOrder,
+  collectForOrder,
   buildBoard,
 };

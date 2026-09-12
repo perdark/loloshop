@@ -1911,45 +1911,82 @@ CREATE TABLE IF NOT EXISTS legacy_pressing_restore_log (
 CREATE INDEX IF NOT EXISTS idx_legacy_pressing_restore_batch
   ON legacy_pressing_restore_log (batch_id);
 
--- ⚠️ ONE batch_id FOR THE WHOLE RUN, WHICH IS WHY THIS IS A DO BLOCK AND NOT A PLAIN INSERT.
--- `gen_random_uuid()` is VOLATILE, so `SELECT gen_random_uuid(), o.id, …` evaluates it once PER
--- ROW: the first prod run of this file stamped 249 rows with 249 different batch ids, which made
--- the one-statement rollback below undo exactly one order. The data was never at risk — every
--- order_id and old_status is recorded either way — but a rollback recipe that does not work is
--- worse than none, because it is discovered while trying to use it. The undo is keyed on the
--- table, not on a batch, for the same reason.
+-- ⚠️ ONE batch_id FOR THE WHOLE RUN, AND ALL THREE STATEMENTS INSIDE THE SAME BLOCK — that
+-- is what makes this file safe to apply again. `gen_random_uuid()` is VOLATILE, so
+-- `SELECT gen_random_uuid(), o.id, …` evaluates it once PER ROW: the first prod run of this file
+-- stamped 249 rows with 249 different batch ids, which made the one-statement rollback undo
+-- exactly one order. The data was never at risk — every order_id and old_status is recorded
+-- either way — but a rollback recipe that does not work is worse than none, because it is
+-- discovered while trying to use it. The undo is keyed on the TABLE, not on a batch, for that
+-- same reason; the UPDATE below is keyed on the BATCH, and the two must not be confused.
+--
+-- ⚠️ THE UPDATE IS KEYED ON **THIS RUN'S** BATCH AND MAY NEVER GO BACK TO DRIVING OFF THE WHOLE
+-- TABLE (fixed 2026-09-12, after eleven days in production). It used to read:
+--
+--     UPDATE orders o SET status = 'pressing' … FROM legacy_pressing_restore_log l
+--      WHERE o.id = l.order_id AND o.status = 'preparing' AND l.new_status = 'pressing';
+--
+-- — 307 permanent rows, with no guard but the order's current status. `scripts/deploy.sh` runs
+-- `npm run migrate` (which applies THIS file) on EVERY deploy, so every deploy dragged back to
+-- الكوي every one of those orders that المكوجي had since pressed and advanced to التجهيز.
+-- Silently, from every angle a worker or a developer could check: the `route_fix` INSERT is
+-- guarded on `NOT EXISTS(action = 'route_fix')` so the second move was never logged, and no
+-- audit row was written either — «رجعت للكوي ومحد رجّعها». Measured on prod 2026-09-12: 49
+-- such orders, 46 of them physically sitting in a bin on رف التجهيز, arriving in
+-- identical-microsecond `orders.updated_at` batches a minute or two after each deploy
+-- (11 rows 09-07 23:51 · 6 rows 09-08 16:55 · 14 rows 09-08 23:29).
+--
+-- The migration FILE (db/migrations/101_legacy_unpressed_to_kawi.sql) never had this defect — it
+-- selects into a temp table and updates only that. This copy was restructured into three
+-- statements and lost the link between them. Pinned by test/legacyPressingIdempotent.test.js,
+-- which runs the text of THIS block rather than a copy of it.
 DO $legacy101$
 DECLARE v_batch uuid := gen_random_uuid();
 BEGIN
-INSERT INTO legacy_pressing_restore_log (batch_id, order_id, old_status, new_status)
-SELECT v_batch, o.id, 'preparing', 'pressing'
-  FROM orders o
-  JOIN products p ON p.id = o.product_id
- WHERE o.status = 'preparing'
-   AND o.needs_pressing = TRUE
-   AND p.type <> 'cap'
-   AND o.created_at < DATE '2026-07-16'
-   AND NOT EXISTS (SELECT 1 FROM staff_activity_log l
-                    WHERE l.order_id = o.id
-                      AND (l.from_stage = 'pressing' OR l.to_stage = 'pressing'))
-   AND NOT EXISTS (SELECT 1 FROM audit_log a
-                    WHERE a.entity = 'order' AND a.entity_id = o.id
-                      AND a.action IN ('status_change', 'status_revert')
-                      AND (a.details->>'to' = 'pressing' OR a.details->>'from' = 'pressing'));
+  INSERT INTO legacy_pressing_restore_log (batch_id, order_id, old_status, new_status)
+  SELECT v_batch, o.id, 'preparing', 'pressing'
+    FROM orders o
+    JOIN products p ON p.id = o.product_id
+   WHERE o.status = 'preparing'
+     AND o.needs_pressing = TRUE
+     AND p.type <> 'cap'
+     AND o.created_at < DATE '2026-07-16'
+     AND NOT EXISTS (SELECT 1 FROM staff_activity_log l
+                      WHERE l.order_id = o.id
+                        AND (l.from_stage = 'pressing' OR l.to_stage = 'pressing'))
+     AND NOT EXISTS (SELECT 1 FROM audit_log a
+                      WHERE a.entity = 'order' AND a.entity_id = o.id
+                        AND a.action IN ('status_change', 'status_revert')
+                        AND (a.details->>'to' = 'pressing' OR a.details->>'from' = 'pressing'));
+
+  -- Already applied, or no legacy rows on this database. Everything below is keyed on
+  -- v_batch, so this early return is belt-and-braces rather than the guard itself.
+  IF NOT EXISTS (SELECT 1 FROM legacy_pressing_restore_log WHERE batch_id = v_batch) THEN
+    RETURN;
+  END IF;
+
+  -- NULL user = «the system corrected a route», never a worker. See the staff_activity_log
+  -- header. This row is also what makes the SELECT above skip the order on every later run:
+  -- it carries to_stage = 'pressing'.
+  INSERT INTO staff_activity_log (user_id, action, order_id, from_stage, to_stage)
+  SELECT NULL, 'route_fix', order_id, 'preparing', 'pressing'
+    FROM legacy_pressing_restore_log WHERE batch_id = v_batch;
+
+  INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
+  SELECT NULL, 'status_change', 'order', order_id,
+         jsonb_build_object(
+           'by', 'migration:101-legacy-unpressed',
+           'from', 'preparing', 'to', 'pressing',
+           'reason', 'opened_at_preparing_before_2026_07_15_routing_change',
+           'batch_id', v_batch)
+    FROM legacy_pressing_restore_log WHERE batch_id = v_batch;
+
+  UPDATE orders o
+     SET status = 'pressing', working_staff_id = NULL, working_since = NULL
+    FROM legacy_pressing_restore_log l
+   WHERE l.batch_id = v_batch AND o.id = l.order_id AND o.status = 'preparing';
 END
 $legacy101$;
-
--- NULL user = «the system corrected a route», never a worker. See the staff_activity_log header.
-INSERT INTO staff_activity_log (user_id, action, order_id, from_stage, to_stage)
-SELECT NULL, 'route_fix', l.order_id, 'preparing', 'pressing'
-  FROM legacy_pressing_restore_log l
- WHERE NOT EXISTS (SELECT 1 FROM staff_activity_log s
-                    WHERE s.order_id = l.order_id AND s.action = 'route_fix');
-
-UPDATE orders o
-   SET status = 'pressing', working_staff_id = NULL, working_since = NULL
-  FROM legacy_pressing_restore_log l
- WHERE o.id = l.order_id AND o.status = 'preparing' AND l.new_status = 'pressing';
 
 -- =====================================================
 -- 102 — LEGACY شال امريكي: WRONG needs_pressing FLAG, SO 101 COULD NOT SEE THEM
