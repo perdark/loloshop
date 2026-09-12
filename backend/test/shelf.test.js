@@ -617,3 +617,100 @@ test('live: migration 108 carries an open bin when the section below it grows', 
     await query('UPDATE shelf_sections SET slot_count = 10 WHERE slot_count <> 10');
   }
 });
+
+// ⚠️ ADVANCING OUT OF التجهيز MUST FREE THE خانة TOO — `revert` did it and `performAdvance` did
+// not (found 2026-09-12). `collectPiece` ticks the placement collected and THEN advances, so the
+// shelf's own «تسليم» was always clean; but a preparer who presses «جاهز» on the station board or
+// on the order page goes straight through `performAdvance`, and the placement stayed live. The
+// bin then counts a garment that has already left the shop — «أكو قطع ما تتسكن صح»: measured on
+// prod 2026-09-12, 14 live placements belonged to orders already at «جاهز».
+// Forward is COLLECTED, never deleted: the piece was picked up, and deleting the row would erase
+// who packed it. Backwards (revert) still deletes, because the piece went back up the line.
+test('live: advancing out of التجهيز marks the placement collected and closes the bin', async (t) => {
+  const order = await pickRetailOrder('cap');
+  if (!order) return t.skip('no retail cap at preparing in this snapshot');
+  const admin = await query("SELECT id, role FROM users WHERE role = 'admin' LIMIT 1");
+  const user = { id: admin.rows[0].id, role: 'admin' };
+  const { loadAdvanceRow, performAdvance } = require('../controllers/productionController');
+
+  let placed = null;
+  try {
+    placed = await shelf.placePiece(order.id, user);
+
+    const row = await loadAdvanceRow(order.id);
+    assert.ok(row, 'the piece must be advanceable');
+    await performAdvance(row, user);
+
+    const live = await query(
+      `SELECT COUNT(*)::int n FROM shelf_placements
+        WHERE order_id = $1 AND collected_at IS NULL`,
+      [order.id]
+    );
+    assert.strictEqual(live.rows[0].n, 0, 'no live placement may survive the piece leaving التجهيز');
+
+    const kept = await query(
+      `SELECT collected_by FROM shelf_placements WHERE order_id = $1`,
+      [order.id]
+    );
+    assert.strictEqual(kept.rows.length, 1, 'the placement is KEPT as history, not deleted');
+    assert.strictEqual(kept.rows[0].collected_by, user.id, 'and it names who took it');
+
+    const open = await query(
+      `SELECT COUNT(*)::int n FROM shelf_slot_occupancy
+        WHERE shelf_code = $1 AND slot_index = $2 AND closed_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM shelf_placements sp
+                           WHERE sp.occupancy_id = shelf_slot_occupancy.id
+                             AND sp.collected_at IS NULL)`,
+      [placed.shelf_code, placed.slot_index]
+    );
+    assert.strictEqual(open.rows[0].n, 0, 'an emptied bin must be closed, not left phantom-open');
+  } finally {
+    // Put the row back exactly as it was — adminNumbers.test.js compares two live COUNTs and a
+    // fixture left in the wrong stage straddles them.
+    await query(`DELETE FROM shelf_placements WHERE order_id = $1`, [order.id]);
+    await query(`UPDATE orders SET status = 'preparing' WHERE id = $1`, [order.id]);
+    await query(`DELETE FROM staff_activity_log WHERE order_id = $1 AND to_stage = 'ready'`, [order.id]);
+    await query(
+      `DELETE FROM audit_log WHERE entity = 'order' AND entity_id = $1 AND details->>'to' = 'ready'`,
+      [order.id]
+    );
+    await query(
+      `DELETE FROM shelf_slot_occupancy so
+        WHERE NOT EXISTS (SELECT 1 FROM shelf_placements sp WHERE sp.occupancy_id = so.id)`
+    );
+  }
+});
+
+// ⚠️ A PIECE THAT **OPENS** AT التجهيز ARRIVED THERE TOO (owner ruling 2026-09-12:
+// «القبعات لازم تتسكن»). `orderController` starts a plain قبعة at 'preparing' — nothing ever
+// moves it there — so `buildBoard`'s old `arrived` CTE, which asked only for a
+// `to_stage = 'preparing'` activity row, could never see one. Measured on prod that day: 483
+// قبعة standing at التجهيز, **not one ever placed**, section C01–C10 empty since the shelf
+// shipped, and 214 of them not even reachable by the console's search box because their student
+// was out of scope entirely — «وين قبعة فلان؟» had no answer anywhere on the screen.
+// The epoch still applies and must keep applying: a piece older than the shelf is backlog
+// nobody staged and belongs on the ordinary قائمة التجهيز, exactly like an old روب.
+test('live: a piece that OPENED at التجهيز after the epoch is offered for placement', async (t) => {
+  const { rows } = await query(
+    `SELECT o.id, p.type
+       FROM orders o
+       JOIN students st ON st.id = o.student_id
+       JOIN products p  ON p.id  = o.product_id
+       LEFT JOIN shelf_placements sp ON sp.order_id = o.id AND sp.collected_at IS NULL
+      WHERE st.wholesaler_id IS NULL
+        AND o.status = 'preparing'
+        AND sp.order_id IS NULL
+        AND o.created_at >= (SELECT trim(both '"' from value::text)::timestamptz
+                               FROM site_settings WHERE key = 'shelf_epoch')
+        AND NOT EXISTS (SELECT 1 FROM staff_activity_log l
+                         WHERE l.order_id = o.id AND l.to_stage IS NOT NULL)
+      LIMIT 1`
+  );
+  if (!rows.length) return t.skip('no piece opened at التجهيز since the epoch on this snapshot');
+
+  const board = await shelf.buildBoard();
+  const item = board.inbox.find((i) => i.order_id === rows[0].id);
+  assert.ok(item, 'a piece with no stage history must still reach «وصلت توّا»');
+  assert.ok(item.suggestion, 'and it must be told where to go, not shown as «بلا خانة»');
+  assert.strictEqual(item.piece_type, rows[0].type);
+});

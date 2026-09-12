@@ -8,7 +8,7 @@ const { addClient, publish } = require('../lib/eventBus');
 // otherwise the shelf shows a bin occupied by something no longer physically there.
 // NB lib/shelf.js lazily requires THIS module back (for performAdvance) — that cycle is
 // resolved by its require sitting inside the function, not at module top level.
-const { releaseForOrder } = require('../lib/shelf');
+const { releaseForOrder, collectForOrder } = require('../lib/shelf');
 
 // ---------- SSE stream: live presence + order events for staff/admin ----------
 function issueEventsTicket(req, res) {
@@ -1081,9 +1081,21 @@ async function getOrder(req, res) {
   // stage a piece skipped legitimately (needs_pressing = FALSE routes التطريز straight to
   // التجهيز, and a plain cap starts AT التجهيز) simply has no row, which is the honest answer
   // to «ليش ما مر بالكوي؟».
+  //
+  // ⚠️ IT READS BOTH LEDGERS, AND IT HAS TO (2026-09-12). `staff_activity_log` is what every
+  // request path writes, but it is not the only thing that has ever moved an order: the
+  // 2026-08-31 `npm run stranded-orders -- --fix` run moved **474** pieces (design_complete →
+  // pressing, embroidery → pressing) writing ONLY an `audit_log` row, because
+  // `scripts/stranded-orders.js` predates this card. Those pieces then sat at الكوي with a
+  // history that stops one stage short, which reads on the floor as «وصلت لهنا لوحدها — محد
+  // نطاها تم ولا رجّعها». An audit row is included only when no activity row already tells the
+  // same story, so an ordinary move is never printed twice.
+  //
+  // The audit half is deliberately NOT the primary source: it carries no `action`, so a
+  // direction has to be derived, and payroll counts activity rows, never these.
   const stageHistory = await query(
     `SELECT sal.action, sal.from_stage::text AS from_stage, sal.to_stage::text AS to_stage,
-            sal.created_at, su.name AS staff_name
+            NULL::jsonb AS details, sal.created_at, su.name AS staff_name
        FROM staff_activity_log sal
        LEFT JOIN users su ON su.id = sal.user_id
       WHERE sal.order_id = $1
@@ -1092,18 +1104,65 @@ async function getOrder(req, res) {
         -- orders and a piece id is not one), so without this filter «منو نقلها؟» on the وشاح
         -- would print the SHAWL's stage moves as the sash's own. See performShawlAdvance.
         AND sal.action <> 'advance_shawl'
-      ORDER BY sal.created_at ASC`,
+     UNION ALL
+     -- The moves that exist ONLY in audit_log. «تصحيح مسار آلي» is used only when the actor is
+     -- NULL: the card prints that phrase and ignores the name, so mapping a human's row to it
+     -- would hide the very person the card exists to show. (No backticks in this comment — it
+     -- lives inside a JS template literal.)
+     SELECT CASE WHEN al.actor_id IS NULL THEN 'route_fix'
+                 WHEN al.action = 'status_revert' THEN 'revert'
+                 ELSE 'advance' END AS action,
+            al.details->>'from' AS from_stage, al.details->>'to' AS to_stage,
+            NULL::jsonb AS details, al.created_at, au.name AS staff_name
+       FROM audit_log al
+       LEFT JOIN users au ON au.id = al.actor_id
+      WHERE al.entity = 'order' AND al.entity_id = $1
+        AND al.action IN ('status_change', 'status_revert')
+        AND al.details->>'to' IS NOT NULL
+        AND NOT EXISTS (
+              SELECT 1 FROM staff_activity_log t
+               WHERE t.order_id = al.entity_id
+                 AND t.action <> 'advance_shawl'
+                 AND t.to_stage::text = al.details->>'to'
+                 AND t.created_at BETWEEN al.created_at - INTERVAL '5 seconds'
+                                      AND al.created_at + INTERVAL '5 seconds')
+     UNION ALL
+     -- The WORK, which never changed a stage and therefore never had a to_stage to be found by.
+     SELECT al.action, NULL, NULL, al.details, al.created_at, au.name
+       FROM audit_log al
+       LEFT JOIN users au ON au.id = al.actor_id
+      WHERE al.entity = 'order' AND al.entity_id = $1
+        AND al.action IN ('embroidery_zone', 'tailor_complete', 'tailor_reopen',
+                          'return_to_customer', 'approve_design', 'reject_design')
+      ORDER BY created_at ASC`,
     [id]
   );
+  const ZONE_LABEL_BY_KEY = Object.fromEntries(ZONE_DEFS.map((z) => [z.key, z.label]));
+  const kindOf = (action) =>
+    action === 'revert' ? 'revert'
+    : action === 'route_fix' ? 'route_fix'
+    : action === 'embroidery_zone' ? 'zone'
+    : action === 'tailor_complete' || action === 'tailor_reopen' ? 'tailor'
+    : action === 'return_to_customer' ? 'return'
+    : action === 'approve_design' || action === 'reject_design' ? 'design'
+    : 'advance';
   const stage_history = stageHistory.rows.map((r) => ({
+    kind: kindOf(r.action),
     action: r.action,
     from_stage: r.from_stage,
     to_stage: r.to_stage,
-    from_label: STATUS_LABEL_AR[r.from_stage] || r.from_stage,
-    to_label: STATUS_LABEL_AR[r.to_stage] || r.to_stage,
+    from_label: r.from_stage ? (STATUS_LABEL_AR[r.from_stage] || r.from_stage) : null,
+    to_label: r.to_stage ? (STATUS_LABEL_AR[r.to_stage] || r.to_stage) : null,
+    zone_label: r.details && r.details.zone
+      ? (ZONE_LABEL_BY_KEY[r.details.zone] || r.details.zone)
+      : null,
+    done: r.details && typeof r.details.done === 'boolean' ? r.details.done : null,
     staff_name: r.staff_name || null,
     at: r.created_at,
   }));
+  // «اشتغل عليها» — distinct names in first-appearance order. A route_fix has no name and
+  // contributes none, which is the point: nobody is listed for a move nobody made.
+  const workers = [...new Set(stage_history.map((h) => h.staff_name).filter(Boolean))];
 
   // ⚠️ NEVER OFFER A BUTTON THE POST WILL REFUSE. `advance` used to ask only
   // canStaffTransition, which knows about ROLES and nothing about the order's own state — so
@@ -1169,6 +1228,7 @@ async function getOrder(req, res) {
       can_see_design: canSeeDesign,
       embroidery_zones,
       stage_history,
+      workers,
       available_actions,
       // The UI never re-derives visibility from roles — it reads this layout discriminator
       // (mirrors the available_actions single-source pattern).
@@ -1240,6 +1300,14 @@ async function performAdvance(order, user) {
        WHERE id = $2 RETURNING id, status`,
       [to, order.id]
     );
+    // Leaving التجهيز FORWARDS means the garment was picked up — tick its placement collected
+    // and close the خانة if that emptied it. `revert` has done the mirror of this since the
+    // shelf shipped; this half was missing, so a preparer pressing «جاهز» anywhere other than
+    // the shelf's own «تسليم» left the bin counting a piece that had already gone out the door.
+    // Idempotent, which is why shelf.collectPiece can keep ticking the row before calling here.
+    if (from === 'preparing') {
+      await collectForOrder(order.id, user.id, client);
+    }
     await client.query(
       `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
        VALUES ($1, 'status_change', 'order', $2, $3)`,

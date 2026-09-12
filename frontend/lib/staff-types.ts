@@ -400,14 +400,25 @@ export interface ProductionOrderDetail {
    * usually the routing rule, not a lost record. Read the gap, don't fill it.
    */
   stage_history?: {
+    /** What KIND of event this was — the card picks its verb from this, never from `action`.
+     *  A stage move is 'advance' / 'revert' / 'route_fix'; the rest are work that never
+     *  changed a stage and therefore has no from/to at all. */
+    kind: "advance" | "revert" | "route_fix" | "zone" | "tailor" | "return" | "design";
     action: string;
     from_stage: string | null;
-    to_stage: string;
+    to_stage: string | null;
     from_label: string | null;
-    to_label: string;
+    to_label: string | null;
+    /** «الوشاح — جهة الاسم» on a `zone` row, else null. */
+    zone_label: string | null;
+    /** `zone` only: TRUE the tick was set, FALSE it was un-ticked. */
+    done: boolean | null;
     staff_name: string | null;
     at: string;
   }[];
+  /** Everyone who touched this piece, distinct, in the order they first appear in the log.
+   *  A `route_fix` names nobody and contributes nobody — that is the point. */
+  workers?: string[];
   /** Actions the requesting user may perform on this order right now.
    *  Derived server-side from the same state machine used by POST handlers. */
   available_actions: {

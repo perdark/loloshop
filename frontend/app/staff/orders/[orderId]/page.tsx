@@ -727,15 +727,42 @@ function CopyOrderDetailsButton({
  * بالكوي؟» is answered by the absence itself. The card therefore lists what happened and
  * never invents a step that did not.
  */
+type HistoryRow = NonNullable<ProductionOrderDetail["stage_history"]>[number];
+
+/**
+ * What each person DID, in their own words — never a raw stage pair.
+ *
+ * ⚠️ KEYED ON `kind`, NEVER ON `action`. `action` is the ledger's word and there are two
+ * ledgers behind it (staff_activity_log and audit_log); `kind` is the server's single answer
+ * about what KIND of event happened, so a new audit action only ever needs a new kind here.
+ * A row that changed no stage (a zone tick, الفصال, «رجّعها للطالب») has from_label/to_label
+ * = null on purpose — printing «null ← null» is exactly what keying on the stages would do.
+ */
+const HISTORY_VERB: Record<string, (h: HistoryRow) => string> = {
+  advance: (h) => (h.from_label ? `قدّمها: ${h.from_label} ← ${h.to_label}` : `قدّمها إلى ${h.to_label}`),
+  revert: (h) => (h.from_label ? `رجّعها: ${h.from_label} ← ${h.to_label}` : `رجّعها إلى ${h.to_label}`),
+  zone: (h) => (h.done === false ? `ألغى تطريز ${h.zone_label}` : `طرّز ${h.zone_label}`),
+  tailor: (h) => (h.action === "tailor_reopen" ? "رجّع الفصال" : "أنهى الفصال"),
+  return: () => "رجّعها للطالب",
+  design: (h) => (h.action === "reject_design" ? "رفض التصميم" : "اعتمد التصميم"),
+  route_fix: (h) =>
+    h.from_label ? `تصحيح مسار: ${h.from_label} ← ${h.to_label}` : "تصحيح مسار آلي",
+};
+
 function StageHistoryCard({
   history,
+  workers,
 }: {
   history: NonNullable<ProductionOrderDetail["stage_history"]>;
+  workers?: string[];
 }) {
   return (
     <article className="rounded-2xl border border-line bg-surface p-4 shadow-[var(--shadow-soft)]">
       <h2 className="text-sm font-bold text-ink">سجل المراحل</h2>
-      <p className="mt-0.5 text-xs text-ink-soft">منو نقل القطعة، ومن وين لوين، وشوكت.</p>
+      <p className="mt-0.5 text-xs text-ink-soft">منو اشتغل عليها، وشنو سوّى، وشوكت.</p>
+      {!!workers?.length && (
+        <p className="mt-2 text-xs text-ink">اشتغل عليها: {workers.join("، ")}</p>
+      )}
       {history.length === 0 && (
         // ⚠️ AN EMPTY LOG IS AN ANSWER, NOT A BLANK. Measured on prod 2026-08-31: 293 pieces
         // sit at التجهيز/جاهز with no log line at all — every one of them created on or
@@ -753,20 +780,20 @@ function StageHistoryCard({
             key={`${h.at}-${i}`}
             className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 rounded-xl bg-surface-sink px-3 py-2 text-xs"
           >
-            <span className="font-semibold text-ink">
-              {h.from_label ? `${h.from_label} ← ${h.to_label}` : h.to_label}
+            <span
+              className={`font-semibold ${h.kind === "revert" || h.kind === "return" ? "text-danger" : "text-ink"}`}
+            >
+              {(HISTORY_VERB[h.kind] ?? HISTORY_VERB.advance)(h)}
             </span>
             <span className="text-ink-soft">
               {/* ⚠️ «غير معروف» IS A BLAME-SHAPED WORD AND `route_fix` IS NOT A PERSON.
-                  Migration 101 moved 248 pieces back into الكوي — pieces opened directly at
-                  التجهيز before the 2026-07-15 routing change, so no worker ever moved them and
-                  none may be named. Those rows carry a NULL user on purpose; printing
-                  «غير معروف» beside them would re-create the exact suspicion the card exists to
-                  end («منو نقلها بدون ما يكويها؟»). Say what happened instead. */}
-              {h.action === "route_fix"
-                ? "تصحيح مسار آلي"
-                : h.staff_name ?? "غير معروف"}{" "}
-              · {formatStamp(h.at)}
+                  Migration 101 moved 248 pieces back into الكوي, and the 2026-08-31
+                  stranded-orders run moved 474 more — pieces nobody touched, corrected by a
+                  script. Those rows carry a NULL user on purpose; printing «غير معروف» beside
+                  them would re-create the exact suspicion the card exists to end («منو نقلها
+                  بدون ما يكويها؟»). The verb already says what happened, so say no name. */}
+              {h.kind === "route_fix" ? "" : `${h.staff_name ?? "غير معروف"} · `}
+              {formatStamp(h.at)}
             </span>
           </li>
         ))}
@@ -1793,7 +1820,7 @@ function ProductionOrderDetailContent() {
               deployed and correct the whole time; it was simply somewhere nobody scrolls. The
               question it answers («منو نقل هذي القطعة؟») is asked while looking at the piece, so
               it has to be the first thing this column says. */}
-          <StageHistoryCard history={stageHistory} />
+          <StageHistoryCard history={stageHistory} workers={detail.workers} />
 
           {/* Student info */}
           <article className="rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-soft)]">

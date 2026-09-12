@@ -35,6 +35,7 @@ const STORAGE_KEY = "loloshop-shelf-console";
 
 interface Persisted {
   search?: string;
+  pieceFilter?: string;
   showAllInbox?: boolean;
 }
 
@@ -63,6 +64,12 @@ export function ShelfConsole() {
   // the auth gate, so there is no SSR hydration mismatch.
   const [board, setBoard] = useState<ShelfBoard | null>(null);
   const [search, setSearch] = useState(() => readPersisted().search ?? "");
+  // ⚠️ THE TYPE FILTER EXISTS BECAUSE ONE PIECE TYPE CAN BURY EVERY OTHER. Caps only entered
+  // التسكين on 2026-09-12 (they OPEN at التجهيز, so nothing ever moved them here and the board
+  // could not see them) — and there were 423 of them against 43 وشاح, 7 شال and 5 روب. Without
+  // a filter the sash a preparer is actually holding is on page four of a list of caps.
+  // «الكل» stays the default: the count in the heading must keep meaning «everything waiting».
+  const [pieceFilter, setPieceFilter] = useState<string>(() => readPersisted().pieceFilter ?? "");
   const [showAllInbox, setShowAllInbox] = useState(() => readPersisted().showAllInbox ?? false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -88,8 +95,8 @@ export function ShelfConsole() {
   usePolling(load, 15000);
 
   useEffect(() => {
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ search, showAllInbox }));
-  }, [search, showAllInbox]);
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ search, showAllInbox, pieceFilter }));
+  }, [search, showAllInbox, pieceFilter]);
 
   // Land the preparer back where they were after opening a piece — the shelf map is long
   // and «رجوع» used to return them to the top of it every time.
@@ -191,7 +198,16 @@ export function ShelfConsole() {
   // the shelf. The 12-item cap is a browsing convenience; while a query is active it would
   // hide the very row that was searched for, so a search always shows every match.
   const inbox = (board?.inbox ?? []).filter((i) => isHit(i.student_id));
-  const shownInbox = showAllInbox || q ? inbox : inbox.slice(0, 12);
+  // Counts are taken BEFORE the type filter so each chip can say how many it holds, and the
+  // «بلا خانة» warning keeps telling the truth about the whole shelf rather than the slice.
+  const inboxByType = new Map<string, { label: string; n: number }>();
+  for (const i of inbox) {
+    const cur = inboxByType.get(i.piece_type) ?? { label: i.piece_label, n: 0 };
+    cur.n += 1;
+    inboxByType.set(i.piece_type, cur);
+  }
+  const filteredInbox = pieceFilter ? inbox.filter((i) => i.piece_type === pieceFilter) : inbox;
+  const shownInbox = showAllInbox || q ? filteredInbox : filteredInbox.slice(0, 12);
   const unplaceable = inbox.filter((i) => !i.suggestion).length;
 
   async function doPlace(item: ShelfInboxItem, target?: { shelf_code: string; slot_index: number }) {
@@ -407,9 +423,35 @@ export function ShelfConsole() {
           ) : null}
         </header>
 
-        {inbox.length === 0 ? (
+        {inboxByType.size > 1 ? (
+          <div className="mb-3 flex flex-wrap gap-2">
+            {[
+              { key: "", label: "الكل", n: inbox.length },
+              ...[...inboxByType.entries()].map(([key, v]) => ({ key, label: v.label, n: v.n })),
+            ].map((c) => (
+              <button
+                key={c.key || "all"}
+                type="button"
+                onClick={() => {
+                  setPieceFilter(c.key);
+                  setShowAllInbox(false);
+                }}
+                className={[
+                  "min-h-11 rounded-full border px-4 text-sm font-bold transition active:scale-95",
+                  pieceFilter === c.key
+                    ? "border-[#1A1A1A] bg-[#1A1A1A] text-white"
+                    : "border-[#ded6c8] bg-white text-[#6b6356]",
+                ].join(" ")}
+              >
+                {c.label} <span className="font-mono">{c.n}</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        {filteredInbox.length === 0 ? (
           <p className="rounded-2xl border border-dashed border-[#ded6c8] bg-[#FFF8F0] px-5 py-6 text-center text-sm text-[#6b6356]">
-            ما وصلت قطع جديدة.
+            {inbox.length === 0 ? "ما وصلت قطع جديدة." : "ما أكو قطع بهذا النوع."}
           </p>
         ) : (
           <>
@@ -450,13 +492,13 @@ export function ShelfConsole() {
                 </div>
               ))}
             </div>
-            {inbox.length > 12 ? (
+            {filteredInbox.length > 12 ? (
               <button
                 type="button"
                 onClick={() => setShowAllInbox((v) => !v)}
                 className="mt-3 min-h-11 w-full rounded-full border border-[#ded6c8] bg-white text-sm font-bold text-[#6b6356]"
               >
-                {showAllInbox ? "عرض أقل" : `عرض الكل (${inbox.length})`}
+                {showAllInbox ? "عرض أقل" : `عرض الكل (${filteredInbox.length})`}
               </button>
             ) : null}
           </>
