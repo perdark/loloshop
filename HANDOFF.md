@@ -429,18 +429,34 @@ longer stranded on a branch · the laptop's loose credentials are filed in
    · **مضر محمد's shift is set to 22:16 → 10:15**, which is why a 10:19 دخول scores 708
      minutes late. The arithmetic is right; `22:16` looks mistyped.
 
-6e. **📊 «الإحصائيات» IS LIVE AT `/admin/analytics` (deployed 2026-09-13) — AND THE BASELINE
-   IT NEEDS STARTS THE DAY IT DEPLOYED.** One screen for: growth, who opens the app (signed-in
-   only), the install floor, and which pages hold attention. ⚠️ **Turning on the app-only gate
-   is still a separate act** — `NEXT_PUBLIC_APP_ONLY=1` in the prod `frontend/.env.local`
-   **plus a rebuild** (`NEXT_PUBLIC_*` is inlined at build time, so `--update-env` does
-   nothing). Deploying the measurement first was deliberate: `site_visits.platform`
-   (migration 110) is the ONLY place a visitor with no account reveals app-vs-browser, and it
-   has no history, so «هل اشتغلت البوابة؟» is only answerable against days collected before
-   the flip. ⚠️ **NULL in that column means «before 110» and is never `web`** — 34k historical
-   rows must stay in «غير معروف», or the browser collapse the gate is judged on is an artefact.
-   ⚠️ The download count on that screen is a **floor** (install + sign-in + notification
-   permission); the real number is only in the Play and App Store consoles.
+6e. **🚧 THE APP-ONLY GATE IS **ON** IN PRODUCTION SINCE 2026-09-13, AND «الإحصائيات» IS LIVE
+   AT `/admin/analytics`.** A browser with no app now lands on `/get-app`. Verified live in a
+   fresh browser: `/` → `/get-app`; **open**: `/join` (+ `/join/<code>`), `/admin`, `/staff`,
+   `/design-support`, `/workshop`, `/tv/`, `/s/ /w/ /d/`, `/get-app`, `/privacy`, `/terms`,
+   `/delete-account`. **Walled**: the whole storefront, `/login`, `/register`, **and
+   `/wholesaler`** — a ممثل on a browser must install the app.
+   · **Both env vars are in the prod `frontend/.env.local`** (backup at `.env.local.bak`):
+     `NEXT_PUBLIC_APP_ONLY=1` **and** `NEXT_PUBLIC_APPSTORE_URL=https://apps.apple.com/app/id6793976053`.
+     ⚠️ **The second one is not optional.** `app/get-app/page.tsx` HIDES the App Store button
+     when it is empty (a button that goes nowhere is worse than none), so turning the gate on
+     without it walls every iPhone student on a page offering only Android — and iOS is the
+     BIGGER half: 381 iPhone vs 336 Android people in the 30 days before the flip.
+   · **Rollback is one line + a rebuild:** drop `NEXT_PUBLIC_APP_ONLY` from that file and run
+     `bash /var/www/loloshop/scripts/deploy.sh`. `NEXT_PUBLIC_*` is inlined at BUILD time, so
+     `pm2 restart --update-env` does nothing — this is never a runtime toggle.
+   · ⚠️ **TESTING IT IN A TAB THAT ALREADY HAD THE SITE OPEN PROVES NOTHING.** The gate is an
+     inline `<head>` script, so it runs on a FULL page load only; a client-side navigation from
+     a document loaded before the deploy never re-runs it. That produced a confident, wrong
+     «the gate does not work» reading during the flip. Grep for the script in `curl` output is
+     also not a test — it ships in every page's HTML and decides at runtime from `pathname`.
+     The only honest check is a fresh tab.
+   · **What `/admin/analytics` is for now:** the app-vs-browser split
+     (`site_visits.platform`, migration 110) is the gate's scoreboard. ⚠️ It has **~1 day of
+     baseline** — the measurement shipped hours before the flip, so before/after is rough.
+     NULL in that column means «before 110» and is never `web`; 34k historical rows must stay
+     in «غير معروف» or the browser collapse is an artefact.
+   · ⚠️ The download figure there is a **floor** (install + sign-in + notification permission);
+     the real count is only in the Play and App Store consoles.
 
 7. **Clean the 12 wholesaler `university_name` rows** — one university is spelled three ways
    («بلاد الرافدين» · «بلاد الرفدين» · «كلية بلاد الرافدين»), same for ديالى. The picker was built
