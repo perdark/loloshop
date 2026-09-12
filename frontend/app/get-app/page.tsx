@@ -265,20 +265,61 @@ function PhoneDuo() {
   );
 }
 
+/**
+ * An iPhone 17 Pro Max, drawn in CSS (owner, 2026-09-13).
+ *
+ * ⚠️ EVERY NUMBER HERE IS A PERCENTAGE OF THE PHONE'S OWN WIDTH, VIA `cqw` — NOT `rem`.
+ * The two phones render at different sizes (the front one ~260px, the tilted one behind it
+ * ~46% of that), and a fixed corner radius that looks right on one is visibly wrong on the
+ * other: too round on the small phone, too square on the large one. `@container` on the
+ * wrapper makes 1cqw = 1% of THIS phone's width, so the frame scales as one object.
+ * Anyone swapping these back to rem will not notice on a laptop and will see it immediately
+ * on the back phone.
+ *
+ * The proportions are the real device's, in points: 440 x 956 screen, 62pt corner radius
+ * (14.1% of width), Dynamic Island 125 x 36 (28.4% x 8.2%). That is what makes it read as a
+ * specific phone instead of "a rounded rectangle" — the ratio is the recognisable part, so
+ * keep it if you retake the screenshots.
+ *
+ * ⚠️ The screenshots are 390x844, a ratio of 0.4621 against this frame's 0.4603 — a 0.4%
+ * crop that `object-cover` absorbs invisibly. Retaking them at 440x956 would be tidier but
+ * is not required; anything much wider WILL crop the sides of the app UI.
+ */
 function PhoneFrame({ src, alt, eager }: { src: string; alt: string; eager?: boolean }) {
   return (
-    <div className="relative aspect-[390/844] w-full rounded-[2.2rem] border-[6px] border-[#22201d] bg-[#22201d] shadow-[var(--shadow-pop)]">
-      <div className="relative h-full w-full overflow-hidden rounded-[1.8rem] bg-beige">
-        <Image
-          src={src}
-          alt={alt}
-          fill
-          sizes="(min-width: 1024px) 280px, 60vw"
-          /* NOT `priority` — a silent no-op in Next 16 (see BrandLogo). */
-          loading={eager ? "eager" : "lazy"}
-          fetchPriority={eager ? "high" : undefined}
-          className="object-cover object-top"
-        />
+    <div className="@container relative w-full">
+      {/* The titanium rail. A three-stop gradient rather than a flat border: the whole
+          reason a CSS phone reads as metal is that the edge catches light differently at
+          the top and bottom. */}
+      <div className="relative aspect-[440/956] w-full rounded-[14.1cqw] bg-[linear-gradient(150deg,#8d8781_0%,#4a4641_18%,#2c2926_50%,#4a4641_82%,#7d7771_100%)] p-[2.4cqw] shadow-[var(--shadow-pop)]">
+        {/* Inner bezel — the black gap between rail and glass. */}
+        <div className="relative h-full w-full overflow-hidden rounded-[11.9cqw] bg-black p-[0.9cqw]">
+          <div className="relative h-full w-full overflow-hidden rounded-[11.2cqw] bg-beige">
+            <Image
+              src={src}
+              alt={alt}
+              fill
+              sizes="(min-width: 1024px) 280px, 60vw"
+              /* NOT `priority` — a silent no-op in Next 16 (see BrandLogo). */
+              loading={eager ? "eager" : "lazy"}
+              fetchPriority={eager ? "high" : undefined}
+              className="object-cover object-top"
+            />
+            {/* Dynamic Island. Sits ON the screenshot on purpose — the captures carry the
+                app's own status bar, and the island is what the eye uses to date the phone. */}
+            <div className="absolute left-1/2 top-[2.6cqw] h-[8.2cqw] w-[28.4cqw] -translate-x-1/2 rounded-full bg-black" />
+          </div>
+        </div>
+      </div>
+
+      {/* Side buttons, in the 17 Pro Max's own arrangement: Action + volume on the left rail,
+          power and Camera Control on the right. Decorative — aria-hidden, no tap targets. */}
+      <div aria-hidden className="pointer-events-none absolute inset-0">
+        <span className="absolute right-[-0.9cqw] top-[16cqw] h-[6.5cqw] w-[1cqw] rounded-l-full bg-[#5b5650]" />
+        <span className="absolute right-[-0.9cqw] top-[26cqw] h-[13cqw] w-[1cqw] rounded-l-full bg-[#5b5650]" />
+        <span className="absolute right-[-0.9cqw] top-[42cqw] h-[13cqw] w-[1cqw] rounded-l-full bg-[#5b5650]" />
+        <span className="absolute left-[-0.9cqw] top-[30cqw] h-[20cqw] w-[1cqw] rounded-r-full bg-[#5b5650]" />
+        <span className="absolute left-[-0.9cqw] top-[56cqw] h-[10cqw] w-[1cqw] rounded-r-full bg-[#5b5650]" />
       </div>
     </div>
   );
