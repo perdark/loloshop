@@ -4,6 +4,7 @@ import { DeepLinkHandler } from "@/components/DeepLinkHandler";
 import { PwaRegistrar } from "@/components/PwaRegistrar";
 import { PushRegistrar } from "@/components/PushRegistrar";
 import { AppBeacon } from "@/components/AppBeacon";
+import { VisitBeacon } from "@/components/VisitBeacon";
 import { AppUpdateGate } from "@/components/AppUpdateGate";
 import { NotificationPermissionPrompt } from "@/components/NotificationPermissionPrompt";
 import { ToasterProvider } from "@/components/providers/ToasterProvider";
@@ -177,6 +178,9 @@ export default function RootLayout({
           exactly the casual opens the daily report is asking about.
         */}
         <AppBeacon />
+        {/* Sessions incl. anonymous, with the path. Skips /admin, /staff and the workshop
+            screens itself — see the exclusion list in the component. */}
+        <VisitBeacon />
         {/*
           The BLOCKING update wall (iOS only, versions below the one that can register for
           push). Mounted before everything else that can draw an overlay so nothing stacks on

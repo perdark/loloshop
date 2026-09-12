@@ -2,7 +2,6 @@ import Link from "next/link";
 import { StudentNav } from "@/components/StudentNav";
 import { SplashIntro } from "@/components/SplashIntro";
 import { DiscountPopup } from "@/components/DiscountPopup";
-import { VisitBeacon } from "@/components/VisitBeacon";
 import { Onboarding } from "@/components/student/Onboarding";
 import { FooterSignature } from "@/components/shop/FooterSignature";
 import { SupportChat } from "@/components/shop/SupportChat";
@@ -24,7 +23,6 @@ export default function StudentLayout({
       <SplashIntro />
       <Onboarding />
       <DiscountPopup />
-      <VisitBeacon />
       {/* One assistant conversation for the whole storefront. The provider renders no DOM of
           its own; it has to sit above BOTH the floating panel and <main> because the home
           page's «عندك سؤال؟» section is a second view of the same thread. */}

@@ -1157,8 +1157,16 @@ CREATE TABLE IF NOT EXISTS site_visits (
   id          BIGSERIAL PRIMARY KEY,
   session_id  TEXT NOT NULL,
   path        TEXT,
+  -- 'android' | 'ios' | 'web'. NULL means «written before migration 110» and must never be
+  -- read as 'web' — see that migration's header.
+  platform    TEXT,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- ⚠️ Migration 110, repeated here on purpose (the 077/080 pattern): CREATE TABLE IF NOT EXISTS
+-- adds nothing to the table prod already has, so THIS is the statement that actually runs on a
+-- deploy. Idempotent, and it invents no data.
+ALTER TABLE site_visits ADD COLUMN IF NOT EXISTS platform TEXT;
+CREATE INDEX IF NOT EXISTS site_visits_platform_idx ON site_visits (created_at DESC, platform);
 CREATE INDEX IF NOT EXISTS idx_site_visits_created_at ON site_visits (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_site_visits_session_created ON site_visits (session_id, created_at DESC);
 
