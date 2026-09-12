@@ -28,9 +28,14 @@
  *    link opens the app and DeepLinkHandler routes it. They stay allowed here anyway, because
  *    that is only true once the store build lands and App Links verify, and because the
  *    workshop/TV screens still run in a real browser.)
+ *  • /staff, /design-support — the destinations those key portals hand off to. See the note
+ *    on them below; allowing /s/ and /d/ without these makes the login work and the app not.
  *  • /privacy, /terms, /delete-account — Apple and Google require these reachable on the
  *    open web. Gating them risks a rejection on the next submission.
  *  • /get-app — the redirect target itself. Omitting it is an infinite redirect loop.
+ *
+ * NOT exempt, deliberately: /wholesaler and the whole student storefront. Reps and students
+ * are the audience the app exists for (owner, 2026-09-12: staff only).
  */
 export const BROWSER_ALLOWED_PREFIXES = [
   "/admin",
@@ -49,6 +54,23 @@ export const BROWSER_ALLOWED_PREFIXES = [
   "/s/",
   "/w/",
   "/d/",
+  // ⚠️ /staff AND /design-support ARE THE OTHER HALF OF /s/ AND /d/ — a portal key without
+  // its destination is a dead end, not an entrance. `/s/<key>` signs a staff member in and
+  // immediately `router.replace("/staff")` (app/s/[key]/page.tsx:68); `/d/<key>` does the same
+  // to "/design-support" (app/d/[key]/page.tsx:71). With only the key path allowed, every
+  // staff member and every designer would be bounced to the store ONE NAVIGATION AFTER a
+  // successful login — with a valid session, from a page that had just worked. Owner ruling
+  // 2026-09-12: «make anyone opening loloshop from browser download app EXCEPT the staff».
+  // (/workshop already had its pair; that is why the workshop portal never showed this.)
+  "/staff",
+  "/design-support",
+  // ⚠️ /login IS STILL GATED, ON PURPOSE, AND THAT SHAPES HOW STAFF GET IN. A staff member
+  // with no session who opens /staff is sent to /login by the page itself — a CLIENT-side
+  // replace, so this head script does not re-run and they can sign in there — but a RELOAD
+  // on /login bounces them to /get-app. Their entrance is the `/s/<key>` portal link, which
+  // is why it is allowed above and why the in-app key field was deleted (2026-08-06:
+  // students were being shown a staff entrance). Allowing /login here would open the door
+  // for every student too, which is the one thing this gate exists to prevent.
   "/privacy",
   "/terms",
   "/delete-account",
@@ -94,8 +116,6 @@ export function buildGateScript(): string {
   // < is a valid JS string escape, so the parsed value is unchanged.
   const config = JSON.stringify({
     allow: BROWSER_ALLOWED_PREFIXES,
-    play: PLAY_URL,
-    ios: APP_STORE_URL,
     bypass: GATE_BYPASS,
   }).replace(/</g, "\\u003c");
 
@@ -119,20 +139,18 @@ try{
   if(C.bypass&&q.get('web')===C.bypass){localStorage.setItem('loloshop_web_ok','1');return;}
   if(localStorage.getItem('loloshop_web_ok')==='1')return;
 }catch(e){}
-var ua=navigator.userAgent||'';
-/* REMOVED 2026-08-08: a '&referrer=join_<code>' tail on the Play URL. "/join" is in the
-   allowlist above, so the loop returns before this line for every /join/* path and the branch
-   had become unreachable dead code — it could only ever have fired for a URL that never
-   reaches here. If /join is ever taken OUT of the allowlist, restore it: it was the only
-   thing that could carry a referral code through an Android install (Play Install Referrer),
-   and it cost nothing. It never had a reader on our side either way. */
-if(/android/i.test(ua)){
-  location.replace(C.play);
-}else if(/iphone|ipad|ipod/i.test(ua)||(/Macintosh/.test(ua)&&navigator.maxTouchPoints>1)){
-  /* iPadOS reports itself as Macintosh; maxTouchPoints is what separates it from a real Mac. */
-  location.replace(C.ios||'/get-app');
-}else{
-  location.replace('/get-app');
-}
+/* ONE DESTINATION FOR EVERY DEVICE — owner ruling 2026-09-12.
+   Until today this sniffed the UA and sent Android straight to Play and iPhone straight to the
+   App Store, so the phone visitor — who is nearly all of our traffic — never saw a LoloShop
+   page at all: the shop's own landing page existed only for laptops, which almost nobody uses.
+   /get-app is now the real marketing page and carries both store buttons, so the sniff is gone
+   and with it the two ways it could misfire (an Android WebView below 105 that the bridge test
+   could not see, and iPadOS reporting itself as Macintosh).
+   ⚠️ REMOVED 2026-08-08 and still not needed: a '&referrer=join_<code>' tail on the Play URL.
+   "/join" is in the allowlist above, so this line is unreachable for every /join/* path. If
+   /join is ever taken OUT of the allowlist, restore it on the Play button in app/get-app —
+   Play Install Referrer is the only thing that can carry a referral code through an Android
+   install, and iOS has no equivalent at all. */
+location.replace('/get-app');
 }catch(e){}})();`;
 }
