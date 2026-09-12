@@ -12,6 +12,7 @@ const { moneyRevealOk, moneyGateConfigured, setMoneyGate, rankFor, RANKS } = req
 const { assertPasswordOk } = require('../lib/password');
 const { revokeUserDevices } = require('../lib/trustedDevice');
 const appPresence = require('../lib/appPresence');
+const shopAnalytics = require('../lib/shopAnalytics');
 const pushBroadcast = require('../lib/pushBroadcast');
 
 const SALT_ROUNDS = 10;
@@ -988,6 +989,19 @@ async function setMoneyGateSecret(req, res) {
 }
 
 /**
+ * GET /api/admin/usage — «الإحصائيات»: نمو المحل، منو يفتح التطبيق، ووين يقضون وقتهم.
+ *
+ * ⚠️ Read-only and money-free. lib/shopAnalytics.js's header explains why the four sources it
+ * returns are never summed; the page labels each block with its own start date for the same
+ * reason. Same `days` clamp as app-stats so the two pages cannot disagree about "last month".
+ */
+async function usageStats(req, res) {
+  const raw = Number(req.query.days);
+  const days = Number.isInteger(raw) && raw > 0 && raw <= 180 ? raw : 30;
+  res.json({ data: await shopAnalytics.buildOverview({ days }) });
+}
+
+/**
  * GET /api/admin/app-stats — «إحصائيات التطبيق على المنصتين».
  *
  * ⚠️ Two sources that measure DIFFERENT things and are never summed: `device_tokens` is a floor
@@ -1068,7 +1082,7 @@ async function pushHistory(req, res) {
 }
 
 module.exports = {
-  appStats, pushAudience, pushSend, pushHistory,
+  appStats, usageStats, pushAudience, pushSend, pushHistory,
   analytics, accounting, updateOrderCost, updateCheckoutGroup,
   listWholesalers, createWholesaler, updateWholesaler, updateDeadline, updatePricing, deleteWholesaler,
   getWholesalerSashConfig, updateWholesalerSashConfig,

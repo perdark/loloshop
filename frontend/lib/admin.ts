@@ -246,6 +246,69 @@ export async function getAppStats(days = 30): Promise<AppStats> {
   return data.data;
 }
 
+// ─── «الإحصائيات» — نمو المحل، منو يفتح التطبيق، ووين يقضون وقتهم ────────────
+// ⚠️ FOUR SOURCES, NEVER SUMMED. backend/lib/shopAnalytics.js's header is the contract:
+//   · accounts/growth → `users` + `orders`, complete since the shop opened
+//   · reach/usage     → `app_opens`, SIGNED-IN ONLY and only since 2026-08-25
+//   · pages           → `site_visits`, sessions incl. anonymous, NO platform, student routes only
+//   · installs        → `device_tokens`, a FLOOR on installs and never «تنزيلات»
+// `since` carries each table's own start date so a young table never renders as a flat zero.
+
+export interface UsageStats {
+  window_days: number;
+  today: string;
+  live: {
+    /** Distinct sessions in the last 30 min — the same figure the TV board shows. */
+    sessions_now: number;
+    sessions_today: number;
+    /** Signed-in people who opened today. Not comparable to sessions — different source. */
+    people_today: number;
+    opens_today: number;
+  };
+  accounts: { role: string; accounts: number }[];
+  growth: {
+    by_month: { month: string; students: number; reps: number; total: number }[];
+    orders_by_week: { week: string; orders: number; students: number }[];
+  };
+  reach: {
+    /** Lifetime, deliberately not windowed: «كم واحد من حساباتنا شاف التطبيق ولو مرة». */
+    by_role: { role: string; accounts: number; ever_opened: number; native_users: number }[];
+    by_platform: { platform: string; role: string; people: number; opens: number }[];
+  };
+  installs: {
+    by_platform: { platform: string; devices: number; people: number; anon: number; new_7d: number }[];
+    by_week: { week: string; platform: string; devices: number }[];
+  };
+  pages: {
+    /** `approx_minutes` is an UPPER bound — slices × 5, see the lib header. */
+    top: { path: string; slices: number; sessions: number; approx_minutes: number }[];
+    /** `unknown` = written before migration 110. Never fold it into `web`. */
+    sessions_by_week: {
+      week: string;
+      sessions: number;
+      slices: number;
+      native: number;
+      web: number;
+      unknown: number;
+    }[];
+    /** App vs browser for ANONYMOUS visitors too — the figure that says whether the gate worked. */
+    by_platform: { platform: string; sessions: number; slices: number }[];
+    slice_minutes: number;
+  };
+  since: {
+    app_opens: string | null;
+    visits: string | null;
+    devices: string | null;
+    users: string | null;
+  };
+}
+
+/** Admin-only: everything /admin/analytics draws, in one request. */
+export async function getUsageStats(days = 30): Promise<UsageStats> {
+  const { data } = await api.get<{ data: UsageStats }>("/admin/usage", { params: { days } });
+  return data.data;
+}
+
 // ─── «إرسال إشعار» — an admin-composed push ──────────────────────────────────
 // ⚠️ It cannot be recalled. The server refuses external links, refuses «الكل» unless the
 // recipient count is typed back, and records every send. See backend/lib/pushBroadcast.js.

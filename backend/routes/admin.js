@@ -117,6 +117,7 @@ router.post('/discounts/end', discounts.end);
 // إحصائيات التطبيق — device_tokens (a FLOOR on installs) and app_opens (real usage since 087)
 // side by side. lib/appPresence.js explains why the two are never added together.
 router.get('/app-stats', c.appStats);
+router.get('/usage', c.usageStats);
 
 // «إرسال إشعار» — a notification a HUMAN wrote. Read the reach first, then send; the send
 // writes `notifications` rows and lets lib/pushOutbox.js deliver them.
