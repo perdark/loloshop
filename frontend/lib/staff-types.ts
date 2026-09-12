@@ -403,7 +403,15 @@ export interface ProductionOrderDetail {
     /** What KIND of event this was — the card picks its verb from this, never from `action`.
      *  A stage move is 'advance' / 'revert' / 'route_fix'; the rest are work that never
      *  changed a stage and therefore has no from/to at all. */
-    kind: "advance" | "revert" | "route_fix" | "zone" | "tailor" | "return" | "design";
+    kind:
+      | "advance"
+      | "revert"
+      | "route_fix"
+      | "zone"
+      | "tailor"
+      | "return"
+      | "design"
+      | "edit";
     action: string;
     from_stage: string | null;
     to_stage: string | null;

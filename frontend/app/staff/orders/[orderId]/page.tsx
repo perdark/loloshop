@@ -745,6 +745,11 @@ const HISTORY_VERB: Record<string, (h: HistoryRow) => string> = {
   tailor: (h) => (h.action === "tailor_reopen" ? "رجّع الفصال" : "أنهى الفصال"),
   return: () => "رجّعها للطالب",
   design: (h) => (h.action === "reject_design" ? "رفض التصميم" : "اعتمد التصميم"),
+  // An edit that moved the piece is the ONE case where «عدّل» is not the whole story: it is how
+  // 100 orders walked back to «بانتظار التصميم» with nobody named anywhere (measured 2026-09-12).
+  // from_label is null when the edit left the stage alone, so this reads correctly both ways.
+  edit: (h) =>
+    h.from_label ? `عدّل الطلب ورجّعه: ${h.from_label} ← ${h.to_label}` : "عدّل الطلب",
   route_fix: (h) =>
     h.from_label ? `تصحيح مسار: ${h.from_label} ← ${h.to_label}` : "تصحيح مسار آلي",
 };
@@ -781,7 +786,7 @@ function StageHistoryCard({
             className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 rounded-xl bg-surface-sink px-3 py-2 text-xs"
           >
             <span
-              className={`font-semibold ${h.kind === "revert" || h.kind === "return" ? "text-danger" : "text-ink"}`}
+              className={`font-semibold ${h.kind === "revert" || h.kind === "return" || (h.kind === "edit" && h.from_label) ? "text-danger" : "text-ink"}`}
             >
               {(HISTORY_VERB[h.kind] ?? HISTORY_VERB.advance)(h)}
             </span>

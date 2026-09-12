@@ -497,6 +497,69 @@ longer stranded on a branch · the laptop's loose credentials are filed in
 
 ## 💣 LANDMINES
 
+- **⚠️ A ONE-TIME CORRECTION COPIED INTO `db/schema.sql` MUST KEEP ITS UPDATE KEYED ON THE RUN
+  THAT SELECTED THE ROWS (2026-09-12).** `scripts/deploy.sh` applies that file on EVERY deploy,
+  so the whole 077/080/093/101 «repeated in schema.sql» convention rests on each copy being
+  idempotent — and the copy is the one that actually runs. 101's copy had been restructured into
+  three statements and the last one drove `UPDATE orders SET status='pressing'` off the whole
+  `legacy_pressing_restore_log` **table** (307 permanent rows) guarded by nothing but
+  `o.status='preparing'`. Every deploy therefore dragged back to الكوي every one of those orders
+  that المكوجي had since pressed and sent to التجهيز. **49 orders, 46 of them physically in a bin
+  on رف التجهيز.** Fixed: one DO block, `WHERE l.batch_id = v_batch`. Repaired on prod by
+  migration **109**, which is deliberately **NOT** repeated in schema.sql — a second re-runnable
+  statement over the same rows is how this happens again.
+  · ⚠️ **IT WAS SILENT FROM EVERY ANGLE.** The `route_fix` INSERT above it is guarded on
+    `NOT EXISTS(action='route_fix')`, so the second move was never logged, and no audit row is
+    written either. «رجعت للكوي ومحد رجّعها» was literally true of every ledger.
+  · **How it was found, and the technique worth keeping:** identical-microsecond `updated_at`
+    groups are the fingerprint of ONE bulk statement. Correlate them with `git log` commit times
+    and the deploy is named — 11 rows 09-07 23:51 · 6 rows 09-08 16:55 · 14 rows 09-08 23:29,
+    matching `1e61191` · `cd64150` · `8b69c22`. Never read the migration FILE and assume the copy
+    agrees; diff them.
+
+- **⚠️ `stage_history` READS BOTH LEDGERS AND MUST KEEP DOING SO (2026-09-12).** It used to read
+  `staff_activity_log` only, and that table is not where most WORK lives. Measured on prod:
+  **1,052** zone ticks · **482** tailor completions · **147** design approvals/rejections · **96**
+  «إرجاع للطالب» · **474** moves by the 2026-08-31 `stranded-orders --fix` run · **100** staff
+  edits that walked an order back to «بانتظار التصميم» — all in `audit_log`, none on any screen.
+  The dedupe is a ±5s / same-`to_stage` NOT EXISTS, so an ordinary advance (which writes BOTH) is
+  printed once. Two opposite ways to break it: drop the audit half and the gaps come back; let it
+  through unfiltered and every transition doubles.
+  · ⚠️ **«تصحيح مسار آلي» ONLY WHEN `actor_id IS NULL`.** The card prints that phrase and ignores
+    the name, so mapping a human's audit row to it hides the person the card exists to show.
+  · ⚠️ **An edit whose `status_before` = `status_after` must carry NO from/to labels**, or the
+    card says «رجّعه: الكوي ← الكوي».
+  · `designTeamController.finishJob` moves design_complete → embroidery writing only an
+    `approve_design` audit row — the NAME shows on the card, but payroll and staff goals count
+    `action IN ('advance','approve_design')` in **`staff_activity_log`**, so that designer's work
+    is not counted. Known, not yet fixed.
+
+- **⚠️ LEAVING التجهيز FORWARDS MUST FREE THE خانة TOO — AND AS *COLLECTED*, NOT DELETED
+  (2026-09-12).** `revert` has called `releaseForOrder` since the shelf shipped; `performAdvance`
+  called nothing, so a preparer pressing «جاهز» anywhere other than the shelf's own «تسليم» left
+  the placement live and the bin went on counting a garment already out the door (14 on prod).
+  `shelf.collectForOrder` is the forward twin and the two are **not** interchangeable: a revert
+  DELETEs (the piece went back up the line and was never packed), this one KEEPS the row because
+  «منو غلّفها» is answered from it. Idempotent on purpose — `collectPiece` ticks the row itself
+  and then calls `performAdvance`.
+
+- **⚠️ A PIECE THAT *OPENS* AT التجهيز ARRIVES THERE TOO (owner 2026-09-12: «القبعات لازم
+  تتسكن»).** A plain قبعة is created at `preparing` (`orderController.js`), so nothing ever writes
+  it a `to_stage='preparing'` row — and `buildBoard`'s `arrived` CTE asked for exactly that. Result:
+  **483 قبعة** standing at التجهيز, **not one ever placed**, section C01–C10 empty since the shelf
+  shipped, and **214** of them unreachable even by the console's search box. `arrived` now also
+  takes a retail order at `preparing`, created after the epoch, with no stage history at all. The
+  **epoch still applies and must keep applying** — an older piece is backlog nobody staged. The
+  piece-type chips above the inbox are load-bearing, not decoration: 428 caps against 42 sashes.
+
+- **⚠️ `experimental.viewTransition` IS GONE IN NEXT 16.3 — it is a TYPE ERROR that fails
+  `next build`.** Removed 2026-09-12 while patching the advisories. It used to wrap every client
+  navigation in `document.startViewTransition`, which is what morphed the CSS
+  `view-transition-name` pairs in `ShopProductCard` / `ProductTile` / `ProductMediaGallery` /
+  `StudentNav`. The replacement is React's `<ViewTransition name=…>` — no config, activated
+  automatically by navigation — but it must **wrap** the element, so those four sites still need
+  converting before the morph comes back. Removing the key is not what stopped the animation.
+
 - **⚠️ A GRANT COMPUTED FROM THE ROLE AND A REFUSAL COMPUTED FROM THE ROW MUST AGREE — THIS IS
   THE THIRD TIME (2026-09-08).** `available_actions.advance` asked only `canStaffTransition`,
   which knows about roles and nothing about the order, so an order `advanceBlockReason` blocks

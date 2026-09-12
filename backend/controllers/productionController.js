@@ -1134,6 +1134,21 @@ async function getOrder(req, res) {
       WHERE al.entity = 'order' AND al.entity_id = $1
         AND al.action IN ('embroidery_zone', 'tailor_complete', 'tailor_reopen',
                           'return_to_customer', 'approve_design', 'reject_design')
+     UNION ALL
+     -- Editing an order can SEND IT BACKWARDS, and that move is invisible to both branches
+     -- above: orderEditController writes the new status inside its own UPDATE and records it
+     -- as status_before/status_after on a staff_order_edit row — never a status_change, never
+     -- an activity row. Measured on prod 2026-09-12: 100 orders were walked back to
+     -- «بانتظار التصميم» this way (39 from التطريز, 32 from التجهيز, 29 from الكوي) with
+     -- nothing on any screen to say who did it or why the piece left the line.
+     -- Every edit is listed, not only the ones that moved a stage — «منو غيّر الطلب» is the
+     -- same question as «منو نقله», and no order carries more than five of these.
+     SELECT al.action, al.details->>'status_before', al.details->>'status_after',
+            al.details, al.created_at, au.name
+       FROM audit_log al
+       LEFT JOIN users au ON au.id = al.actor_id
+      WHERE al.entity = 'order' AND al.entity_id = $1
+        AND al.action = 'staff_order_edit'
       ORDER BY created_at ASC`,
     [id]
   );
@@ -1145,14 +1160,23 @@ async function getOrder(req, res) {
     : action === 'tailor_complete' || action === 'tailor_reopen' ? 'tailor'
     : action === 'return_to_customer' ? 'return'
     : action === 'approve_design' || action === 'reject_design' ? 'design'
+    : action === 'staff_order_edit' ? 'edit'
     : 'advance';
   const stage_history = stageHistory.rows.map((r) => ({
     kind: kindOf(r.action),
     action: r.action,
     from_stage: r.from_stage,
     to_stage: r.to_stage,
-    from_label: r.from_stage ? (STATUS_LABEL_AR[r.from_stage] || r.from_stage) : null,
-    to_label: r.to_stage ? (STATUS_LABEL_AR[r.to_stage] || r.to_stage) : null,
+    // An edit that left the piece where it was has status_before === status_after; sending an
+    // identical pair would make the card say «رجّعه: الكوي ← الكوي».
+    from_label:
+      r.from_stage && r.from_stage !== r.to_stage
+        ? (STATUS_LABEL_AR[r.from_stage] || r.from_stage)
+        : null,
+    to_label:
+      r.to_stage && r.to_stage !== r.from_stage
+        ? (STATUS_LABEL_AR[r.to_stage] || r.to_stage)
+        : null,
     zone_label: r.details && r.details.zone
       ? (ZONE_LABEL_BY_KEY[r.details.zone] || r.details.zone)
       : null,
