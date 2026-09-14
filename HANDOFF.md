@@ -526,6 +526,37 @@ longer stranded on a branch · the laptop's loose credentials are filed in
 
 ## 💣 LANDMINES
 
+- **⚠️ «فرّغ الرف» RELEASES, IT NEVER COLLECTS — AND THE STUDENT NEVER SEES A PRODUCTION
+  STAGE (both 2026-09-14, unmerged on `main`'s working tree).** Two halves of one owner report
+  («زر يفرّغ الرف» + «طلاب هوايه يشوفون جاهز للاستلام وهو مو جاهز»), and they constrain each
+  other:
+  · `shelf.clearShelf()` DELETEs live placements and closes empty bins. It must never loop
+    `collectForOrder`: that is the forward twin, it advances, and one press would mark the
+    whole shelf «جاهز للاستلام» — the reported complaint, multiplied. The guard is the LAST
+    test in `test/shelf.test.js` and it asserts the NEGATIVE (no `orders.status` changes).
+    ⚠️ **It must stay in that file.** `node --test` parallelises FILES, so a shelf-wide wipe in
+    its own file ran against the placement tests and left **20 bins `closed_at` while still
+    holding live pieces** — the shelf's core invariant, broken silently, in a dev DB other
+    suites read. Manager/admin only (`requireStaffType()` with no types), and its confirmation
+    copy names what it does NOT do.
+  · ⚠️ **TWO `shelf.test.js` TESTS ASSUMED AN EMPTY شال SHELF and were only passing because of
+    that corruption.** Fixed the same day, both toward measuring reality instead of a blank
+    snapshot: «a communal bin accepts TWO DIFFERENT students» now asserts the **delta** (it was
+    `bin.count === 2` and read «15 !== 2» against a populated bin), and the migration-108 test
+    **parks** any live C07/C11 bin and restores it in `finally` — it used to collide with the
+    real open شال bin through `shelf_slot_one_open` and look like a migration bug. Never DELETE
+    a C bin to make room: it may be holding real pieces.
+  · The bug was never a false `ready`: staff really did advance those pieces. «طلباتي» printed
+    a status **per PIECE**, so a student whose قبعة was packed read «جاهز للاستلام» beside a
+    وشاح still في الكوي. Measured on the prod restore: **180 students** in that state, **176**
+    of them with the mixed pieces inside ONE `checkout_group_id` — which is why the set key is
+    that column. «جاهز للاستلام» is now a fact about the SET; everything else is «قيد التنفيذ».
+  · ⚠️ **NO INTERNAL STAGE MAY REACH A CUSTOMER, AND THAT REVERSED A TEST ON PURPOSE.**
+    `aiChat.test.js` used to demand an unmapped status degrade to its RAW value («ugly is fine»);
+    it now demands the opposite, because the raw value is an internal word too. Both
+    `MyOrdersList.tsx` and `supportContext.customerStatusAr` collapse everything in flight to
+    one phrase — do not "improve" either by reintroducing `ORDER_STATUS_LABELS` / `STATUS_AR`.
+
 - **⚠️ A ONE-TIME CORRECTION COPIED INTO `db/schema.sql` MUST KEEP ITS UPDATE KEYED ON THE RUN
   THAT SELECTED THE ROWS (2026-09-12).** `scripts/deploy.sh` applies that file on EVERY deploy,
   so the whole 077/080/093/101 «repeated in schema.sql» convention rests on each copy being

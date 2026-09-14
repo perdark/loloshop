@@ -223,6 +223,31 @@ async function collectForOrder(orderId, userId, client) {
   await run(CLOSE_EMPTY_BINS_SQL);
 }
 
+// ── «فرّغ الرف» — wipes the MAP, never the pieces (owner 2026-09-14) ──────────────────────
+// Deletes every LIVE placement and closes every open bin, so every خانة reads empty and each
+// piece falls back into the «وصلت توّا» inbox to be placed again.
+//
+// ⚠️ THIS IS A RELEASE, NOT A COLLECT, AND THAT DISTINCTION IS THE ENTIRE POINT.
+// Nothing advances, no `orders.status` is touched, nothing becomes «جاهز للاستلام» — the
+// garments are still physically at التجهيز and still need packing. A loop over
+// `collectForOrder` here would mark the whole shelf ready in one press, which is precisely
+// the complaint («طلاب هوايه يشوفون جاهز للاستلام وهو مو جاهز») that this button was asked
+// for alongside. Same reasoning as `releaseForOrder` vs `collectForOrder` — read their
+// headers before changing either side.
+//
+// Placements that were ALREADY collected are left alone: they are the «منو غلّفها» history
+// and the «جُمعت» tab reads them. So this is recoverable — re-place each piece — and it
+// destroys no record of anything that actually left the shop.
+async function clearShelf() {
+  return tx(async (client) => {
+    const released = await client.query(
+      'DELETE FROM shelf_placements WHERE collected_at IS NULL'
+    );
+    const closed = await client.query(CLOSE_EMPTY_BINS_SQL);
+    return { released: released.rowCount, bins_closed: closed.rowCount };
+  });
+}
+
 function guardShelfable(order) {
   if (!order) throw new ShelfError(404, 'ERR_NOT_FOUND', 'القطعة غير موجودة');
   if (order.wholesaler_id != null) {
@@ -697,5 +722,6 @@ module.exports = {
   closeSet,
   releaseForOrder,
   collectForOrder,
+  clearShelf,
   buildBoard,
 };

@@ -12,5 +12,11 @@ export default function StaffShelfPage() {
 
   if (loading || !user) return <PageLoader />;
 
-  return <ShelfConsole />;
+  // «فرّغ الرف» wipes the whole map in one press, so it is manager/admin only — mirrors the
+  // route's `requireStaffType()` (no types = manager + admin). This only HIDES the button;
+  // the server is what refuses a preparer who posts the endpoint by hand.
+  const canClear =
+    user.role === "admin" || (user.staff_types ?? []).includes("manager");
+
+  return <ShelfConsole canClear={canClear} />;
 }

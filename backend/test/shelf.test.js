@@ -360,8 +360,22 @@ test('live: a communal bin accepts TWO DIFFERENT students in the same خانة',
   const admin = await query("SELECT id FROM users WHERE role = 'admin' LIMIT 1");
   const user = { id: admin.rows[0].id };
 
+  // ⚠️ ASSERT THE DELTA, NEVER AN ABSOLUTE COUNT. This used to read `bin.count === 2`, which
+  // silently assumed the suggested شال خانة was EMPTY — true only of a dev DB whose shelf has
+  // never been used. Against a correctly populated snapshot the suggestion lands in the open
+  // شال bin that already holds a dozen pieces and the test failed with «15 !== 2», reporting a
+  // problem with the DB rather than with the code. What the communal rule actually promises is
+  // «two more pieces, two different students, same خانة» — so that is what is measured.
+  const binCountBefore = async (code, index) => {
+    const board = await shelf.buildBoard();
+    const bin = board.shelves.find((s) => s.code === code)?.slots.find((s) => s.index === index);
+    return bin ? bin.count : 0;
+  };
+
   try {
     const first = await shelf.placePiece(a.id, user);
+    const countAfterFirst = await binCountBefore(first.shelf_code, first.slot_index);
+
     // Explicit target — the same خانة, a different student. On an exclusive section this is
     // exactly the call that raises ERR_SLOT_TAKEN.
     const second = await shelf.placePiece(b.id, user, {
@@ -374,15 +388,17 @@ test('live: a communal bin accepts TWO DIFFERENT students in the same خانة',
     const bin = board.shelves
       .find((s) => s.code === first.shelf_code)
       .slots.find((s) => s.slot_code === first.slot_code);
-    assert.strictEqual(bin.count, 2);
+    assert.strictEqual(bin.count, countAfterFirst + 1, 'the second student ADDS to the same bin');
     assert.strictEqual(bin.mode, 'shared');
     // A communal bin names no owner — the two students live on its `pieces`, which is what
     // the map searches so «وين شال فلان؟» still resolves.
     assert.strictEqual(bin.student_id, null, 'a communal bin must claim no owner');
-    assert.deepStrictEqual(
-      [...new Set(bin.pieces.map((p) => p.student_name))].length,
+    const placed = bin.pieces.filter((p) => p.order_id === a.id || p.order_id === b.id);
+    assert.strictEqual(placed.length, 2, 'both pieces must be inside the bin');
+    assert.strictEqual(
+      new Set(placed.map((p) => p.student_id)).size,
       2,
-      'both students must be findable inside the bin'
+      'and they must belong to two DIFFERENT students'
     );
   } finally {
     await query('DELETE FROM shelf_placements WHERE order_id = ANY($1)', [[a.id, b.id]]);
@@ -582,6 +598,19 @@ test('live: migration 108 carries an open bin when the section below it grows', 
   const cap = (await shelf.loadSections()).find((x) => x.piece_type === 'cap');
   const shawlSec = (await shelf.loadSections()).find((x) => x.piece_type === 'shawl');
 
+  // ⚠️ THIS TEST MANUFACTURES THE PROD SHAPE, SO IT NEEDS C07 AND C11 FREE — and on a
+  // populated snapshot they are NOT. `shelf_slot_one_open` is a partial unique index on
+  // (shelf_code, slot_index) WHERE closed_at IS NULL, so the real open شال bin at C11 made the
+  // migration's own UPDATE abort with a duplicate key and the failure read as a migration bug.
+  // Park any live C bin for the duration and put it back in `finally` — never DELETE one, it
+  // may be holding real pieces.
+  const parked = await query(
+    `UPDATE shelf_slot_occupancy SET closed_at = now()
+      WHERE shelf_code = 'C' AND closed_at IS NULL AND slot_index IN (7, 11)
+      RETURNING id`
+  );
+  const parkedIds = parked.rows.map((r) => r.id);
+
   try {
     // Rewind to the pre-108 shelf C: قبعة 6 خانات, so شال starts at C07.
     await query('UPDATE shelf_sections SET slot_count = 6 WHERE id = $1', [cap.id]);
@@ -615,6 +644,12 @@ test('live: migration 108 carries an open bin when the section below it grows', 
   } finally {
     await query("DELETE FROM shelf_slot_occupancy WHERE shelf_code = 'C' AND student_id IS NULL AND NOT EXISTS (SELECT 1 FROM shelf_placements sp WHERE sp.occupancy_id = shelf_slot_occupancy.id)");
     await query('UPDATE shelf_sections SET slot_count = 10 WHERE slot_count <> 10');
+    if (parkedIds.length) {
+      await query(
+        'UPDATE shelf_slot_occupancy SET closed_at = NULL WHERE id = ANY($1::int[])',
+        [parkedIds]
+      );
+    }
   }
 });
 
@@ -713,4 +748,109 @@ test('live: a piece that OPENED at التجهيز after the epoch is offered for
   assert.ok(item, 'a piece with no stage history must still reach «وصلت توّا»');
   assert.ok(item.suggestion, 'and it must be told where to go, not shown as «بلا خانة»');
   assert.strictEqual(item.piece_type, rows[0].type);
+});
+
+// ── «فرّغ الرف» ────────────────────────────────────────────────────────────────────────────
+//
+// ⚠️ THIS TEST LIVES IN THIS FILE ON PURPOSE, AND MOVING IT TO ITS OWN FILE BREAKS THE SUITE.
+// `clearShelf` is SHELF-WIDE: it deletes every live placement there is. `node --test` runs
+// files in PARALLEL processes but the tests inside one file in sequence — so as its own file
+// it wiped the shelf out from under the placement tests above, and the damage outlived the
+// run (bins left `closed_at` while still holding live pieces, which `buildBoard` then reads as
+// a هيكل with no خانة). Measured while writing it: «a communal bin accepts TWO DIFFERENT
+// students» started asserting 15 !== 2. Keep it here, keep it LAST.
+//
+// The contract itself is mostly NEGATIVE. The obvious reading of «فرّغ الرف» is «سلّم كل شي»,
+// and that reading would advance hundreds of pieces to «جاهز للاستلام» in one press — the exact
+// complaint the button was asked for alongside. So: placements go, bins close, nothing moves.
+
+async function snapshotShelf() {
+  const placements = await query(
+    `SELECT order_id, occupancy_id, student_id, placed_by, placed_at
+       FROM shelf_placements WHERE collected_at IS NULL`
+  );
+  const bins = await query('SELECT id FROM shelf_slot_occupancy WHERE closed_at IS NULL');
+  return { placements: placements.rows, binIds: bins.rows.map((r) => r.id) };
+}
+
+async function restoreShelf(snap) {
+  // Bins first — a placement points at one, and an OPEN bin is what makes the خانة occupied.
+  if (snap.binIds.length) {
+    await query(
+      'UPDATE shelf_slot_occupancy SET closed_at = NULL WHERE id = ANY($1::int[])',
+      [snap.binIds]
+    );
+  }
+  for (const p of snap.placements) {
+    await query(
+      `INSERT INTO shelf_placements (order_id, occupancy_id, student_id, placed_by, placed_at)
+       VALUES ($1, $2, $3, $4, $5) ON CONFLICT (order_id) DO NOTHING`,
+      [p.order_id, p.occupancy_id, p.student_id, p.placed_by, p.placed_at]
+    );
+  }
+  // The invariant the earlier breakage violated silently. Asserted HERE rather than trusted,
+  // so a bad restore fails this test instead of poisoning every later shelf test.
+  const orphaned = await query(
+    `SELECT COUNT(*)::int n FROM shelf_slot_occupancy so
+      WHERE so.closed_at IS NOT NULL
+        AND EXISTS (SELECT 1 FROM shelf_placements sp
+                     WHERE sp.occupancy_id = so.id AND sp.collected_at IS NULL)`
+  );
+  assert.strictEqual(orphaned.rows[0].n, 0, 'a bin holding live pieces must be OPEN');
+}
+
+test('live: clearShelf empties every خانة and advances NOTHING', async (t) => {
+  const snap = await snapshotShelf();
+  if (!snap.placements.length) return t.skip('no live placements in this snapshot');
+
+  const ids = snap.placements.map((p) => p.order_id);
+  const before = await query(
+    'SELECT id, status FROM orders WHERE id = ANY($1::uuid[]) ORDER BY id',
+    [ids]
+  );
+  const collectedBefore = await query(
+    'SELECT COUNT(*)::int n FROM shelf_placements WHERE collected_at IS NOT NULL'
+  );
+
+  try {
+    const res = await shelf.clearShelf();
+    assert.strictEqual(res.released, snap.placements.length, 'released count');
+    assert.strictEqual(res.bins_closed, snap.binIds.length, 'bins closed count');
+
+    const liveLeft = await query(
+      'SELECT COUNT(*)::int n FROM shelf_placements WHERE collected_at IS NULL'
+    );
+    assert.strictEqual(liveLeft.rows[0].n, 0, 'no live placement may survive');
+
+    const openLeft = await query(
+      'SELECT COUNT(*)::int n FROM shelf_slot_occupancy WHERE closed_at IS NULL'
+    );
+    assert.strictEqual(openLeft.rows[0].n, 0, 'no bin may stay open');
+
+    // ── The half that matters. A collect would have moved these to `ready`. ──
+    const after = await query(
+      'SELECT id, status FROM orders WHERE id = ANY($1::uuid[]) ORDER BY id',
+      [ids]
+    );
+    assert.deepStrictEqual(
+      after.rows,
+      before.rows,
+      'clearShelf must not change a single order status — it releases, it does not collect'
+    );
+
+    // «منو غلّفها» is read off collected placements; this must never touch them.
+    const collectedAfter = await query(
+      'SELECT COUNT(*)::int n FROM shelf_placements WHERE collected_at IS NOT NULL'
+    );
+    assert.strictEqual(
+      collectedAfter.rows[0].n,
+      collectedBefore.rows[0].n,
+      'already-collected placements are history, not shelf state'
+    );
+
+    // A second press on an empty shelf is a clean no-op, not an error.
+    assert.deepStrictEqual(await shelf.clearShelf(), { released: 0, bins_closed: 0 });
+  } finally {
+    await restoreShelf(snap);
+  }
 });

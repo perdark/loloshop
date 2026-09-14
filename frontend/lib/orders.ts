@@ -273,6 +273,11 @@ export async function getOrderBreakdown(
 // ─── Student order tracking ────────────────────────────────────────────────
 export interface StudentOrder {
   id: string;
+  /** The checkout the piece was bought in. NULL on a few legacy rows — those stand alone.
+   *  This is what makes «جاهز للاستلام» a fact about the ORDER rather than about one piece:
+   *  a وشاح still في الكوي and a قبعة already جاهزة share this id, and the screen must read
+   *  the whole group before it tells a student to come to the shop. */
+  checkoutGroupId: string | null;
   productName: string;
   productType: ProductType;
   status: OrderStatus;
@@ -289,6 +294,7 @@ export async function getMyOrders(): Promise<StudentOrder[]> {
   const { data } = await api.get<{ data: Record<string, unknown>[] }>("/orders/mine");
   return (data.data ?? []).map((r) => ({
     id: String(r.id),
+    checkoutGroupId: (r.checkout_group_id as string | null) ?? null,
     productName: String(r.product_name ?? ""),
     productType: r.product_type as ProductType,
     status: r.status as OrderStatus,

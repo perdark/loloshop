@@ -67,6 +67,8 @@ router.post('/shelf/place', requireStaffType('presser', 'preparer'), shelfC.plac
 router.post('/shelf/collect', requireStaffType('presser', 'preparer'), shelfC.collect);
 router.post('/shelf/close-set', requireStaffType('presser', 'preparer'), shelfC.closeSet);
 router.delete('/shelf/placement/:orderId', requireStaffType('presser', 'preparer'), shelfC.releasePlacement);
+// Destructive and shelf-wide → manager/admin only, like patchSection below.
+router.post('/shelf/clear', requireStaffType(), shelfC.clear);
 // Shelf layout config (عدد الخانات / الحد الأقصى) — manager + admin only.
 router.patch('/shelf/sections/:id', requireStaffType(), shelfC.patchSection);
 
