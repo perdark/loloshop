@@ -5,11 +5,33 @@
 // approved. The student's own sentence stays on the order line where it belongs.
 const { styleClause } = require('./calligraphyStyles');
 
+// ⚠️ NEVER ASK THIS MODEL FOR DIACRITICS. «masterful diacritics» used to sit in the line
+// below, and it is the whole of the owner's «الخط زين بس مو زين» (2026-09-14). Measured live
+// against `google/gemini-3.1-flash-image` with the same five names on the same day:
+//   · WITH the old wording — 0 of 5 lines clean. Every name came back vocalised
+//     («مُصَطَفَى عَلِي», «دِيَّالَى» with a shadda that does not belong in the word at all),
+//     and the harakat dragged STRAY GLYPHS in with them: a floating «ص» under مصطفى, a «ء»
+//     dropped inside علي, an extra «مُ» beside حوم, a second «س» under قسم. The model draws
+//     marks at letter weight, so on a sash those become stitched specks nobody ordered.
+//   · WITHOUT it — 5 of 5 clean, correctly spelled, bare. Same model, same price, same
+//     ~16s. The sheet still cropped 5/5 through lib/sheetCrop.js.
+// A student's name on a graduation sash is never vocalised. Asking for «masterful» anything
+// invites the model to decorate, and decoration here means wrong letters.
+//
+// ⚠️ AND THE NIB CLAUSE IS LOAD-BEARING WITH IT. Removing the diacritics ask alone also
+// removed the model's cue to press the pen — the first no-harakat sheet came back thin and
+// wiry, which is worse for embroidery than it looks on screen (a hairline stroke has nothing
+// for the digitizer to fill). The explicit "heavy pressure / never thin" wording below is
+// what puts the weight back; the two changes ship together and should be reverted together.
 const BASE = [
   'Elegant Arabic Thuluth calligraphy, pure black ink on a PURE FLAT WHITE (#FFFFFF) background.',
   'The background must be plain solid white only — no paper texture, no grain, no cream or beige tint,',
-  'no gradient, no shadow, no off-white. Broad-nib pen with strong thick/thin contrast, masterful',
-  'diacritics, balanced spacing.',
+  'no gradient, no shadow, no off-white. Written with a WIDE broad-nib reed pen held with heavy',
+  'pressure — THICK, BOLD, confident strokes with strong thick/thin contrast. The letters must be',
+  'substantial and heavy, never thin, faint, wiry or hairline. Balanced spacing.',
+  'Write every word BARE with NO diacritics at all — no harakat, no fatha, no damma, no kasra,',
+  'no sukun, no shadda, no tanwin, no small marks above or below any letter. Only the letters',
+  'themselves and their own required dots.',
 ].join(' ');
 
 const NEG = 'No underlines, no quotation marks, no frames, no borders, no boxes, no numbering, no Latin text, no watermark.';
@@ -65,7 +87,7 @@ function buildSheetPrompt(items, variant = 'front', style = null) {
     `Write each of the following ${normalized.length} Arabic names as its own separate centered line,`,
     'stacked vertically top to bottom, and SPREAD THEM OUT to fill the whole height of the image.',
     'CRITICAL — line separation: leave a VERY LARGE empty white gap between every consecutive line,',
-    'at least TWICE the height of the text itself. Each name (including all its diacritics, dots and',
+    'at least TWICE the height of the text itself. Each name (including all its dots and',
     'tall letters) must sit completely alone with wide empty margins above and below it — no part of',
     'any name may come near, touch or overlap the line above or below it. The vertical gap BETWEEN',
     'names must be clearly much bigger than the gaps inside a single name, so every line can be cleanly',
