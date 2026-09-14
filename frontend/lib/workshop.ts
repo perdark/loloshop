@@ -123,6 +123,18 @@ export async function updateWorkshopWorker(id: string, body: { is_lead?: boolean
   await api.patch(`/workshop/workers/${id}`, body);
 }
 
+/** Remove a worker from the workshop roster.
+ *
+ *  ⚠️ The API REFUSES (409 `ERR_HAS_HISTORY`) any worker who has ever been paid — the wage
+ *  ledger is ON DELETE CASCADE, so a delete would erase it. Surface that Arabic message with
+ *  `getApiErrorMessage`; it names the counts and tells the admin to use «إيقاف» instead.
+ *  `account_retired` says whether the worker's own login was retired with them (a workshop
+ *  account, `+ عامل`) or left alone (a linked staff member, who still works in the shop). */
+export async function deleteWorkshopWorker(id: string): Promise<{ account_retired: boolean }> {
+  const { data } = await api.delete<{ ok: true; account_retired: boolean }>(`/workshop/workers/${id}`);
+  return { account_retired: !!data.account_retired };
+}
+
 export async function listRates(): Promise<RateRow[]> {
   const { data } = await api.get<{ data: RateRow[] }>("/workshop/rates");
   return data.data || [];
@@ -148,6 +160,25 @@ export async function addWorkshopAdjustment(body: {
 }) {
   const { data } = await api.post("/workshop/adjustments", body);
   return data as { id: string };
+}
+
+/** Fix a recorded piece. `rate` and `amount` are NEVER sent — the server recomputes the wage
+ *  from `workshop_piece_rates` for the (product, operation, audience) triple, the same way the
+ *  insert path does. A partial body is merged over the stored row and validated as a whole.
+ *
+ *  Who may call it: a lead or admin on any entry; a worker on their OWN entry only — that is
+ *  the point of it, a worker who mis-taps «سجّل الشغل» can undo it themselves. */
+export async function updateProductionEntry(id: string, body: {
+  product?: WorkshopProduct; operation?: WorkshopOperation; audience?: WorkshopAudience;
+  qty?: number; work_date?: string; note?: string;
+}) {
+  const { data } = await api.patch(`/workshop/production/${id}`, body);
+  return data.data as WorkshopLedgerEntry;
+}
+
+/** Delete a recorded piece. Hard delete — an audit_log row keeps the evidence. */
+export async function deleteProductionEntry(id: string) {
+  await api.delete(`/workshop/production/${id}`);
 }
 
 export async function getWorkerLedger(id: string): Promise<WorkerSummary> {

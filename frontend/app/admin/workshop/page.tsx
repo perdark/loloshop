@@ -12,8 +12,11 @@ import { formatIQD } from "@/lib/format";
 import { getApiErrorMessage } from "@/lib/api";
 import { CalculationDetails } from "@/components/admin/CalculationDetails";
 import {
-  addWorkshopAdjustment, createWorkshopWorker, getLinkCandidates, getWorkshopDashboard,
-  listRates, recordProductionForWorker, updateWorkshopWorker, upsertRate,
+  ProductionEntryActions, isEditableEntry, type EditableEntry,
+} from "@/components/workshop/ProductionEntryActions";
+import {
+  addWorkshopAdjustment, createWorkshopWorker, deleteWorkshopWorker, getLinkCandidates,
+  getWorkshopDashboard, listRates, recordProductionForWorker, updateWorkshopWorker, upsertRate,
   type PortalMember, type RateRow, type WorkshopDashboard, type WorkshopOperation,
   type WorkshopProduct, type WorkshopWorker, type WorkshopAudience,
 } from "@/lib/workshop";
@@ -38,11 +41,11 @@ export default function AdminWorkshopPage() {
   return <>
     <PageHeader title="الورشة" subtitle="تسجيل القطع وأجور فريق ب" backHref="/admin" />
     <div className="mb-6 flex flex-wrap gap-2">{([['overview','نظرة عامة'],['record','تسجيل القطع'],['rates','أسعار القطع'],['workers','العمّال']] as [Tab,string][]).map(([key,label]) => <button key={key} onClick={() => setTab(key)} className={`min-h-11 rounded-full border px-4 text-sm font-semibold ${tab === key ? 'border-orange-ink bg-orange-ink text-white' : 'border-line bg-surface text-ink'}`}>{label}</button>)}</div>
-    {loading ? <p className="py-16 text-center text-ink-soft">جارٍ التحميل…</p> : fetchError || !data ? <div className="rounded-2xl border border-danger/25 bg-surface px-6 py-12 text-center"><p className="font-bold text-ink">تعذّر تحميل بيانات الورشة</p><p className="mt-1 text-sm text-ink-soft">تحقق من الاتصال ثم أعد المحاولة.</p><Button className="mt-4" onClick={load}>إعادة المحاولة</Button></div> : tab === "overview" ? <Overview data={data} onChanged={load} /> : tab === "record" ? <RecordForm workers={data.workers} rates={rates} onDone={load} /> : tab === "rates" ? <Rates rows={rates} onDone={load} /> : <Workers workers={data.workers} onDone={load} />}
+    {loading ? <p className="py-16 text-center text-ink-soft">جارٍ التحميل…</p> : fetchError || !data ? <div className="rounded-2xl border border-danger/25 bg-surface px-6 py-12 text-center"><p className="font-bold text-ink">تعذّر تحميل بيانات الورشة</p><p className="mt-1 text-sm text-ink-soft">تحقق من الاتصال ثم أعد المحاولة.</p><Button className="mt-4" onClick={load}>إعادة المحاولة</Button></div> : tab === "overview" ? <Overview data={data} rates={rates} onChanged={load} /> : tab === "record" ? <RecordForm workers={data.workers} rates={rates} onDone={load} /> : tab === "rates" ? <Rates rows={rates} onDone={load} /> : <Workers workers={data.workers} onDone={load} />}
   </>;
 }
 
-function Overview({ data, onChanged }: { data: WorkshopDashboard; onChanged: () => Promise<void> }) {
+function Overview({ data, rates, onChanged }: { data: WorkshopDashboard; rates: RateRow[]; onChanged: () => Promise<void> }) {
   const [adjust, setAdjust] = useState<WorkshopWorker | null>(null);
   const [audience, setAudience] = useState<"all" | WorkshopAudience>("all");
   const pieces = audience === "all" ? data.totals.pieces : audience === "retail" ? data.totals.pieces_retail : data.totals.pieces_wholesale;
@@ -65,7 +68,7 @@ function Overview({ data, onChanged }: { data: WorkshopDashboard; onChanged: () 
       </p>
     </CalculationDetails>
     {data.workers.length === 0 ? <EmptyState title="لا يوجد عمّال" message="أضف عمّال الورشة من تبويب العمّال." /> : <div className="overflow-x-auto rounded-2xl border border-line bg-surface"><table className="w-full min-w-[720px] text-sm"><thead className="border-b border-line text-ink-soft"><tr className="[&>th]:px-4 [&>th]:py-3 [&>th]:text-start"><th>العامل</th><th>القطع</th><th>أجور القطع</th><th>الحوافز</th><th>الخصومات</th><th>المستحق</th><th></th></tr></thead><tbody className="divide-y divide-line">{data.workers.map((w) => <tr key={w.id} className="[&>td]:px-4 [&>td]:py-3"><td className="font-semibold text-ink">{w.name}</td><td>{w.pieces}</td><td>{formatIQD(w.production)}</td><td>{formatIQD(w.bonuses)}</td><td>{formatIQD(w.deductions)}</td><td className="font-bold text-orange-ink">{formatIQD(w.payable)}</td><td><Button size="sm" variant="secondary" onClick={() => setAdjust(w)}>حافز / خصم</Button></td></tr>)}</tbody></table></div>}
-    <section><h2 className="mb-3 text-base font-bold text-ink">آخر التسجيلات</h2><div className="divide-y divide-line rounded-2xl border border-line bg-surface px-4">{data.recent.length ? data.recent.map((entry) => <div key={entry.id} className="flex items-center justify-between gap-3 py-3 text-sm"><div><p className="font-semibold text-ink">{entry.worker_name} · {entry.kind === 'production' ? `${entry.operation_label_ar} ${entry.product_label_ar} × ${entry.qty}` : entry.kind === 'bonus' ? 'حافز' : 'خصم'}</p><p className="text-xs text-ink-soft">{entry.reason || entry.entry_date}</p></div><b className={entry.kind === 'deduction' ? 'text-danger' : 'text-ink'}>{entry.kind === 'deduction' ? '−' : '+'}{formatIQD(entry.amount)}</b></div>) : <p className="py-8 text-center text-sm text-ink-soft">لا توجد تسجيلات بعد.</p>}</div></section>
+    <section><h2 className="mb-3 text-base font-bold text-ink">آخر التسجيلات</h2>{/* «تعديل»/«حذف» على سطر القطع فقط — الحافز والخصم يُصحَّحان من «حافز / خصم»، مو من هنا. */}<div className="divide-y divide-line rounded-2xl border border-line bg-surface px-4">{data.recent.length ? data.recent.map((entry) => <div key={entry.id} className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm"><div className="min-w-0 flex-1"><p className="font-semibold text-ink">{entry.worker_name} · {entry.kind === 'production' ? `${entry.operation_label_ar} ${entry.product_label_ar} × ${entry.qty}` : entry.kind === 'bonus' ? 'حافز' : 'خصم'}</p><p className="text-xs text-ink-soft">{entry.reason || entry.entry_date}</p></div><b className={entry.kind === 'deduction' ? 'text-danger' : 'text-ink'}>{entry.kind === 'deduction' ? '−' : '+'}{formatIQD(entry.amount)}</b>{isEditableEntry(entry) && <ProductionEntryActions entry={entry as EditableEntry} rates={rates} onDone={onChanged} />}</div>) : <p className="py-8 text-center text-sm text-ink-soft">لا توجد تسجيلات بعد.</p>}</div></section>
     {adjust && <AdjustmentModal worker={adjust} onClose={() => setAdjust(null)} onDone={async () => { setAdjust(null); await onChanged(); }} />}
   </div>;
 }
@@ -104,9 +107,99 @@ function Rates({ rows, onDone }: { rows: RateRow[]; onDone: () => Promise<void> 
 }
 
 function Workers({ workers, onDone }: { workers: WorkshopWorker[]; onDone: () => Promise<void> }) {
-  const [open,setOpen]=useState(false); const [candidates,setCandidates]=useState<PortalMember[]>([]);
-  async function toggle(w:WorkshopWorker){try{await updateWorkshopWorker(w.id,{active:!w.active});await onDone();}catch(e){toast.error(getApiErrorMessage(e,"تعذّر التحديث"));}}
-  return <div className="space-y-4"><div className="flex justify-end"><Button onClick={async()=>{setCandidates(await getLinkCandidates());setOpen(true);}}>+ عامل</Button></div>{workers.length===0?<EmptyState title="لا يوجد عمّال" message="أضف أول عامل للورشة."/>:<div className="grid gap-3 sm:grid-cols-2">{workers.map((w)=><div key={w.id} className="flex items-center justify-between rounded-2xl border border-line bg-surface p-4"><div><p className="font-bold text-ink">{w.name}</p><p className="text-xs text-ink-soft">{w.active?'نشط':'متوقف'} · {w.pieces} قطعة</p></div><Button size="sm" variant="secondary" onClick={()=>toggle(w)}>{w.active?'إيقاف':'تفعيل'}</Button></div>)}</div>}{open&&<AddWorkerModal candidates={candidates} onClose={()=>setOpen(false)} onDone={async()=>{setOpen(false);await onDone();}}/>}</div>;
+  const [open, setOpen] = useState(false);
+  const [candidates, setCandidates] = useState<PortalMember[]>([]);
+  const [edit, setEdit] = useState<WorkshopWorker | null>(null);
+  const [remove, setRemove] = useState<WorkshopWorker | null>(null);
+  async function toggle(w: WorkshopWorker) {
+    try { await updateWorkshopWorker(w.id, { active: !w.active }); await onDone(); }
+    catch (e) { toast.error(getApiErrorMessage(e, "تعذّر التحديث")); }
+  }
+  return <div className="space-y-4">
+    <div className="flex justify-end"><Button onClick={async () => { setCandidates(await getLinkCandidates()); setOpen(true); }}>+ عامل</Button></div>
+    {workers.length === 0 ? <EmptyState title="لا يوجد عمّال" message="أضف أول عامل للورشة." /> : <div className="grid gap-3 sm:grid-cols-2">{workers.map((w) => <div key={w.id} className="rounded-2xl border border-line bg-surface p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate font-bold text-ink">{w.name}</p>
+          <p className="text-xs text-ink-soft">{w.active ? 'نشط' : 'متوقف'} · {w.pieces} قطعة{w.is_lead ? ' · قائد الورشة' : ''}{w.is_staff ? ' · موظف مرتبط' : ''}</p>
+        </div>
+        <Button size="sm" variant="secondary" onClick={() => toggle(w)}>{w.active ? 'إيقاف' : 'تفعيل'}</Button>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button size="sm" variant="secondary" onClick={() => setEdit(w)}>تعديل</Button>
+        <Button size="sm" variant="danger" onClick={() => setRemove(w)}>حذف</Button>
+      </div>
+    </div>)}</div>}
+    {open && <AddWorkerModal candidates={candidates} onClose={() => setOpen(false)} onDone={async () => { setOpen(false); await onDone(); }} />}
+    {edit && <EditWorkerModal worker={edit} onClose={() => setEdit(null)} onDone={async () => { setEdit(null); await onDone(); }} />}
+    {remove && <DeleteWorkerModal worker={remove} onClose={() => setRemove(null)} onDone={async () => { setRemove(null); await onDone(); }} />}
+  </div>;
+}
+
+/* ⚠️ الاسم ورمز الدخول ينعدّلون بس لعامل الورشة نفسه (`role = 'worker'`). العامل المرتبط
+   بحساب موظف — `is_staff` — اسمه ورمزه يخصّون حساب الموظف، وupdateWorker بالسيرفر يتجاهلهم
+   بصمت. نعطّل الحقلين ونكتب السبب بدل ما نخلي المدير يضغط «حفظ» وما يتغير شي. */
+function EditWorkerModal({ worker, onClose, onDone }: { worker: WorkshopWorker; onClose: () => void; onDone: () => Promise<void> }) {
+  const [name, setName] = useState(worker.name);
+  const [password, setPassword] = useState('');
+  const [isLead, setIsLead] = useState(worker.is_lead);
+  const [active, setActive] = useState(worker.active);
+  const [busy, setBusy] = useState(false);
+  async function save() {
+    const body: { is_lead?: boolean; active?: boolean; name?: string; password?: string } = {};
+    if (isLead !== worker.is_lead) body.is_lead = isLead;
+    if (active !== worker.active) body.active = active;
+    if (!worker.is_staff) {
+      const trimmed = name.trim();
+      if (!trimmed) { toast.error("الاسم مطلوب"); return; }
+      if (trimmed !== worker.name) body.name = trimmed;
+      if (password) {
+        if (password.length < 8) { toast.error("رمز الدخول 8 أحرف على الأقل"); return; }
+        body.password = password;
+      }
+    }
+    if (Object.keys(body).length === 0) { toast.error("ما غيّرت شي"); return; }
+    setBusy(true);
+    try { await updateWorkshopWorker(worker.id, body); toast.success("تم حفظ التعديل"); await onDone(); }
+    catch (e) { toast.error(getApiErrorMessage(e, "تعذّر الحفظ")); }
+    finally { setBusy(false); }
+  }
+  return <Modal open onClose={onClose} title={`تعديل — ${worker.name}`} footer={<><Button variant="ghost" onClick={onClose}>إلغاء</Button><Button onClick={save} loading={busy}>حفظ</Button></>}>
+    <div className="space-y-3">
+      {worker.is_staff
+        ? <p className="rounded-xl bg-surface-sink p-3 text-sm text-ink-soft">هذا عامل مرتبط بحساب موظف — اسمه ورمز دخوله ينعدّلون من صفحة الموظفين، مو من هنا.</p>
+        : <>
+            <Input label="الاسم" value={name} onChange={(e) => setName(e.target.value)} />
+            <Input label="رمز دخول جديد (اتركه فارغ إذا ما تريد تغييره)" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          </>}
+      <Select label="قائد الورشة" value={isLead ? '1' : '0'} onChange={(e) => setIsLead(e.target.value === '1')} options={[{ value: '0', label: 'لا' }, { value: '1', label: 'نعم — يشوف كل العمّال ويسجّل قطعهم' }]} />
+      <Select label="الحالة" value={active ? '1' : '0'} onChange={(e) => setActive(e.target.value === '1')} options={[{ value: '1', label: 'نشط' }, { value: '0', label: 'متوقف — ما يظهر بتسجيل القطع' }]} />
+    </div>
+  </Modal>;
+}
+
+/* ⚠️ الحذف يمسح سطر الورشة بس. السيرفر يرفض أي عامل عنده سجل أجور (409) لأن سجل القطع
+   والحوافز CASCADE وينمسح وياه — نخلي رسالته العربية تطلع مثل ما هي بدل ما نخترع وحدة. */
+function DeleteWorkerModal({ worker, onClose, onDone }: { worker: WorkshopWorker; onClose: () => void; onDone: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const paid = worker.pieces > 0 || worker.bonuses > 0 || worker.deductions > 0;
+  async function confirm() {
+    setBusy(true);
+    try {
+      const { account_retired } = await deleteWorkshopWorker(worker.id);
+      toast.success(account_retired ? "تم حذف العامل وإلغاء حسابه" : "تم شيل العامل من الورشة");
+      await onDone();
+    } catch (e) { toast.error(getApiErrorMessage(e, "تعذّر الحذف")); }
+    finally { setBusy(false); }
+  }
+  return <Modal open onClose={onClose} title={`حذف — ${worker.name}`} footer={<><Button variant="ghost" onClick={onClose}>إلغاء</Button><Button variant="danger" onClick={confirm} loading={busy}>حذف</Button></>}>
+    <div className="space-y-3 text-sm">
+      {paid
+        ? <p className="rounded-xl border border-danger/25 bg-danger/5 p-3 font-semibold text-danger">عند {worker.name} سجل أجور ({worker.pieces} قطعة). الحذف راح ينرفض — استخدم «إيقاف» حتى يبقى السجل محفوظ.</p>
+        : <p className="text-ink">راح ينشال {worker.name} من الورشة نهائياً.{worker.is_staff ? ' حساب الموظف نفسه ما يتأثر — يبقى شغّال بالمحل.' : ' وحسابه بالورشة ما يقدر يسجّل دخول بعدها.'}</p>}
+      <p className="text-ink-soft">إذا تريده يبقى بالسجل بس ما يشتغل، استخدم «إيقاف» بدل الحذف.</p>
+    </div>
+  </Modal>;
 }
 
 function AdjustmentModal({worker,onClose,onDone}:{worker:WorkshopWorker;onClose:()=>void;onDone:()=>Promise<void>}){const[kind,setKind]=useState<'bonus'|'deduction'>('bonus');const[amount,setAmount]=useState('');const[reason,setReason]=useState('');const[busy,setBusy]=useState(false);async function save(){const n=Math.floor(Number(amount));if(n<1||!reason.trim()){toast.error("المبلغ والسبب مطلوبان");return;}setBusy(true);try{await addWorkshopAdjustment({worker_id:worker.id,kind,amount:n,reason:reason.trim()});toast.success(kind==='bonus'?'تمت إضافة الحافز':'تم تطبيق الخصم');await onDone();}catch(e){toast.error(getApiErrorMessage(e,"تعذّر الحفظ"));}finally{setBusy(false);}}return <Modal open onClose={onClose} title={`حافز أو خصم — ${worker.name}`} footer={<><Button variant="ghost" onClick={onClose}>إلغاء</Button><Button onClick={save} loading={busy}>حفظ</Button></>}><div className="space-y-3"><Select label="النوع" value={kind} onChange={(e)=>setKind(e.target.value as 'bonus'|'deduction')} options={[{value:'bonus',label:'حافز'},{value:'deduction',label:'خصم'}]}/><Input label="المبلغ" type="number" min={1} value={amount} onChange={(e)=>setAmount(e.target.value)}/><Input label="السبب" value={reason} onChange={(e)=>setReason(e.target.value)}/></div></Modal>}

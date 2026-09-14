@@ -11,6 +11,9 @@ import {
   type RateRow, type WorkerSummary, type WorkshopOperation, type WorkshopProduct,
   type WorkshopAudience,
 } from "@/lib/workshop";
+import {
+  ProductionEntryActions, isEditableEntry, type EditableEntry,
+} from "@/components/workshop/ProductionEntryActions";
 
 export default function WorkshopWorkerPage() {
   const router = useRouter();
@@ -49,7 +52,7 @@ export default function WorkshopWorkerPage() {
         ) : tab === "record" ? (
           <ProductionForm rates={summary.rates || []} onDone={load} />
         ) : (
-          <Account summary={summary} />
+          <Account summary={summary} onDone={load} />
         )}
       </main>
     </div>
@@ -114,10 +117,15 @@ function ProductionForm({ rates, onDone }: { rates: RateRow[]; onDone: () => Pro
   );
 }
 
-function Account({ summary }: { summary: WorkerSummary }) {
+function Account({ summary, onDone }: { summary: WorkerSummary; onDone: () => Promise<void> }) {
   return <div className="space-y-4">
     <div className="grid grid-cols-2 gap-3"><Metric label="أجور ممثلين" value={formatIQD(summary.production_wholesale)} /><Metric label="أجور تجزئة" value={formatIQD(summary.production_retail)} /><Metric label="حوافز" value={formatIQD(summary.bonuses)} /><Metric label="خصومات" value={formatIQD(summary.deductions)} /><Metric label="المستحق" value={formatIQD(summary.payable)} accent /></div>
-    <section><h2 className="mb-2 font-bold text-ink">آخر الحركات</h2><div className="divide-y divide-line rounded-2xl border border-line bg-surface px-4">{summary.entries.length ? summary.entries.map((e) => <div key={e.id} className="flex items-center justify-between gap-3 py-3 text-sm"><div><p className="font-medium text-ink">{e.kind === "production" ? `${e.operation_label_ar} · ${e.product_label_ar} × ${e.qty} · ${e.audience_label_ar}` : e.kind === "bonus" ? "حافز" : "خصم"}</p><p className="text-xs text-ink-soft">{e.reason || formatDateShort(e.entry_date)}</p></div><b className={e.kind === "deduction" ? "text-danger" : "text-ink"}>{e.kind === "deduction" ? "−" : "+"}{formatIQD(e.amount)}</b></div>) : <p className="py-10 text-center text-sm text-ink-soft">ما في حركات بعد.</p>}</div></section>
+    <section>
+      <h2 className="mb-2 font-bold text-ink">آخر الحركات</h2>
+      {/* ⚠️ «تعديل»/«حذف» تظهر على سطر القطع بس — الحافز والخصم قرار إداري، ما ينشال من
+          هنا. `isEditableEntry` هي الفرق، والمكوّن نفسه يرجع null لو انمرّر إله سطر ثاني. */}
+      <div className="divide-y divide-line rounded-2xl border border-line bg-surface px-4">{summary.entries.length ? summary.entries.map((e) => <div key={e.id} className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm"><div className="min-w-0 flex-1"><p className="font-medium text-ink">{e.kind === "production" ? `${e.operation_label_ar} · ${e.product_label_ar} × ${e.qty} · ${e.audience_label_ar}` : e.kind === "bonus" ? "حافز" : "خصم"}</p><p className="text-xs text-ink-soft">{e.reason || formatDateShort(e.entry_date)}</p></div><b className={e.kind === "deduction" ? "text-danger" : "text-ink"}>{e.kind === "deduction" ? "−" : "+"}{formatIQD(e.amount)}</b>{isEditableEntry(e) && <ProductionEntryActions entry={e as EditableEntry} rates={summary.rates || []} onDone={onDone} />}</div>) : <p className="py-10 text-center text-sm text-ink-soft">ما في حركات بعد.</p>}</div>
+    </section>
   </div>;
 }
 

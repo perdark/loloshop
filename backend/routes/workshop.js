@@ -23,6 +23,7 @@ router.get('/workers', c.requireLead, c.listWorkers);
 router.get('/link-candidates', requireRole('admin'), c.linkCandidates);
 router.post('/workers', requireRole('admin'), c.createWorker);
 router.patch('/workers/:id', requireRole('admin'), c.updateWorker);
+router.delete('/workers/:id', requireRole('admin'), c.deleteWorker);
 
 // Rates — read for lead/admin, write admin-only
 router.get('/rates', c.requireLead, c.listRates);
@@ -30,6 +31,11 @@ router.put('/rates', requireRole('admin'), c.upsertRate);
 
 // Direct production — lead/admin may record for a worker. Money adjustments are admin-only.
 router.post('/production', c.requireLead, c.createProduction);
+// ⚠️ NO `requireLead` ON THESE TWO — the guard is inside (`loadEntryFor`), because a plain
+// worker may fix THEIR OWN wrong entry and nobody else's. A route-level requireLead would
+// send them back to an admin for a typo they made 10 seconds ago.
+router.patch('/production/:id', c.updateProduction);
+router.delete('/production/:id', c.deleteProduction);
 router.post('/adjustments', requireRole('admin'), c.createAdjustment);
 router.get('/workers/:id/ledger', c.requireLead, c.workerLedger);
 

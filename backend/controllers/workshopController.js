@@ -113,7 +113,7 @@ async function insertProduction({ workerId, body, actorUserId }) {
     `INSERT INTO workshop_production_entries
        (worker_id, product, operation, audience, qty, rate, amount, work_date, note, created_by)
      VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8::date,CURRENT_DATE),$9,$10)
-     RETURNING id, qty, rate, amount, audience, work_date, created_at`,
+     RETURNING id, qty, rate, amount, audience, to_char(work_date,'YYYY-MM-DD') AS work_date, created_at`,
     [workerId, body.product, body.operation, body.audience, body.qty, unitRate, amount,
       body.work_date || null, String(body.note || '').trim() || null, actorUserId]
   );
@@ -132,11 +132,19 @@ async function ledgerFor(workerId, limit = 100) {
     [workerId]
   );
   const entries = await query(
+    // ⚠️ `to_char`, NEVER the raw `date` column. `work_date`/`entry_date` are DATE, and pg
+    // hands a DATE back as a JS Date at the SERVER's local midnight — which `JSON.stringify`
+    // then writes as UTC, so prod (Europe/Berlin) turned 2026-09-11 into
+    // "2026-09-10T21:00:00.000Z". The admin list printed that string verbatim, and the edit
+    // modal's date input read its first ten characters and silently moved the day BACK ONE
+    // on every save. Same trap as attendanceController.dateKey (2026-09-08) and the 40,000
+    // IQD deduction before it; `salaryController` has always done it this way.
     `SELECT id, 'production' AS kind, product, operation, audience, qty, rate, amount,
-            work_date AS entry_date, note AS reason, created_at
+            to_char(work_date,'YYYY-MM-DD') AS entry_date, note AS reason, created_at
        FROM workshop_production_entries WHERE worker_id=$1
      UNION ALL
-     SELECT id, kind, NULL, NULL, NULL, 0, 0, amount, entry_date, reason, created_at
+     SELECT id, kind, NULL, NULL, NULL, 0, 0, amount,
+            to_char(entry_date,'YYYY-MM-DD'), reason, created_at
        FROM workshop_adjustments WHERE worker_id=$1
      ORDER BY created_at DESC LIMIT $2`, [workerId, limit]
   );
@@ -240,6 +248,74 @@ async function updateWorker(req, res) {
   res.json({ ok: true });
 }
 
+/**
+ * Remove a worker from the workshop roster (admin only, 2026-09-14).
+ *
+ * ⚠️ THIS REFUSES ANY WORKER WHO HAS EVER BEEN PAID, AND THAT REFUSAL IS THE FEATURE.
+ * Both `workshop_production_entries.worker_id` and `workshop_adjustments.worker_id` are
+ * **ON DELETE CASCADE**, so deleting the roster row silently takes the worker's entire wage
+ * ledger with it — every قطعة they were paid for, every حافز and خصم. Nothing in the app
+ * would show anything missing afterwards; the totals would simply be smaller. «إيقاف»
+ * (active = FALSE) already exists and is the right tool for someone who has left: it keeps
+ * the money history and only stops them being picked on «تسجيل القطع».
+ * So delete is for the row that should never have existed — a typo, a «(تجريبي)» test
+ * worker, an account added twice.
+ *
+ * ⚠️ AND IT NEVER DELETES A `users` ROW. Deleting a user cascades far outside the workshop —
+ * `staff_attendance_records`, `staff_salary_transactions`, `staff_salaries`,
+ * `staff_activity_log`, `staff_payroll_statements` are all ON DELETE CASCADE on `user_id`,
+ * i.e. the person's بصمات and راتب. A workshop-only account (`role = 'worker'`, created by
+ * «+ عامل») is instead SOFT-deleted — `deleted_at` + a `token_version` bump, which is what
+ * middleware/auth.js reads to refuse a login — so the wage history of everyone ELSE, which
+ * points at this user through `created_by`, stays readable. A LINKED STAFF account
+ * (`role = 'staff'`) is not touched at all: that person still works in the shop, they are
+ * just no longer on the workshop roster.
+ */
+async function deleteWorker(req, res) {
+  const { id } = req.params;
+  if (!UUID_RE.test(String(id))) return res.status(400).json({ error: 'معرّف غير صحيح', code: 'ERR_VALIDATION' });
+  const cur = await query(
+    `SELECT w.id, w.user_id, u.name, u.role,
+       (SELECT count(*) FROM workshop_production_entries e WHERE e.worker_id = w.id)::int AS entries,
+       (SELECT count(*) FROM workshop_adjustments a WHERE a.worker_id = w.id)::int AS adjustments
+     FROM workshop_workers w JOIN users u ON u.id = w.user_id WHERE w.id = $1`,
+    [id]
+  );
+  if (!cur.rows.length) return res.status(404).json({ error: 'العامل غير موجود', code: 'ERR_NOT_FOUND' });
+  const worker = cur.rows[0];
+
+  if (worker.entries > 0 || worker.adjustments > 0) {
+    const parts = [];
+    if (worker.entries > 0) parts.push(`${worker.entries} تسجيل قطع`);
+    if (worker.adjustments > 0) parts.push(`${worker.adjustments} حافز/خصم`);
+    return res.status(409).json({
+      error: `ما ينحذف — عند ${worker.name} ${parts.join(' و')} بسجل الأجور. استخدم «إيقاف» حتى يبقى السجل.`,
+      code: 'ERR_HAS_HISTORY',
+    });
+  }
+
+  // A workshop-only login is retired with the roster row; a real staff account never is.
+  const retireAccount = worker.role === 'worker';
+  await tx(async (client) => {
+    await client.query(`DELETE FROM workshop_workers WHERE id = $1`, [id]);
+    if (retireAccount) {
+      await client.query(
+        `UPDATE users SET deleted_at = NOW(), token_version = token_version + 1, updated_at = NOW()
+          WHERE id = $1 AND deleted_at IS NULL`,
+        [worker.user_id]
+      );
+    }
+    await client.query(
+      `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
+       VALUES ($1, 'workshop_worker_deleted', 'workshop_worker', $2, $3)`,
+      [req.user.id, id, JSON.stringify({
+        name: worker.name, user_id: worker.user_id, role: worker.role, account_retired: retireAccount,
+      })]
+    );
+  });
+  res.json({ ok: true, account_retired: retireAccount });
+}
+
 async function linkCandidates(req, res) {
   const { rows } = await query(
     `SELECT u.id,u.name FROM users u WHERE u.role='staff'
@@ -286,6 +362,119 @@ async function createProduction(req, res) {
   res.status(201).json(result.data);
 }
 
+/**
+ * Load a production entry and decide whether this caller may fix it.
+ *
+ * ⚠️ A PLAIN WORKER MAY EDIT AND DELETE THEIR OWN ROW, AND THAT IS DELIBERATE.
+ * The reported problem is «العامل سجّل قطعة غلط وما يكدر يشيلها» — the worker records their
+ * own piecework through `myProduction`, notices the mistake immediately, and today the only
+ * repair is an admin on a laptop. Letting them fix their own row adds NO new power: they can
+ * already create any entry they like for themselves through that same endpoint, so a worker
+ * who wanted to inflate their wage never needed this door. What it removes is a wrong number
+ * sitting in the ledger until someone else has time.
+ * Everyone else's row still needs a lead or an admin, and both paths write an audit row —
+ * this is money, so «منو غيّرها» has to be answerable afterwards.
+ */
+async function loadEntryFor(req, id) {
+  if (!UUID_RE.test(String(id))) return { status: 400, error: 'معرّف غير صحيح', code: 'ERR_VALIDATION' };
+  const { rows } = await query(
+    // `to_char` over `e.*`'s own work_date — the audit row below quotes `before`, and a raw
+    // DATE would put "2026-09-10T21:00:00.000Z" in the shop's only record of what the entry
+    // used to say. The evidence has to read the day a human would.
+    `SELECT e.*, to_char(e.work_date,'YYYY-MM-DD') AS work_date, w.user_id AS worker_user_id
+       FROM workshop_production_entries e
+       JOIN workshop_workers w ON w.id = e.worker_id WHERE e.id = $1`, [id]
+  );
+  if (!rows.length) return { status: 404, error: 'التسجيل غير موجود', code: 'ERR_NOT_FOUND' };
+  const entry = rows[0];
+  const privileged = req.user.role === 'admin' || (req.worker?.is_lead && req.worker.active);
+  const mine = req.worker?.active && req.worker.id === entry.worker_id;
+  if (!privileged && !mine) return { status: 403, error: 'ممنوع', code: 'ERR_FORBIDDEN' };
+  return { entry };
+}
+
+/** Edit a recorded piece. The wage is ALWAYS recomputed from `workshop_piece_rates` —
+ *  a client never sends `rate` or `amount`, exactly as on the insert path. */
+async function updateProduction(req, res) {
+  const found = await loadEntryFor(req, req.params.id);
+  if (found.error) return res.status(found.status).json({ error: found.error, code: found.code });
+  const { entry } = found;
+
+  // Merge over the stored row so a partial edit (just the qty, say) is still validated as a
+  // whole — product/operation/audience are a triple and only the triple has a price.
+  const next = {
+    product:   req.body?.product   ?? entry.product,
+    operation: req.body?.operation ?? entry.operation,
+    audience:  req.body?.audience  ?? entry.audience,
+    qty:       req.body?.qty       ?? entry.qty,
+    work_date: req.body?.work_date ?? null,
+    note:      req.body?.note,
+  };
+  if (typeof next.qty === 'string' && next.qty.trim() !== '') next.qty = Number(next.qty);
+  const invalid = validatePiece(next);
+  if (invalid) return res.status(400).json({ error: invalid, code: 'ERR_VALIDATION' });
+
+  const rate = await query(
+    `SELECT amount FROM workshop_piece_rates WHERE operation = $1 AND product = $2 AND audience = $3`,
+    [next.operation, next.product, next.audience]
+  );
+  const unitRate = n(rate.rows[0]?.amount);
+  const amount = unitRate * next.qty;
+  const note = req.body && 'note' in req.body ? (String(req.body.note || '').trim() || null) : entry.note;
+
+  const updated = await tx(async (client) => {
+    const { rows } = await client.query(
+      `UPDATE workshop_production_entries
+          SET product = $2, operation = $3, audience = $4, qty = $5, rate = $6, amount = $7,
+              work_date = COALESCE($8::date, work_date), note = $9
+        WHERE id = $1
+        RETURNING id, product, operation, audience, qty, rate, amount,
+                  to_char(work_date,'YYYY-MM-DD') AS work_date, note, created_at`,
+      [entry.id, next.product, next.operation, next.audience, next.qty, unitRate, amount,
+       next.work_date || null, note]
+    );
+    await client.query(
+      `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
+       VALUES ($1, 'workshop_entry_updated', 'workshop_entry', $2, $3)`,
+      [req.user.id, entry.id, JSON.stringify({
+        worker_id: entry.worker_id,
+        before: { product: entry.product, operation: entry.operation, audience: entry.audience,
+                  qty: n(entry.qty), rate: n(entry.rate), amount: n(entry.amount),
+                  work_date: entry.work_date, note: entry.note },
+        after:  { product: next.product, operation: next.operation, audience: next.audience,
+                  qty: next.qty, rate: unitRate, amount, note },
+        by_self: req.worker?.id === entry.worker_id,
+      })]
+    );
+    return rows[0];
+  });
+  res.json({ data: { ...updated, qty: n(updated.qty), rate: n(updated.rate), amount: n(updated.amount) } });
+}
+
+/** Remove a recorded piece. Hard delete — the row IS the wage, and a "cancelled" piece that
+ *  still sat in the table would have to be filtered out of `ledgerFor`, `dashboard`,
+ *  `listWorkers` and every SUM in this file, four places that must agree forever. The audit
+ *  row below is the record that it existed, and it carries the whole entry. */
+async function deleteProduction(req, res) {
+  const found = await loadEntryFor(req, req.params.id);
+  if (found.error) return res.status(found.status).json({ error: found.error, code: found.code });
+  const { entry } = found;
+  await tx(async (client) => {
+    await client.query(`DELETE FROM workshop_production_entries WHERE id = $1`, [entry.id]);
+    await client.query(
+      `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
+       VALUES ($1, 'workshop_entry_deleted', 'workshop_entry', $2, $3)`,
+      [req.user.id, entry.id, JSON.stringify({
+        worker_id: entry.worker_id, product: entry.product, operation: entry.operation,
+        audience: entry.audience, qty: n(entry.qty), rate: n(entry.rate), amount: n(entry.amount),
+        work_date: entry.work_date, note: entry.note,
+        by_self: req.worker?.id === entry.worker_id,
+      })]
+    );
+  });
+  res.json({ ok: true });
+}
+
 async function createAdjustment(req, res) {
   const { worker_id, kind, amount, reason, entry_date } = req.body || {};
   if (!UUID_RE.test(String(worker_id)) || !['bonus', 'deduction'].includes(kind) || !validInt(amount, 1) || !String(reason || '').trim() || !validDate(entry_date)) {
@@ -322,10 +511,11 @@ async function dashboard(req, res) {
   const t = totals.rows[0];
   const recent = await query(
     `SELECT p.id,'production' kind,u.name worker_name,p.product,p.operation,p.audience,p.qty,p.rate,p.amount,
-            p.work_date entry_date,p.note reason,p.created_at
+            to_char(p.work_date,'YYYY-MM-DD') entry_date,p.note reason,p.created_at
        FROM workshop_production_entries p JOIN workshop_workers w ON w.id=p.worker_id JOIN users u ON u.id=w.user_id
      UNION ALL
-     SELECT a.id,a.kind,u.name,NULL,NULL,NULL,0,0,a.amount,a.entry_date,a.reason,a.created_at
+     SELECT a.id,a.kind,u.name,NULL,NULL,NULL,0,0,a.amount,
+            to_char(a.entry_date,'YYYY-MM-DD'),a.reason,a.created_at
        FROM workshop_adjustments a JOIN workshop_workers w ON w.id=a.worker_id JOIN users u ON u.id=w.user_id
      ORDER BY created_at DESC LIMIT 100`
   );
@@ -352,8 +542,9 @@ async function workerRows() {
 
 module.exports = {
   attachWorker, requireLead, requireWorkerSelf, portalMembers, portalLogin,
-  mySummary, myProduction, listWorkers, createWorker, updateWorker, linkCandidates,
-  listRates, upsertRate, createProduction, createAdjustment, workerLedger, dashboard,
+  mySummary, myProduction, listWorkers, createWorker, updateWorker, deleteWorker, linkCandidates,
+  listRates, upsertRate, createProduction, updateProduction, deleteProduction,
+  createAdjustment, workerLedger, dashboard,
   validatePiece, insertProduction, ratesMatrix, ledgerFor,
   OPERATIONS, PRODUCTS, PRODUCT_OPS, AUDIENCES, AUDIENCE_LABEL_AR,
 };
