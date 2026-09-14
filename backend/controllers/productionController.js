@@ -9,6 +9,7 @@ const { addClient, publish } = require('../lib/eventBus');
 // NB lib/shelf.js lazily requires THIS module back (for performAdvance) — that cycle is
 // resolved by its require sitting inside the function, not at module top level.
 const { releaseForOrder, collectForOrder } = require('../lib/shelf');
+const { notifyStageChange, notifySetReady } = require('../lib/studentOrderNotices');
 
 // ---------- SSE stream: live presence + order events for staff/admin ----------
 function issueEventsTicket(req, res) {
@@ -1342,11 +1343,13 @@ async function performAdvance(order, user) {
        VALUES ($1, 'advance', $2, $3, $4)`,
       [user.id, order.id, from, to]
     );
-    await client.query(
-      `INSERT INTO notifications (user_id, type, title_ar, body_ar, link)
-       VALUES ($1, 'status_change', $2, $3, '/')`,
-      [order.user_id, 'تحديث حالة الطلب', `حالة طلبك الآن: ${STATUS_LABEL_AR[to]}`]
-    );
+    // Paused — one طقم is several `orders` rows, so this buzzed the student once per PIECE
+    // for the same move, in stage words the customer screens had just stopped printing.
+    // See lib/studentOrderNotices.js.
+    await notifyStageChange(client, { userId: order.user_id, status: to });
+    // The set-level «جاهز للاستلام». On EVERY move, not only into ready: a piece leaving
+    // ready un-finishes a set that was already announced. See lib/studentOrderNotices.js.
+    await notifySetReady(client, order.id);
     return rows[0];
   });
   emitOrderChanged(order.id, updated.status);
@@ -1923,11 +1926,12 @@ async function revert(req, res) {
        VALUES ($1, 'revert', $2, $3, $4)`,
       [req.user.id, id, from, to]
     );
-    await client.query(
-      `INSERT INTO notifications (user_id, type, title_ar, body_ar, link)
-       VALUES ($1, 'status_change', $2, $3, '/')`,
-      [order.user_id, 'تحديث حالة الطلب', `حالة طلبك الآن: ${STATUS_LABEL_AR[to]}`]
-    );
+    // Paused — and a revert is the one the student least needs to hear: it announces the
+    // shop walking its own work backwards. See lib/studentOrderNotices.js.
+    await notifyStageChange(client, { userId: order.user_id, status: to });
+    // A revert out of ready is exactly the case this re-arms: the student was told the طقم was
+    // finished and it no longer is, so the next completion must announce again.
+    await notifySetReady(client, id);
     return rows[0];
   });
   emitOrderChanged(id, updated.status);

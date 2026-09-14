@@ -1140,6 +1140,26 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_address TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_phone   TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_notes   TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivered_by     UUID REFERENCES users(id) ON DELETE SET NULL;
+
+-- ── 111: «طلبك جاهز للاستلام» is sent ONCE per set ───────────────────────────────────────
+-- ⚠️ THE BACKFILL LIVES INSIDE THE `IF NOT EXISTS` BRANCH ON PURPOSE. This file is applied on
+-- EVERY deploy by scripts/deploy.sh, and NULL here means «this student has not been told yet».
+-- A bare `UPDATE ... WHERE ready_notified_at IS NULL AND status IN ('ready','delivered')`
+-- would read as idempotent and would instead silently SWALLOW the notification for every set
+-- that reached ready between two deploys. Keyed on the column's own creation it runs once,
+-- ever. Same shape of trap as the 2026-09-12 pressing-revert incident; see
+-- db/migrations/111_order_ready_notified.sql for the full reasoning.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_name = 'orders' AND column_name = 'ready_notified_at'
+  ) THEN
+    ALTER TABLE orders ADD COLUMN ready_notified_at TIMESTAMPTZ;
+    UPDATE orders SET ready_notified_at = now()
+     WHERE status IN ('ready', 'delivered');
+  END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS idx_orders_delivered ON orders(delivered_at DESC) WHERE status = 'delivered';
 
 -- Migration 038: generic key/value settings store for admin-controlled site config.

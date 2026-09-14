@@ -6,6 +6,7 @@ const { staffScopeAllows, staffTypesOf } = require('../middleware/auth');
 const { persistFullSetOrder, readFullSetOrder, loadWholesalerPricing } = require('../lib/fullSetOrder');
 const { capturePlates, plateFor } = require('../lib/platePreservation');
 const memoCache = require('../lib/memoCache');
+const { notifyStageChange, notifySetReady } = require('../lib/studentOrderNotices');
 
 const ALL_STATUSES = [
   'pending_approval', 'designing', 'design_complete', 'converting',
@@ -453,11 +454,13 @@ async function updateStatus(req, res) {
         [req.user.id, toIdx > fromIdx ? 'advance' : 'revert', id, prev, status]
       );
     }
-    await client.query(
-      `INSERT INTO notifications (user_id, type, title_ar, body_ar, link)
-       VALUES ($1, 'status_change', $2, $3, '/')`,
-      [cur.rows[0].user_id, 'تحديث حالة الطلب', `حالة طلبك الآن: ${STATUS_LABEL_AR[status]}`]
-    );
+    // Paused — and this was the worst of the three writers: it had no `prev !== status`
+    // guard, so re-saving an order on the stage it already sat at notified the student about
+    // a move that never happened. See lib/studentOrderNotices.js.
+    await notifyStageChange(client, { userId: cur.rows[0].user_id, status });
+    // …and the ONE notification the student does still get. Runs on every status change, not
+    // only on `ready`, because it is also the re-arm — see lib/studentOrderNotices.js.
+    await notifySetReady(client, id);
     return rows[0];
   });
   publish({ type: 'order', orderId: updated.id, status: updated.status });
