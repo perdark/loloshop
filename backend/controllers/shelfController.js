@@ -63,6 +63,14 @@ async function releasePlacement(req, res) {
   res.json({ data: { released: true } });
 }
 
+// «فرّغ الرف» — manager/admin only (route-level requireStaffType() with no types).
+// Deliberately NOT open to the preparer: it wipes the whole map in one press, and the
+// preparer already has a per-piece «إرجاع» for the ordinary mistake.
+async function clear(req, res) {
+  const data = await shelf.clearShelf();
+  res.json({ data });
+}
+
 // Config editing (manager/admin only via requireStaffType()). Shrinking a section below
 // an OPEN bin would orphan a shelved piece, so it is refused by name.
 async function patchSection(req, res) {
@@ -121,4 +129,4 @@ async function patchSection(req, res) {
   res.json({ data: { id, slot_count: nextCount, max_per_slot: nextMax } });
 }
 
-module.exports = { getBoard, place, collect, closeSet, releasePlacement, patchSection };
+module.exports = { getBoard, place, collect, closeSet, releasePlacement, clear, patchSection };

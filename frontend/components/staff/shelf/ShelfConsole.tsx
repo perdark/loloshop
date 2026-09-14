@@ -13,6 +13,7 @@ import {
   placePiece,
   collectPiece,
   closeSet,
+  clearShelf,
   type ShelfBoard,
   type ShelfInboxItem,
   type ShelfSlot,
@@ -29,6 +30,8 @@ import { useScrollRestore } from "@/hooks/useScrollRestore";
 import { PlaceSheet } from "./PlaceSheet";
 import { ShelfMap } from "./ShelfMap";
 import { SearchField } from "@/components/ui/SearchField";
+import { Modal } from "@/components/ui/Modal";
+import { Button } from "@/components/ui/Button";
 import { matchesAr } from "@/lib/arabic";
 
 const STORAGE_KEY = "loloshop-shelf-console";
@@ -59,7 +62,13 @@ function readPersisted(): Persisted {
   }
 }
 
-export function ShelfConsole() {
+interface ShelfConsoleProps {
+  /** «فرّغ الرف» is manager/admin only — the server enforces it, this only hides the button
+   *  from a worker who would get a 403 for pressing it. */
+  canClear?: boolean;
+}
+
+export function ShelfConsole({ canClear = false }: ShelfConsoleProps) {
   // Lazy-init from sessionStorage is safe: this console only mounts client-side behind
   // the auth gate, so there is no SSR hydration mismatch.
   const [board, setBoard] = useState<ShelfBoard | null>(null);
@@ -76,6 +85,10 @@ export function ShelfConsole() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [sheet, setSheet] = useState<ShelfInboxItem | null>(null);
   const [openSlot, setOpenSlot] = useState<ShelfSlot | null>(null);
+  // «فرّغ الرف» confirmation. A real dialog, never window.confirm — the shop runs this screen
+  // inside the app's WebView, where a native confirm blocks the whole page.
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const loadedOnce = useRef(false);
 
   const load = useCallback(async () => {
@@ -209,6 +222,12 @@ export function ShelfConsole() {
   const filteredInbox = pieceFilter ? inbox.filter((i) => i.piece_type === pieceFilter) : inbox;
   const shownInbox = showAllInbox || q ? filteredInbox : filteredInbox.slice(0, 12);
   const unplaceable = inbox.filter((i) => !i.suggestion).length;
+  // How much «فرّغ الرف» would release. Counted off the MAP (every live placement), not off
+  // the filtered lists — the button is shelf-wide and the number in the confirmation must be too.
+  const piecesOnShelf = (board?.shelves ?? []).reduce(
+    (n, sh) => n + sh.slots.reduce((m, sl) => m + sl.pieces.length, 0),
+    0,
+  );
 
   async function doPlace(item: ShelfInboxItem, target?: { shelf_code: string; slot_index: number }) {
     setBusyId(item.order_id);
@@ -256,6 +275,26 @@ export function ShelfConsole() {
       flash(getApiErrorMessage(e, "تعذّر الإرجاع"));
     } finally {
       setBusyId(null);
+    }
+  }
+
+  // Wipes the MAP only — every خانة empties and every piece returns to «وصلت توّا».
+  // Nothing advances and nothing becomes «جاهز للاستلام»; see backend/lib/shelf.js clearShelf.
+  async function doClearShelf() {
+    setClearing(true);
+    try {
+      const res = await clearShelf();
+      flash(
+        res.released > 0
+          ? `تفرّغ الرف — ${res.released} قطعة رجعت لقائمة التسكين`
+          : "الرف فارغ أصلاً",
+      );
+      setConfirmClear(false);
+      await load();
+    } catch (e) {
+      flash(getApiErrorMessage(e, "تعذّر تفريغ الرف"));
+    } finally {
+      setClearing(false);
     }
   }
 
@@ -507,6 +546,18 @@ export function ShelfConsole() {
 
       {/* ── Zone 3: الرف ─────────────────────────────────────────── */}
       <section>
+        {canClear ? (
+          <header className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-xl font-black text-[#1A1A1A]">الرف</h2>
+            <button
+              type="button"
+              onClick={() => setConfirmClear(true)}
+              className="min-h-11 flex-none rounded-full border border-[#9f382d] bg-white px-4 text-sm font-bold text-[#9f382d] transition active:scale-[.98]"
+            >
+              فرّغ الرف
+            </button>
+          </header>
+        ) : null}
         <ShelfMap
           shelves={board.shelves}
           search={q}
@@ -700,6 +751,52 @@ export function ShelfConsole() {
         onSkip={() => setSheet(null)}
         onClose={() => setSheet(null)}
       />
+
+      {/* ── «فرّغ الرف» confirmation ────────────────────────────────────────────
+          The copy has to say what this does NOT do, because the obvious reading of
+          «فرّغ الرف» is «سلّمهم» — and that is the one thing it must never be mistaken for. */}
+      <Modal
+        open={confirmClear}
+        onClose={() => (clearing ? undefined : setConfirmClear(false))}
+        title="تفريغ الرف"
+        footer={
+          /* «إلغاء» FIRST — in RTL that puts it under the thumb and the destructive press
+             further away. Modal also focuses the first focusable child, so a stray Enter
+             cancels rather than wipes the shelf. */
+          <>
+            <Button
+              variant="ghost"
+              fullWidth
+              disabled={clearing}
+              onClick={() => setConfirmClear(false)}
+            >
+              إلغاء
+            </Button>
+            <Button
+              variant="danger"
+              fullWidth
+              loading={clearing}
+              onClick={() => void doClearShelf()}
+            >
+              إي، فرّغ الرف
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3 text-sm text-ink-soft">
+          <p className="font-bold text-ink">
+            راح تنفرّغ كل الخانات
+            {piecesOnShelf > 0 ? ` — ${piecesOnShelf} قطعة حالياً على الرف` : ""}.
+          </p>
+          <p>
+            القطع <span className="font-bold text-ink">ما تنمسح وما تتسلّم</span> — تبقى بالتجهيز
+            وترجع بقائمة «وصلت توّا» حتى تسكّنها من جديد.
+          </p>
+          <p className="rounded-xl bg-surface-sink px-3 py-2">
+            ولا طلب راح يصير «جاهز للاستلام» بهذا الزر.
+          </p>
+        </div>
+      </Modal>
 
       {toast ? (
         <div className="fixed inset-x-0 bottom-6 z-50 mx-auto w-fit rounded-full bg-[#1A1A1A] px-5 py-3 text-sm font-bold text-white shadow-xl">

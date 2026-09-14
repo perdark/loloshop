@@ -18,6 +18,12 @@ const { billableOrderSql } = require('./counts');
 // because backend and frontend share no package (see CLAUDE.md → Architecture). If a status
 // is added to the enum, add it in BOTH places — an unmapped status falls back to the raw
 // value, which is ugly but never wrong.
+// ⚠️ STILL EXPORTED AND STILL NEEDED — but NOT by the customer-facing context any more.
+// Its only remaining callers are `lib/adminMetrics.js`'s two stage breakdowns, where the full
+// vocabulary is exactly right: an admin asking «وين الطلبات؟» wants «قيد التطريز: 895 قطعة».
+// A CUSTOMER gets `customerStatusAr` below instead. Same shape of split as the two answer
+// guards (`answerGuard` vs `adminAnswerGuard`) — do not fold them back together, and do not
+// delete this map as dead code just because `formatContext` stopped reading it.
 const STATUS_AR = {
   pending_approval: 'بانتظار موافقة ممثل الجامعة',
   designing: 'قيد التصميم',
@@ -33,6 +39,17 @@ const STATUS_AR = {
   delivered: 'تم التسليم',
   cancelled: 'ملغي',
 };
+
+// The THREE words a customer is allowed to hear about a piece. `ready` deliberately reads
+// «خلصت قطعة من الطلب» and NOT «جاهز للاستلام»: one finished piece is not a finished order, and
+// «جاهز للاستلام» is said once, about the whole set, by the line further down.
+function customerStatusAr(status) {
+  if (status === 'delivered') return 'تم التسليم';
+  if (status === 'ready') return 'خلصت هاي القطعة';
+  if (status === 'cancelled') return 'ملغي';
+  if (status === 'pending_approval') return 'بانتظار موافقة ممثل الجامعة';
+  return 'قيد التنفيذ';
+}
 
 const fmtDate = (d) => (d ? new Date(d).toISOString().slice(0, 10) : null);
 const fmtIQD = (n) => `${Number(n || 0).toLocaleString('en-US')} دينار`;
@@ -334,14 +351,50 @@ function formatContext(p, orders = []) {
   } else {
     lines.push(`- عدد طلباته: ${orders.length}`);
     orders.forEach((o, i) => {
-      const status = STATUS_AR[o.status] || o.status;
+      // ⚠️ THE STAGE IS COLLAPSED ON PURPOSE — «لولو» MUST NOT SAY «جاهز للاستلام» ABOUT ONE
+      // PIECE (owner 2026-09-14). A student's وشاح, روب and قبعة finish at different times;
+      // handing the model `STATUS_AR[o.status]` per row let it answer «طلبك جاهز» off the قبعة
+      // while the وشاح was still في الكوي, and the student came to a shop with nothing to hand
+      // them. Same defect, same day, as the one fixed on the «طلباتي» screen
+      // (frontend/components/student/MyOrdersList.tsx — read its header for the measurements).
+      // The internal stages (التصميم · التطريز · التجميع · الكوي · التجهيز) are the shop's
+      // vocabulary, never the customer's, so nothing below ever names one.
       const delivered = o.delivered_at ? ` — تسلّمه بتاريخ ${fmtDate(o.delivered_at)}` : '';
       // price = 0 does NOT mean free: bundle lines carry the whole bundle's price on one
       // row and 0 on the rest (see checkout_groups). Stating "0 دينار" would tell a student
       // their robe is free, so the price is omitted and the bot is told to redirect instead.
       const price = Number(o.price) > 0 ? ` — السعر: ${fmtIQD(o.price)}` : ' — السعر ضمن طلب مشترك';
-      lines.push(`  ${i + 1}. "${safeField(o.product_name, 60)}" — الحالة: ${status}${price}${delivered}`);
+      lines.push(
+        `  ${i + 1}. "${safeField(o.product_name, 60)}" — الحالة: ${customerStatusAr(o.status)}${price}${delivered}`
+      );
     });
+
+    // The verdict the customer is actually asking for. A set is the checkout it was bought in
+    // (falling back to the order's own id for legacy rows with no group), and it is ready ONLY
+    // when every live piece in it has reached ready/delivered.
+    const sets = new Map();
+    for (const o of orders) {
+      const key = o.checkout_group_id || `single:${o.product_name}:${o.created_at}`;
+      const cur = sets.get(key) || { total: 0, done: 0, allDelivered: true };
+      cur.total += 1;
+      if (o.status === 'ready' || o.status === 'delivered') cur.done += 1;
+      if (o.status !== 'delivered') cur.allDelivered = false;
+      sets.set(key, cur);
+    }
+    const readySets = [...sets.values()].filter((s) => s.done === s.total && !s.allDelivered);
+    const workingSets = [...sets.values()].filter((s) => s.done < s.total);
+    if (readySets.length) {
+      lines.push(`- عدده ${readySets.length} طلب مكتمل كامل وجاهز للاستلام من المحل`);
+    }
+    if (workingSets.length) {
+      const partial = workingSets.filter((s) => s.done > 0).length;
+      lines.push(
+        `- عنده ${workingSets.length} طلب لسه قيد التنفيذ — ما يجي يستلم` +
+          (partial
+            ? ` (${partial} منها خلصت بعض قطعها بس مو كلها، فما تكَله جاهز)`
+            : '')
+      );
+    }
   }
 
   return lines.join('\n');
@@ -382,7 +435,8 @@ async function forUser(userId) {
   // Orders are read through students.user_id, so this can only ever return the caller's own.
   const { rows: orders } = p.student_id
     ? await query(
-        `SELECT o.status, o.price, o.created_at, o.delivered_at, pr.name_ar AS product_name
+        `SELECT o.status, o.price, o.created_at, o.delivered_at, o.checkout_group_id,
+                pr.name_ar AS product_name
            FROM orders o
            JOIN products pr ON pr.id = o.product_id
           WHERE o.student_id = $1 AND o.status <> 'cancelled'
@@ -408,5 +462,5 @@ async function forUser(userId) {
 
 module.exports = {
   forUser, priceBook, bestSellers, productDigest, universitiesDigest,
-  STATUS_AR, formatContext, formatPriceBook, formatProductDigest, TYPE_AR, safeField,
+  STATUS_AR, customerStatusAr, formatContext, formatPriceBook, formatProductDigest, TYPE_AR, safeField,
 };

@@ -176,3 +176,13 @@ export async function updateShelfSection(
   const res = await api.patch(`/production/shelf/sections/${id}`, patch);
   return res.data.data;
 }
+
+/**
+ * «فرّغ الرف» — wipes the MAP only: every خانة closes and every live placement is removed.
+ * The pieces STAY at التجهيز (no status changes, nothing becomes «جاهز للاستلام») and come
+ * back in the «وصلت توّا» inbox to be re-placed. Manager/admin only server-side.
+ */
+export async function clearShelf(): Promise<{ released: number; bins_closed: number }> {
+  const res = await api.post("/production/shelf/clear", {});
+  return res.data.data;
+}

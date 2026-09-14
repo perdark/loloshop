@@ -236,13 +236,42 @@ test('the deadline is labelled as an ORDER cutoff, not a delivery date', () => {
   assert.ok(text.includes('مو موعد تسليم'), 'the date must carry its disambiguation inline');
 });
 
-test('statuses are Arabic, and an unmapped status degrades to the raw value instead of vanishing', () => {
+test('the customer never hears a production stage — every in-flight status is «قيد التنفيذ»', () => {
+  // ⚠️ THIS REPLACED «an unmapped status degrades to the raw value» (owner 2026-09-14), and the
+  // reversal is deliberate. That rule was right while the bot echoed the internal stage: a new
+  // enum value leaking as `some_new_status` was uglier than it vanishing. The bot no longer
+  // echoes ANY stage — التصميم · التطريز · التجميع · الكوي · التجهيز are the shop's words, not
+  // the customer's — so the raw value must NOT appear either. Everything still moving collapses
+  // to one phrase, and an unrecognised status lands there too, which is the safe answer rather
+  // than a lossy one: «قيد التنفيذ» is true of every stage the enum could ever gain.
   const text = formatContext(student, [
     { status: 'embroidery', price: 1, product_name: 'أ', delivered_at: null },
     { status: 'some_new_status', price: 1, product_name: 'ب', delivered_at: null },
   ]);
-  assert.ok(text.includes('قيد التطريز'));
-  assert.ok(text.includes('some_new_status'), 'ugly is fine; silently dropping a status is not');
+  assert.ok(text.includes('قيد التنفيذ'));
+  assert.ok(!text.includes('قيد التطريز'), 'an internal stage must never reach the customer');
+  assert.ok(!text.includes('some_new_status'), 'nor may a raw enum value');
+});
+
+test('«جاهز للاستلام» is said about the SET, never about one finished piece', () => {
+  // The defect this pins: a student's قبعة finishes days before their وشاح, and the old context
+  // handed the model «الحالة: جاهز للاستلام» on that one row — so «لولو» told them to come to
+  // the shop for an order that was not packed. Measured on the prod restore: 180 students in
+  // exactly that state. The per-piece line now says «خلصت هاي القطعة»; only the set-level line
+  // is allowed to use the words that bring someone to the shop.
+  const mixed = formatContext(student, [
+    { status: 'ready', price: 1, product_name: 'قبعة', delivered_at: null, checkout_group_id: 'g1' },
+    { status: 'pressing', price: 1, product_name: 'وشاح', delivered_at: null, checkout_group_id: 'g1' },
+  ]);
+  assert.ok(!mixed.includes('جاهز للاستلام'), 'a half-finished set must never be called ready');
+  assert.ok(mixed.includes('ما يجي يستلم'), 'and it must say so out loud');
+  assert.ok(mixed.includes('مو كلها'), 'including that SOME pieces are done — else the model guesses');
+
+  const done = formatContext(student, [
+    { status: 'ready', price: 1, product_name: 'قبعة', delivered_at: null, checkout_group_id: 'g2' },
+    { status: 'ready', price: 1, product_name: 'وشاح', delivered_at: null, checkout_group_id: 'g2' },
+  ]);
+  assert.ok(done.includes('جاهز للاستلام'), 'a complete set IS ready and must say so');
 });
 
 test('a retail customer is described as having no rep rather than an empty one', () => {
