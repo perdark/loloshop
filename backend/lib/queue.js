@@ -3,6 +3,12 @@
 const PgBoss = require('pg-boss');
 
 const QUEUE_GENERATION = 'calligraphy-generate';
+// The safety net under the batching hold (lib/calligraphyBatching.js). A held sheet is
+// normally woken by its own delayed re-enqueue; this sweep exists for the case where that
+// enqueue was lost — a worker restart between the hold and the send. Without it a held plate
+// would sit `pending` with nobody scheduled to look at it again, which is the one way this
+// feature could turn into «الخط توقف».
+const QUEUE_SWEEP = 'calligraphy-sweep';
 
 let bossPromise = null;
 function getBoss() {
@@ -24,6 +30,7 @@ function getBoss() {
     boss.on('error', (err) => console.error('pg-boss error:', err));
     bossPromise = boss.start().then(async () => {
       await boss.createQueue(QUEUE_GENERATION).catch(() => {}); // idempotent (exists → throws)
+      await boss.createQueue(QUEUE_SWEEP).catch(() => {});
       return boss;
     });
     bossPromise.catch((err) => {
@@ -39,11 +46,15 @@ function getBoss() {
 // BEST-EFFORT dedupe (pg-boss only enforces it while a job sits in `created`) —
 // true protection against double generation is structural: one worker at
 // concurrency 1, and a drained job has no pending plates, so extra attempts no-op.
-async function enqueueGeneration(jobId) {
+async function enqueueGeneration(jobId, { startAfterSeconds = 0 } = {}) {
   try {
     const boss = await getBoss();
     await boss.send(QUEUE_GENERATION, { jobId }, {
+      // ⚠️ `singletonKey` ONLY dedupes while a job sits in `created`, so a delayed re-enqueue
+      // for a held sheet can collide with the ticket that is still running and be dropped.
+      // The sweep below is what makes that survivable; do not rely on this alone.
       singletonKey: jobId,
+      ...(startAfterSeconds > 0 ? { startAfter: Math.ceil(startAfterSeconds) } : {}),
       retryLimit: 2,
       retryDelay: 30,
       retryBackoff: true,
@@ -57,4 +68,4 @@ async function enqueueGeneration(jobId) {
   }
 }
 
-module.exports = { getBoss, enqueueGeneration, QUEUE_GENERATION };
+module.exports = { getBoss, enqueueGeneration, QUEUE_GENERATION, QUEUE_SWEEP };

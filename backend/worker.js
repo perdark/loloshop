@@ -4,6 +4,8 @@ require('dotenv').config();
 const { getBoss, QUEUE_GENERATION } = require('./lib/queue');
 const { processNextBatch } = require('./lib/calligraphyEngine');
 const staffReport = require('./lib/staffReportJob');
+const calligSweep = require('./lib/calligraphySweep');
+const { enqueueGeneration } = require('./lib/queue');
 
 // Drains one calligraphy job: batch after batch (≤10 names each) until nothing is
 // pending. A failed batch (OpenRouter error, or zero progress while work remains)
@@ -14,6 +16,17 @@ async function handleGeneration(jobId) {
     const out = await processNextBatch(jobId, null);
     if (out.error) throw new Error(`${out.error.code}: ${out.error.message}`);
     const d = out.data;
+    // ⚠️ A HOLD IS NOT A STALL — CHECK IT BEFORE THE «no progress» THROW BELOW.
+    // An under-full sheet is deliberately not bought yet (lib/calligraphyBatching.js), and it
+    // also reports `processed === 0` with work remaining. Throwing would spend the two
+    // pg-boss retries in ~90s and then ABANDON the plates, which is the one outcome this
+    // feature must never produce. Return quietly instead and book a wake-up for the moment
+    // the window closes; lib/calligraphySweep.js covers the case where that send is lost.
+    if (d.held) {
+      console.log(`[worker] job ${jobId}: holding ${d.held_count} name(s) for ${d.held_seconds}s`);
+      await enqueueGeneration(jobId, { startAfterSeconds: d.held_seconds + 5 });
+      return;
+    }
     console.log(`[worker] job ${jobId}: +${d.processed} done=${d.done} failed=${d.failed} remaining=${d.remaining}`);
     if (d.remaining <= 0) return;
     if (d.processed === 0) throw new Error('batch made no progress — retrying later');
@@ -34,6 +47,16 @@ async function handleGeneration(jobId) {
     await staffReport.register(boss);
   } catch (err) {
     console.error('staff report schedule failed (calligraphy unaffected):', err.message);
+  }
+
+  // The batching sweep. Same isolation as the report above and for a stronger reason: if this
+  // fails to register, held plates lose their safety net, so the failure must be LOUD in the
+  // log rather than taking the worker down with it.
+  try {
+    await calligSweep.register(boss);
+  } catch (err) {
+    console.error('⚠️ calligraphy sweep schedule FAILED — held plates rely only on their own '
+      + 'delayed re-enqueue until this is fixed:', err.message);
   }
 
   console.log('loloshop-worker up — consuming', QUEUE_GENERATION);

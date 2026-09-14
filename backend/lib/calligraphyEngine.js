@@ -10,6 +10,7 @@ const { buildSheetPrompt, buildSinglePrompt } = require('./calligraphyPrompt');
 const { saveBufferToUploads } = require('./upload');
 const { looksLikeInstruction } = require('./calligraphyText');
 const { checkBudget, budgetError, logSpend, notifyCreditExhausted } = require('./calligraphySpend');
+const { holdDecision } = require('./calligraphyBatching');
 
 const BATCH = 10;
 // Upstream failures that are about the SHOP's account or the wire, never about these names.
@@ -119,7 +120,7 @@ async function jobCounts(jobId) {
 // Returns { data } on success/no-work/crop-review, or { error: {status,message,code},
 // data } when the upstream generator failed (the HTTP wrapper turns that into the
 // same status/JSON the endpoint always sent; the worker throws it for pg-boss retry).
-async function processNextBatch(jobId, req = null) {
+async function processNextBatch(jobId, req = null, { force = false } = {}) {
   // Pick the variant of the OLDEST pending plate, then take up to BATCH of that variant.
   // This guarantees one sheet = one prompt (front and back must never share a sheet).
   const { rows: head } = await query(
@@ -167,6 +168,32 @@ async function processNextBatch(jobId, req = null) {
     hitchhikers = rows;
   }
   const sheetBatch = batch.concat(hitchhikers);
+
+  // HOLD AN UNDER-FULL SHEET (2026-09-15 cost audit — lib/calligraphyBatching.js has the
+  // measurements). Half of every sheet the shop bought carried ONE name at four times the
+  // full-sheet price, because the cross-job top-up above can only borrow what is pending at
+  // this instant and the shop works one rep at a time. Waiting is what gives it something to
+  // borrow. The plates stay `pending` — the status the whole engine already means by "someone
+  // will pick this up" — so a hold is indistinguishable from the budget ceiling and the
+  // outage path as far as every other reader is concerned, and nothing needs to know.
+  const hold = holdDecision(sheetBatch, { force });
+  if (hold.hold) {
+    const c = await jobCounts(jobId);
+    return {
+      data: {
+        processed: 0, ...c, remaining: c.pending, job_cost: await jobCost(jobId), plates: [],
+        // ⚠️ THE CALLERS MUST READ `held`, NOT INFER IT FROM `processed === 0`.
+        // worker.js throws on "no progress while work remains" so pg-boss retries a stall;
+        // a hold is the opposite of a stall and throwing on it would burn the retry budget
+        // and then abandon the plates. See handleGeneration.
+        held: true,
+        held_seconds: hold.waitSeconds,
+        held_until: hold.readyAt ? hold.readyAt.toISOString() : null,
+        held_count: sheetBatch.length,
+      },
+    };
+  }
+
   const names = sheetBatch.map((b) => ({ text: b.render_text, element: b.element_text }));
 
   // Daily ceiling BEFORE any money leaves. Plates stay PENDING, never failed: the worker

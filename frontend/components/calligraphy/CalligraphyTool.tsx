@@ -696,6 +696,12 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
   const [jobId, setJobId] = useState<string | null>(null);
   const [plates, setPlates] = useState<CalPlate[]>([]);
   const [done, setDone] = useState(0);
+  // ⚠️ A HOLD IS NOT A STALL. An under-full sheet is deliberately not bought yet
+  // (backend/lib/calligraphyBatching.js — half of every sheet the shop bought carried ONE
+  // name at four times the per-name price). Without this the poll loop below counts it as 30
+  // quiet polls, decides the worker is dead, drives the loop from the browser, gets held
+  // there too and stops — leaving a page that looks like generation silently failed.
+  const [heldSeconds, setHeldSeconds] = useState<number | null>(null);
   const [total, setTotal] = useState(0);
 
   // ── per-plate action states ─────────────────────────────────────────────────
@@ -1023,6 +1029,22 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
   // + fetching the job (cal_last_job) shows the finished plates. If the worker is
   // down (no progress for ~2 min), we fall back to the old client-driven /process
   // loop so generation never hard-blocks on the worker.
+  /** «ولّدها هسة» — buy this sheet now, however few names are on it. Deliberately a button a
+   *  human presses and never an automatic fallback: a hold the designer cannot skip is a
+   *  reason to stop using the workbench, and an automatic skip is no hold at all. */
+  async function forceGenerateNow() {
+    if (!jobId) return;
+    setHeldSeconds(null);
+    try {
+      const r = await processCalJob(jobId, true);
+      setDone(r.done);
+      setPlates((prev) => prev.map((p) => r.plates.find((u) => u.id === p.id) ?? p));
+      if (r.review) toast.error("تعذّر تقطيع إحدى الأوراق — راجِعها يدويًا");
+    } catch (e) {
+      toast.error(getApiErrorMessage(e, "تعذّر التوليد"));
+    }
+  }
+
   async function runCreatedJob(job: CalJob) {
     setJobId(job.job_id);
     setPlates(job.plates);
@@ -1038,6 +1060,9 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
       setDone(snap.done);
       const finished = snap.plates.every((p) => p.status !== "pending");
       if (finished) break;
+      setHeldSeconds(snap.held ? snap.held_seconds ?? 0 : null);
+      // Waiting for a fuller sheet is the system working. Don't age the stall counter.
+      if (snap.held) continue;
       stalledPolls = snap.done === lastDone ? stalledPolls + 1 : 0;
       lastDone = snap.done;
       if (stalledPolls >= 30) {
@@ -1059,6 +1084,7 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
       }
     }
     // refresh to capture all final states
+    setHeldSeconds(null);
     const full = await getCalJob(job.job_id);
     setPlates(full.plates);
     setDone(full.done);
@@ -2261,12 +2287,29 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
             <p className="text-sm font-semibold text-ink">
               التقدم: {done} / {total}
             </p>
-            {running && (
+            {running && heldSeconds === null && (
               <p className="text-xs text-ink-soft">
                 جارٍ توليد ورقة… قد تستغرق حتى دقيقة لكل ورقة ({elapsed} ثانية)
               </p>
             )}
           </div>
+          {/* Waiting for a fuller sheet. Say WHY — a progress bar that stops moving with no
+              explanation is the same thing as a broken screen — and always offer the door out. */}
+          {heldSeconds !== null && (
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-surface-sink p-3">
+              <p className="text-xs text-ink-soft">
+                بالانتظار حتى تمتلئ الورقة — الورقة الوحدة تشيل ١٠ أسماء بنفس السعر.
+                {" "}تنطبع تلقائياً خلال{" "}
+                <b className="text-ink">
+                  {heldSeconds > 60 ? `${Math.ceil(heldSeconds / 60)} دقيقة` : `${heldSeconds} ثانية`}
+                </b>
+                .
+              </p>
+              <Button size="sm" variant="secondary" onClick={forceGenerateNow}>
+                ولّدها هسة
+              </Button>
+            </div>
+          )}
           <div
             role="progressbar"
             aria-valuenow={progress}

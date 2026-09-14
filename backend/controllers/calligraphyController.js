@@ -16,6 +16,7 @@ const {
   processNextBatch, toPlate, autoLinkPlate, attachOrderContext,
   jobCounts, jobCost, promptVariant, BATCH,
 } = require('../lib/calligraphyEngine');
+const { holdStateFor } = require('../lib/calligraphyBatching');
 const {
   isRealName, looksLikeInstruction, checkRenderText,
 } = require('../lib/calligraphyText');
@@ -467,9 +468,14 @@ function listStyles(req, res) {
 // POST /jobs/:jobId/process — next batch of <=10 pending (single-variant per sheet)
 async function processNext(req, res) {
   const { jobId } = req.params;
+  // `force` is «ولّدها هسة» — the designer standing at the machine who needs this plate now
+  // and will not wait for a sheet to fill (lib/calligraphyBatching.js). It is a per-press
+  // decision by a human looking at the screen, never a default: without the door, a hold the
+  // designer cannot skip is a reason to stop using the workbench.
+  const force = req.body?.force === true || req.query?.force === '1';
   // Thin wrapper over the shared engine (lib/calligraphyEngine.js) — the pg-boss
   // worker runs the exact same code path. Response shape/statuses unchanged.
-  const out = await processNextBatch(jobId, req);
+  const out = await processNextBatch(jobId, req, { force });
   if (out.error) {
     return res.status(out.error.status).json({ error: out.error.message, code: out.error.code, data: out.data });
   }
@@ -482,7 +488,16 @@ async function getJob(req, res) {
   const { rows } = await query(`SELECT * FROM calligraphy_plates WHERE job_id=$1 ORDER BY created_at`, [jobId]);
   if (!rows.length) return bad(res, 'المهمة غير موجودة', 'ERR_NOT_FOUND', 404);
   const c = await jobCounts(jobId);
-  res.json({ data: { job_id: jobId, ...c, job_cost: await jobCost(jobId), plates: await attachOrderContext(rows.map(toPlate)) } });
+  // Whether these plates are WAITING FOR A SHEET rather than being generated. The workbench
+  // polls this endpoint every 4s and would otherwise read a hold as a stalled worker — it
+  // counts 30 quiet polls and then drives the loop from the browser, which gets held too and
+  // leaves the page looking like generation silently failed.
+  const hold = holdStateFor(rows.filter((r) => r.status === 'pending'));
+  res.json({ data: {
+    job_id: jobId, ...c, job_cost: await jobCost(jobId),
+    held: hold.held, held_seconds: hold.waitSeconds,
+    plates: await attachOrderContext(rows.map(toPlate)),
+  } });
 }
 
 // Ten paid images on ONE plate is already far past "the model had a bad day". Before this the

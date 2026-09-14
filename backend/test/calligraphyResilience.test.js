@@ -11,6 +11,17 @@
 // Everything drives the real engine/controller against the dev DB with global.fetch stubbed —
 // nothing here spends money.
 require('dotenv').config();
+// ⚠️ THE 2026-09-15 BATCHING HOLD IS SWITCHED OFF FOR THIS WHOLE FILE, AND THAT IS CORRECT.
+// `lib/calligraphyBatching.js` now makes an under-full sheet WAIT for company instead of
+// buying itself a whole image — which is exactly the shape every fixture below uses (one or
+// two names, generated immediately). These tests are about what a generation COSTS and what
+// happens when it FAILS, not about when it is bought; leaving the hold on would make every
+// one of them assert the hold instead, and the behaviour they were written to protect would
+// stop being covered at all. `CALLIG_HOLD_MINUTES=0` is the shop's own kill switch, so this
+// is the supported way to ask for the old timing, not a test-only back door.
+// The hold itself is covered in calligraphyBatching.test.js and calligraphyHoldEngine.test.js.
+process.env.CALLIG_HOLD_MINUTES = '0';
+
 
 const test = require('node:test');
 const assert = require('node:assert/strict');

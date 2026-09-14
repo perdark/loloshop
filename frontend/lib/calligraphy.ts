@@ -52,6 +52,10 @@ export interface CalPlate {
 }
 
 export interface CalJob {
+  /** Every pending group of this job is waiting for a fuller sheet. The workbench polls this
+   *  endpoint, so without it a hold reads as a dead worker. */
+  held?: boolean;
+  held_seconds?: number;
   job_id: string;
   total: number;
   done: number;
@@ -70,6 +74,13 @@ export interface CalJob {
 }
 
 export interface CalProcess {
+  /** The sheet was NOT bought — it is under-full and waiting for company. The plates stay
+   *  pending; see backend/lib/calligraphyBatching.js for why half-empty sheets were 35% of
+   *  the bill. `held_seconds` is how long until it renders on its own. */
+  held?: boolean;
+  held_seconds?: number;
+  held_until?: string | null;
+  held_count?: number;
   processed: number;
   total: number;
   done: number;
@@ -234,9 +245,12 @@ export async function createCalJob(body: CreateJobBody): Promise<CalJob> {
   return data.data;
 }
 
-export async function processCalJob(jobId: string): Promise<CalProcess> {
+/** `force` is «ولّدها هسة» — skip the batching hold and buy the sheet now, however few names
+ *  are on it. A per-press decision by a designer looking at the screen, never a default. */
+export async function processCalJob(jobId: string, force = false): Promise<CalProcess> {
   const { data } = await api.post<{ data: CalProcess }>(
-    `/calligraphy/jobs/${jobId}/process`
+    `/calligraphy/jobs/${jobId}/process`,
+    force ? { force: true } : {}
   );
   return data.data;
 }
