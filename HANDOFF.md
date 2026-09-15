@@ -526,6 +526,32 @@ longer stranded on a branch · the laptop's loose credentials are filed in
 
 ## 💣 LANDMINES
 
+- **⚠️ THE CALLIGRAPHY PROMPT HAS NOW BROKEN IN BOTH DIRECTIONS ON CONSECUTIVE DAYS, AND EACH
+  BREAK WORE THE OTHER ONE'S FIX (2026-09-14 → 2026-09-15).** `lib/calligraphyPrompt.js` is the
+  whole of it and its header carries both measurements. 09-14: BASE asked for «masterful
+  diacritics» → 0 of 5 names clean, every one vocalised, and the harakat dragged stray glyphs
+  (ص ء مُ س) in at letter weight — stitched specks nobody ordered. 09-15, the fix for that: it
+  deleted the only artistry wording in the prompt and replaced it with prohibitions, so what was
+  left described heavy, bare, unornamented Arabic on white — **a description of a bold typeface**,
+  which is what the model then drew («يولد صور بخطوط عادية وليس مزخرفة»).
+  · ⚠️ **«strong thick/thin contrast» AND «never thin … or hairline» CANNOT BOTH BE ASKED FOR.**
+    The thin stroke IS the contrast — a broad nib makes it wherever the pen turns — so banning
+    thinness flattens every stroke to one weight, and one weight is a font. The weight rule now
+    binds the BROAD strokes only. The 09-14 pen-pressure finding is NOT undone by that and must
+    not be: a wiry stroke gives the digitizer nothing to fill.
+  · ⚠️ **The diacritics ban stays ENUMERATED.** The long list is what was measured; no shorter
+    paraphrase ever was.
+  · ⚠️ **ORDER IS LOAD-BEARING** — artistry first and longest, every prohibition behind it. A
+    prompt that is mostly prohibitions renders like a font however good its first sentence is.
+    That one mechanism explains both days.
+  · ⚠️ **`MINIMAL` BINDS THE ORNAMENTS, NEVER THE LETTERFORMS.** The owner's 08-26 decision
+    (front as plain as the back) is about floated motifs; its old wording «keep it mostly clean
+    plain letters» reached the WRITING, and was the third clause in one prompt saying the letters
+    should be plain. The decision is unchanged, only its reach.
+  · `test/calligraphyPrompt.test.js` pins both ends (pure — no DB, no network, no paid image).
+    Red/green: 4 of its 8 fail on the 09-14 prompt, and the 4 that pass in both states are the
+    diacritics and pen-pressure ones — that split is the point of the file.
+
 - **⚠️ «فرّغ الرف» RELEASES, IT NEVER COLLECTS — AND THE STUDENT NEVER SEES A PRODUCTION
   STAGE (both 2026-09-14, unmerged on `main`'s working tree).** Two halves of one owner report
   («زر يفرّغ الرف» + «طلاب هوايه يشوفون جاهز للاستلام وهو مو جاهز»), and they constrain each
@@ -1292,6 +1318,23 @@ longer stranded on a branch · the laptop's loose credentials are filed in
 ---
 
 ## 🤔 OPEN DECISIONS + NEXT MOVES
+
+- **❓ OWNER CALL — A HELD SHEET COSTS RESOLUTION PER NAME, AND NOBODY HAS PRICED THAT SIDE
+  (new 2026-09-15).** `bede219` holds an under-full sheet until it fills, which is worth ~35% of
+  the calligraphy bill and is not in question. What it also did is move names that used to buy
+  their own image onto a shared one: a solo plate buys **1K 1:1 → up to 1024px** of name, while a
+  ten-name **2K 9:16** sheet gives each band **~200px**. At 200px the model physically cannot draw
+  the thick/thin modulation the prompt asks for, so this pulls the same direction as the prompt
+  regression fixed the same day — it just costs money to undo, which is why the session did not
+  touch it. Three knobs, in rising cost: «ولّدها هسة» (`force`) already gives one name its own
+  sheet on demand · `CALLIG_HOLD_MINUTES=0` switches holding off shop-wide with no release ·
+  `BATCH` 10 → 5 gives ~410px a name at ~$0.02 instead of ~$0.01. **Look at a real prod plate
+  before spending anything** — the prompt fix alone may be the whole of it.
+- **👁️ VERIFY THE FIRST PROD SHEET AFTER THE PROMPT FIX BY EYE.** This session had no
+  `OPENROUTER_API_KEY` and no `node_modules`, so the 2026-09-15 (b) prompt fix is verified as
+  prompt TEXT, never as a returned image. The one thing to check: the flourish came back
+  **without** the harakat coming back with it. If names return vocalised, the artistry block is
+  over-weighted — trim it, never the ban.
 
 - ~~The prep-queue data gap~~ — **CLOSED 2026-08-05 (e).** The spec (`لون/قماش/فصال الروب` · `الشكل`
   · `لون القبعة`), the free-text lines («كسرة الكتف» · «نوع القبعة») and `measurements` now render on
