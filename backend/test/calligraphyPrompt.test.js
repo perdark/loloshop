@@ -46,22 +46,70 @@ test('the weight rule never bans thinness — that is the contrast itself', () =
   for (const [label, p] of allPrompts()) {
     assert.doesNotMatch(p, /never[^.]*\bthin\b/i, `${label}: thinness is banned again`);
     assert.doesNotMatch(p, /hairline/i, `${label}: hairlines are the fine half of the contrast`);
-    assert.match(p, /thick-to-thin|thick\/thin/i, `${label}: no contrast is asked for at all`);
+    assert.match(p, /thick-and-thin|thick-to-thin|thick\/thin/i, `${label}: no contrast is asked for at all`);
   }
 });
 
-test('every prompt ASKS for diacritics — owner ruling 2026-09-15', () => {
-  // ⚠️ THIS TEST IS THE REVERSE OF THE ONE THAT STOOD HERE, AND THE REVERSAL IS THE POINT.
-  // 7a7e5ee removed «masterful diacritics» to stop vocalised names and stray glyphs. That was
-  // a real measurement and it still holds: without the phrase, 5/5 names come back bare. The
-  // owner looked at both sheets side by side on 2026-09-15 and chose the vocalised one — to
-  // him the marks ARE the زخرفة a graduation sash is bought for, not a spelling defect.
-  // So the marks are the PRODUCT now. Do not "fix" them again without asking him; he has
-  // chosen them twice, the second time against a cleaner alternative that was already live.
+test('the prompt says NOTHING about diacritics, in either direction', () => {
+  // ⚠️ THIS TEST HAS NOW BEEN WRITTEN THREE WAYS, ONCE PER OWNER RULING. Read the history in
+  // lib/calligraphyPrompt.js before changing it again — each version was a real measurement:
+  //
+  //   7a7e5ee (09-14)  banned the marks     → clean names, but the prompt became prohibitions
+  //                                           and the model drew a TYPEFACE.
+  //   21d6ac0 (09-15)  demanded «masterful» → the owner chose these against a cleaner sheet.
+  //                                           The marks are the product, not a spelling bug.
+  //   this    (09-17)  says nothing at all  → the owner wrote the prompt himself and it is the
+  //                                           only version whose marks he accepted («الحركات
+  //                                           تراجعت بيهن كانوا افضل» was his verdict on the
+  //                                           «few light marks» attempt).
+  //
+  // The rule that survived all three: name the HAND and let it draw its own marks. Any
+  // explicit instruction — praise or ban — pulls them off their natural weight.
   for (const [label, p] of allPrompts()) {
-    assert.match(p, /masterful diacritics/i, `${label}: the owner's زخرفة is gone`);
-    assert.doesNotMatch(p, /NO diacritics at all/i, `${label}: the ban is back`);
+    assert.doesNotMatch(p, /masterful diacritics/i, `${label}: asking for marks over-weights them`);
+    assert.doesNotMatch(p, /NO diacritics at all|no harakat/i, `${label}: the ban is back`);
+    assert.doesNotMatch(p, /light diacritical marks/i, `${label}: the 09-17 middle ground the owner rejected`);
+    // ...and the hand that carries them must be named, or nothing draws marks at all.
+    assert.match(p, /Iraqi-school Thuluth/i, `${label}: the named hand is what produces the marks`);
   }
+});
+
+test('the canvas is never described as a physical sheet of paper', () => {
+  // ⚠️ THE MOST EXPENSIVE FAILURE FOUND SO FAR, BECAUSE NOTHING THROWS. The owner's draft
+  // opened with «clean white A4 sheet, portrait» and the model PHOTOGRAPHED a page on a desk:
+  // corner pixels 96/49/119/49, 0.0% pure white, 85.9% grey. cropSheet() still happily
+  // reported 10 bands, so the pipeline raised nothing — but band 1 of 10 was a patch of
+  // blurred desk, and that is what reaches order_items.plate_image_url and the embroiderer.
+  // Describe a flat digital canvas; never an object a camera could point at.
+  for (const [label, p] of allPrompts()) {
+    // ⚠️ MATCH THE ASSERTION, NOT THE WORDS. The guard itself contains «No paper sheet», so a
+    // naive /paper sheet/ test fails on the fix it is supposed to protect. What must never
+    // appear is the canvas being ASSERTED as paper — «a clean white A4 sheet», «on a sheet of
+    // paper» — so the pattern requires an article in front of it.
+    assert.doesNotMatch(p, /\b(a|an|the)\s+(clean\s+)?(white\s+)?(A4|paper sheet|sheet of paper)/i,
+      `${label}: the canvas is described as paper — the model will photograph it`);
+    assert.match(p, /NOT a photograph/i, `${label}: the anti-photo guard is gone`);
+    assert.match(p, /#FFFFFF/i, `${label}: the flat-white requirement is gone`);
+  }
+});
+
+test('the embroidery rule is present and does not forbid interlocking', () => {
+  // «NO stroke dropping below its line» is the owner's wording and it is what makes a plate
+  // stitchable: it constrains where a stroke may TRAVEL, not how letters relate. The
+  // alternative tried on 09-17 — «letters must not overlap, cross or interlock» — produced a
+  // readable but plain line that is not Thuluth, and he rejected it.
+  for (const [label, p] of allPrompts()) {
+    assert.match(p, /NO stroke dropping below its line/i, `${label}: the embroidery rule is gone`);
+    assert.doesNotMatch(p, /must not (overlap|interlock)/i, `${label}: this flattens the script`);
+  }
+});
+
+test('guillemets are banned — element_text puts them IN the prompt', () => {
+  // buildSheetPrompt wraps the motif word in «…», so the character is genuinely present in
+  // the text the model reads and it will draw it around a name if not told otherwise.
+  const p = buildSheetPrompt([{ text: 'ديالى', element: 'وردة' }], 'front', null);
+  assert.match(p, /«وردة»/, 'the motif is passed wrapped — that is why the ban is needed');
+  assert.match(p, /no guillemets/i, 'the ban must ride in the same prompt');
 });
 
 test('limiting ornaments never turns into an instruction about the letters', () => {
