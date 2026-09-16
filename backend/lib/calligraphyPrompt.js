@@ -5,14 +5,54 @@
 // approved. The student's own sentence stays on the order line where it belongs.
 const { styleClause } = require('./calligraphyStyles');
 
+// ⚠️ DO NOT ADD A DIACRITICS CLAUSE HERE. IN EITHER DIRECTION. This line has now been
+// written three ways and measured each time, and the version that works is the one that does
+// not mention harakat at all:
+//
+//   2026-09-14  «masterful diacritics»  → every name vocalised at LETTER weight, dragging
+//               stray glyphs in with the marks (a floating ص under مصطفى, a ء inside علي).
+//               0 of 5 lines clean.
+//   2026-09-15  «no diacritics at all» (9 stacked prohibitions) → clean, but the prompt was
+//               then mostly prohibitions and the model drew a TYPEFACE. Owner: «يولد صور
+//               بخطوط عادية وليس مزخرفة». Reverted the same day; he chose the vocalised sheet.
+//   2026-09-17  «a FEW light marks, most letters bare» — the middle ground nobody had tried.
+//               Owner, on a real generated plate: «الحركات تراجعت بيهن كانوا افضل».
+//   2026-09-17  THIS VERSION — say nothing. The owner wrote this prompt himself and it is the
+//               only one that produced marks he accepted: asking for a named CALLIGRAPHIC HAND
+//               makes the model draw the harakat that hand actually uses, at their own weight.
+//               Every explicit instruction — praise or ban — pulls them off that natural weight.
+//
+// Verified live on google/gemini-3.1-flash-image, 2026-09-17: a 10-name sheet came back 10/10,
+// spelling exact, marks natural, and cropped 10/10 through lib/sheetCrop.js.
+//
+// ⚠️ AND NEVER DESCRIBE THE CANVAS AS A PHYSICAL SHEET OF PAPER. The owner's draft opened with
+// «clean white A4 sheet, portrait» and the model obeyed it literally: it PHOTOGRAPHED a page
+// lying on a desk. Measured on that image — corner pixels 96/49/119/49, **0.0%** pure white,
+// 85.9% grey. The trap is that it does not look like a failure to the pipeline: cropSheet()
+// still reported 10 bands, so nothing throws and nothing is flagged — but band 1 of 10 was a
+// patch of blurred desk, and that is what would reach order_items.plate_image_url and the
+// embroiderer. Describe a flat digital canvas, never an object that can be photographed.
 const BASE = [
-  'Elegant Arabic Thuluth calligraphy, pure black ink on a PURE FLAT WHITE (#FFFFFF) background.',
-  'The background must be plain solid white only — no paper texture, no grain, no cream or beige tint,',
-  'no gradient, no shadow, no off-white. Broad-nib pen with strong thick/thin contrast, masterful',
-  'diacritics, balanced spacing.',
+  // The HAND, named and specific. This is what carries the artistry — and the harakat.
+  'Elegant Iraqi-school Thuluth calligraphy hand, pure black ink, high thick-and-thin broad-nib',
+  'pen contrast, balanced spacing.',
+  // The CANVAS, explicitly not an object.
+  'Pure black ink on a PURE FLAT WHITE (#FFFFFF) digital background — a flat vector-like scan,',
+  'NOT a photograph. No paper sheet, no paper texture, no grain, no page edges, no desk, no hand,',
+  'no shadow, no perspective, no vignette, no cream or beige tint, no gradient, no off-white.',
+  'The background must be uniform #FFFFFF from corner to corner.',
+  // The EMBROIDERY rule. Owner's wording, and it does the job the 09-17 «letters must not
+  // interlock» experiment was reaching for WITHOUT flattening the script: it constrains where
+  // a stroke may travel, not how the letters relate to each other. Measured: that experiment
+  // produced a readable but plain line the owner rejected; this keeps the Thuluth intact.
+  'Each name stays on one line with NO stroke dropping below its line.',
 ].join(' ');
 
-const NEG = 'No underlines, no quotation marks, no frames, no borders, no boxes, no numbering, no Latin text, no watermark.';
+// ⚠️ THE GUILLEMET BAN IS LOAD-BEARING, not decoration. `element_text` reaches the model
+// wrapped in «…» (buildSheetPrompt below), and the ornament styles are described in Arabic
+// prose that uses them too — so the character is IN the prompt and the model will happily
+// draw it around a name. The owner's own draft banned it explicitly; it is kept.
+const NEG = 'No underlines, no quotation marks, no guillemets, no arrows, no frames, no borders, no boxes, no numbering, no Latin text, no watermark.';
 
 // Owner decision 2026-08-26: the sash FRONT is now as plain as the back. It used to carry
 // «add small floated decorative ornaments» while the back was told to use less than half of
