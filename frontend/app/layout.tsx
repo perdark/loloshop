@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Amiri, Cairo, Great_Vibes, Playfair_Display } from "next/font/google";
 import { DeepLinkHandler } from "@/components/DeepLinkHandler";
+import { EdgeBack } from "@/components/EdgeBack";
 import { PwaRegistrar } from "@/components/PwaRegistrar";
 import { PushRegistrar } from "@/components/PushRegistrar";
 import { AppBeacon } from "@/components/AppBeacon";
@@ -165,6 +166,13 @@ export default function RootLayout({
           route — including before the student has navigated anywhere themselves.
         */}
         <DeepLinkHandler />
+        {/*
+          «السحب من حافة اليمين للرجوع» — the back gesture the iOS shell does not have. Renders
+          nothing; inert on Android and in every browser. Root layout because a student can be
+          anywhere when she sweeps, and because the one overlay contract it uses (`lolo:back`)
+          lives in components/ui/Modal.tsx, not on any single route.
+        */}
+        <EdgeBack />
         {/*
           Push notifications. Renders nothing; inert in a browser and while signed out.
           Root layout because the tap that OPENS the app has to find a listener already

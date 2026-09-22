@@ -64,10 +64,22 @@ export function Modal({ open, onClose, title, children, footer, descriptionId }:
       }
     };
 
+    // The right-edge back swipe (components/EdgeBack.tsx) asks before it navigates: an open
+    // sheet cancels the event and closes itself instead. Wiring it HERE covers every caller of
+    // this primitive at once, and is why EdgeBack never needs to know which modals exist.
+    // ⚠️ Same contract as Escape above — a sheet that swallows the gesture MUST close, or the
+    // gesture becomes a no-op the student cannot tell from a broken screen.
+    const onBack = (e: Event) => {
+      e.preventDefault();
+      close();
+    };
+
     document.addEventListener("keydown", onKey);
+    window.addEventListener("lolo:back", onBack);
     document.body.style.overflow = "hidden";
     return () => {
       document.removeEventListener("keydown", onKey);
+      window.removeEventListener("lolo:back", onBack);
       document.body.style.overflow = "";
       prev?.focus?.();
     };
