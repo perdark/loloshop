@@ -191,12 +191,13 @@ test('a reroll anchors on the ORIGINAL plate geometry, not the ratcheted current
 });
 
 test('a short job fills its paid sheet with pending same-variant plates from other jobs', async () => {
-  // 47% of lifetime spend was under-filled sheets (34 sheets carried ONE name). A 3-name job
-  // must not buy a 3-band image while 4 same-variant names sit pending in another job.
+  // 47% of lifetime spend was under-filled sheets (34 sheets carried ONE name). A 2-name job
+  // must not buy a 2-band image while 2 same-variant names sit pending in another job.
+  // (Sized to fit the 5-band sheet since 2026-09-23 — was 3 + 4 on the 10-band sheet.)
   const jobA = crypto.randomUUID();
   const jobB = crypto.randomUUID();
-  for (let i = 0; i < 3; i++) await insertPlate({ job_id: jobA, status: 'pending', render_text: `${TAG} اسم-أ-${i}` });
-  for (let i = 0; i < 4; i++) await insertPlate({ job_id: jobB, status: 'pending', render_text: `${TAG} اسم-ب-${i}` });
+  for (let i = 0; i < 2; i++) await insertPlate({ job_id: jobA, status: 'pending', render_text: `${TAG} اسم-أ-${i}` });
+  for (let i = 0; i < 2; i++) await insertPlate({ job_id: jobB, status: 'pending', render_text: `${TAG} اسم-ب-${i}` });
 
   const { calls, restore } = stubFetch((body) => sheetPng(promptNameCount(body)), 0.07);
   let out;
@@ -207,20 +208,20 @@ test('a short job fills its paid sheet with pending same-variant plates from oth
   }
   assert.ok(!out.error, JSON.stringify(out.error || {}));
   assert.equal(calls.length, 1, 'one paid sheet for both jobs');
-  assert.equal(promptNameCount(calls[0].body), 7, 'all 7 pending names ride the one sheet');
+  assert.equal(promptNameCount(calls[0].body), 4, 'all 4 pending names ride the one sheet');
 
   // The response stays scoped to the requested job — the workbench view does not change.
-  assert.equal(out.data.processed, 3);
-  assert.equal(out.data.plates.length, 3);
+  assert.equal(out.data.processed, 2);
+  assert.equal(out.data.plates.length, 2);
   assert.equal(out.data.remaining, 0);
 
-  // The hitchhikers are done in the DB, each carrying a 1/7 share of the sheet.
+  // The hitchhikers are done in the DB, each carrying a 1/4 share of the sheet.
   const { rows: bPlates } = await query(
     `SELECT status, cost_usd, plate_path FROM calligraphy_plates WHERE job_id=$1`, [jobB]);
-  assert.equal(bPlates.length, 4);
+  assert.equal(bPlates.length, 2);
   for (const p of bPlates) {
     assert.equal(p.status, 'done');
-    assert.ok(Math.abs(Number(p.cost_usd) - 0.07 / 7) < 0.0005, `cost share ${p.cost_usd}`);
+    assert.ok(Math.abs(Number(p.cost_usd) - 0.07 / 4) < 0.0005, `cost share ${p.cost_usd}`);
     fx.files.push(absFromUrl(p.plate_path));
   }
   const { rows: aPlates } = await query(

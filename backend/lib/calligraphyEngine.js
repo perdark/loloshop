@@ -1,5 +1,5 @@
 // backend/lib/calligraphyEngine.js
-// Single source of truth for "process the next batch of ≤10 pending plates" of a
+// Single source of truth for "process the next batch of ≤BATCH pending plates" of a
 // calligraphy job. Called by BOTH the HTTP endpoint (calligraphyController.processNext)
 // and the pg-boss worker (worker.js) — it never touches req/res. `req` is optional and
 // only threads into saveBufferToUploads for dev-host public URLs (null in the worker).
@@ -10,9 +10,10 @@ const { buildSheetPrompt, buildSinglePrompt } = require('./calligraphyPrompt');
 const { saveBufferToUploads } = require('./upload');
 const { looksLikeInstruction } = require('./calligraphyText');
 const { checkBudget, budgetError, logSpend, notifyCreditExhausted } = require('./calligraphySpend');
-const { holdDecision } = require('./calligraphyBatching');
+const { holdDecision, FULL_SHEET } = require('./calligraphyBatching');
 
-const BATCH = 10;
+// One sheet size, owned by calligraphyBatching.js — the hold rule and the batch must agree.
+const BATCH = FULL_SHEET;
 // Upstream failures that are about the SHOP's account or the wire, never about these names.
 // Callers must not retire a plate for one — see the catch in processNextBatch.
 const INFRA_CODES = new Set(['ERR_OPENROUTER_CREDIT', 'ERR_OPENROUTER_NET', 'ERR_OPENROUTER_KEY']);

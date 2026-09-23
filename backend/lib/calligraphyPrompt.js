@@ -64,9 +64,14 @@ const NEG = 'No underlines, no quotation marks, no guillemets, no arrows, no fra
 // ⚠️ `cap` deliberately KEEPS the ornaments — the cap is a separate garment, not the other
 // half of the sash. `cap_side` never reaches this table: calligraphyEngine.js:16 maps it to
 // `cap` first. So front/back/cap are the only three keys that can ever be looked up here.
+//
+// ⚠️ MINIMAL BINDS THE ORNAMENTS, NEVER THE LETTERFORMS (HANDOFF landmine, 2026-09-15). The old
+// wording «keep it mostly clean plain letters» reached the WRITING and told the model to draw
+// plain letters on every sash front/back — which is most ممثل work (owner 2026-09-23: «بدون
+// زخرفة»). Say what the space AROUND the name holds, and let BASE own the hand.
 const MINIMAL =
-  'Use minimal ornamentation — at most one or two tiny floated ornaments total; keep it mostly ' +
-  'clean plain letters with no decorative filler around the words.';
+  'Use minimal ornamentation — at most one or two tiny floated ornaments total, with no ' +
+  'decorative filler around the words. The letters themselves stay fully calligraphic.';
 
 const ORNAMENT = {
   front: MINIMAL,

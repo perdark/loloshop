@@ -189,8 +189,8 @@ export interface CreateJobBody {
   reviewed?: boolean;
 }
 
-/** Below this, the UI warns (a sheet costs the same whether it holds 1 or 10 names). */
-export const MIN_BATCH = 10;
+/** Below this, the UI warns (a sheet costs the same whether it holds 1 or MIN_BATCH names). */
+export const MIN_BATCH = 5; // must equal backend lib/calligraphyBatching.js FULL_SHEET (5 since 2026-09-23)
 
 // Mirrors the backend `isRealName`: a real embroiderable name has ≥2 Arabic letters,
 // so pure numbers / Latin / emoji / single chars are flagged and never generated.
