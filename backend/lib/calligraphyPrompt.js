@@ -36,23 +36,38 @@ const BASE = [
   // The HAND, named and specific. This is what carries the artistry — and the harakat.
   'Elegant Iraqi-school Thuluth calligraphy hand, pure black ink, high thick-and-thin broad-nib',
   'pen contrast, balanced spacing.',
+  // ⚠️ NAME THE HAND AND NAME WHAT IT IS NOT (2026-09-24). Named once and alone, «Thuluth» lost
+  // to the model's default: measured on prod, ممثل plates came back Thuluth one line, heavy
+  // Naskh the next, thin Naskh the one after, and the مفرد (solo) plates came back Naskh every
+  // time. Describing what makes it Thuluth — the tall hooked alifs, the letters stacked into a
+  // composition, the long sweeping tails — gives the model something to draw instead of a word.
+  'It must be genuine classical THULUTH (خط الثلث) as an Iraqi master would write it — NOT Naskh,',
+  'NOT Ruq\'ah, NOT Diwani, NOT a printed or typed font. Tall alifs and lams with the hooked Thuluth',
+  'head, letters stacked and composed over each other in the classical Thuluth arrangement, long',
+  'sweeping tails and elongated curves.',
   // The CANVAS, explicitly not an object.
   'Pure black ink on a PURE FLAT WHITE (#FFFFFF) digital background — a flat vector-like scan,',
   'NOT a photograph. No paper sheet, no paper texture, no grain, no page edges, no desk, no hand,',
   'no shadow, no perspective, no vignette, no cream or beige tint, no gradient, no off-white.',
   'The background must be uniform #FFFFFF from corner to corner.',
-  // The EMBROIDERY rule. Owner's wording, and it does the job the 09-17 «letters must not
-  // interlock» experiment was reaching for WITHOUT flattening the script: it constrains where
-  // a stroke may travel, not how the letters relate to each other. Measured: that experiment
-  // produced a readable but plain line the owner rejected; this keeps the Thuluth intact.
-  'Each name stays on one line with NO stroke dropping below its line.',
+  // ⚠️ THE EMBROIDERY RULE, RELAXED ON THE OWNER'S ORDER (2026-09-24). It used to read «Each name
+  // stays on one line with NO stroke dropping below its line», which forbids the two things that
+  // make Thuluth Thuluth — descending tails and stacked letters — so the model obeyed it by
+  // drawing Naskh on a flat baseline. What the pipeline actually needs is that each name stays
+  // inside its OWN band (lib/sheetCrop.js cuts on the white gaps), not that it stays flat.
+  // «ONE row» and «every letter readable» came from the first live trial of the relaxed rule:
+  // a solo plate wrapped المحامية onto its own line and dropped the ع of اسماعيل into a stack.
+  'Each name is ONE self-contained composition on ONE row — it never wraps onto a second line —',
+  'and its tails and stacked letters stay inside that name\'s own band and never reach into the',
+  'name above or below it. Stacking must never hide or drop a letter: every letter of the name',
+  'stays present and readable.',
 ].join(' ');
 
 // ⚠️ THE GUILLEMET BAN IS LOAD-BEARING, not decoration. `element_text` reaches the model
 // wrapped in «…» (buildSheetPrompt below), and the ornament styles are described in Arabic
 // prose that uses them too — so the character is IN the prompt and the model will happily
 // draw it around a name. The owner's own draft banned it explicitly; it is kept.
-const NEG = 'No underlines, no quotation marks, no guillemets, no arrows, no frames, no borders, no boxes, no numbering, no Latin text, no watermark.';
+const NEG = 'Draw only the letters of each name — no dash, hyphen, bullet or punctuation before or after it. No signature, no calligrapher\'s mark, stamp or date. No underlines, no quotation marks, no guillemets, no arrows, no frames, no borders, no boxes, no numbering, no Latin text, no watermark.';
 
 // Owner decision 2026-08-26: the sash FRONT is now as plain as the back. It used to carry
 // «add small floated decorative ornaments» while the back was told to use less than half of
@@ -98,11 +113,14 @@ function buildSheetPrompt(items, variant = 'front', style = null) {
       : { text: it.text, element: it.element || null }
   );
 
+  // ⚠️ NO «- » BULLET IN FRONT OF A NAME (2026-09-24). The model drew it: «- الاقتصادي حيدر هاشم»
+  // and «-الدكتور حسين عباس-» both reached order_items as plates with a dash stitched beside the
+  // name. One name per line is all the separation the list needs.
   const list = normalized.map(({ text, element }) => {
     if (element) {
-      return `- ${text}   ⟨draw a small, simple, solid black-ink motif of «${element}» right beside this name, on the SAME line and close to the letters — do NOT put it on its own separate line⟩`;
+      return `${text}   ⟨draw a small, simple, solid black-ink motif of «${element}» right beside this name, on the SAME line and close to the letters — do NOT put it on its own separate line⟩`;
     }
-    return `- ${text}`;
+    return text;
   }).join('\n');
 
   return [
