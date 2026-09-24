@@ -102,6 +102,12 @@ test('the embroidery rule keeps each name in its band without flattening it', ()
     assert.doesNotMatch(p, /NO stroke dropping below its line/i, `${label}: the flattening rule is back`);
     assert.match(p, /own band/i, `${label}: nothing keeps a name out of its neighbour's band`);
     assert.doesNotMatch(p, /must not (overlap|interlock)/i, `${label}: this flattens the script`);
+    // Measured on prod 2026-09-24, the day it shipped: asking for letters «stacked and composed
+    // over each other» folded names into a block (median width/height 5.6 → 2.2) and put the
+    // title on its own row in 2 of the first 4 plates. A sash carries a long strip.
+    assert.doesNotMatch(p, /stacked and composed over each other/i, `${label}: asks for a block, not a line`);
+    assert.match(p, /never two rows/i, `${label}: nothing stops the title wrapping above the name`);
+    assert.match(p, /four times wider than it is tall/i, `${label}: no width target`);
   }
 });
 

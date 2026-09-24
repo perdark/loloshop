@@ -43,8 +43,7 @@ const BASE = [
   // composition, the long sweeping tails — gives the model something to draw instead of a word.
   'It must be genuine classical THULUTH (خط الثلث) as an Iraqi master would write it — NOT Naskh,',
   'NOT Ruq\'ah, NOT Diwani, NOT a printed or typed font. Tall alifs and lams with the hooked Thuluth',
-  'head, letters stacked and composed over each other in the classical Thuluth arrangement, long',
-  'sweeping tails and elongated curves.',
+  'head, long sweeping tails and elongated curves, with only light Thuluth overlaps inside the line.',
   // The CANVAS, explicitly not an object.
   'Pure black ink on a PURE FLAT WHITE (#FFFFFF) digital background — a flat vector-like scan,',
   'NOT a photograph. No paper sheet, no paper texture, no grain, no page edges, no desk, no hand,',
@@ -57,10 +56,15 @@ const BASE = [
   // inside its OWN band (lib/sheetCrop.js cuts on the white gaps), not that it stays flat.
   // «ONE row» and «every letter readable» came from the first live trial of the relaxed rule:
   // a solo plate wrapped المحامية onto its own line and dropped the ع of اسماعيل into a stack.
-  'Each name is ONE self-contained composition on ONE row — it never wraps onto a second line —',
-  'and its tails and stacked letters stay inside that name\'s own band and never reach into the',
-  'name above or below it. Stacking must never hide or drop a letter: every letter of the name',
-  'stays present and readable.',
+  // ⚠️ AND NEVER ASK FOR STACKING (2026-09-24, measured on prod the same day it shipped).
+  // «letters stacked and composed over each other» folded names into a square block: plates
+  // went from a median width/height of 5.6 (330 مفرد) to 2.2, and 2 of the first 4 put the title
+  // on its own row. A sash carries a LONG strip. The width ratio is the number to check.
+  'Each name is written as ONE long horizontal line reading right to left — never two rows, and a',
+  'title such as الأستاذ or المهندسة is never placed above the rest of the name. The finished name',
+  'is a wide strip, at least four times wider than it is tall. Its tails stay inside that name\'s',
+  'own band and never reach into the name above or below it, and every letter stays present and',
+  'readable.',
 ].join(' ');
 
 // ⚠️ THE GUILLEMET BAN IS LOAD-BEARING, not decoration. `element_text` reaches the model
