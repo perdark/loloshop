@@ -27,6 +27,21 @@ router.post('/custom-order', customOrders.createCustomOrder);
 router.post('/custom-order/uploads/image', imageUploadLimit, imageUpload.single('file'), validateUploadedImage, customOrders.uploadImage);
 router.get('/custom-order/students-search', require('../controllers/orderEditController').studentsSearch);
 router.patch('/orders/:id/cost', c.updateOrderCost);
+
+// «التكاليف والربح الحقيقي» — the cost model (migration 113) and the P&L built on it.
+const costs = require('../controllers/costController');
+router.get('/costs/model', costs.getModel);
+router.get('/costs/pnl', costs.pnl);
+router.post('/costs/items', costs.createItem);
+router.patch('/costs/items/:id', costs.updateItem);
+router.delete('/costs/items/:id', costs.deleteItem);
+router.post('/costs/lines', costs.createLine);
+router.patch('/costs/lines/:id', costs.updateLine);
+router.delete('/costs/lines/:id', costs.deleteLine);
+router.post('/costs/expenses', costs.createExpense);
+router.patch('/costs/expenses/:id', costs.updateExpense);
+router.delete('/costs/expenses/:id', costs.deleteExpense);
+router.patch('/costs/settings', costs.updateSettings);
 router.delete('/orders/:id', c.deleteOrder);
 router.patch('/checkout-groups/:id', c.updateCheckoutGroup);
 router.get('/reps-overview', c.repsOverview);

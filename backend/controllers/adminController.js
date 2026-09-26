@@ -225,11 +225,24 @@ async function updateOrderCost(req, res) {
   if (!Number.isFinite(cost) || !Number.isInteger(cost) || cost < 0) {
     return res.status(400).json({ error: 'تكلفة غير صالحة', code: 'ERR_VALIDATION' });
   }
+  // ⚠️ On a rep row `cost` IS حصة الإدارة, not a production cost (counts.js). Overwriting it
+  // silently rewrote the shop's income and the rep's margin. Production cost now lives in the
+  // cost model (/admin/costs), so this only ever touches retail rows.
   const { rows } = await query(
-    `UPDATE orders SET cost = $1 WHERE id = $2 RETURNING id, price, cost, profit`,
+    `UPDATE orders SET cost = $1 WHERE id = $2 AND wholesaler_approval IS NULL
+     RETURNING id, price, cost, profit`,
     [cost, id]
   );
-  if (!rows.length) return res.status(404).json({ error: 'الطلب غير موجود', code: 'ERR_NOT_FOUND' });
+  if (!rows.length) {
+    const exists = await query(`SELECT 1 FROM orders WHERE id = $1`, [id]);
+    if (exists.rows.length) {
+      return res.status(409).json({
+        error: 'هذا طلب ممثل — «التكلفة» فيه هي حصة الإدارة وما تتعدل من هنا. تكلفة الإنتاج صارت بصفحة التكاليف.',
+        code: 'ERR_REP_ORDER_COST',
+      });
+    }
+    return res.status(404).json({ error: 'الطلب غير موجود', code: 'ERR_NOT_FOUND' });
+  }
   await query(
     `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
      VALUES ($1, 'update_cost', 'order', $2, $3)`,

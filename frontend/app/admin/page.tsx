@@ -24,6 +24,7 @@ import { MoneyRevealTrigger } from "@/components/MoneyRevealTrigger";
 import { setMoneyGate } from "@/lib/money-gate";
 import { CalculationDetails } from "@/components/admin/CalculationDetails";
 import { Count } from "@/components/ui/Count";
+import { getCostPnl, type Pnl } from "@/lib/costs";
 
 const DashboardCharts = dynamic(
   () =>
@@ -92,6 +93,66 @@ function Figure({
         </dd>
       )}
     </div>
+  );
+}
+
+/* «صافي الربح التقريبي — هذا الشهر»: the dashboard's own money row never subtracted a
+   single cost, so it was never a profit figure (see `retailCostMissing` below). This card
+   pulls the ONE number from the real cost model (`/admin/costs`) and links straight there.
+   It fetches independently of the rest of the dashboard's `load()` — a failure here (the
+   model has no data yet, or the endpoint is still being built) must never take the whole
+   dashboard down with it, so it swallows its own error into a quiet inline message. */
+function TrueProfitCard({ showMoney }: { showMoney: boolean }) {
+  const [pnl, setPnl] = useState<Pnl | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    const now = new Date();
+    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    getCostPnl(month, month)
+      .then(setPnl)
+      .catch(() => setFailed(true));
+  }, []);
+
+  return (
+    <Link
+      href="/admin/costs"
+      className="mt-4 block rounded-2xl border border-ink/10 bg-surface px-5 py-4 transition-colors hover:border-orange/40"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-ink">صافي الربح التقريبي — هذا الشهر</p>
+          {failed ? (
+            <p className="mt-1 text-xs text-[var(--shop-muted)]">
+              تعذر تحميل رقم الربح الحقيقي الآن — افتح صفحة التكاليف مباشرة.
+            </p>
+          ) : pnl ? (
+            <p className="mt-1 text-xs text-[var(--shop-muted)]">
+              بعد خصم المواد والأجور والرواتب والمصاريف · التكاليف الكلية{" "}
+              <MoneyMask show={showMoney} placeholder="••••">
+                <Money amount={pnl.total.total_costs} />
+              </MoneyMask>
+            </p>
+          ) : (
+            <p className="mt-1 text-xs text-[var(--shop-muted)]">جارٍ التحميل…</p>
+          )}
+        </div>
+        {pnl && (
+          <div className="text-end">
+            <p
+              className={`text-2xl font-bold tabular-nums ${pnl.total.net >= 0 ? "text-green-700" : "text-danger"}`}
+            >
+              <MoneyMask show={showMoney} placeholder="••••">
+                <Money amount={pnl.total.net} />
+              </MoneyMask>
+            </p>
+            <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-900">
+              تقديري
+            </span>
+          </div>
+        )}
+      </div>
+    </Link>
   );
 }
 
@@ -501,6 +562,11 @@ export default function AdminDashboardPage() {
         <Figure label="طلبات محتسبة" value={`${toArabicDigits(money.orders)} طلب`} />
       </dl>
 
+      {/* The REAL number — «دخل المحل» above is revenue, never profit, because nothing in
+          it has ever had materials/wages/salaries/expenses subtracted. This card is that
+          subtraction, pulled from the cost model on /admin/costs. */}
+      <TrueProfitCard showMoney={showMoney} />
+
       {/* The representatives' money — collected through the shop, but not the shop's.
           Kept OUT of the ledger above and labelled outright, because printing it as
           «إجمالي الربح» was the whole bug. Hidden entirely when no rep has sold
@@ -536,13 +602,18 @@ export default function AdminDashboardPage() {
       </section>
       )}
 
-      {/* Honest gap, not a warning: with no production cost entered anywhere, the shop's
-          NET profit is simply unknown. Better an admitted blank than a confident lie. */}
+      {/* Honest gap, not a warning: this row is revenue, not profit, until real costs are
+          entered. It used to say net profit "cannot be computed" — it now can, on the cost
+          model page, so it points there instead of implying the number is out of reach. */}
       {retailCostMissing && (
         <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-900">
           لم تُدخل تكلفة إنتاج لأي طلب تجزئة (٠ من {toArabicDigits(money.retailPieces)} قطعة)، لذلك
-          «مبيعات التجزئة» إيراد وليس ربحاً، ولا يمكن حساب صافي ربح المحل بعد. أدخل التكلفة من
-          صفحة الطلبات ليصبح الرقم صافياً.
+          «مبيعات التجزئة» إيراد وليس ربحاً هنا. صافي الربح الحقيقي — بعد خصم المواد والأجور
+          والرواتب والمصاريف — يُحسب في{" "}
+          <Link href="/admin/costs" className="font-semibold underline underline-offset-2">
+            صفحة التكاليف والربح الحقيقي
+          </Link>
+          .
         </p>
       )}
 
@@ -557,7 +628,12 @@ export default function AdminDashboardPage() {
           <p>مبيعات التجزئة = ما يدفعه الطالب للمحل مباشرة (بدون ممثل).</p>
           <p>ربح الممثلين = ما دفعه الطلاب للممثلين − حصة الإدارة. هذا المبلغ يبقى عند الممثل.</p>
           <p>
-            صافي ربح المحل = دخل المحل − تكلفة الإنتاج، ولا يظهر هنا لأن تكلفة الإنتاج غير مُدخلة.
+            صافي ربح المحل الحقيقي = دخل المحل − (المواد + أجور الورشة + الرواتب + المصاريف +
+            الخسائر). لا يظهر في هذه الصفحة — احسبه من{" "}
+            <Link href="/admin/costs" className="font-semibold underline underline-offset-2">
+              صفحة التكاليف والربح الحقيقي
+            </Link>
+            .
           </p>
           <p>عدد الطلبات / الباقات = كل طلب منفرد مرة، وكل مجموعة شراء مرتبطة مرة واحدة مهما كان عدد قطعها.</p>
         </div>
@@ -819,8 +895,12 @@ export default function AdminDashboardPage() {
               يساوي دخل المحل.
             </p>
             <p className="mt-2">
-              هذا الرقم دخل وليس صافي ربح: صافي الربح = دخل المحل − تكلفة الإنتاج، وتكلفة الإنتاج
-              غير مُدخلة على طلبات التجزئة.
+              هذا الرقم دخل وليس صافي ربح: الصافي الحقيقي يُحسب بعد خصم المواد والأجور والرواتب
+              والمصاريف والخسائر، في{" "}
+              <Link href="/admin/costs" className="font-semibold underline underline-offset-2">
+                صفحة التكاليف والربح الحقيقي
+              </Link>
+              .
             </p>
             <p className="mt-2">
               عدد الطلبات يحسب الباقة مرة واحدة، والحساب لا يشمل طلبات الممثلين المعلّقة أو المُرجعة ولا أي طلب ملغى.

@@ -30,6 +30,7 @@ const {
 } = require('./counts');
 
 const presence = require('./staffPresence');
+const trueProfit = require('./trueProfit');
 // «2026/8/30» — the console's one date format. See lib/shopTime.js.
 const { fmtShopDate } = require('./shopTime');
 
@@ -73,14 +74,12 @@ const METRICS = {
         `إجمالي اللي دفعه الطلاب: ${fmtIQD(m.gross_collected)}`,
         `عدد الطلبات: ${m.orders}`,
       ];
-      // The dashboard refuses to print a net profit while no production cost exists;
-      // the assistant must refuse in the same breath, or it becomes the easy place to
-      // get the number the dashboard would not give.
-      if (Number(m.retail_pieces_costed) === 0) {
-        facts.push(
-          'ماكو تكلفة إنتاج مُدخلة لأي طلب تجزئة، فمبيعات التجزئة إيراد مو ربح، وصافي ربح المحل ما ينحسب بعد'
-        );
-      }
+      // دخل المحل is income, never profit. Since 2026-09-26 the net lives in ONE place —
+      // lib/trueProfit.js via the `true_profit` metric — so this metric points there instead
+      // of improvising a subtraction the /admin/costs page would disagree with.
+      facts.push(
+        'دخل المحل إيراد مو ربح — صافي الربح بعد المواد والرواتب والمصاريف والخسائر يطلع من «الربح الحقيقي»'
+      );
       return { label: `آخر ${d} يوم`, facts };
     },
   },
@@ -386,6 +385,52 @@ const METRICS = {
     },
   },
 
+  true_profit: {
+    desc: 'الربح الحقيقي: دخل المحل ناقص المواد وأجور الورشة والرواتب والمصاريف والخسائر والذكاء الاصطناعي، شهرياً، مع أرباح كل منتج وتنبيهات التكاليف الناقصة (params: months = عدد الأشهر لورا بما فيها الحالي، 1-12)',
+    params: ['months'],
+    // The ONLY net-profit answer the assistant has. Everything comes from lib/trueProfit.js —
+    // the same function /admin/costs renders — so the console and the page agree to the dinar.
+    run: async ({ months }) => {
+      const n = Math.min(Math.max(parseInt(months, 10) || 1, 1), 12);
+      const { current } = trueProfit.currentMonth();
+      const [y, m] = current.split('-').map(Number);
+      const start = new Date(Date.UTC(y, m - n, 1));
+      const from = `${start.getUTCFullYear()}-${String(start.getUTCMonth() + 1).padStart(2, '0')}`;
+      const r = await trueProfit.computePnl({ from, to: current });
+      const t = r.total;
+      const facts = [
+        `الفترة: ${r.from} إلى ${r.to}${t.partial ? ' (الشهر الحالي لحد اليوم)' : ''}`,
+        `دخل المحل: ${fmtIQD(t.income.shop_income)}`,
+        `مواد الإنتاج (تقديري): ${fmtIQD(t.costs.materials)}`,
+        `أجور الورشة بالقطعة: ${fmtIQD(t.costs.workshop_wages)}`,
+        `رواتب الموظفين: ${fmtIQD(t.costs.salaries)}`,
+        `مصاريف شهرية ثابتة: ${fmtIQD(t.costs.fixed_expenses)}`,
+        `مصاريف لمرة واحدة: ${fmtIQD(t.costs.one_off_expenses)}`,
+        `خسائر: ${fmtIQD(t.costs.losses)}`,
+        `الذكاء الاصطناعي: ${fmtIQD(t.costs.ai)} (${r.ai_usd}$)`,
+        `مجموع التكاليف: ${fmtIQD(t.total_costs)}`,
+        `صافي الربح التقريبي: ${fmtIQD(t.net)}${t.margin_pct == null ? '' : ` (${t.margin_pct}% من دخل المحل)`}`,
+        `ربح الممثلين (مو إلنا، للعلم): ${fmtIQD(t.income.rep_margin)}`,
+      ];
+      if (r.months.length > 1) {
+        for (const mo of r.months) {
+          facts.push(`${mo.month}: دخل ${fmtIQD(mo.income.shop_income)}، تكاليف ${fmtIQD(mo.total_costs)}، صافي ${fmtIQD(mo.net)}`);
+        }
+      }
+      const byMargin = r.per_product.filter((p) => p.pieces >= 5);
+      for (const p of byMargin.slice(0, 3)) {
+        facts.push(`من أكثر المنتجات مساهمة: ${p.name_ar} — ${p.pieces} قطعة، دخل القطعة ${fmtIQD(p.income_per_piece)}، موادها ${fmtIQD(p.material_cost_per_piece)}`);
+      }
+      const weak = [...byMargin].sort((a, b) =>
+        (a.income_per_piece - a.material_cost_per_piece) - (b.income_per_piece - b.material_cost_per_piece)).slice(0, 2);
+      for (const p of weak) {
+        facts.push(`أضعف هامش: ${p.name_ar} — دخل القطعة ${fmtIQD(p.income_per_piece)}، موادها ${fmtIQD(p.material_cost_per_piece)}`);
+      }
+      for (const w of r.warnings) facts.push(`تنبيه: ${w.text_ar}`);
+      return { label: `الربح الحقيقي — ${r.from} إلى ${r.to}`, facts };
+    },
+  },
+
   salary_summary: {
     desc: 'ملخص الرواتب والمكافآت والخصومات للموظفين خلال فترة (params: days)',
     params: ['days'],
@@ -399,7 +444,9 @@ const METRICS = {
           ORDER BY total DESC`
       );
       if (!rows.length) return { label: `آخر ${d} يوم`, facts: ['ماكو حركات رواتب بهذي الفترة'] };
-      const AR = { salary: 'راتب', bonus: 'مكافأة', deduction: 'خصم', advance: 'سلفة', payout: 'تحويل' };
+      // Keys are the salary_txn_type enum. 'salary_set' is written when an admin SETS a salary,
+      // not when one is paid — so it is labelled as a change, never summed as money paid out.
+      const AR = { salary_set: 'تعديل راتب أساسي (مو دفعة)', bonus: 'مكافأة', deduction: 'خصم' };
       return {
         label: `حركات الرواتب — آخر ${d} يوم`,
         facts: rows.map((r) => `${AR[r.type] || r.type}: ${r.n} حركة، ${fmtIQD(r.total)}`),
