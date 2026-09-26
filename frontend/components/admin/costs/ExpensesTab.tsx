@@ -23,6 +23,7 @@ import {
   type CostSettings,
   type Expense,
   type ExpenseKind,
+  parseAmount,
 } from "@/lib/costs";
 import { ConfirmDeleteModal } from "./ConfirmDeleteModal";
 
@@ -136,7 +137,7 @@ function ExpenseRow({
     noteAr !== (expense.note_ar || "");
 
   async function save() {
-    const amt = Number(amount.replace(/[^\d.]/g, ""));
+    const amt = parseAmount(amount);
     if (!nameAr.trim() || !Number.isFinite(amt) || amt < 0 || !startsOn) {
       toast.error("تحقق من الاسم والمبلغ والتاريخ");
       return;
@@ -253,7 +254,7 @@ function AddExpenseModal({
   const [saving, setSaving] = useState(false);
 
   async function save() {
-    const amt = Number(amount.replace(/[^\d.]/g, ""));
+    const amt = parseAmount(amount);
     if (!nameAr.trim() || !Number.isFinite(amt) || amt < 0 || !startsOn) {
       toast.error("تحقق من الاسم والمبلغ والتاريخ");
       return;
@@ -342,8 +343,8 @@ function SettingsBox({
   const dirty = Number(usdIqd) !== settings.usd_iqd || Number(dayRate) !== settings.unsalaried_day_rate;
 
   async function save() {
-    const rate = Number(usdIqd.replace(/[^\d.]/g, ""));
-    const day = Number(dayRate.replace(/[^\d.]/g, ""));
+    const rate = parseAmount(usdIqd);
+    const day = parseAmount(dayRate);
     if (!Number.isFinite(rate) || rate <= 0 || !Number.isFinite(day) || day < 0) {
       toast.error("تحقق من الأرقام");
       return;

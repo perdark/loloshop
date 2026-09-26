@@ -31,6 +31,7 @@ import {
   type CostProduct,
   PRODUCT_TYPE_LABEL,
   type ProductType,
+  parseAmount,
 } from "@/lib/costs";
 import { ConfirmDeleteModal } from "./ConfirmDeleteModal";
 
@@ -253,7 +254,7 @@ function LineRow({
   const [saving, setSaving] = useState(false);
 
   const item = items.find((i) => i.id === itemId);
-  const qtyNum = Number(qty.replace(/[^\d.]/g, ""));
+  const qtyNum = parseAmount(qty);
   const computed = item && Number.isFinite(qtyNum) ? item.unit_cost * qtyNum : 0;
 
   const dirty =
@@ -353,7 +354,7 @@ function AddLineModal({
   const [saving, setSaving] = useState(false);
 
   async function save() {
-    const qtyNum = Number(qty.replace(/[^\d.]/g, ""));
+    const qtyNum = parseAmount(qty);
     if (!itemId || !Number.isFinite(qtyNum) || qtyNum <= 0) {
       toast.error("تحقق من البند والكمية");
       return;

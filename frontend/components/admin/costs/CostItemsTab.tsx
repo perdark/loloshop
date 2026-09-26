@@ -26,6 +26,7 @@ import {
   type CostCategory,
   type CostItem,
   type CostLine,
+  parseAmount,
 } from "@/lib/costs";
 import { ConfirmDeleteModal } from "./ConfirmDeleteModal";
 
@@ -135,7 +136,7 @@ function ItemRow({
     noteAr !== (item.note_ar || "");
 
   async function save() {
-    const cost = Number(unitCost.replace(/[^\d.]/g, ""));
+    const cost = parseAmount(unitCost);
     if (!nameAr.trim() || !unitAr.trim() || !Number.isFinite(cost) || cost < 0) {
       toast.error("تحقق من الاسم والوحدة والسعر");
       return;
@@ -234,7 +235,7 @@ function AddItemModal({
   const [saving, setSaving] = useState(false);
 
   async function save() {
-    const cost = Number(unitCost.replace(/[^\d.]/g, ""));
+    const cost = parseAmount(unitCost);
     if (!nameAr.trim() || !unitAr.trim() || !Number.isFinite(cost) || cost < 0) {
       toast.error("تحقق من الاسم والوحدة والسعر");
       return;

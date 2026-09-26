@@ -386,12 +386,14 @@ const METRICS = {
   },
 
   true_profit: {
-    desc: 'الربح الحقيقي: دخل المحل ناقص المواد وأجور الورشة والرواتب والمصاريف والخسائر والذكاء الاصطناعي، شهرياً، مع أرباح كل منتج وتنبيهات التكاليف الناقصة (params: months = عدد الأشهر لورا بما فيها الحالي، 1-12)',
-    params: ['months'],
+    desc: 'الربح الحقيقي: دخل المحل ناقص المواد وأجور الورشة والرواتب والمصاريف والخسائر والذكاء الاصطناعي، شهرياً، مع أرباح كل منتج وتنبيهات التكاليف الناقصة (params: days — 30 = الشهر الحالي، 90 = آخر ٣ أشهر)',
+    params: ['days'],
     // The ONLY net-profit answer the assistant has. Everything comes from lib/trueProfit.js —
     // the same function /admin/costs renders — so the console and the page agree to the dinar.
-    run: async ({ months }) => {
-      const n = Math.min(Math.max(parseInt(months, 10) || 1, 1), 12);
+    // The console router passes `days`, never `months` — so derive it («آخر ٣ أشهر» → 90 days → 3).
+    run: async ({ months, days }) => {
+      const fromDays = days ? Math.ceil(clampDays(days) / 30) : null;
+      const n = Math.min(Math.max(parseInt(months, 10) || fromDays || 1, 1), 12);
       const { current } = trueProfit.currentMonth();
       const [y, m] = current.split('-').map(Number);
       const start = new Date(Date.UTC(y, m - n, 1));

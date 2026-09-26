@@ -301,3 +301,21 @@ export const SALARY_SOURCE_LABEL: Record<PnlSalarySource, string> = {
   estimate: "تقديري — ماله راتب مسجل",
   workshop: "ورشة بالقطعة",
 };
+
+/**
+ * Parse a number the admin typed. Accepts Arabic-Indic digits (١٢٣), Persian digits, «٫» or «,»
+ * as the decimal point, and thousands separators («١,٠٠٠,٠٠٠» / «1,000,000»). Returns NaN for
+ * anything else — including an empty field — so every caller's isFinite check rejects it instead
+ * of silently saving 0.
+ */
+export function parseAmount(raw: string | number): number {
+  let s = String(raw ?? "")
+    .replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    .replace(/[\u06F0-\u06F9]/g, (d) => String(d.charCodeAt(0) - 0x06f0))
+    .replace(/[\s\u066C\u00A0]/g, "")
+    .replace(/\u066B/g, ".");
+  // «1,000,000» is thousands; a single comma followed by 1–2 digits («0,05») is a decimal.
+  if (/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(s)) s = s.replace(/,/g, "");
+  else s = s.replace(",", ".");
+  return /^\d+(\.\d+)?$/.test(s) ? Number(s) : NaN;
+}

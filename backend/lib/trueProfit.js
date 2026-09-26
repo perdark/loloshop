@@ -190,6 +190,10 @@ async function computePnl({ from, to, now = new Date() } = {}) {
                 (SELECT COUNT(DISTINCT r.work_date)::int FROM staff_attendance_records r
                   WHERE r.user_id = u.id AND to_char(r.work_date,'YYYY-MM') = m.month) AS days,
                 (m.month < (SELECT k FROM first_att)) AS before_attendance,
+                (SELECT COALESCE(SUM(t.amount) FILTER (WHERE t.type = 'bonus'), 0)::bigint
+                   FROM staff_salary_transactions t
+                  WHERE t.user_id = u.id AND t.deleted_at IS NULL
+                    AND ${monthOf('t.created_at')} = m.month) AS bonuses,
                 (SELECT COALESCE(SUM(CASE t.type WHEN 'bonus' THEN t.amount WHEN 'deduction' THEN -t.amount ELSE 0 END), 0)::bigint
                    FROM staff_salary_transactions t
                   WHERE t.user_id = u.id AND t.deleted_at IS NULL AND t.source_type <> 'attendance'
@@ -197,7 +201,10 @@ async function computePnl({ from, to, now = new Date() } = {}) {
            FROM m CROSS JOIN users u
            LEFT JOIN staff_salaries ss ON ss.user_id = u.id
            LEFT JOIN staff_payroll_statements st ON st.user_id = u.id AND st.month_key = m.month
-          WHERE u.role = 'staff'`,
+          WHERE u.role = 'staff'
+            -- Someone on the workshop roster is paid by the piece ONLY (payoutMath.mergeRecipients);
+            -- counting a salary for them too would pay the same person twice.
+            AND NOT EXISTS (SELECT 1 FROM workshop_workers w WHERE w.user_id = u.id)`,
         params
       ),
       query(`SELECT kind, name_ar, amount::bigint AS amount,
@@ -276,7 +283,8 @@ async function computePnl({ from, to, now = new Date() } = {}) {
     if (!row) continue;
     let amount = 0; let source = null;
     if (r.statement_net != null) {
-      amount = Number(r.statement_net); source = 'statement';
+      // A payslip's net already carries its deductions but never the goal bonuses.
+      amount = Number(r.statement_net) + Number(r.bonuses); source = 'statement';
     } else if (Number(r.base_salary) > 0 && (r.days > 0 || r.before_attendance)) {
       amount = Number(r.base_salary) * frac(r.month) + Number(r.adjustments); source = 'base';
     } else if (r.days > 0) {
