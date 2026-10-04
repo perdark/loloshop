@@ -136,7 +136,76 @@ function tagged(message, status, code, retryAfterSec) {
 }
 
 function configured() {
-  return Boolean(process.env.OPENROUTER_API_KEY);
+  return Boolean(process.env.OPENROUTER_API_KEY || process.env.SMARTAPI_KEY);
+}
+
+// ── PROVIDER: SmartAPI (Claude) by default since 2026-10-04 ─────────────────────────────
+// Owner: OpenRouter's balance ran out and «smartapi وبس», on condition the quality is Claude's.
+// SmartAPI serves the real Anthropic models (verified 2026-10-04: claude-sonnet-5 answers as
+// «Sonnet 5 من Anthropic», ~3s a reply). `AI_CHAT_PROVIDER=openrouter` puts the old path back
+// with no deploy; `AI_CHAT_FALLBACK=openrouter` tries OpenRouter when SmartAPI is down.
+// ⚠️ This does NOT go through lib/smartapi.js's post(): that gate is shared with calligraphy
+// image jobs (3 in flight, 180s timeouts, 4s→36s backoff), so a student's question would queue
+// behind a batch of plates. A chat reply gets its own short timeout and no retries.
+const SMARTAPI_CHAT_URL = 'https://smartapi.shop/v1/chat/completions';
+const DEFAULT_SMARTAPI_MODEL = 'claude-sonnet-5';
+
+function provider() {
+  const p = (process.env.AI_CHAT_PROVIDER || '').toLowerCase();
+  if (p === 'openrouter' || p === 'smartapi') return p;
+  return process.env.SMARTAPI_KEY ? 'smartapi' : 'openrouter';
+}
+
+async function completeSmartapi({ messages, maxTokens, temperature, jsonMode, maxOutputCap }) {
+  const key = process.env.SMARTAPI_KEY;
+  if (!key) throw tagged('مفتاح SmartAPI غير مهيأ', 500, 'ERR_OPENROUTER_KEY');
+  const model = process.env.AI_CHAT_SMARTAPI_MODEL || DEFAULT_SMARTAPI_MODEL;
+  let msgs = messages;
+  const body = { model, messages: msgs, max_tokens: Math.min(maxTokens || maxOutputCap, maxOutputCap), temperature };
+  if (jsonMode) {
+    body.response_format = { type: 'json_object' };
+    // Upstream refuses json_object unless a message says "json", and reports it as an outage.
+    if (!msgs.some((m) => /json/i.test(typeof m.content === 'string' ? m.content : JSON.stringify(m.content)))) {
+      body.messages = [{ role: 'system', content: 'Respond in JSON.' }, ...msgs];
+    }
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Number(process.env.AI_CHAT_SMARTAPI_TIMEOUT_MS || 45000));
+  let resp;
+  try {
+    resp = await fetch(SMARTAPI_CHAT_URL, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    console.error('aiChat smartapi network error:', err.name === 'AbortError' ? 'timeout' : err.message);
+    throw tagged('تعذّر الاتصال بالمساعد', 502, 'ERR_AI_NET');
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!resp.ok) {
+    let detail = '';
+    try { detail = await resp.text(); } catch { /* ignore */ }
+    console.error('aiChat smartapi non-200:', resp.status, detail.slice(0, 400));
+    throw tagged('المساعد مو متوفر حالياً', 502, 'ERR_AI_UPSTREAM');
+  }
+  const data = await resp.json();
+  let text = data?.choices?.[0]?.message?.content;
+  if (typeof text !== 'string' || !text.trim()) {
+    console.error('aiChat empty content from smartapi', model);
+    throw tagged('ما وصلني رد، جرّب مرة ثانية', 502, 'ERR_AI_EMPTY');
+  }
+  // Claude often fences JSON even when asked for json_object; unwrap rather than fail the parse.
+  const fence = jsonMode && text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fence) text = fence[1];
+  const usage = data?.usage || {};
+  const promptTokens = Number(usage.prompt_tokens || usage.input_tokens || 0);
+  const completionTokens = Number(usage.completion_tokens || usage.output_tokens || 0);
+  // SmartAPI reports tokens, never dollars — priced at the owner's rate (same env as smartapi.js).
+  const costUsd = ((promptTokens + completionTokens) * Number(process.env.SMARTAPI_USD_PER_MTOK || 0.1)) / 1e6;
+  return { text: text.trim(), model, promptTokens, completionTokens, costUsd };
 }
 
 /**
@@ -465,7 +534,22 @@ async function recentTurns({ userId, sessionKey, surface = 'support', limit = 3 
 // transport and returns a JSON object covering ten lines — under the 300-token assistant cap
 // that JSON came back TRUNCATED, parsed as nothing, and the endpoint answered "0 suggestions"
 // while still paying for the call. Callers that ask for more must say so explicitly.
-async function complete({ messages, maxTokens, temperature = 0.3, jsonMode = false, maxOutputCap = CAPS.maxOutputTokens }) {
+async function complete(opts) {
+  const { temperature = 0.3, jsonMode = false, maxOutputCap = CAPS.maxOutputTokens } = opts;
+  const args = { ...opts, temperature, jsonMode, maxOutputCap };
+  if (provider() === 'openrouter') return completeOpenrouter(args);
+  try {
+    return await completeSmartapi(args);
+  } catch (err) {
+    const canFallBack = (process.env.AI_CHAT_FALLBACK || '').toLowerCase() === 'openrouter'
+      && process.env.OPENROUTER_API_KEY && /^ERR_AI_(NET|UPSTREAM|EMPTY)$/.test(err.code || '');
+    if (!canFallBack) throw err;
+    console.error('aiChat: smartapi failed (' + err.code + '), falling back to openrouter');
+    return completeOpenrouter(args);
+  }
+}
+
+async function completeOpenrouter({ messages, maxTokens, temperature, jsonMode, maxOutputCap }) {
   const key = process.env.OPENROUTER_API_KEY;
   if (!key) throw tagged('مفتاح OpenRouter غير مهيأ', 500, 'ERR_OPENROUTER_KEY');
 
@@ -547,6 +631,6 @@ module.exports = {
   DEFAULT_MODEL,
   // Pure helpers, exported for test/aiChat.test.js — no database, no network.
   _internals: {
-    evaluateCaps, estimateCostUsd, FALLBACK_PRICE_PER_MTOK, UNKNOWN_MODEL_PRICE, WARN_MEMO_KEY,
+    evaluateCaps, estimateCostUsd, FALLBACK_PRICE_PER_MTOK, UNKNOWN_MODEL_PRICE, WARN_MEMO_KEY, provider,
   },
 };

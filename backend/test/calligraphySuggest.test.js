@@ -14,6 +14,10 @@
 //
 // The model is stubbed throughout: no network, no spend.
 require('dotenv').config();
+// These tests stub global.fetch with OpenRouter-shaped responses and pin the OpenRouter
+// sheet/solo path, which is still the fallback. SmartAPI (the default since 2026-09-26) has
+// its own tests in calligraphySmartapi.test.js.
+process.env.CALLIG_PROVIDER = 'openrouter';
 
 const test = require('node:test');
 const assert = require('node:assert/strict');

@@ -14,6 +14,40 @@ written against an uncommitted tree; **(d)** committed it, so that caveat is dis
 
 ---
 
+## 2026-09-26 — 🧪 SmartAPI as the calligraphy source instead of OpenRouter (tests only, nothing wired)
+
+Owner wants to stop topping up OpenRouter. SmartAPI (`smartapi.shop`, `SMARTAPI_KEY` in
+`backend/.env`) sells `gpt-6-sol` image generation at ~30k tokens ≈ **$0.003/plate** (owner's
+price: 15M tokens for $1.5) vs **$0.067** for today's solo plate. **No shop code changed.**
+Scripts + result sheets: `docs/experiments/2026-09-26-smartapi/` (untracked; run from
+`backend/` with `node docs/…/run3.js`).
+
+**Recipe that works:** `POST /v1/responses`, `model: gpt-6-sol`, `input_image` references,
+`tools:[{type:'image_generation',size:'1536x1024',quality:'high',background:'opaque'}]`,
+`tool_choice:{type:'image_generation'}`; the base64 is in `output[].result` of the
+`image_generation_call` item, transparent → flatten on white. ~45–80 s per image.
+
+**Measured on the same 10 real names:**
+- Text prompt + shop plate as style ref: **5–7/10** spelled right. The typical error is an
+  EXTRA ALIF before a word (امحمد · انور · احوراء · عمارا) — copied from the reference plate.
+- **Name rendered as an image (Amiri, sharp SVG) + shop plate as style ref («A»): ~7/10 and
+  ZERO extra alifs.** The remaining errors are letter swaps (جماعة · الكتورة · عجيان). Style
+  stays shop-grade Thuluth. **This is the method to build on.**
+- Name image without the style ref («B»): 6/10 and looks like a font — rejected.
+- **AI spelling readers are not a gate:** blind transcription returned Quran verses; a reader
+  told the expected name missed 3–4 of 5 errors and false-alarmed once. Owner ruled the
+  designer reviews anyway, so the reader is dropped.
+- Reliability: ~6 concurrent requests → `rate_limit_exceeded`; `upstream_unavailable` hit
+  mid-session. Keep concurrency ≤3, retry with backoff, **OpenRouter must stay the fallback**.
+- SmartAPI returns tokens, not USD, so `calligraphySpend` cannot ledger it as-is.
+
+**Next (proposed, not approved):** 3 candidates per name with method A (~$0.009/name, <3%
+chance none is right at 70%) and the designer picks — measure it on the same 10 names, then
+build `lib/smartapi.js` with the same `generateImage` contract as `lib/openrouter.js` +
+automatic fallback.
+
+---
+
 ## 2026-08-25 — 💸 starting a discount round · 📱 the app console · 🔔 an admin-written push · ✅ notification opt-in
 
 Merged and deployed in one go (`6d97196`, migrations **086·087·088·089**), prod dumped first.

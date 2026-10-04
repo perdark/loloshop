@@ -9,6 +9,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { RetailReviewBoard } from "@/components/calligraphy/RetailReviewBoard";
+import { SmartRunModal } from "@/components/calligraphy/SmartRunModal";
 import { getApiErrorMessage } from "@/lib/api";
 import { isAuthenticated, getUser } from "@/lib/auth";
 import { safeFileName, saveFile, saveFromUrl } from "@/lib/download";
@@ -360,12 +361,15 @@ function QueueZoneCard({
   running,
   onGenerate,
   onGenerateHeld,
+  onSmart,
 }: {
   variant: CalVariant;
   zone: CalQueueZone;
   running: boolean;
   onGenerate: (variant: CalVariant, mode: "full" | "all") => void;
   onGenerateHeld: (item: CalQueueHeldItem, text: string) => Promise<void>;
+  /** «ولّد الكل بذكاء» — opens the understanding pipeline's plan for this zone. */
+  onSmart: (variant: CalVariant) => void;
 }) {
   const [confirmAll, setConfirmAll] = useState(false);
   const [showOther, setShowOther] = useState(false);
@@ -460,6 +464,17 @@ function QueueZoneCard({
 
       {/* action buttons */}
       <div className="flex flex-col gap-2">
+        {/* The understanding pipeline reads the HELD lines too — that is most of its value —
+            so it is offered whenever the zone has any un-plated line, not only `pending`. */}
+        <Button
+          size="sm"
+          variant="primary"
+          disabled={zone.pending + heldCount < 1 || running}
+          onClick={() => onSmart(variant)}
+          fullWidth
+        >
+          ولّد الكل بذكاء ✦
+        </Button>
         <Button
           size="sm"
           variant="primary"
@@ -690,6 +705,8 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
   const [queueError, setQueueError] = useState(false);
   // ممثل filter for the automatic queue (counts + generation scope). "" = الكل.
   const [queueWid, setQueueWid] = useState(stored.queueWid ?? "");
+  // Which zone's «ولّد الكل بذكاء» plan is open, or null.
+  const [smartVariant, setSmartVariant] = useState<CalVariant | null>(null);
 
   // ── job state ───────────────────────────────────────────────────────────────
   const [running, setRunning] = useState(false);
@@ -1129,6 +1146,20 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
       await refreshQueue();
     } catch (e) {
       toast.error(getApiErrorMessage(e, "تعذّر التوليد من الطابور"));
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  // ── «ولّد الكل بذكاء»: the plan was accepted and the job exists ────────────────
+  async function runSmartJob(job: CalJob) {
+    setRunning(true);
+    try {
+      beginBatch(job);
+      await runCreatedJob(job);
+      await refreshQueue();
+    } catch (e) {
+      toast.error(getApiErrorMessage(e, "تعذّر التوليد"));
     } finally {
       setRunning(false);
     }
@@ -1843,10 +1874,21 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
                     running={running}
                     onGenerate={runQueue}
                     onGenerateHeld={runHeldItem}
+                    onSmart={setSmartVariant}
                   />
                 ))}
               </div>
             ) : null}
+            {smartVariant && (
+              <SmartRunModal
+                open
+                variant={smartVariant}
+                wholesalerId={queueWid || null}
+                wholesalerName={wholesalers.find((w) => w.id === queueWid)?.name ?? null}
+                onClose={() => setSmartVariant(null)}
+                onStarted={runSmartJob}
+              />
+            )}
           </div>
         )}
 

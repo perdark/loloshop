@@ -96,8 +96,8 @@ const noDeliveryPromise = (a) => {
 
 const SCENARIOS = [
   // ── Guest: the money questions ────────────────────────────────────────────────────────
-  { g: 'أسعار', q: 'شكد سعر الروب؟', checks: [has(/20,000/), has(/يبدأ|بداية/), arabicOnly] },
-  { g: 'أسعار', q: 'اسعار الوشاح شكد؟', checks: [has(/15,000/), arabicOnly] },
+  { g: 'أسعار', q: 'شكد سعر الروب؟', checks: [has(/25,000/), has(/يبدأ|بداية/), arabicOnly] },
+  { g: 'أسعار', q: 'اسعار الوشاح شكد؟', checks: [has(/20,000/), arabicOnly] },
   { g: 'أسعار', q: 'شكد سعر الطقم الكامل؟', checks: [has(/1[34]5,000|150,000|140,000/), arabicOnly] },
   { g: 'أسعار', q: 'عندكم شي ارخص من هذا؟', checks: [arabicOnly] },
   { g: 'أسعار', q: 'اذا اخذ ٣ اوشحة شكد يطلع المجموع؟', checks: [lacks(/45,000|المجموع هو/, 'a computed total the checkout never quoted'), arabicOnly] },
@@ -129,9 +129,11 @@ const SCENARIOS = [
   // Google map of the real shop sits at the bottom of the very page the widget is on.
   { g: 'قواعد', q: 'وين موقعكم؟', checks: [has(/ديالى|بعقوبة|خريطة|الصفحة الرئيسية|موقعنا/), lacks(/مو محدد|ما عدنا محل|ماكو محل/, 'a denial that the shop exists'), arabicOnly] },
   { g: 'قواعد', q: 'عندكم محل حقيقي لو بس اونلاين؟', checks: [has(/ديالى|بعقوبة|محل/), arabicOnly] },
+  // Prices re-pointed 2026-10-04: the August discount round ended (+5,000 each), so the old
+  // 20k/15k/25k expectations failed against a correct answer. Read from the DB, not memory.
   // Regression #3: asked about the weather it volunteered «15,000 للشال» — that is the وشاح
   // price; the شال is 25,000. Two near-synonyms in Arabic, two different products.
-  { g: 'قواعد', q: 'شكد سعر الشال؟', checks: [has(/25,000/), lacks(/الشال يبدأ من 15,000|للشال.{0,12}15,000/, 'the sash price attached to the shawl'), arabicOnly] },
+  { g: 'قواعد', q: 'شكد سعر الشال؟', checks: [has(/30,000/), lacks(/الشال يبدأ من 20,000|للشال.{0,12}20,000/, 'the sash price attached to the shawl'), arabicOnly] },
 
   // Regression #5: «شنو اكثر قطعة تنباع عدكم؟» → «وشاح التخرج، لأن الطلاب يحبون يصممونها
   // بنفسهم». It had NO sales data — it guessed, and invented a motive to justify the guess. It
@@ -231,7 +233,7 @@ async function run() {
   const memToken = await mint();
   const t1 = await ask('/assistant/support', { question: 'شكد سعر الروب؟', sessionToken: memToken });
   const t2 = await ask('/assistant/support', { question: 'وهو الوشاح؟', sessionToken: memToken });
-  const memOk = /15,000|وشاح/.test(t2.answer || '');
+  const memOk = /20,000|وشاح/.test(t2.answer || '');
   results.push({
     group: 'ذاكرة',
     q: 'شكد سعر الروب؟ → وهو الوشاح؟',

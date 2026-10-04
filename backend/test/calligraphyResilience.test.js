@@ -11,6 +11,10 @@
 // Everything drives the real engine/controller against the dev DB with global.fetch stubbed —
 // nothing here spends money.
 require('dotenv').config();
+// These tests stub global.fetch with OpenRouter-shaped responses and pin the OpenRouter
+// sheet/solo path, which is still the fallback. SmartAPI (the default since 2026-09-26) has
+// its own tests in calligraphySmartapi.test.js.
+process.env.CALLIG_PROVIDER = 'openrouter';
 // ⚠️ THE 2026-09-15 BATCHING HOLD IS SWITCHED OFF FOR THIS WHOLE FILE, AND THAT IS CORRECT.
 // `lib/calligraphyBatching.js` now makes an under-full sheet WAIT for company instead of
 // buying itself a whole image — which is exactly the shape every fixture below uses (one or

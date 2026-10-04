@@ -19,7 +19,8 @@
     "end-discounts": "node scripts/end-discounts.js",
     "payroll-statements": "node scripts/publish-payroll-statements.js",
     "friday-deduction-report": "node scripts/friday-deduction-report.js",
-    "stranded-orders": "node scripts/stranded-orders.js"
+    "stranded-orders": "node scripts/stranded-orders.js",
+    "reroll-audit": "node scripts/calligraphy-reroll-audit.js"
   },
   "keywords": [],
   "author": "",

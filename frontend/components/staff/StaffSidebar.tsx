@@ -133,6 +133,17 @@ function iconPen() {
   );
 }
 
+// «الاستوديو» — ChatGPT داخل لولو شوب. Same audience as الخط العربي (canCalligraphy).
+function iconSparkles() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M12 3v4M12 17v4M3 12h4M17 12h4" />
+      <path d="M7 7l2 2M15 15l2 2M17 7l-2 2M9 15l-2 2" />
+      <circle cx="12" cy="12" r="2.3" />
+    </svg>
+  );
+}
+
 // Home-list label per queue role. /staff shows the FIRST such role's queue (mirrors
 // app/staff/page.tsx routing), so the home link is labelled by that first role.
 const HOME_LABELS: Partial<Record<StaffType, string>> = {
@@ -285,7 +296,10 @@ export function StaffSidebar({ user, open, onClose }: StaffSidebarProps) {
   const productionAndToolLinks = [
     ...baseLinks,
     ...(canCalligraphy
-      ? [{ href: "/staff/calligraphy", label: "الخط العربي", icon: iconPen(), prefix: true }]
+      ? [
+          { href: "/staff/calligraphy", label: "الخط العربي", icon: iconPen(), prefix: true },
+          { href: "/staff/studio", label: "الاستوديو", icon: iconSparkles(), prefix: true },
+        ]
       : []),
     ...(canDesignSupport
       ? [{ href: "/design-support", label: "أيادي التصميم", icon: iconPen(), prefix: true }]

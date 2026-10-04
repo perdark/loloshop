@@ -40,8 +40,16 @@
  * buy-immediately behaviour exactly, with no deploy.
  */
 
-/** A sheet holds ten bands. Below this it is worth waiting for company. */
-const FULL_SHEET = 10;
+/**
+ * A sheet holds FIVE bands (was ten until 2026-09-23). Below this it is worth waiting for company.
+ *
+ * ⚠️ THIS IS THE ONE SHEET SIZE — calligraphyEngine.js imports it as BATCH. Owner report
+ * 2026-09-23: «ممثل plates come out as plain text, retail is fine». Measured on the prod
+ * restore: 94% of ممثل plates came off 7–10-name sheets, where a 2K 9:16 canvas gives each band
+ * ~200px — too small for the model to draw real Thuluth, so it draws a typeface. Retail/typed
+ * jobs mostly ride 1–6-name sheets. Five bands ≈ 410px each, ~$0.02/name instead of ~$0.01.
+ */
+const FULL_SHEET = 5;
 
 /** How long the oldest name on a sheet may be made to wait. 0 disables holding entirely. */
 function holdMinutes() {

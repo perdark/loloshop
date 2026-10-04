@@ -514,7 +514,7 @@ export function RetailReviewBoard({
                       </div>
 
                       {/* No per-student «توليد» here on purpose — a sheet holds up to
-                          MIN_BATCH names and costs the same for 1 or 10, so generation is
+                          MIN_BATCH names and costs the same for 1 or MIN_BATCH, so generation is
                           one batch across all reviewed students (sticky bar below). */}
                     </div>
                   )}
@@ -554,7 +554,7 @@ export function RetailReviewBoard({
           {selection.underfilled.length > 0 && (
             <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
               الورقة الواحدة تتسع لـ {MIN_BATCH} أسماء وتكلفتها واحدة سواء حملت اسماً أو
-              عشرة، وكل نوع زخرفة يُطبع على ورقة منفصلة. أقل من {MIN_BATCH}:{" "}
+              خمسة، وكل نوع زخرفة يُطبع على ورقة منفصلة. أقل من {MIN_BATCH}:{" "}
               <span className="font-semibold">
                 {selection.underfilled
                   .map(

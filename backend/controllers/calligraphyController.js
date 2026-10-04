@@ -7,10 +7,12 @@ const fs = require('fs');
 const { ZipArchive } = require('archiver');
 const sharp = require('sharp');
 const { query } = require('../lib/db');
-const { generateImage, MODELS } = require('../lib/openrouter');
+const { MODELS } = require('../lib/openrouter');
 const { checkBudget, budgetError, logSpend, notifyCreditExhausted } = require('../lib/calligraphySpend');
 const { cropSheet } = require('../lib/sheetCrop');
-const { buildSheetPrompt, buildSinglePrompt } = require('../lib/calligraphyPrompt');
+const { normalizeOrnament, ORNAMENT_LEVELS } = require('../lib/calligraphyPrompt');
+const { planZone, resolveRunItems } = require('../lib/calligraphyPipeline');
+const provider = require('../lib/calligraphyProvider');
 const { saveBufferToUploads } = require('../lib/upload');
 const {
   processNextBatch, toPlate, autoLinkPlate, attachOrderContext,
@@ -109,11 +111,14 @@ async function insertPlates(jobId, items, { source, model, createdBy }) {
   for (const it of items) {
     const { rows } = await query(
       `INSERT INTO calligraphy_plates
-         (job_id, wholesaler_id, student_id, order_item_id, source, render_text, variant, element_text, style, status, model, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending',$10,$11) RETURNING *`,
+         (job_id, wholesaler_id, student_id, order_item_id, source, render_text, variant, element_text, style, status, model, created_by, ornament, ref_image_url)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending',$10,$11,$12,$13) RETURNING *`,
       [jobId, it.wholesaler_id || null, it.student_id || null, it.order_item_id || null,
        source, it.render_text, it.variant || 'front', it.element_text || null,
-       normalizeStyle(it.style), model, createdBy]);
+       normalizeStyle(it.style), model, createdBy,
+       // Both come from the pipeline (lib/calligraphyPipeline.js), which already resolved the
+       // reference from the DB; every other caller leaves them NULL = the old behaviour.
+       normalizeOrnament(it.ornament), it.ref_image_url || null]);
     out.push(toPlate(rows[0]));
   }
   return out;
@@ -371,6 +376,8 @@ async function createJob(req, res) {
       // NULL — the shop default — so a stale or crafted value can only ever degrade, never
       // reach the image prompt. The student's own words are not a style and never become one.
       style: normalizeStyle(it && it.style),
+      // The ornament dial (migration 112). Closed list; anything else is NULL = zone default.
+      ornament: normalizeOrnament(it && it.ornament),
       // Per-LINE review flag. See the guard below.
       reviewed: (it && it.reviewed) === true,
     }))
@@ -455,6 +462,55 @@ async function createJob(req, res) {
   res.status(201).json({
     data: { job_id: jobId, total: out.length, dropped, warned, plates: await attachOrderContext(out) },
   });
+}
+
+// ---------------------------------------------------------------------------
+// «ولّد الكل» — the understanding pipeline (lib/calligraphyPipeline.js).
+//
+// POST /smart/plan {variant, wholesaler_id?, default_ornament?}
+//   Reads every un-plated REP line of the zone, understands it, checks the photos it has to,
+//   and returns the plan: what generates automatically, grouped by ornament, what needs a
+//   person and why, and what it will roughly cost. Generates nothing; spends only text-model
+//   money (~$0.01 per 100 lines), under the same daily ceiling as the images.
+//
+// POST /smart/run {variant, items:[{order_item_id, render_text, ornament, element_text, use_reference}]}
+//   Creates ONE job from the plan the designer saw (edited or not) and hands it to the worker.
+//   Every line is re-resolved from the DB — see resolveRunItems.
+async function smartPlan(req, res) {
+  const { variant, wholesaler_id, default_ornament } = req.body || {};
+  if (!VARIANTS.includes(variant)) return bad(res, 'variant غير صالح');
+  const budget = await checkBudget();
+  if (!budget.allowed) {
+    const be = budgetError(budget);
+    return res.status(be.status).json({ error: be.message, code: be.code });
+  }
+  const wid = wholesaler_id && UUID_RE.test(wholesaler_id) ? wholesaler_id : null;
+  try {
+    const plan = await planZone({ variant, label: ZONE_LABEL[variant], wholesalerId: wid, defaultOrnament: default_ornament });
+    res.json({ data: plan });
+  } catch (err) {
+    console.error('smartPlan failed:', err.message);
+    res.status(err.status || 502).json({ error: err.expose ? err.message : 'تعذّر تحليل الطلبات — أعد المحاولة', code: err.code || 'ERR_SMART_PLAN' });
+  }
+}
+
+async function smartRun(req, res) {
+  const { variant } = req.body || {};
+  if (!VARIANTS.includes(variant)) return bad(res, 'variant غير صالح');
+  const { items, dropped } = await resolveRunItems(req.body && req.body.items, ZONE_LABEL[variant]);
+  if (!items.length) return bad(res, 'لا توجد أسماء صالحة للتوليد', 'ERR_EMPTY');
+  const jobId = crypto.randomUUID();
+  const plates = await insertPlates(jobId, items.map((it) => ({ ...it, variant })), {
+    source: 'wholesaler', model: MODELS.standard, createdBy: req.user.id,
+  });
+  enqueueGeneration(jobId);
+  res.status(201).json({ data: { job_id: jobId, total: plates.length, dropped, plates: await attachOrderContext(plates) } });
+}
+
+// GET /ornaments — the closed ornament dial, so the workbench never hard-codes a second copy.
+function listOrnaments(req, res) {
+  const label = { none: 'بدون زخرفة', light: 'قليل', medium: 'متوسط', rich: 'عالي' };
+  res.json({ data: ORNAMENT_LEVELS.map((id) => ({ id, label: label[id] || id })) });
 }
 
 // GET /styles — the closed style list, so the workbench never hard-codes a second copy of it.
@@ -543,6 +599,17 @@ async function reroll(req, res) {
   // unlike a batch there is no sheet to keep pure. Absent key = keep what the plate has.
   const style = Object.prototype.hasOwnProperty.call(body, 'style')
     ? normalizeStyle(body.style) : (p.style || null);
+  // Same for the ornament dial: «أعد التوليد بزخرفة أكثر» is the commonest reason to press.
+  const ornament = Object.prototype.hasOwnProperty.call(body, 'ornament')
+    ? normalizeOrnament(body.ornament) : (p.ornament || null);
+  // A plate drawn from the student's photo is rerolled from the same photo. The reference is
+  // the stored one (set from the order line by the pipeline), never anything in the request.
+  let reference = null;
+  if (p.ref_image_url && body.use_reference !== false) {
+    const { absFromUrl } = require('../lib/upload');
+    const abs = absFromUrl(p.ref_image_url);
+    try { if (abs) reference = await fs.promises.readFile(abs); } catch { reference = null; }
+  }
 
   // Daily ceiling BEFORE the money leaves (lib/calligraphySpend.js, 2026-08-18 audit).
   const budget = await checkBudget();
@@ -551,24 +618,23 @@ async function reroll(req, res) {
     return res.status(be.status).json({ error: be.message, code: be.code });
   }
 
-  const model = p.model || MODELS.standard;
+  // A plate drawn on SmartAPI records `smartapi:<model>` — never hand that to OpenRouter.
+  const model = p.model && !String(p.model).startsWith('smartapi:') ? p.model : MODELS.standard;
   let gen;
-  // 1K 1:1, not the default 2K 9:16: this is ONE name, and the final band is normalized to the
-  // sibling geometry anyway (matchPlateGeometry targets ~100-200px of ink height), so 2K bought
-  // nothing but cost — measured $0.101 vs $0.067 per press, 47% of lifetime spend was solo
-  // images (2026-08-18 audit). 1:1 keeps the canvas ~1024px wide so long teacher names don't
-  // cramp or wrap the way they would on a 1K 9:16 portrait (~576px wide).
-  try { gen = await generateImage({ model, prompt: buildSinglePrompt(renderText, promptVariant(variant), elementText, style), resolution: '1K', aspectRatio: '1:1' }); }
-  catch (err) {
+  // ONE name, one image, through the provider router (lib/calligraphyProvider.js): SmartAPI
+  // first, OpenRouter on its failure. On OpenRouter this is byte-for-byte the old reroll — 1K
+  // 1:1, buildSinglePrompt (or the reference prompt), cropped to one band — because 2K bought
+  // nothing but cost ($0.101 vs $0.067 per press, 2026-08-18 audit).
+  try {
+    gen = await provider.generatePlate({ text: renderText, variant, ornament, element: elementText, style, reference, model });
+  } catch (err) {
     // A 402 means the shop is out of credit, not that this name is bad — tell the admin, since
     // until 2026-08-28 the only record of it was a line in a log file on the server.
     if (err.code === 'ERR_OPENROUTER_CREDIT') await notifyCreditExhausted();
     return res.status(err.status || 502).json({ error: err.message, code: err.code || 'ERR_OPENROUTER' });
   }
-  await logSpend('reroll', gen.cost);
-  // single-name image: trim to one band (expected 1); fall back to full image
+  await logSpend(gen.provider === 'smartapi' ? 'reroll_smartapi' : 'reroll', gen.cost);
   let plateBuf = gen.buffer;
-  try { const { plates } = await cropSheet(gen.buffer, 1); if (plates[0]) plateBuf = plates[0]; } catch { /* keep full */ }
 
   // Reframe onto the geometry of the ORIGINAL plate (migration 082), never the one being
   // replaced: anchoring on the previous reroll's output made ink height monotone
@@ -587,10 +653,10 @@ async function reroll(req, res) {
   const { rows } = await query(
     `UPDATE calligraphy_plates
         SET status='done', plate_path=$2, cost_usd = cost_usd + $3, error=NULL, linked_at = NULL,
-            render_text=$4, element_text=$5, variant=$6, style=$8, reroll_count = reroll_count + 1,
+            render_text=$4, element_text=$5, variant=$6, style=$8, ornament=$9, reroll_count = reroll_count + 1,
             original_plate_path = COALESCE(original_plate_path, $7)
       WHERE id=$1 RETURNING *`,
-    [id, plate.url, Number(gen.cost || 0), renderText, elementText, variant, p.plate_path, style]);
+    [id, plate.url, Number(gen.cost || 0), renderText, elementText, variant, p.plate_path, style, ornament]);
   // Re-attach the fresh artwork onto the order line right away (auto-link, no manual step).
   const [withCtx] = await attachOrderContext([toPlate(await autoLinkPlate(rows[0]))]);
   res.json({ data: withCtx });
@@ -831,12 +897,12 @@ async function generateElement(req, res) {
   }
   let gen;
   try {
-    gen = await generateImage({ model: MODELS.standard, prompt: buildElementPrompt(word), resolution: '1K', aspectRatio: '1:1' });
+    gen = await provider.generateElement({ prompt: buildElementPrompt(word), model: MODELS.standard });
   } catch (err) {
     if (err.code === 'ERR_OPENROUTER_CREDIT') await notifyCreditExhausted();
     return res.status(err.status || 502).json({ error: err.message || 'فشل التوليد', code: err.code || 'ERR_OPENROUTER' });
   }
-  await logSpend('element', gen.cost);
+  await logSpend(gen.provider === 'smartapi' ? 'element_smartapi' : 'element', gen.cost);
   const png = await whiteToTransparent(gen.buffer);
   const saved = saveBufferToUploads(req, 'calligraphy/elements', png, 'png');
   res.json({ data: { url: saved.url, cost: Number(gen.cost || 0) } });
@@ -846,4 +912,5 @@ module.exports = {
   listWholesalers, wholesalerNames, createJob, processNext, getJob, reroll, downloadZip,
   getQueue, queueGenerate, recentPlates, composePlate, generateElement,
   ordersZones, sendOrder, platesZip, retailQueue, suggestText, listStyles,
+  smartPlan, smartRun, listOrnaments,
 };

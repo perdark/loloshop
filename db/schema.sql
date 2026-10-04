@@ -1284,6 +1284,17 @@ CREATE INDEX IF NOT EXISTS idx_callig_plates_pending_batch
   ON calligraphy_plates (variant, style, created_at)
   WHERE status = 'pending';
 
+-- Migration 112: the ornament dial (none·light·medium·rich, NULL = zone default) and the
+-- student's photo as a style reference. Nullable, no backfill — see the migration's header.
+ALTER TABLE calligraphy_plates ADD COLUMN IF NOT EXISTS ornament TEXT;
+ALTER TABLE calligraphy_plates ADD COLUMN IF NOT EXISTS ref_image_url TEXT;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'calligraphy_plates_ornament_chk') THEN
+    ALTER TABLE calligraphy_plates ADD CONSTRAINT calligraphy_plates_ornament_chk
+      CHECK (ornament IS NULL OR ornament IN ('none', 'light', 'medium', 'rich'));
+  END IF;
+END $$;
+
 -- ---------------------------------------------------------------------------------------
 -- Migration 080: the calligraphy plate gets its OWN column on order_items.
 --
@@ -2368,3 +2379,51 @@ BEGIN
 
   DROP TABLE _shelf_reflow;
 END $$;
+
+-- 114: «الاستوديو» — a ChatGPT-like tool for design staff on SmartAPI (lib/studioAi.js).
+-- See db/migrations/114_studio.sql for the full reasoning. Repeated here (not a backfill,
+-- just IF NOT EXISTS CREATE/ALTER) because this is the file `npm run migrate` applies.
+CREATE TABLE IF NOT EXISTS studio_conversations (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    UUID NOT NULL REFERENCES users(id),
+  title      TEXT,
+  model      TEXT NOT NULL DEFAULT 'gpt',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'studio_conversations_model_chk') THEN
+    ALTER TABLE studio_conversations ADD CONSTRAINT studio_conversations_model_chk
+      CHECK (model IN ('gpt', 'claude'));
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS studio_messages (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  conversation_id UUID NOT NULL REFERENCES studio_conversations(id) ON DELETE CASCADE,
+  role            TEXT NOT NULL,
+  content         TEXT NOT NULL DEFAULT '',
+  image_urls      TEXT[] NOT NULL DEFAULT '{}',
+  kind            TEXT NOT NULL DEFAULT 'text',
+  cost_usd        NUMERIC(10,6) NOT NULL DEFAULT 0,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'studio_messages_role_chk') THEN
+    ALTER TABLE studio_messages ADD CONSTRAINT studio_messages_role_chk
+      CHECK (role IN ('user', 'assistant'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'studio_messages_kind_chk') THEN
+    ALTER TABLE studio_messages ADD CONSTRAINT studio_messages_kind_chk
+      CHECK (kind IN ('text', 'image'));
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS studio_conversations_user_updated_idx
+  ON studio_conversations (user_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS studio_messages_conversation_created_idx
+  ON studio_messages (conversation_id, created_at);
+CREATE INDEX IF NOT EXISTS studio_messages_created_idx
+  ON studio_messages (created_at);

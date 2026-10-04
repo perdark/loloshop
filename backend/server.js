@@ -123,6 +123,7 @@ app.use('/api/designs', require('./routes/designs'));
 app.use('/api/fonts', require('./routes/fonts'));
 app.use('/api/payroll', require('./routes/payroll'));
 app.use('/api/calligraphy', require('./routes/calligraphy'));
+app.use('/api/studio', require('./routes/studio'));
 app.use('/api/tv', require('./routes/tv'));
 app.use('/api/track', require('./routes/track'));
 app.use('/api/workshop', require('./routes/workshop'));

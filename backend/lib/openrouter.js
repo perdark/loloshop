@@ -95,4 +95,88 @@ async function generateImage({ model, prompt, resolution = '2K', aspectRatio = '
   throw last;
 }
 
-module.exports = { generateImage, MODELS, OPENROUTER_URL };
+// ---------------------------------------------------------------------------
+// WITH A REFERENCE IMAGE — the student's own photo, sent beside the prompt.
+//
+// The /images endpoint above takes a prompt and nothing else, so a reference has to go through
+// chat completions with `modalities: ['image','text']`, which is how OpenRouter exposes Gemini's
+// image input. Same model, same failure codes, same one free retry on "no image" — only the
+// transport differs. The photo is inlined as a data URL (never a link for the provider to
+// fetch), downscaled first: the reference carries a hand and an ornament density, not detail.
+const CHAT_URL = 'https://openrouter.ai/api/v1/chat/completions';
+
+async function referenceDataUrl(buffer) {
+  const sharp = require('sharp');
+  const jpg = await sharp(buffer, { limitInputPixels: 40_000_000 })
+    .rotate()
+    .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
+    .flatten({ background: '#ffffff' })
+    .jpeg({ quality: 85 })
+    .toBuffer();
+  return `data:image/jpeg;base64,${jpg.toString('base64')}`;
+}
+
+async function attemptReference({ model, prompt, imageUrl, aspectRatio, resolution }) {
+  const key = process.env.OPENROUTER_API_KEY;
+  if (!key) throw tagged('مفتاح OpenRouter غير مهيأ', 500, 'ERR_OPENROUTER_KEY');
+  let resp;
+  try {
+    resp = await fetch(CHAT_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': process.env.PUBLIC_URL || 'https://lolo-shop96.com',
+        'X-Title': 'LoloShop Calligraphy',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: [
+          { type: 'text', text: prompt },
+          { type: 'image_url', image_url: { url: imageUrl } },
+        ] }],
+        modalities: ['image', 'text'],
+        image_config: { aspect_ratio: aspectRatio, image_size: resolution },
+        usage: { include: true },
+      }),
+    });
+  } catch (err) {
+    console.error('OpenRouter network error:', err.message);
+    throw tagged('تعذّر الاتصال بخدمة توليد الصور', 502, 'ERR_OPENROUTER_NET');
+  }
+  if (!resp.ok) {
+    let detail = '';
+    try { detail = JSON.stringify(await resp.json()); } catch { /* ignore */ }
+    console.error('OpenRouter non-200 (reference):', resp.status, detail.slice(0, 500));
+    throw errorFor(resp.status, detail);
+  }
+  const data = await resp.json();
+  const msg = data && data.choices && data.choices[0] && data.choices[0].message;
+  const url = msg && Array.isArray(msg.images) && msg.images[0] && msg.images[0].image_url
+    && msg.images[0].image_url.url;
+  const m = typeof url === 'string' && url.match(/^data:image\/[a-z]+;base64,(.+)$/);
+  if (!m) {
+    const text = msg && typeof msg.content === 'string' ? msg.content : '';
+    console.error('OpenRouter reference: no image:', JSON.stringify(data).slice(0, 300));
+    throw errorFor(502, `no image data ${text.slice(0, 80)}`);
+  }
+  const cost = Number((data.usage && data.usage.cost) || 0);
+  return { buffer: Buffer.from(m[1], 'base64'), cost };
+}
+
+async function generateImageWithReference({ model, prompt, reference, resolution = '1K', aspectRatio = '1:1' }) {
+  const imageUrl = await referenceDataUrl(reference);
+  let last;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      return await attemptReference({ model, prompt, imageUrl, aspectRatio, resolution });
+    } catch (err) {
+      last = err;
+      if (!err.retriable || attempt === MAX_ATTEMPTS) throw err;
+      console.warn(`OpenRouter ${err.code} (reference) — retrying (${attempt}/${MAX_ATTEMPTS})`);
+    }
+  }
+  throw last;
+}
+
+module.exports = { generateImage, generateImageWithReference, MODELS, OPENROUTER_URL };

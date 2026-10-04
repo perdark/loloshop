@@ -2,6 +2,15 @@ import { api } from "@/lib/api";
 
 export type CalSource = "typed" | "wholesaler" | "retail";
 export type CalVariant = "front" | "back" | "cap" | "cap_side";
+export type CalOrnament = "none" | "light" | "medium" | "rich";
+
+/** Owner's words for the dial (2026-09-26): قليل · متوسط · عالي, plus none. */
+export const ORNAMENT_LABEL: Record<CalOrnament, string> = {
+  none: "بدون زخرفة",
+  light: "قليل",
+  medium: "متوسط",
+  rich: "عالي",
+};
 
 export const VARIANT_LABEL: Record<CalVariant, string> = {
   front: "أمامي",
@@ -32,6 +41,10 @@ export interface CalPlate {
   element_text: string | null;
   /** Style id from the closed list, or null for the shop default (migration 083). */
   style?: string | null;
+  /** Ornament dial (migration 112): none · light · medium · rich; null = the zone default. */
+  ornament?: CalOrnament | null;
+  /** The student's own photo this plate was drawn to match, when they asked for it. */
+  ref_image_url?: string | null;
   /** Paid regenerations already spent on this plate. The server refuses past CAL_REROLL_LIMIT. */
   reroll_count?: number;
   /**
@@ -189,8 +202,8 @@ export interface CreateJobBody {
   reviewed?: boolean;
 }
 
-/** Below this, the UI warns (a sheet costs the same whether it holds 1 or 10 names). */
-export const MIN_BATCH = 10;
+/** Below this, the UI warns (a sheet costs the same whether it holds 1 or MIN_BATCH names). */
+export const MIN_BATCH = 5; // must equal backend lib/calligraphyBatching.js FULL_SHEET (5 since 2026-09-23)
 
 // Mirrors the backend `isRealName`: a real embroiderable name has ≥2 Arabic letters,
 // so pure numbers / Latin / emoji / single chars are flagged and never generated.
@@ -482,5 +495,80 @@ export async function composePlate(id: string, image: Blob): Promise<CalPlate> {
 
 export async function generateElement(word: string): Promise<{ url: string; cost: number }> {
   const { data } = await api.post<{ data: { url: string; cost: number } }>(`/calligraphy/element`, { word });
+  return data.data;
+}
+
+// ─── «ولّد الكل بذكاء» — the understanding pipeline ──────────────────────────
+// The server reads every rep line of a zone, fills a form per line, checks the photos the
+// students pointed at, and returns a plan. Nothing is generated until `runSmart` is called
+// with the plan's items (which the server re-resolves from the DB — the reference photo is
+// never taken from here).
+
+export interface CalSmartAuto {
+  order_item_id: string;
+  student_id: string;
+  student_name: string | null;
+  student_text: string;
+  has_photo: boolean;
+  render_text: string;
+  element_text: string | null;
+  ornament: CalOrnament | null;
+  ref_image_url: string | null;
+  side_text: string | null;
+}
+
+export interface CalSmartException {
+  order_item_id: string;
+  student_id: string;
+  student_name: string | null;
+  student_text: string;
+  has_photo: boolean;
+  proposed_text: string | null;
+  kind: string;
+  ornament: CalOrnament | null;
+  flags: string[];
+  why: string;
+  photo_note: string | null;
+}
+
+export interface CalSmartPlan {
+  variant: CalVariant;
+  auto: CalSmartAuto[];
+  exceptions: CalSmartException[];
+  counts: {
+    lines: number;
+    auto?: number;
+    exceptions?: number;
+    by_ornament?: Record<string, number>;
+    with_reference?: number;
+    side_texts?: number;
+    estimate?: { sheets: number; references: number; usd: number };
+  };
+  cost_usd: number;
+}
+
+export interface CalSmartRunItem {
+  order_item_id: string;
+  render_text: string;
+  element_text?: string | null;
+  ornament?: CalOrnament | null;
+  use_reference?: boolean;
+}
+
+export async function planSmart(
+  variant: CalVariant,
+  wholesalerId?: string | null,
+  defaultOrnament?: CalOrnament | null
+): Promise<CalSmartPlan> {
+  const { data } = await api.post<{ data: CalSmartPlan }>("/calligraphy/smart/plan", {
+    variant,
+    wholesaler_id: wholesalerId || null,
+    default_ornament: defaultOrnament || null,
+  }, { timeout: 180000 });
+  return data.data;
+}
+
+export async function runSmart(variant: CalVariant, items: CalSmartRunItem[]): Promise<CalJob> {
+  const { data } = await api.post<{ data: CalJob }>("/calligraphy/smart/run", { variant, items });
   return data.data;
 }

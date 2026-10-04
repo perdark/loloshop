@@ -12,6 +12,9 @@
 // No network: a held batch returns before `checkBudget` and before `generateImage`, so this
 // test can assert "nothing was bought" simply by still being pending afterwards.
 require('dotenv').config();
+// The sheet hold only exists on the OpenRouter path — SmartAPI draws every name alone and
+// never holds (lib/calligraphyEngine.js processSoloBatch). Pin the path this file is about.
+process.env.CALLIG_PROVIDER = 'openrouter';
 const test = require('node:test');
 const assert = require('node:assert');
 const crypto = require('crypto');

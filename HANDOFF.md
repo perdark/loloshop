@@ -526,6 +526,49 @@ longer stranded on a branch · the laptop's loose credentials are filed in
 
 ## 💣 LANDMINES
 
+- **⚠️ THE CALLIGRAPHY PHOTO LOSS IS PARTLY RECOVERED — 255 PHOTOS RESTORED 2026-09-22, AND THE
+  SOURCE THAT WORKED IS NOT WHERE ANYONE LOOKED.** `autoLinkPlate` overwrote
+  `order_items.customer_image_url` before migration 080; the FILES were never deleted, only the
+  pointer. What recovered them: a backup taken **before** that line's plate was generated still
+  holds the photo in the same column. The decisive folder is
+  **`~/Desktop/clients/loloshop-db-backups/`** (17 & 20 July plus 1·6·7·9 Aug) — it is NOT
+  `_private/loloshop-db/`, whose oldest dump is 13 Aug and therefore useless for this.
+  **17 July is a hard wall**: 222 lines / 129 students were overwritten before it and no backup
+  anywhere goes further back.
+  · **`photo_restore_log`** is the undo ledger (batch_id · order_item_id · old_value · new_value ·
+    source). Batches `1b213a58-…` (250, from backups) and `c57f79a7-…` (5, identified by the text
+    inside the photo). ⚠️ **Deliberately NOT in `db/schema.sql`** — a one-time correction that
+    re-runs on every deploy is exactly the 101 incident. Pre-change dump:
+    `/root/loloshop-pre-photorestore-2026-09-22.dump`.
+  · ⚠️ **«222 lines still empty» IS NOT «222 photos lost».** Measured after the 080 fix, only
+    **48.8%** of calligraphy orders carry a photo at all (323 of 662). Classifying the remaining
+    text: **164 lines are a name or a phrase**, 16 mention something visual, and 9 of those are
+    false positives (**«رواء من*صور*»** matches on the substring; «خط واضح وزخرفة حركات» is a
+    calligraphy instruction, not a photo). **Real exposure = 7 pieces shop-wide**, 4 still in
+    production.
+  · ⚠️ **A NAME INSIDE A PHOTO IS NOT PROOF OF OWNERSHIP** (owner ruling): students upload someone
+    else's sash as a STYLE reference. Only a photo whose text matches *that student's own typed
+    order* AND lands in their upload window was accepted — that is how the 5 were found, and 14
+    other name matches were REJECTED because they sat days later (they are the shop's own output).
+  · **Dead ends, measured, do not re-run:** `audit_log` (492 photo links, **zero** overlap with the
+    damaged orders) · `designs`/`cart_items`/`orders.measurements`/a scan of every text column ·
+    API and proxy logs (uploads were never logged; June–July logs died with the old box) · the old
+    **Neon prod DB is still alive** via `backend/.env.bak-neon` but frozen at 20 July, adding zero ·
+    EXIF (56% of files carry a block, but only 4 of 224 still name a device — the image optimizer
+    strips it).
+  · **Calibrations worth keeping:** on 3,500 intact lines the file's mtime sits a **median 4 minutes
+    BEFORE** the order and only 5.8% after it · matching by time alone is **13.5%** top-1 / 41%
+    top-3, far too weak to auto-apply · a student's OTHER photo is the right one just **0.8%** of the
+    time (every line has its own photo — the reuse assumption is false) · timeline-neighbour
+    attribution is **83.3%** accurate but covers only 14%.
+  · Owner-facing pages live in `recovery/` (untracked): `restored-photos.html` ·
+    `baqer-full-report.html` · `baqer-missing-review.html` · `affected-orders.html`.
+  · ✅ **Measured 2026-09-22 (b):** 51 of the 255 plates are wrong → 48 pieces, max shop income
+    1,317,000 IQD (5 pre-stitch · 13 stitched in shop · 30 ready). `recovery/plate-vs-photo-audit.html`.
+    **Open:** 50 of the 51 are GENERATOR defects (instruction text rendered, wrong crop of a shared
+    sheet), not photo loss — so other calligraphy orders from the same era may carry them. Unmeasured.
+
+
 - **⚠️ THE CALLIGRAPHY PROMPT HAS NOW BROKEN IN BOTH DIRECTIONS ON CONSECUTIVE DAYS, AND EACH
   BREAK WORE THE OTHER ONE'S FIX (2026-09-14 → 2026-09-15).** `lib/calligraphyPrompt.js` is the
   whole of it and its header carries both measurements. 09-14: BASE asked for «masterful
@@ -1319,6 +1362,29 @@ longer stranded on a branch · the laptop's loose credentials are filed in
 
 ## 🤔 OPEN DECISIONS + NEXT MOVES
 
+- **💰 «تصفية الشهر» — feature deferred by the owner 2026-10-01.** `staff_salary_transactions` is
+  cumulative since June (`buildSalarySummary` is not month-scoped), so «سجل الراتب» and «الرصيد
+  الحالي» on `/staff/me` keep every old row under the new monthly statement. Sept was settled BY
+  HAND: all 18 pre-October rows soft-deleted with `delete_reason_ar='تصفية أيلول 2026 — الشهر
+  انحسب بكشف الراتب'` (backup `/root/sst-pre-settle.dump`), which also hid a phantom **2,984,000**
+  break deduction on مضر محمد (09-27). **Repeat that by hand after every payroll publish** until the
+  feature exists: a settlement marker per user, summary shows only rows after it, archived rows
+  visible to admin. ⚠️ «الرصيد الحالي» still shows `base_salary`, not 0 — decide that in the spec.
+
+- **✦ «ولّد الكل بذكاء» IS BUILT AND UNCOMMITTED (2026-09-26 (ب)(ج) in PROGRESS).** Understanding
+  layer + photo reader + ornament dial wired into generation. ⚠️ **Migration 112 must ride the
+  same deploy** — `insertPlates` now writes `ornament`/`ref_image_url`, so on a DB without them
+  EVERY job creation 500s, not just the smart one. It is in `db/schema.sql`, so `deploy.sh`'s
+  `npm run migrate` covers it. ⚠️ A plate with `ref_image_url` is ALWAYS a solo ~$0.068 image —
+  never let it join a sheet: the reference is one student's. Not yet opened in a browser.
+
+- **✍️ CALLIGRAPHY IS SMARTAPI-ONLY NOW (2026-09-29, uncommitted).** Owner: «smartapi وبس».
+  `CALLIG_FALLBACK` defaults OFF — OpenRouter is never paid unless `.env` says
+  `CALLIG_FALLBACK=openrouter`. Plates are drawn in two passes (letters, then ornaments only):
+  11/14 on hard real names vs 5/14 before. ⚠️ **Never add words asking the model to reshape,
+  stack or interlace letters to pass 1, or ornaments at the line's ends to pass 2** — both were
+  measured breaking spelling; reasons in `lib/calligraphyPrompt.js`. The assistant and
+  `calligraphySuggest` still use OpenRouter — next. Detail: 2026-09-29 PROGRESS entry.
 - **❓ OWNER CALL — A HELD SHEET COSTS RESOLUTION PER NAME, AND NOBODY HAS PRICED THAT SIDE
   (new 2026-09-15).** `bede219` holds an under-full sheet until it fills, which is worth ~35% of
   the calligraphy bill and is not in question. What it also did is move names that used to buy

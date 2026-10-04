@@ -66,14 +66,14 @@ test('an empty batch is not a hold', () => {
 
 // ── what the SCREEN says ────────────────────────────────────────────────────────────────
 test('the display groups by (variant, style) the way the engine batches', () => {
-  // 6 front + 6 back is TWELVE pending plates and TWO under-full sheets. A naive
-  // `pending >= 10` would tell the designer «جاري التوليد» while nothing moved for ten
+  // (FULL_SHEET-1) front + (FULL_SHEET-1) back is MORE than a sheet of pending plates and
+  // still TWO under-full sheets. A naive `pending >= FULL_SHEET` would tell the designer «جاري التوليد» while nothing moved for ten
   // minutes — two rules disagreeing about one fact, which is this codebase's favourite bug.
   const split = [
-    ...Array.from({ length: 6 }, () => agoMin(0, { variant: 'front' })),
-    ...Array.from({ length: 6 }, () => agoMin(0, { variant: 'back' })),
+    ...Array.from({ length: FULL_SHEET - 1 }, () => agoMin(0, { variant: 'front' })),
+    ...Array.from({ length: FULL_SHEET - 1 }, () => agoMin(0, { variant: 'back' })),
   ];
-  assert.equal(split.length, 12);
+  assert.ok(split.length >= FULL_SHEET);
   assert.equal(holdStateFor(split, { now: NOW }).held, true, 'reported movement that is not happening');
 });
 
@@ -90,8 +90,8 @@ test('style is part of the sheet identity, not just the variant', () => {
   // One sheet is one prompt and a prompt carries one style clause (migration 083), so ten
   // names in two styles are still two half sheets.
   const styled = [
-    ...Array.from({ length: 5 }, () => agoMin(0, { style: 'mad' })),
-    ...Array.from({ length: 5 }, () => agoMin(0, { style: null })),
+    ...Array.from({ length: FULL_SHEET - 1 }, () => agoMin(0, { style: 'mad' })),
+    ...Array.from({ length: FULL_SHEET - 1 }, () => agoMin(0, { style: null })),
   ];
   assert.equal(holdStateFor(styled, { now: NOW }).held, true);
 });

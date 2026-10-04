@@ -646,6 +646,60 @@ Closed metric set for the admin-facing AI analytics chat — unchanged by this r
 
 ---
 
+## Studio (الاستوديو — ChatGPT-like tool for design staff) — 2026-10-04
+
+SmartAPI-backed (own fetch — `backend/lib/studioAi.js` — NOT `lib/smartapi.js`'s shared queue,
+which calligraphy image jobs own). Who may use it: same gate as الخط العربي —
+`authRequired` + `allowToolUser` (moved to `lib/calligraphyAccess.js`): admin, staff
+manager/designer/embroiderer, or an active `design_team_members` row (`design_helper`).
+A conversation row is owner-only for writes (PATCH/DELETE/send message); **admin may READ any**
+conversation but may not edit or delete one it does not own. All error responses
+`{ error: <Arabic msg>, code: 'ERR_*' }`.
+
+### GET `/studio/conversations`
+Mine, newest first, capped at 100. `{ data: [{ id, title, model, updated_at }] }`.
+
+### POST `/studio/conversations`
+Body: `{ model? }` — `'gpt'` (default) or `'claude'`, stored on the row and used for every
+message in it. → `201 { data: <conversation row> }`.
+
+### GET `/studio/conversations/:id`
+Owner or admin. → `{ data: { conversation, messages: [{ id, role, content, image_urls, kind, cost_usd, created_at }] } }`.
+`role` is `'user'|'assistant'`; `kind` is `'text'|'image'`.
+
+### PATCH `/studio/conversations/:id`
+Owner only. Body: `{ title }` (rename). → `{ data: <conversation row> }`.
+
+### DELETE `/studio/conversations/:id`
+Owner only (admin does NOT bypass this — read access ≠ write access). Cascades to its messages.
+→ `{ data: { ok: true } }`.
+
+### POST `/studio/conversations/:id/messages` (owner only, multipart/form-data, rate-limited 60/15min/user)
+Fields: `text` (required, ≤4000 chars), `mode` (`'chat'` default or `'image'`), up to 4 `images`
+(jpg/png/webp, ≤10MB each — re-encoded with sharp and saved under `/uploads/studio/`).
+The user's turn is saved BEFORE the model call (so a failed call never loses it), then:
+- `mode=chat`: last 20 messages as text context + the current turn's images as resized
+  (≤1024px) `image_url` data URLs, `gpt-5.5` (model `'gpt'`) or `claude-sonnet-5` (model
+  `'claude'`) per conversation's own `model`, `max_tokens` 4000.
+- `mode=image`: SmartAPI `/responses` + `image_generation` tool (`gpt-6-sol`); attached images
+  become edit inputs; the generated PNG is saved to `/uploads/studio/`. Assistant message has
+  `kind: 'image'`, `content: ''`, `image_urls: [url]`.
+
+First message in a conversation auto-titles it (first 40 chars, collapsed whitespace).
+→ `{ data: { user: <message row>, assistant: <message row> } }`.
+
+Caps (24h rolling, checked before spending): per-user `STUDIO_USER_DAILY_USD` (default $2),
+shop-wide `STUDIO_DAILY_USD` (default $10, checked first) → `429 ERR_STUDIO_CAP`. Other errors:
+`ERR_INVALID_IMAGE` (400, bad upload) · `ERR_STUDIO_KEY` (500, SmartAPI not configured) ·
+`ERR_STUDIO_NET` / `ERR_STUDIO_UPSTREAM` / `ERR_STUDIO_EMPTY` / `ERR_STUDIO_SHAPE` /
+`ERR_STUDIO_NO_IMAGE` (502, transport/model failures — retriable).
+
+### GET `/studio/usage` (admin only)
+Per-user spend over the last 30 days. `{ data: [{ user_id, name, messages, images, cost_usd }] }`
+(`messages` = all assistant replies, `images` = the subset that generated an image).
+
+---
+
 ## Error Codes
 
 | Code | HTTP | Meaning |

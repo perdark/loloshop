@@ -3,40 +3,17 @@ const router = require('express').Router();
 const rateLimit = require('express-rate-limit');
 const multer = require('multer');
 const { authRequired } = require('../middleware/auth');
-const { query } = require('../lib/db');
 const { imageUploadLimit } = require('../lib/upload');
-const { mayUseTool, mayPushOrder } = require('../lib/calligraphyAccess');
+const { mayPushOrder, allowToolUser } = require('../lib/calligraphyAccess');
 const c = require('../controllers/calligraphyController');
 
 const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
-// Who may use the AI calligraphy tool:
-//   • `mayUseTool` (lib/calligraphyAccess.js) — admin role, and staff manager/designer/
-//     embroiderer. embroiderer was added 2026-09-02 so محمد عماد (المطرّز) can generate,
-//     reroll and download his own plates without waiting on a designer — التطريز has a
-//     backlog and used to have to queue behind التصميم for this. AND
-//   • أيادي التصميم — an ACTIVE design_team member (محمد هيثم + his helpers), checked here
-//     rather than in the shared predicate because it needs a DB lookup, not a role/staff_type
-//     check. The design-team crew's whole job is running this AI, so it is deliberately opened
-//     to role='design_helper'. Membership must be active (a deactivated helper's still-valid
-//     JWT is rejected), mirroring designTeamController.attachTeamMember's fail-closed rule.
-async function allowCalligraphyUser(req, res, next) {
-  try {
-    const u = req.user;
-    if (!u) return res.status(401).json({ error: 'غير مصرح', code: 'ERR_AUTH' });
-    if (mayUseTool(u)) return next();
-    if (u.role === 'design_helper') {
-      const { rows } = await query(
-        `SELECT 1 FROM design_team_members WHERE user_id = $1 AND active = TRUE LIMIT 1`,
-        [u.id]
-      );
-      if (rows.length) return next();
-    }
-    return res.status(403).json({ error: 'ممنوع', code: 'ERR_FORBIDDEN' });
-  } catch (err) {
-    return next(err);
-  }
-}
+// Who may use the AI calligraphy tool — moved to lib/calligraphyAccess.js as `allowToolUser`
+// on 2026-10-04 so the Studio tool (routes/studio.js) shares the exact same gate: admin role,
+// staff manager/designer/embroiderer (embroiderer added 2026-09-02 so محمد عماد can generate,
+// reroll and download his own plates without waiting on a designer), plus أيادي التصميم — an
+// ACTIVE design_team member. Behaviour here is unchanged.
 
 // «تحويل للتطريز» (advance an order out of بانتظار التصميم) is STRICTER than the tool
 // itself, and stays that way on purpose: `mayPushOrder` admits only admin + staff
@@ -48,7 +25,7 @@ function requireDesignerOrAdmin(req, res, next) {
   return res.status(403).json({ error: 'ممنوع', code: 'ERR_FORBIDDEN' });
 }
 
-router.use(authRequired, allowCalligraphyUser);
+router.use(authRequired, allowToolUser);
 
 // generation is the expensive path — cap it
 const genLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 120 });
@@ -79,6 +56,11 @@ router.get('/recent', c.recentPlates);
 // still a bill, and the daily ledger it writes to is shared with the image spend.
 router.post('/suggest', genLimit, c.suggestText);
 router.get('/styles', c.listStyles);
+// «ولّد الكل» (lib/calligraphyPipeline.js). The plan spends text-model money, so it sits
+// behind the same limiter as every other paid call; the run starts paid image generation.
+router.post('/smart/plan', genLimit, c.smartPlan);
+router.post('/smart/run', genLimit, c.smartRun);
+router.get('/ornaments', c.listOrnaments);
 
 // Compositor endpoints
 router.post('/plates/:id/compose', imageUploadLimit, memUpload.single('image'), c.composePlate);
