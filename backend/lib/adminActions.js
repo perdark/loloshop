@@ -164,14 +164,19 @@ const ACTIONS = {
       if (cost === null) return { ok: false, error: 'الكلفة لازم تكون بين ٠ و ١٠,٠٠٠,٠٠٠' };
 
       const order = await lookup(
-        `SELECT o.id, o.price, o.cost, u.name AS student_name, p.name AS product_name
+        `SELECT o.id, o.price, o.cost, o.wholesaler_approval, u.name AS student_name, p.name_ar AS product_name
            FROM orders o
-           LEFT JOIN users u ON u.id = o.student_id
+           LEFT JOIN students s ON s.id = o.student_id
+           LEFT JOIN users u ON u.id = s.user_id
            LEFT JOIN products p ON p.id = o.product_id
           WHERE o.id = $1`,
         [id]
       );
       if (!order) return { ok: false, error: 'الطلب ما موجود' };
+      // Same rule as adminController.updateOrderCost: on a rep row this column is حصة الإدارة.
+      if (order.wholesaler_approval != null) {
+        return { ok: false, error: 'هذا طلب ممثل — كلفته هي حصة الإدارة وما تتغير من هنا' };
+      }
 
       const subject = `${order.student_name || 'طالب'} — ${order.product_name || 'قطعة'}`;
       const was = order.cost == null ? 'غير محددة' : fmtIQD(order.cost);

@@ -31,7 +31,8 @@ const presence = require('./staffPresence');
 // its students' wholesaler_id while leaving their orders 'approved', so the naive predicate
 // would silently reclassify a deleted rep's whole cohort as retail. (`orders.wholesaler_id`
 // does not exist at all — the first draft of this file assumed it did.)
-const { retailRowSql, liveSql } = require('./counts');
+const { liveSql } = require('./counts');
+const trueProfit = require('./trueProfit');
 
 const fmtIQD = (n) => `${Number(n || 0).toLocaleString('en-US')} دينار`;
 
@@ -175,35 +176,42 @@ async function build(now = new Date()) {
     console.error('suggestion deadlines block failed:', e.message);
   }
 
-  // ── 4. RETAIL ORDERS WITH NO PRODUCTION COST ─────────────────────────────────────────────
-  // Why this one matters more than it looks: the /admin dashboard REFUSES to print a net
-  // profit while no retail cost has been entered, and adminMetrics.revenue_summary refuses in
-  // the same breath. So this is not a tidiness nag — it names the exact reason the owner
-  // cannot see his own profit, and set_order_cost is in the registry.
+  // ── 4. THE TRUE PROFIT — and what still makes it a guess ───────────────────────────────
+  // Replaced 2026-09-26. This used to nag about retail orders with no per-order cost, but the
+  // net no longer comes from per-order costs: it comes from the cost model (/admin/costs,
+  // lib/trueProfit.js). So the two things worth a card are «this month is losing money» and
+  // «N of the numbers behind it are still estimates».
   try {
-    const { rows } = await query(
-      `SELECT COUNT(*)::int AS n, COALESCE(SUM(o.price), 0)::bigint AS revenue
-         FROM orders o
-        WHERE ${liveSql('o')}
-          AND ${retailRowSql('o')}
-          AND o.cost IS NULL
-          AND o.created_at > NOW() - INTERVAL '90 days'`
-    );
-    const r = rows[0];
-    if (Number(r.n) > 0) {
+    const r = await trueProfit.computePnl({ now });
+    const m = r.months[r.months.length - 1];
+    if (m && m.income.shop_income > 0 && m.net < 0) {
       out.push(
         item(
-          'retail_cost_missing',
+          'month_losing',
+          'urgent',
+          'الشهر الحالي خسران لحد الآن',
+          `دخل المحل ${fmtIQD(m.income.shop_income)} والتكاليف ${fmtIQD(m.total_costs)}`,
+          '/admin/costs',
+          'شكد الربح الحقيقي هذا الشهر؟'
+        )
+      );
+    }
+    const c = r.confidence;
+    const guesses = (c.items_total - c.items_confirmed) + (c.expenses_total - c.expenses_confirmed);
+    if (guesses > 0) {
+      out.push(
+        item(
+          'costs_unconfirmed',
           'info',
-          `${r.n} طلب تجزئة بدون كلفة إنتاج`,
-          `مبيعاتها ${fmtIQD(r.revenue)} — بدون الكلفة ما ينحسب صافي الربح`,
-          '/admin/orders',
-          'شكد دخل المحل آخر ٣٠ يوم؟'
+          `${guesses} بند تكلفة بعده تقديري`,
+          'الربح الحقيقي محسوب بأسعار تقريبية — أكّدها حتى يصير الرقم حقيقي',
+          '/admin/costs',
+          'شكد الربح الحقيقي آخر ٣ أشهر؟'
         )
       );
     }
   } catch (e) {
-    console.error('suggestion cost block failed:', e.message);
+    console.error('suggestion true-profit block failed:', e.message);
   }
 
   // ── 5. STALLED PIECES ────────────────────────────────────────────────────────────────────

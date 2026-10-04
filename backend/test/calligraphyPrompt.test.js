@@ -93,15 +93,35 @@ test('the canvas is never described as a physical sheet of paper', () => {
   }
 });
 
-test('the embroidery rule is present and does not forbid interlocking', () => {
-  // «NO stroke dropping below its line» is the owner's wording and it is what makes a plate
-  // stitchable: it constrains where a stroke may TRAVEL, not how letters relate. The
-  // alternative tried on 09-17 — «letters must not overlap, cross or interlock» — produced a
-  // readable but plain line that is not Thuluth, and he rejected it.
+test('the embroidery rule keeps each name in its band without flattening it', () => {
+  // 2026-09-17 → 09-24 the rule was «NO stroke dropping below its line». It forbade Thuluth's
+  // own tails and stacking, and the model obeyed it by drawing Naskh on a flat baseline — every
+  // solo (مفرد) plate measured on prod was Naskh. The owner relaxed it on 2026-09-24: what the
+  // crop needs is that a name stays in its own band, not that it stays flat.
   for (const [label, p] of allPrompts()) {
-    assert.match(p, /NO stroke dropping below its line/i, `${label}: the embroidery rule is gone`);
+    assert.doesNotMatch(p, /NO stroke dropping below its line/i, `${label}: the flattening rule is back`);
+    assert.match(p, /own band/i, `${label}: nothing keeps a name out of its neighbour's band`);
     assert.doesNotMatch(p, /must not (overlap|interlock)/i, `${label}: this flattens the script`);
+    // Measured on prod 2026-09-24, the day it shipped: asking for letters «stacked and composed
+    // over each other» folded names into a block (median width/height 5.6 → 2.2) and put the
+    // title on its own row in 2 of the first 4 plates. A sash carries a long strip.
+    assert.doesNotMatch(p, /stacked and composed over each other/i, `${label}: asks for a block, not a line`);
+    assert.match(p, /never two rows/i, `${label}: nothing stops the title wrapping above the name`);
+    assert.match(p, /four times wider than it is tall/i, `${label}: no width target`);
   }
+});
+
+test('the hand is pinned against the scripts the model drifts into', () => {
+  // Measured on prod 2026-09-24: one Thuluth mention lost to heavy and thin Naskh, and a
+  // «- » list bullet and a fake calligrapher's signature were drawn onto real plates.
+  for (const [label, p] of allPrompts()) {
+    assert.match(p, /NOT Naskh/, `${label}: Naskh is not excluded`);
+    assert.match(p, /NOT a printed or typed font/i, `${label}: a typeface is not excluded`);
+    assert.match(p, /no signature/i, `${label}: signatures are not banned`);
+  }
+  const sheet = buildSheetPrompt(['مصطفى علي', 'ديالى'], 'front', null);
+  assert.doesNotMatch(sheet, /^- /m, 'a list bullet is back — the model draws it as a dash');
+  assert.match(sheet, /^مصطفى علي$/m);
 });
 
 test('guillemets are banned — element_text puts them IN the prompt', () => {
@@ -128,6 +148,7 @@ test('«بدون زخرفة» still strips the ornaments without stripping the c
   const p = buildSheetPrompt(['ديالى'], 'front', 'plain');
   assert.match(p, /NO decorative ornaments at all/i);
   assert.match(p, /THULUTH calligraphy/i, 'the style knob must not cost the script');
+  assert.doesNotMatch(p, /plain letters/i, '«plain letters» reaches the letterforms, not the ornaments');
 });
 
 test('the element motif prompt is unrelated artwork and carries no calligraphy rules', () => {

@@ -751,25 +751,34 @@ function OrdersSection({
                   </div>
                 </td>
                 <td className="px-4 py-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Input
-                      type="text"
-                      inputMode="numeric"
-                      className="max-w-[8rem]"
-                      value={costDraftById[order.id] ?? ""}
-                      onChange={(e) => onCostInput(order.id, e.target.value)}
-                      placeholder="د.ع"
-                      dir="ltr"
-                      aria-label="التكلفة"
-                    />
-                    <Button
-                      className="min-h-9 px-3 py-2 text-xs"
-                      loading={savingCostId === order.id}
-                      onClick={() => onSaveCost(order.id)}
-                    >
-                      حفظ
-                    </Button>
-                  </div>
+                  {/* A rep row's «cost» IS حصة الإدارة — editing it here would silently
+                      change shop income, not a production cost. The backend rejects it too;
+                      this just stops the admin from typing into a field that can only 400. */}
+                  {isRepView ? (
+                    <span className="text-xs text-[var(--shop-muted)]">
+                      حصة الإدارة — لا تُعدَّل من هنا
+                    </span>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Input
+                        type="text"
+                        inputMode="numeric"
+                        className="max-w-[8rem]"
+                        value={costDraftById[order.id] ?? ""}
+                        onChange={(e) => onCostInput(order.id, e.target.value)}
+                        placeholder="د.ع"
+                        dir="ltr"
+                        aria-label="التكلفة"
+                      />
+                      <Button
+                        className="min-h-9 px-3 py-2 text-xs"
+                        loading={savingCostId === order.id}
+                        onClick={() => onSaveCost(order.id)}
+                      >
+                        حفظ
+                      </Button>
+                    </div>
+                  )}
                 </td>
               </tr>
             ))}
@@ -855,24 +864,32 @@ function OrdersSection({
               className="mt-3"
             />
             <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-ink/10 pt-3">
-              <span className="text-sm text-[var(--shop-muted)]">تعديل التكلفة:</span>
-              <Input
-                type="text"
-                inputMode="numeric"
-                className="max-w-[7rem]"
-                value={costDraftById[order.id] ?? ""}
-                onChange={(e) => onCostInput(order.id, e.target.value)}
-                placeholder="د.ع"
-                dir="ltr"
-                aria-label="التكلفة"
-              />
-              <Button
-                className="min-h-9 px-3 py-2 text-xs"
-                loading={savingCostId === order.id}
-                onClick={() => onSaveCost(order.id)}
-              >
-                حفظ
-              </Button>
+              {isRepView ? (
+                <span className="text-sm text-[var(--shop-muted)]">
+                  حصة الإدارة — لا تُعدَّل من هنا
+                </span>
+              ) : (
+                <>
+                  <span className="text-sm text-[var(--shop-muted)]">تعديل التكلفة:</span>
+                  <Input
+                    type="text"
+                    inputMode="numeric"
+                    className="max-w-[7rem]"
+                    value={costDraftById[order.id] ?? ""}
+                    onChange={(e) => onCostInput(order.id, e.target.value)}
+                    placeholder="د.ع"
+                    dir="ltr"
+                    aria-label="التكلفة"
+                  />
+                  <Button
+                    className="min-h-9 px-3 py-2 text-xs"
+                    loading={savingCostId === order.id}
+                    onClick={() => onSaveCost(order.id)}
+                  >
+                    حفظ
+                  </Button>
+                </>
+              )}
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <span className="text-xs text-[var(--shop-muted)]">
@@ -1530,13 +1547,14 @@ function AdminOrdersContent() {
                 </p>
               </div>
               <div>
-                <p className="text-xs text-muted">
-                  {activeIsRep ? "دخل المحل" : "إجمالي التكلفة"}
-                </p>
-                <p
-                  className={`mt-0.5 font-bold tabular-nums ${activeIsRep ? "text-ink" : "text-ink-soft"}`}
-                  dir="ltr"
-                >
+                {/* Was mislabeled «إجمالي التكلفة» on retail: `bundleShopIncome` is never a
+                    cost, on either source — it is total_cost (حصة الإدارة) for a rep bundle
+                    and total_price (the full price, since retail has no rep cut) for a
+                    retail one. Both are exactly what `frontend/lib/orderMoney.ts` calls
+                    shopIncome, so the label says that now for both, matching the variable's
+                    own name instead of contradicting it. */}
+                <p className="text-xs text-muted">دخل المحل</p>
+                <p className="mt-0.5 font-bold tabular-nums text-ink" dir="ltr">
                   {formatIQD(bundleShopIncome)}
                 </p>
               </div>

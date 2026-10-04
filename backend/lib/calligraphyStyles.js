@@ -40,8 +40,8 @@ const STYLES = {
     label: 'بدون زخرفة',
     hint: 'الطالب يريد الاسم وحده بلا زخارف',
     clause:
-      'NO decorative ornaments at all: plain letters only, nothing floated around the words. '
-      + 'This overrides any ornament instruction above.',
+      'NO decorative ornaments at all: nothing floated around the words. The letters themselves '
+      + 'stay full Thuluth calligraphy. This overrides any ornament instruction above.',
   },
 };
 

@@ -1385,6 +1385,13 @@ longer stranded on a branch · the laptop's loose credentials are filed in
   stack or interlace letters to pass 1, or ornaments at the line's ends to pass 2** — both were
   measured breaking spelling; reasons in `lib/calligraphyPrompt.js`. The assistant and
   `calligraphySuggest` still use OpenRouter — next. Detail: 2026-09-29 PROGRESS entry.
+- **💰 «التكاليف والربح الحقيقي» (`/admin/costs`) — 2026-09-26, migration 113.** The seeded prices
+  are ESTIMATES (`confirmed=false`) waiting for the owner/admin to correct. ⚠️ The seed is guarded
+  by the `site_settings` marker `cost_model_seeded`, NOT by ON CONFLICT — delete that marker and the
+  next deploy re-seeds everything the admin deleted. ⚠️ Recipes are MATERIALS ONLY; labour comes
+  from the workshop log and payroll. Income comes from counts.js, and `test/costModel.test.js` pins
+  that it equals `settledMoney`. Detail: the 2026-09-26 PROGRESS entry.
+
 - **❓ OWNER CALL — A HELD SHEET COSTS RESOLUTION PER NAME, AND NOBODY HAS PRICED THAT SIDE
   (new 2026-09-15).** `bede219` holds an under-full sheet until it fills, which is worth ~35% of
   the calligraphy bill and is not in question. What it also did is move names that used to buy
