@@ -298,7 +298,7 @@ export function StaffSidebar({ user, open, onClose }: StaffSidebarProps) {
     ...(canCalligraphy
       ? [
           { href: "/staff/calligraphy", label: "الخط العربي", icon: iconPen(), prefix: true },
-          { href: "/staff/studio", label: "الاستوديو", icon: iconSparkles(), prefix: true },
+          { href: "/staff/studio", label: "ChatGPT", icon: iconSparkles(), prefix: true },
         ]
       : []),
     ...(canDesignSupport

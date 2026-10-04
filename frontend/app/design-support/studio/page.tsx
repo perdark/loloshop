@@ -19,7 +19,7 @@ export default function DesignSupportStudioPage() {
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 lg:px-8">
           <div>
             <p className="text-xs font-medium text-orange-ink">لولو شوب</p>
-            <p className="font-display-ar text-xl font-bold text-ink">الاستوديو</p>
+            <p className="font-display-ar text-xl font-bold text-ink">ChatGPT</p>
           </div>
           <Link
             href="/design-support"

@@ -46,7 +46,7 @@ export function MessageBubble({ message, onPreviewImage }: MessageBubbleProps) {
 
         {message.content && (
           <p className="whitespace-pre-wrap break-words text-sm leading-relaxed" dir="auto">
-            {message.content}
+            {isUser ? message.content : <LiteMarkdown text={message.content} />}
           </p>
         )}
 
@@ -62,6 +62,42 @@ export function MessageBubble({ message, onPreviewImage }: MessageBubbleProps) {
 
 /** The bubble shown while a request is in flight — never a blank gap, since image
  *  generation on SmartAPI can run close to a minute. */
+// The models answer in markdown (GPT almost always). Showing raw «**» to a designer reads as
+// broken, so this renders the four things that actually show up — bold, headings, bullets and
+// inline code — as React elements. No innerHTML, so model output can never inject markup.
+function inlineBold(line: string, key: string) {
+  return line.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).map((part, i) => {
+    if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
+      return <strong key={`${key}-${i}`}>{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
+      return (
+        <code key={`${key}-${i}`} className="rounded bg-surface-sink px-1 text-[0.85em]" dir="ltr">
+          {part.slice(1, -1)}
+        </code>
+      );
+    }
+    return part;
+  });
+}
+
+function LiteMarkdown({ text }: { text: string }) {
+  const lines = text.replace(/```[a-z]*\n?/g, "").split("\n");
+  return (
+    <>
+      {lines.map((raw, i) => {
+        const heading = raw.match(/^#{1,6}\s+(.*)$/);
+        const bullet = raw.match(/^\s*[-*•]\s+(.*)$/);
+        const nl = i < lines.length - 1 ? "\n" : "";
+        if (heading) return <span key={i}><strong>{inlineBold(heading[1], `h${i}`)}</strong>{nl}</span>;
+        if (bullet) return <span key={i}>{"• "}{inlineBold(bullet[1], `b${i}`)}{nl}</span>;
+        if (/^\s*(-{3,}|\*{3,})\s*$/.test(raw)) return <span key={i}>{nl}</span>;
+        return <span key={i}>{inlineBold(raw, `l${i}`)}{nl}</span>;
+      })}
+    </>
+  );
+}
+
 export function LoadingBubble({ mode }: { mode: StudioMode }) {
   return (
     <div className="flex w-full justify-end">

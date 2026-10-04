@@ -25,7 +25,7 @@ const navItems: {
   { href: "/admin/products", label: "الكتالوج", exact: false },
   { href: "/admin/packages", label: "باقات VIP", exact: false },
   { href: "/admin/calligraphy", label: "الخط العربي", exact: false },
-  { href: "/admin/studio", label: "الاستوديو", exact: false },
+  { href: "/admin/studio", label: "ChatGPT", exact: false },
   { href: "/admin/workshop", label: "الورشة", exact: false },
   { href: "/admin/analytics", label: "الإحصائيات", exact: false },
   { href: "/admin/app", label: "التطبيق والإشعارات", exact: false },

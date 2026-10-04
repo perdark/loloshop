@@ -1362,6 +1362,16 @@ longer stranded on a branch · the laptop's loose credentials are filed in
 
 ## 🤔 OPEN DECISIONS + NEXT MOVES
 
+- **🔀 2026-10-04 — EVERYTHING AI IS ON SMARTAPI NOW (OpenRouter balance ran out).** Deployed with
+  this push: الخط (SmartAPI-only, migration 112) · «لولو» for students + admin (`aiChat.complete` →
+  `claude-sonnet-5`, 44/44 scenarios) · **«ChatGPT»** at `/staff/studio`, `/design-support/studio`,
+  `/admin/studio` (migration **114**; chat GPT/Claude, read images, generate images; daily caps
+  `STUDIO_USER_DAILY_USD`=2 / `STUDIO_DAILY_USD`=10). `SMARTAPI_KEY` was ADDED to the prod backend
+  `.env` the same day (it was missing — without it `aiChat` silently stays on OpenRouter).
+  Rollback without a deploy: `AI_CHAT_PROVIDER=openrouter` + `pm2 restart loloshop-api --update-env`.
+  Pre-deploy dump: `/root/loloshop-pre-chatgpt-2026-10-04-2134.dump` (+ laptop `_private/loloshop-db/`).
+  ⚠️ Owner asked the per-person usage panel REMOVED from the UI; `GET /api/studio/usage` still exists.
+
 - **💰 «تصفية الشهر» — feature deferred by the owner 2026-10-01.** `staff_salary_transactions` is
   cumulative since June (`buildSalarySummary` is not month-scoped), so «سجل الراتب» and «الرصيد
   الحالي» on `/staff/me` keep every old row under the new monthly statement. Sept was settled BY

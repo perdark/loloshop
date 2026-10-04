@@ -793,7 +793,7 @@ export default function DesignSupportPage() {
               href="/design-support/studio"
               className="inline-flex min-h-11 items-center rounded-full border border-orange-ink/30 bg-orange-ink/10 px-4 text-sm font-semibold text-orange-ink transition-colors hover:bg-orange-ink/15"
             >
-              الاستوديو
+              ChatGPT
             </Link>
             {isAdmin ? (
               <Link href="/admin" className="inline-flex min-h-11 items-center rounded-full border border-line bg-surface-sink px-4 text-sm font-semibold text-ink transition-colors hover:border-orange-ink/40 hover:text-orange-ink">

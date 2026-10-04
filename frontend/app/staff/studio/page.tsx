@@ -34,7 +34,7 @@ export default function StaffStudioPage() {
       <div className="mx-auto max-w-lg px-4 py-16" dir="rtl">
         <EmptyState
           title="غير مصرّح"
-          message="الاستوديو مخصّص للمصممين والمطرّزين والمديرين فقط."
+          message="ChatGPT مخصّص للمصممين والمطرّزين والمديرين فقط."
         />
       </div>
     );

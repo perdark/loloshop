@@ -8,12 +8,10 @@ import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { getApiErrorMessage } from "@/lib/api";
-import { getUser } from "@/lib/auth";
 import { safeFileName, saveFromUrl } from "@/lib/download";
 import { ConversationList } from "@/components/studio/ConversationList";
 import { Composer } from "@/components/studio/Composer";
 import { LoadingBubble, MessageBubble } from "@/components/studio/MessageBubble";
-import { UsagePanel } from "@/components/studio/UsagePanel";
 import {
   createStudioConversation,
   deleteStudioConversation,
@@ -48,9 +46,6 @@ function localId() {
  * by `allowToolUser` on every `/studio/*` call (see `lib/calligraphyAccess.js`).
  */
 export function StudioTool({ backHref }: { backHref?: string } = {}) {
-  const me = getUser();
-  const isAdmin = me?.role === "admin";
-
   // ── conversations ────────────────────────────────────────────────────────────
   const [conversations, setConversations] = useState<StudioConversation[]>([]);
   const [conversationsLoading, setConversationsLoading] = useState(true);
@@ -58,7 +53,6 @@ export function StudioTool({ backHref }: { backHref?: string } = {}) {
   const [messages, setMessages] = useState<StudioMessage[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [usageOpen, setUsageOpen] = useState(false);
 
   // ── composer draft ───────────────────────────────────────────────────────────
   const [mode, setMode] = useState<StudioMode>("chat");
@@ -229,7 +223,7 @@ export function StudioTool({ backHref }: { backHref?: string } = {}) {
     if (!previewUrl) return;
     setPreviewSaving(true);
     try {
-      const out = await saveFromUrl(previewUrl, safeFileName("صورة الاستوديو", "png", "صورة"));
+      const out = await saveFromUrl(previewUrl, safeFileName("صورة ChatGPT", "png", "صورة"));
       if (out !== "cancelled") toast.success("تم تنزيل الصورة");
     } catch {
       toast.error("تعذّر تنزيل الصورة");
@@ -261,19 +255,9 @@ export function StudioTool({ backHref }: { backHref?: string } = {}) {
         </div>
       )}
 
-      <PageHeader
-        title="الاستوديو"
-        subtitle="محادثة أو توليد صور بالذكاء الاصطناعي — بديل اشتراكات ChatGPT المتفرقة"
-        action={
-          isAdmin ? (
-            <Button variant="ghost" onClick={() => setUsageOpen(true)}>
-              الاستهلاك
-            </Button>
-          ) : undefined
-        }
-      />
+      <PageHeader title="ChatGPT" />
 
-      <div className="flex h-[75vh] max-h-[800px] min-h-[480px] overflow-hidden rounded-2xl border border-line bg-surface shadow-[var(--shadow-soft)]">
+      <div className="flex h-[calc(100dvh-14rem)] min-h-[420px] overflow-hidden lg:h-[calc(100dvh-16rem)] lg:max-h-[800px] lg:min-h-[440px] rounded-2xl border border-line bg-surface shadow-[var(--shadow-soft)]">
         {/* ≥lg side column */}
         <div className="hidden w-72 shrink-0 border-e border-line lg:block">
           <ConversationList {...conversationListProps} />
@@ -301,7 +285,7 @@ export function StudioTool({ backHref }: { backHref?: string } = {}) {
             ) : messages.length === 0 && !pendingMode ? (
               <div className="flex h-full flex-col items-center justify-center gap-5 px-2 text-center">
                 <EmptyState
-                  title="ابدأ محادثة مع الاستوديو"
+                  title="ابدأ محادثة جديدة"
                   message="اكتب رسالة، أو جرّب أحد الأمثلة التالية:"
                 />
                 <div className="grid w-full max-w-lg gap-2 sm:grid-cols-2">
@@ -375,7 +359,6 @@ export function StudioTool({ backHref }: { backHref?: string } = {}) {
         )}
       </Modal>
 
-      {isAdmin && <UsagePanel open={usageOpen} onClose={() => setUsageOpen(false)} />}
     </div>
   );
 }
