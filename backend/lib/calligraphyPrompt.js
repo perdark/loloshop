@@ -275,15 +275,17 @@ function buildSmartApiPrompt({ style = null, studentReference = false } = {}) {
 // came back uniform and stamped. Measured on 4 hard names, 3 references + NO_REPEAT: 3/4 spelled
 // right (the miss was pass 1, not pass 2). Letters and ornaments in ONE pass spelled 10/14 against
 // 13/14 for two passes — it invented «الجميلة» for المترجمة — so keep the passes separate.
-// Medium is the base text itself; light/rich only scale it.
+// ⚠️ 2026-10-07, owner: «الزخارف اكثر تنوعا واقل عددا الى النصف». IMAGES 2-4 (the besto plates) are
+// the dense end, so every level is now stated RELATIVE to them and «medium» is half. Measured on
+// prod plates the same day: 7-13 marks per plate-height before, the old Gemini plates 2-5.
 const SMART_ORNAMENT = {
-  light: 'Use only about a third as many marks as IMAGES 2, 3 and 4 do — sparse.',
-  medium: '',
+  light: 'Use only about a QUARTER as many marks as IMAGES 2, 3 and 4 do — sparse, a few marks only.',
+  medium: 'Use only about HALF as many marks as IMAGES 2, 3 and 4 do, with clean white space between them — do NOT fill every gap.',
   // ⚠️ «rich» may only mean MORE of the same marks. Measured 2026-09-29: «generously through every
   // gap» put a mark under the first alif (المترجمة → «إلمترجمة») and once redrew letters
   // («التارجمة»); a floral flourish at the line's ends ATE the first alif twice in three names
   // (الاستاذة → «لاستاذة», الصيدلانية → «لصيدلانية»). Nothing may sit at the ends of the line.
-  rich: 'Use them a little more densely than IMAGES 2, 3 and 4 — but nothing at the two ends of the line.',
+  rich: 'Use about as many marks as IMAGES 2, 3 and 4 do — but nothing at the two ends of the line.',
 };
 // A mark right above or below an alif reads as a hamza (ا → أ/إ), so it is a spelling change.
 const SMART_MARK_RULE = 'Never place a mark directly above or below an alif, and never where it could be read '
@@ -311,17 +313,19 @@ function buildSmartApiOrnamentPrompt({ variant = 'front', ornament = null, eleme
     ? 'Use the same MIXED FAMILY of marks they use: tall thin hooked ticks like a small v with a tail, long slanted '
       + 'fatha-like strokes, curled damma-like commas, tiny hamza-like and shadda-like caps, short slanted kasra-like '
       + 'strokes, and tiny curls — in many different sizes and angles, some marks LARGE (about twice the size of a plain '
-      + 'dot-tick) and some small. Group them in loose clusters of three to five that follow the rhythm of the letters, '
-      + 'filling the space ABOVE the tall letters and ALSO below the baseline between and under the letters, so the whole '
-      + `name looks lavishly decorated like ${refs}. ${NO_REPEAT}`
+      + 'dot-tick) and some small. Spread them in small loose groups of two or three that follow the rhythm of the '
+      + 'letters, ABOVE the tall letters and in some of the gaps below the baseline. VARIETY matters more than amount: '
+      + `every group mixes different shapes, and no shape appears more than twice on the whole plate. ${NO_REPEAT}`
     : 'Use a varied scatter of tiny hand-drawn marks — small v-shaped ticks, short slanted harakat strokes, tiny curls — '
       + 'above the letters and in the gaps below the baseline, at different sizes and angles.';
   return [
     'Edit IMAGE 1: it is a finished Arabic calligraphy name. Do NOT change, move, redraw or thicken ANY',
     'letter or dot — the lettering must stay identical.',
-    level === 'none' ? '' : `ADD a rich, hand-placed scatter of pen-stroke ornaments EXACTLY in the manner of ${refs}. ${family} `
-      + 'Thin pen strokes, much lighter than the letters, never touching a letter. '
-      + `${SMART_ORNAMENT[level]} ${SMART_MARK_RULE}`,
+    level === 'none' ? '' : `ADD a hand-placed scatter of pen-stroke ornaments EXACTLY in the manner of ${refs}. ${family} `
+      // 2026-10-07, owner: «ثخن الزخارف شوي» — a firm pen line, not a hairline, still clearly under the letters.
+      + 'Draw each mark with a firm, clearly visible pen stroke — never a hairline — about a third as thick as the '
+      + 'letters\' strokes, so it is still clearly lighter than the letters, never touching a letter. '
+      + `${shopRefs ? SMART_ORNAMENT[level] : SMART_ORNAMENT[level].replace(/IMAGES 2, 3 and 4 do/g, 'IMAGE 2 does')} ${SMART_MARK_RULE}`,
     element ? `Also add a small simple solid black-ink motif of «${element}» right beside the text, on the same line, touching no letter.` : '',
     'Everything stays on the one line. Black ink on pure white.',
   ].filter(Boolean).join(' ');

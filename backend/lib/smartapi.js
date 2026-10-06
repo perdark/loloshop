@@ -37,8 +37,9 @@ const STYLE_REF3_FILE = path.join(__dirname, '..', 'assets', 'calligraphy', 'sty
 // Pass 2 is re-drawn (up to ORNAMENT_TRIES times, best kept) when a plate comes back thinner than this
 // many marks per plate-height — see lib/plateMarks.js. Calibrated 2026-10-06 on the plates the owner
 // approved (5.6–9.1) against the thin ones he rejected (3.3–5.0).
+// 2026-10-07, owner: «اقل عددا الى النصف» — the target halved, so the bar is 3, not 5.
 // Read at call time so the tests (and an emergency .env edit + restart) can change them.
-const minMarks = () => Number(process.env.CALLIG_MIN_MARKS ?? 5);
+const minMarks = () => Number(process.env.CALLIG_MIN_MARKS ?? 3);
 const ornamentTries = () => Math.max(1, Number(process.env.CALLIG_ORNAMENT_TRIES ?? 3));
 
 function tagged(message, status, code, extra = {}) {
