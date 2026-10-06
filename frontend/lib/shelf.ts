@@ -182,7 +182,10 @@ export async function updateShelfSection(
  * The pieces STAY at التجهيز (no status changes, nothing becomes «جاهز للاستلام») and come
  * back in the «وصلت توّا» inbox to be re-placed. Manager/admin only server-side.
  */
-export async function clearShelf(): Promise<{ released: number; bins_closed: number }> {
-  const res = await api.post("/production/shelf/clear", {});
+export async function clearShelf(
+  shelfCode?: string,
+): Promise<{ released: number; bins_closed: number }> {
+  // No code = the whole shelf; a code (A/B/C) empties that one physical shelf only.
+  const res = await api.post("/production/shelf/clear", shelfCode ? { shelf_code: shelfCode } : {});
   return res.data.data;
 }

@@ -67,8 +67,12 @@ async function releasePlacement(req, res) {
 // Deliberately NOT open to the preparer: it wipes the whole map in one press, and the
 // preparer already has a per-piece «إرجاع» for the ordinary mistake.
 async function clear(req, res) {
-  const data = await shelf.clearShelf();
-  res.json({ data });
+  try {
+    const data = await shelf.clearShelf((req.body || {}).shelf_code);
+    res.json({ data });
+  } catch (err) {
+    return sendShelfError(res, err);
+  }
 }
 
 // Config editing (manager/admin only via requireStaffType()). Shrinking a section below

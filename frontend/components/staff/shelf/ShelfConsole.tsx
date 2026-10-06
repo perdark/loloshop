@@ -89,6 +89,8 @@ export function ShelfConsole({ canClear = false }: ShelfConsoleProps) {
   // inside the app's WebView, where a native confirm blocks the whole page.
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearing, setClearing] = useState(false);
+  // Which physical shelf «فرّغ الرف» empties: "" = all of them, else A/B/C.
+  const [clearTarget, setClearTarget] = useState<string>("");
   const loadedOnce = useRef(false);
 
   const load = useCallback(async () => {
@@ -224,10 +226,15 @@ export function ShelfConsole({ canClear = false }: ShelfConsoleProps) {
   const unplaceable = inbox.filter((i) => !i.suggestion).length;
   // How much «فرّغ الرف» would release. Counted off the MAP (every live placement), not off
   // the filtered lists — the button is shelf-wide and the number in the confirmation must be too.
-  const piecesOnShelf = (board?.shelves ?? []).reduce(
-    (n, sh) => n + sh.slots.reduce((m, sl) => m + sl.pieces.length, 0),
-    0,
-  );
+  const piecesOnShelfCode = (code: string) =>
+    (board?.shelves ?? [])
+      .filter((sh) => !code || sh.code === code)
+      .reduce((n, sh) => n + sh.slots.reduce((m, sl) => m + sl.pieces.length, 0), 0);
+  const piecesOnShelf = piecesOnShelfCode(clearTarget);
+  const shelfLabel = (code: string) => {
+    const sh = board?.shelves.find((x) => x.code === code);
+    return sh ? `${code} · ${sh.sections.map((s) => s.label_ar).join(" + ")}` : code;
+  };
 
   async function doPlace(item: ShelfInboxItem, target?: { shelf_code: string; slot_index: number }) {
     setBusyId(item.order_id);
@@ -283,11 +290,12 @@ export function ShelfConsole({ canClear = false }: ShelfConsoleProps) {
   async function doClearShelf() {
     setClearing(true);
     try {
-      const res = await clearShelf();
+      const res = await clearShelf(clearTarget || undefined);
+      const which = clearTarget ? `رف ${clearTarget}` : "الرف";
       flash(
         res.released > 0
-          ? `تفرّغ الرف — ${res.released} قطعة رجعت لقائمة التسكين`
-          : "الرف فارغ أصلاً",
+          ? `تفرّغ ${which} — ${res.released} قطعة رجعت لقائمة التسكين`
+          : `${which} فارغ أصلاً`,
       );
       setConfirmClear(false);
       await load();
@@ -551,7 +559,10 @@ export function ShelfConsole({ canClear = false }: ShelfConsoleProps) {
             <h2 className="text-xl font-black text-[#1A1A1A]">الرف</h2>
             <button
               type="button"
-              onClick={() => setConfirmClear(true)}
+              onClick={() => {
+                setClearTarget("");
+                setConfirmClear(true);
+              }}
               className="min-h-11 flex-none rounded-full border border-[#9f382d] bg-white px-4 text-sm font-bold text-[#9f382d] transition active:scale-[.98]"
             >
               فرّغ الرف
@@ -778,15 +789,40 @@ export function ShelfConsole({ canClear = false }: ShelfConsoleProps) {
               loading={clearing}
               onClick={() => void doClearShelf()}
             >
-              إي، فرّغ الرف
+              {clearTarget ? `إي، فرّغ رف ${clearTarget}` : "إي، فرّغ الرف كله"}
             </Button>
           </>
         }
       >
         <div className="space-y-3 text-sm text-ink-soft">
+          <div role="radiogroup" aria-label="أي رف" className="grid grid-cols-2 gap-2">
+            {["", ...(board?.shelves ?? []).map((sh) => sh.code)].map((code) => {
+              const on = clearTarget === code;
+              return (
+                <button
+                  key={code || "all"}
+                  type="button"
+                  role="radio"
+                  aria-checked={on}
+                  disabled={clearing}
+                  onClick={() => setClearTarget(code)}
+                  className={`min-h-11 rounded-xl border px-3 text-start text-sm font-bold transition ${
+                    on
+                      ? "border-[#9f382d] bg-[#9f382d] text-white"
+                      : "border-[#E0E0E0] bg-white text-ink"
+                  }`}
+                >
+                  {code ? shelfLabel(code) : "كل الرف"}
+                  <span className={`block text-xs font-normal ${on ? "text-white/80" : "text-ink-soft"}`}>
+                    {piecesOnShelfCode(code)} قطعة
+                  </span>
+                </button>
+              );
+            })}
+          </div>
           <p className="font-bold text-ink">
-            راح تنفرّغ كل الخانات
-            {piecesOnShelf > 0 ? ` — ${piecesOnShelf} قطعة حالياً على الرف` : ""}.
+            {clearTarget ? `راح تنفرّغ خانات رف ${clearTarget} بس` : "راح تنفرّغ كل الخانات"}
+            {piecesOnShelf > 0 ? ` — ${piecesOnShelf} قطعة حالياً عليه` : ""}.
           </p>
           <p>
             القطع <span className="font-bold text-ink">ما تنمسح وما تتسلّم</span> — تبقى بالتجهيز

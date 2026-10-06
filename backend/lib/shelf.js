@@ -238,12 +238,36 @@ async function collectForOrder(orderId, userId, client) {
 // Placements that were ALREADY collected are left alone: they are the «منو غلّفها» history
 // and the «جُمعت» tab reads them. So this is recoverable — re-place each piece — and it
 // destroys no record of anything that actually left the shop.
-async function clearShelf() {
+//
+// `shelfCode` (owner 2026-10-07: «تفريغ A,B,C على حدة») scopes the wipe to ONE physical shelf.
+// Omitted = the whole shelf, exactly as before. An unknown code is refused rather than read as
+// «everything» — a typo must never widen a destructive press.
+async function clearShelf(shelfCode) {
   return tx(async (client) => {
-    const released = await client.query(
-      'DELETE FROM shelf_placements WHERE collected_at IS NULL'
+    if (shelfCode == null || shelfCode === '') {
+      const released = await client.query(
+        'DELETE FROM shelf_placements WHERE collected_at IS NULL'
+      );
+      const closed = await client.query(CLOSE_EMPTY_BINS_SQL);
+      return { released: released.rowCount, bins_closed: closed.rowCount };
+    }
+    const code = String(shelfCode);
+    const known = await client.query(
+      'SELECT 1 FROM shelf_sections WHERE shelf_code = $1 LIMIT 1',
+      [code]
     );
-    const closed = await client.query(CLOSE_EMPTY_BINS_SQL);
+    if (!known.rowCount) {
+      throw new ShelfError(400, 'ERR_BAD_SHELF', `لا يوجد رف ${code}`);
+    }
+    const released = await client.query(
+      `DELETE FROM shelf_placements sp
+        USING shelf_slot_occupancy so
+        WHERE sp.occupancy_id = so.id
+          AND so.shelf_code = $1
+          AND sp.collected_at IS NULL`,
+      [code]
+    );
+    const closed = await client.query(`${CLOSE_EMPTY_BINS_SQL} AND so.shelf_code = $1`, [code]);
     return { released: released.rowCount, bins_closed: closed.rowCount };
   });
 }

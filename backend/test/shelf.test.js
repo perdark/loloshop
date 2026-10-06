@@ -854,3 +854,45 @@ test('live: clearShelf empties every خانة and advances NOTHING', async (t) =
     await restoreShelf(snap);
   }
 });
+
+// Per-shelf «فرّغ» (owner 2026-10-07). Lives in THIS file for the same reason as the test
+// above: a shelf-wide wipe in a parallel file corrupts the placement tests.
+test('live: clearShelf(code) empties ONLY that shelf and advances nothing', async (t) => {
+  const snap = await snapshotShelf();
+  const byShelf = await query(
+    `SELECT so.shelf_code, COUNT(*)::int n
+       FROM shelf_placements sp JOIN shelf_slot_occupancy so ON so.id = sp.occupancy_id
+      WHERE sp.collected_at IS NULL GROUP BY so.shelf_code ORDER BY n DESC`
+  );
+  if (!byShelf.rows.length) return t.skip('no live placements in this snapshot');
+  const target = byShelf.rows[0].shelf_code;
+  const others = byShelf.rows.filter((r) => r.shelf_code !== target);
+
+  await assert.rejects(() => shelf.clearShelf('Z'), (e) => e.code === 'ERR_BAD_SHELF');
+
+  const ids = snap.placements.map((p) => p.order_id);
+  const before = await query('SELECT id, status FROM orders WHERE id = ANY($1::uuid[]) ORDER BY id', [ids]);
+  try {
+    const res = await shelf.clearShelf(target);
+    assert.strictEqual(res.released, byShelf.rows[0].n, 'released only the target shelf');
+
+    const after = await query(
+      `SELECT so.shelf_code, COUNT(*)::int n
+         FROM shelf_placements sp JOIN shelf_slot_occupancy so ON so.id = sp.occupancy_id
+        WHERE sp.collected_at IS NULL GROUP BY so.shelf_code ORDER BY n DESC`
+    );
+    assert.ok(!after.rows.some((r) => r.shelf_code === target), `${target} must be empty`);
+    assert.deepStrictEqual(after.rows, others, 'other shelves untouched');
+
+    const openOnTarget = await query(
+      'SELECT COUNT(*)::int n FROM shelf_slot_occupancy WHERE closed_at IS NULL AND shelf_code = $1',
+      [target]
+    );
+    assert.strictEqual(openOnTarget.rows[0].n, 0, 'no bin on the target shelf stays open');
+
+    const statuses = await query('SELECT id, status FROM orders WHERE id = ANY($1::uuid[]) ORDER BY id', [ids]);
+    assert.deepStrictEqual(statuses.rows, before.rows, 'it releases, it never collects');
+  } finally {
+    await restoreShelf(snap);
+  }
+});
