@@ -74,7 +74,7 @@ async function generatePlate({ text, variant = 'front', ornament = null, element
       const gen = await smartapi.generatePlate({
         text,
         prompt: buildSmartApiPrompt({ style, studentReference: !!reference }),
-        ornamentPrompt: buildSmartApiOrnamentPrompt({ variant: promptVariant(variant), ornament, element }),
+        ornamentPrompt: buildSmartApiOrnamentPrompt({ variant: promptVariant(variant), ornament, element, shopRefs: !reference }),
         styleReference: reference,
       });
       return { ...gen, provider: 'smartapi' };

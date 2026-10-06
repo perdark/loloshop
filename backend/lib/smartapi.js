@@ -15,6 +15,7 @@
 // with the extra-alif defect (امحمد · انور) copied from the style plate; name-as-image gave ~7/10
 // and ZERO extra alifs. See docs/HANDOFF-archive.md, 2026-09-26.
 const path = require('path');
+const { countMarks } = require('./plateMarks');
 const sharp = require('sharp');
 
 const BASE_URL = 'https://smartapi.shop/v1';
@@ -29,6 +30,16 @@ const BACKOFF_MS = Number(process.env.SMARTAPI_BACKOFF_MS ?? 4000);
 
 const FONT_FILE = path.join(__dirname, '..', 'assets', 'fonts', 'Amiri-Regular.ttf');
 const STYLE_REF_FILE = path.join(__dirname, '..', 'assets', 'calligraphy', 'style-ref.png');
+// Two more besto plates: pass 2 shows the model THREE references so the ornament family is varied,
+// not one plate's. (style-ref.png is also the PEN reference for pass 1.)
+const STYLE_REF2_FILE = path.join(__dirname, '..', 'assets', 'calligraphy', 'style-ref-2.png');
+const STYLE_REF3_FILE = path.join(__dirname, '..', 'assets', 'calligraphy', 'style-ref-3.png');
+// Pass 2 is re-drawn (up to ORNAMENT_TRIES times, best kept) when a plate comes back thinner than this
+// many marks per plate-height — see lib/plateMarks.js. Calibrated 2026-10-06 on the plates the owner
+// approved (5.6–9.1) against the thin ones he rejected (3.3–5.0).
+// Read at call time so the tests (and an emergency .env edit + restart) can change them.
+const minMarks = () => Number(process.env.CALLIG_MIN_MARKS ?? 5);
+const ornamentTries = () => Math.max(1, Number(process.env.CALLIG_ORNAMENT_TRIES ?? 3));
 
 function tagged(message, status, code, extra = {}) {
   const e = new Error(message); e.status = status; e.expose = true; e.code = code;
@@ -150,6 +161,14 @@ async function shopStyleRef() {
   if (!styleRefCache) styleRefCache = await require('fs').promises.readFile(STYLE_REF_FILE);
   return styleRefCache;
 }
+let extraRefsCache = null;
+async function shopExtraRefs() {
+  if (!extraRefsCache) {
+    const fsp = require('fs').promises;
+    extraRefsCache = await Promise.all([fsp.readFile(STYLE_REF2_FILE), fsp.readFile(STYLE_REF3_FILE)]);
+  }
+  return extraRefsCache;
+}
 
 async function toDataUrl(buffer, max = 1400) {
   const png = await sharp(buffer, { limitInputPixels: 40_000_000 })
@@ -200,13 +219,24 @@ async function generatePlate({ text, prompt, ornamentPrompt = null, styleReferen
   const style = styleReference || await shopStyleRef();
   const letters = await editImage(prompt, [await textImage(text), style]);
   if (!ornamentPrompt) return letters;
-  try {
-    const decorated = await editImage(ornamentPrompt, [letters.buffer, style]);
-    return { buffer: decorated.buffer, cost: letters.cost + decorated.cost };
-  } catch (err) {
-    console.warn(`SmartAPI ornament pass failed (${err.code || err.message}) — shipping the plain plate`);
-    return letters;
+  // The shop's three references only when the shop plate is the style; a customer's photo stays alone.
+  const refs = styleReference ? [style] : [style, ...(await shopExtraRefs())];
+  let best = null; let cost = letters.cost;
+  for (let attempt = 0; attempt < ornamentTries(); attempt++) {
+    try {
+      const decorated = await editImage(ornamentPrompt, [letters.buffer, ...refs]);
+      cost += decorated.cost;
+      // The model's ornament density varies a lot run to run on one prompt; a customer's own photo
+      // is a different look entirely, so only the shop recipe is held to the density bar.
+      const { perHeight } = styleReference ? { perHeight: Infinity } : await countMarks(decorated.buffer);
+      if (!best || perHeight > best.perHeight) best = { buffer: decorated.buffer, perHeight };
+      if (perHeight >= minMarks()) break;
+    } catch (err) {
+      console.warn(`SmartAPI ornament pass failed (${err.code || err.message})${best ? ' — keeping the best earlier draw' : ' — shipping the plain plate'}`);
+      if (!best) break; // nothing decorated yet: a retry would hit the same outage
+    }
   }
+  return best ? { buffer: best.buffer, cost } : { ...letters, cost };
 }
 
 /** A prompt-only image (the motif «element» tool). Same flatten-on-white as a plate. */

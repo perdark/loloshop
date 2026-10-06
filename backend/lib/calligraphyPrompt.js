@@ -268,31 +268,59 @@ function buildSmartApiPrompt({ style = null, studentReference = false } = {}) {
 
 // How much pass 2 adds. null = the zone default (front/back plain like the shop plate, the cap a
 // little more — same split as ORNAMENT above).
+// ⚠️ 2026-10-06: the shop references are now three cleaned «besto» plates (the Gemini-era look the
+// owner wants back) and pass 2 asks for THEIR manner: a mixed FAMILY of hand-placed marks, some
+// large, in loose clusters above the letters AND below the baseline, no two alike. «Small marks into
+// the gaps» came back as a sparse, regular, font-like dusting; ONE reference with the same words
+// came back uniform and stamped. Measured on 4 hard names, 3 references + NO_REPEAT: 3/4 spelled
+// right (the miss was pass 1, not pass 2). Letters and ornaments in ONE pass spelled 10/14 against
+// 13/14 for two passes — it invented «الجميلة» for المترجمة — so keep the passes separate.
+// Medium is the base text itself; light/rich only scale it.
 const SMART_ORNAMENT = {
-  light: 'Add only a FEW of these marks — sparse, three or four in the whole line.',
-  medium: 'Add them lightly, spread through the line, like IMAGE 2.',
+  light: 'Use only about a third as many marks as IMAGES 2, 3 and 4 do — sparse.',
+  medium: '',
   // ⚠️ «rich» may only mean MORE of the same marks. Measured 2026-09-29: «generously through every
   // gap» put a mark under the first alif (المترجمة → «إلمترجمة») and once redrew letters
   // («التارجمة»); a floral flourish at the line's ends ATE the first alif twice in three names
   // (الاستاذة → «لاستاذة», الصيدلانية → «لصيدلانية»). Nothing may sit at the ends of the line.
-  rich: 'Add them through the line like IMAGE 2, a little more densely — but nothing at the two ends of the line.',
+  rich: 'Use them a little more densely than IMAGES 2, 3 and 4 — but nothing at the two ends of the line.',
 };
 // A mark right above or below an alif reads as a hamza (ا → أ/إ), so it is a spelling change.
 const SMART_MARK_RULE = 'Never place a mark directly above or below an alif, and never where it could be read '
   + 'as a dot, a hamza or a letter.';
 
+// ⚠️ 2026-10-05, owner: «there is a lot of repeated shapes». With two references the model stamped
+// the same hooked tick all along the line; three references plus this sentence gave visibly more
+// variety (curls, long slashes, commas, rings) on the same names — improved, not eliminated.
+const NO_REPEAT = 'EVERY mark is drawn individually by hand, like a real pen: NO two marks may have the same shape, size, '
+  + 'slant or stroke weight, and the same tick must never be repeated in a row — vary the shape from mark to mark '
+  + '(hooked tick, long slash, curl, comma, cap, loop, tiny ring), include a few rare shapes copied from the references, '
+  + 'and leave uneven gaps so it does not look stamped or patterned.';
+
 /**
  * Pass 2: decorate a finished plate WITHOUT touching its letters. Returns null when there is
  * nothing to add (ornament «none» and no motif), so the caller skips the second paid call.
+ * `shopRefs` = IMAGES 2-4 are the shop's three besto plates; false when a customer's photo is the
+ * single style reference (then the wording must not promise images that are not there).
  */
-function buildSmartApiOrnamentPrompt({ variant = 'front', ornament = null, element = null } = {}) {
+function buildSmartApiOrnamentPrompt({ variant = 'front', ornament = null, element = null, shopRefs = true } = {}) {
   const level = normalizeOrnament(ornament) || 'medium';
   if (level === 'none' && !element) return null;
+  const refs = shopRefs ? 'IMAGES 2, 3 and 4 (they are style references only — ignore their words)' : 'IMAGE 2';
+  const family = shopRefs
+    ? 'Use the same MIXED FAMILY of marks they use: tall thin hooked ticks like a small v with a tail, long slanted '
+      + 'fatha-like strokes, curled damma-like commas, tiny hamza-like and shadda-like caps, short slanted kasra-like '
+      + 'strokes, and tiny curls — in many different sizes and angles, some marks LARGE (about twice the size of a plain '
+      + 'dot-tick) and some small. Group them in loose clusters of three to five that follow the rhythm of the letters, '
+      + 'filling the space ABOVE the tall letters and ALSO below the baseline between and under the letters, so the whole '
+      + `name looks lavishly decorated like ${refs}. ${NO_REPEAT}`
+    : 'Use a varied scatter of tiny hand-drawn marks — small v-shaped ticks, short slanted harakat strokes, tiny curls — '
+      + 'above the letters and in the gaps below the baseline, at different sizes and angles.';
   return [
     'Edit IMAGE 1: it is a finished Arabic calligraphy name. Do NOT change, move, redraw or thicken ANY',
-    'letter or dot — the lettering must stay pixel-identical.',
-    level === 'none' ? '' : 'Only ADD small decorative calligraphic marks (the small vertical tashkeel-like ornaments and tiny '
-      + 'harakat shapes seen in IMAGE 2) into the EMPTY white gaps above and between the letters. '
+    'letter or dot — the lettering must stay identical.',
+    level === 'none' ? '' : `ADD a rich, hand-placed scatter of pen-stroke ornaments EXACTLY in the manner of ${refs}. ${family} `
+      + 'Thin pen strokes, much lighter than the letters, never touching a letter. '
       + `${SMART_ORNAMENT[level]} ${SMART_MARK_RULE}`,
     element ? `Also add a small simple solid black-ink motif of «${element}» right beside the text, on the same line, touching no letter.` : '',
     'Everything stays on the one line. Black ink on pure white.',

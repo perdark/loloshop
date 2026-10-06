@@ -34,6 +34,33 @@ const json = (status, obj) => ({ ok: status < 400, status, text: async () => JSO
 
 const imageOk = (b64) => json(200, { output: [{ type: 'image_generation_call', result: b64 }], usage: { total_tokens: 30000 } });
 
+test.beforeEach(() => { process.env.CALLIG_MIN_MARKS = '0'; });
+test.after(() => { delete process.env.CALLIG_MIN_MARKS; });
+
+test('a thin pass 2 is re-drawn up to the try limit and the plate still ships', async (t) => {
+  const f = stubFetch(async () => imageOk(await pngB64())); // a blank pixel: zero marks, always thin
+  t.after(f.restore);
+  process.env.CALLIG_PROVIDER = 'smartapi';
+  process.env.CALLIG_MIN_MARKS = '5';
+  process.env.CALLIG_ORNAMENT_TRIES = '3';
+  t.after(() => { process.env.CALLIG_MIN_MARKS = '0'; delete process.env.CALLIG_ORNAMENT_TRIES; });
+  const out = await provider.generatePlate({ text: 'رتاج', variant: 'front', ornament: 'medium' });
+  assert.equal(f.calls.length, 4, 'letters pass + three ornament draws');
+  assert.ok(out.buffer.length > 0, 'a thin plate still ships — it is never lost');
+});
+
+test('a customer photo as the style reference is not held to the shop density bar', async (t) => {
+  const f = stubFetch(async () => imageOk(await pngB64()));
+  t.after(f.restore);
+  process.env.CALLIG_PROVIDER = 'smartapi';
+  process.env.CALLIG_MIN_MARKS = '5';
+  t.after(() => { process.env.CALLIG_MIN_MARKS = '0'; });
+  await provider.generatePlate({ text: 'رتاج', variant: 'front', ornament: 'medium', reference: await Buffer.from(await pngB64(), 'base64') });
+  assert.equal(f.calls.length, 2, 'letters + ONE ornament draw');
+  const imgs = f.calls[1].body.input[0].content.filter((c) => c.type === 'input_image').length;
+  assert.equal(imgs, 2, 'letters + the customer photo only — never the shop plates');
+});
+
 test('pass 1 re-inks the typeset name (IMAGE 1) with the style plate (IMAGE 2); pass 2 only decorates', async (t) => {
   const b64 = await pngB64();
   const f = stubFetch(() => imageOk(b64));
@@ -50,8 +77,9 @@ test('pass 1 re-inks the typeset name (IMAGE 1) with the style plate (IMAGE 2); 
   assert.match(letters[0].text, /no extra alif/);
   // The measured spelling killers stay out of pass 1 (2026-09-29: 4/14 with them, 11/14 without).
   assert.doesNotMatch(letters[0].text, /\b(stack(ed)? and|interlac)/i);
-  assert.match(ornaments[0].text, /pixel-identical/);
-  assert.equal(ornaments.filter((c) => c.type === 'input_image').length, 2);
+  assert.match(ornaments[0].text, /must stay identical/);
+  // Pass 2 shows the shop's three besto references (letters + three plates) so the ornament family is varied.
+  assert.equal(ornaments.filter((c) => c.type === 'input_image').length, 4);
   assert.ok(Math.abs(out.cost - 0.006) < 1e-9, 'both passes are ledgered at the owner\'s price');
 });
 
