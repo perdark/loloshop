@@ -96,6 +96,9 @@ export function FullSetOrderForm({
   const selectedCap = hasPiece("cap");
   const selectedRobe = hasPiece("robe");
   const isFullPackage = selectedSash && selectedCap && selectedRobe;
+  // Owner 2026-10-07: a NEW order with a «وشاح عادي» has no back embroidery. Existing orders
+  // (initial != null) keep the field, so nothing already saved disappears from an edit.
+  const showSashBack = !!initial || (sashType || "عادي") !== "عادي";
 
   function togglePiece(piece: ProductPiece) {
     if (!selectedPieces.includes(piece)) {
@@ -166,7 +169,7 @@ export function FullSetOrderForm({
       },
       embroidery: {
         sash_front: zone(zones.sashFront),
-        sash_back: zone(zones.sashBack),
+        sash_back: showSashBack ? zone(zones.sashBack) : {},
         cap_side: zone(zones.capSide),
         cap_top: zone(zones.capTop),
         robe_sleeve_right: zone(zones.robeSleeveRight),
@@ -425,6 +428,7 @@ export function FullSetOrderForm({
                 onFile={(f) => handleUpload("sashFront", f)}
                 onClear={() => setZone("sashFront", { imageUrl: "" })}
               />
+              {showSashBack && (
               <EmbroideryField
                 label="تطريز الوشاح من الخلف"
                 zone={zones.sashBack}
@@ -432,6 +436,7 @@ export function FullSetOrderForm({
                 onFile={(f) => handleUpload("sashBack", f)}
                 onClear={() => setZone("sashBack", { imageUrl: "" })}
               />
+              )}
             </>
           )}
           {selectedCap && (
