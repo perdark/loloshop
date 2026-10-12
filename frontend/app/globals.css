@@ -1516,3 +1516,27 @@ html {
   .lolo-sticker-in { animation: none; }
   .lolo-sticker-spark { animation: none; opacity: 1; }
 }
+
+
+/* ── iPad app: rounded screen corners ─────────────────────────────────────────
+   iPad corners have a ~18px radius and iPadOS reports a 0 safe-area inset on the sides, so
+   anything flush to an edge (headers, lists, bottom bars) gets its corners clipped. A 12px
+   gutter on the page flow plus a floor on the safe-area helpers clears the arc. Scoped to the
+   Capacitor shell on iPad via `data-ipad-app` (set in app/layout.tsx). */
+html[data-ipad-app] body {
+  padding-inline: 12px;
+}
+html[data-ipad-app] .safe-top {
+  padding-top: max(env(safe-area-inset-top, 0px), 12px);
+}
+html[data-ipad-app] .safe-bottom {
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 12px);
+}
+html[data-ipad-app] .safe-x {
+  padding-left: max(env(safe-area-inset-left, 0px), 12px);
+  padding-right: max(env(safe-area-inset-right, 0px), 12px);
+}
+/* Fixed overlays/bars are outside body's padding: keep them off the corner arcs too. */
+html[data-ipad-app] .fixed.bottom-0 {
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 12px);
+}

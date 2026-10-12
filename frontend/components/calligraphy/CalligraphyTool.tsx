@@ -1552,8 +1552,19 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
       const w = window as unknown as {
         showDirectoryPicker?: (opts?: { mode?: string }) => Promise<FileSystemDirectoryHandle>;
       };
+      // Chrome on macOS refuses Desktop / Documents / Downloads (and any folder holding system
+      // files) with a SecurityError or NotAllowedError — so a picker failure that is not the
+      // user cancelling must fall through to the ZIP, never end in an error toast.
+      let dir: FileSystemDirectoryHandle | null = null;
       if (w.showDirectoryPicker) {
-        const dir = await w.showDirectoryPicker({ mode: "readwrite" });
+        try {
+          dir = await w.showDirectoryPicker({ mode: "readwrite" });
+        } catch (e) {
+          if ((e as Error)?.name === "AbortError") throw e;
+          dir = null;
+        }
+      }
+      if (dir) {
         const used = new Set<string>();
         let ok = 0;
         for (const p of target) {
@@ -1573,8 +1584,6 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
         }
         toast.success(`تم حفظ ${ok} صورة في المجلد`);
       } else {
-        // ZIP fallback (phones / Safari / Firefox). Goes through saveFile: the old inline
-        // anchor revoked its blob URL on the next line, which Safari reads as "cancel".
         const blob = await platesZipBlob(target.map((p) => p.id));
         const out = await saveFile(blob, `calligraphy-${target.length}.zip`);
         if (out !== "cancelled") toast.success("تم تنزيل ملف ZIP بالصور");

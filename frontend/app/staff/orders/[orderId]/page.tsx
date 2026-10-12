@@ -1,5 +1,6 @@
 "use client";
 
+import { Lightbox } from "@/components/staff/station/Lightbox";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
@@ -125,6 +126,7 @@ function ProductPhotoCard({
  * plate WITHOUT the reference is what made that unnoticeable, so both render or neither does.
  */
 function ItemArtwork({ item }: { item: ProductionOrderItem }) {
+  const [open, setOpen] = useState<{ url: string; caption: string } | null>(null);
   const shots: { url: string; caption: string }[] = [];
   const plate = resolveImageUrl(item.plate_image_url);
   if (plate) shots.push({ url: plate, caption: "الخط المولّد" });
@@ -136,11 +138,12 @@ function ItemArtwork({ item }: { item: ProductionOrderItem }) {
     <div className="flex flex-wrap gap-3">
       {shots.map((shot) => (
         <figure key={shot.url} className="w-fit">
-          <a
-            href={shot.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="block w-fit"
+          {/* A button + in-page Lightbox, NOT `<a target=_blank>`: inside the iPad/iPhone app
+              WebView a new-tab link does nothing, so the student's وصل photo could not be opened. */}
+          <button
+            type="button"
+            onClick={() => setOpen(shot)}
+            className="block w-fit cursor-zoom-in"
             aria-label={`عرض ${shot.caption} — ${item.label_snapshot} بالحجم الكامل`}
           >
             <Image
@@ -151,7 +154,7 @@ function ItemArtwork({ item }: { item: ProductionOrderItem }) {
               className="max-h-56 w-auto rounded-lg border border-line object-contain"
               loading="lazy"
             />
-          </a>
+          </button>
           {shots.length > 1 && (
             <figcaption className="mt-1 text-[11px] font-semibold text-ink-soft">
               {shot.caption}
@@ -159,6 +162,13 @@ function ItemArtwork({ item }: { item: ProductionOrderItem }) {
           )}
         </figure>
       ))}
+      {open && (
+        <Lightbox
+          url={open.url}
+          title={`${open.caption} — ${item.label_snapshot}`}
+          onClose={() => setOpen(null)}
+        />
+      )}
     </div>
   );
 }

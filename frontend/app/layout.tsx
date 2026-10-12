@@ -133,6 +133,15 @@ export default function RootLayout({
           `window.Capacitor` is already readable this early — see lib/app-gate.ts.
           Emitted only when NEXT_PUBLIC_APP_ONLY=1, so the kill switch removes it entirely.
         */}
+        {/* iPad app: the screen's rounded corners clip content that sits flush at the edges, and
+            iPadOS reports 0 safe-area inset there. Flag it so globals.css can add a corner gutter.
+            Only inside the Capacitor shell — a browser has window chrome, no clipped corners. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "try{var n=navigator;if(window.Capacitor&&(/iPad/.test(n.userAgent)||(n.platform==='MacIntel'&&n.maxTouchPoints>1)))document.documentElement.setAttribute('data-ipad-app','')}catch(e){}",
+          }}
+        />
         {APP_ONLY && (
           <script dangerouslySetInnerHTML={{ __html: buildGateScript() }} />
         )}
