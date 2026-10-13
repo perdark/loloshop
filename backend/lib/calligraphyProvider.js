@@ -18,7 +18,7 @@
 const smartapi = require('./smartapi');
 const openrouter = require('./openrouter');
 const { complete: openrouterComplete } = require('./aiChat');
-const { buildSmartApiPrompt, buildSmartApiOrnamentPrompt, buildSinglePrompt, buildReferencePrompt } = require('./calligraphyPrompt');
+const { buildSmartApiPrompt, buildSmartApiOrnamentPrompt, buildSinglePrompt, buildReferencePrompt, normalizeOrnament } = require('./calligraphyPrompt');
 const { cropSheet } = require('./sheetCrop');
 
 const promptVariant = (v) => (v === 'cap_side' ? 'cap' : v);
@@ -76,6 +76,8 @@ async function generatePlate({ text, variant = 'front', ornament = null, element
         prompt: buildSmartApiPrompt({ style, studentReference: !!reference }),
         ornamentPrompt: buildSmartApiOrnamentPrompt({ variant: promptVariant(variant), ornament, element, shopRefs: !reference }),
         styleReference: reference,
+        ornamentLevel: normalizeOrnament(ornament) || 'medium',
+        element,
       });
       return { ...gen, provider: 'smartapi' };
     },

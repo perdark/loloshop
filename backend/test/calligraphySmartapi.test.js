@@ -6,6 +6,8 @@ process.env.SMARTAPI_RETRIES = '1';
 process.env.SMARTAPI_BACKOFF_MS = '1';
 process.env.SMARTAPI_KEY = process.env.SMARTAPI_KEY || 'test-key';
 process.env.OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || 'test-key';
+// The pass-2 tests below are about the MODEL's ornament pass; the script pass has its own tests at the end.
+process.env.CALLIG_ORNAMENTS = 'ai';
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -158,4 +160,42 @@ test('json mode always carries the word "json" — upstream refuses it otherwise
   // A prompt that already says JSON is sent untouched.
   await smartapi.chat({ messages: [{ role: 'user', content: 'أعد JSON فقط' }], jsonMode: true });
   assert.equal(f.calls[1].body.messages.length, 1);
+});
+
+// ─── pass 2 by script (lib/plateOrnaments.js, 2026-10-12) ──────────────────────────────────────
+const { addOrnaments } = require('../lib/plateOrnaments');
+const { countMarks } = require('../lib/plateMarks');
+
+test('script pass 2: ONE paid call per plate, and the plate comes back ornamented', async (t) => {
+  const plate = (await smartapi.textImage('زينب علي الساعدي')).toString('base64');
+  const f = stubFetch(() => imageOk(plate));
+  t.after(() => { f.restore(); process.env.CALLIG_ORNAMENTS = 'ai'; });
+  process.env.CALLIG_PROVIDER = 'smartapi';
+  delete process.env.CALLIG_ORNAMENTS;
+  const out = await provider.generatePlate({ text: 'زينب علي الساعدي', variant: 'front' });
+  assert.equal(f.calls.length, 1, 'pass 2 must not call the model');
+  assert.ok((await countMarks(out.buffer)).marks >= 3);
+});
+
+test('script pass 2 never changes a letter pixel', async () => {
+  const plate = await smartapi.textImage('محمد عبدالله');
+  const grey = async (b) => sharp(b).flatten({ background: '#ffffff' }).greyscale().raw().toBuffer({ resolveWithObject: true });
+  const before = await grey(plate);
+  const { buffer, marks } = await addOrnaments(plate, { seed: 42 });
+  const after = await grey(buffer);
+  assert.ok(marks > 0);
+  assert.equal(after.info.width, before.info.width);
+  for (let i = 0; i < before.data.length; i++) {
+    if (before.data[i] < 128) assert.ok(after.data[i] < 128, 'an ink pixel lost its ink');
+  }
+});
+
+test('a customer photo or an «element» motif still goes to the model for pass 2', async (t) => {
+  const plate = (await smartapi.textImage('زينب')).toString('base64');
+  const f = stubFetch(() => imageOk(plate));
+  t.after(() => { f.restore(); process.env.CALLIG_ORNAMENTS = 'ai'; });
+  process.env.CALLIG_PROVIDER = 'smartapi';
+  delete process.env.CALLIG_ORNAMENTS;
+  await provider.generatePlate({ text: 'زينب', variant: 'front', element: 'قلب' });
+  assert.equal(f.calls.length, 2);
 });

@@ -16,6 +16,7 @@
 // and ZERO extra alifs. See docs/HANDOFF-archive.md, 2026-09-26.
 const path = require('path');
 const { countMarks } = require('./plateMarks');
+const { addOrnaments } = require('./plateOrnaments');
 const sharp = require('sharp');
 
 const BASE_URL = 'https://smartapi.shop/v1';
@@ -40,6 +41,10 @@ const STYLE_REF3_FILE = path.join(__dirname, '..', 'assets', 'calligraphy', 'sty
 // 2026-10-07, owner: «اقل عددا الى النصف» — the target halved, so the bar is 3, not 5.
 // Read at call time so the tests (and an emergency .env edit + restart) can change them.
 const minMarks = () => Number(process.env.CALLIG_MIN_MARKS ?? 3);
+// Script density per ornament level, in lib/plateMarks.js units (marks per plate-height of width).
+// «medium» sits where the owner's approved AI plates measured after the 2026-10-07 halving (~4.5).
+const SCRIPT_DENSITY = { light: 2.5, medium: 4.5, rich: 7.5 };
+const scriptDensity = (level) => Number(process.env.CALLIG_SCRIPT_DENSITY) || SCRIPT_DENSITY[level] || SCRIPT_DENSITY.medium;
 const ornamentTries = () => Math.max(1, Number(process.env.CALLIG_ORNAMENT_TRIES ?? 3));
 
 function tagged(message, status, code, extra = {}) {
@@ -216,10 +221,22 @@ async function editImage(prompt, images) {
  *      spelled as well as it will be, so it ships plain rather than the name going back to pending.
  * Returns `{ buffer, cost }` like openrouter.generateImage; cost covers both passes.
  */
-async function generatePlate({ text, prompt, ornamentPrompt = null, styleReference = null }) {
+async function generatePlate({ text, prompt, ornamentPrompt = null, styleReference = null, ornamentLevel = 'medium', element = null }) {
   const style = styleReference || await shopStyleRef();
   const letters = await editImage(prompt, [await textImage(text), style]);
   if (!ornamentPrompt) return letters;
+  // Pass 2 by SCRIPT (lib/plateOrnaments.js) — ~0.3 s instead of ~40 s a draw, marks cut from the
+  // shop's own plates, letters untouched by construction. The model is still used when the plate
+  // needs something only it can draw: a student's own photo as the style, or an «element» motif.
+  // CALLIG_ORNAMENTS=ai brings the model back for every plate.
+  if (process.env.CALLIG_ORNAMENTS !== 'ai' && !styleReference && !element) {
+    try {
+      const { buffer } = await addOrnaments(letters.buffer, { targetDensity: scriptDensity(ornamentLevel) });
+      return { buffer, cost: letters.cost };
+    } catch (err) {
+      console.warn(`script ornament pass failed (${err.message}) — drawing it with the model`);
+    }
+  }
   // The shop's three references only when the shop plate is the style; a customer's photo stays alone.
   const refs = styleReference ? [style] : [style, ...(await shopExtraRefs())];
   let best = null; let cost = letters.cost;

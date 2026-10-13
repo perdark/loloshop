@@ -1,0 +1,307 @@
+[
+ {
+  "file": "slant-000.png",
+  "kind": "slant",
+  "relH": 0.1011
+ },
+ {
+  "file": "slant-002.png",
+  "kind": "slant",
+  "relH": 0.1371
+ },
+ {
+  "file": "slant-010.png",
+  "kind": "slant",
+  "relH": 0.2135
+ },
+ {
+  "file": "slant-011.png",
+  "kind": "slant",
+  "relH": 0.1393
+ },
+ {
+  "file": "slant-013.png",
+  "kind": "slant",
+  "relH": 0.1371
+ },
+ {
+  "file": "slant-014.png",
+  "kind": "slant",
+  "relH": 0.2022
+ },
+ {
+  "file": "slant-024.png",
+  "kind": "slant",
+  "relH": 0.1303
+ },
+ {
+  "file": "slant-031.png",
+  "kind": "slant",
+  "relH": 0.1012
+ },
+ {
+  "file": "slant-033.png",
+  "kind": "slant",
+  "relH": 0.1379
+ },
+ {
+  "file": "slant-035.png",
+  "kind": "slant",
+  "relH": 0.2914
+ },
+ {
+  "file": "slant-041.png",
+  "kind": "slant",
+  "relH": 0.3822
+ },
+ {
+  "file": "slant-054.png",
+  "kind": "slant",
+  "relH": 0.089
+ },
+ {
+  "file": "slant-060.png",
+  "kind": "slant",
+  "relH": 0.1291
+ },
+ {
+  "file": "slant-061.png",
+  "kind": "slant",
+  "relH": 0.1169
+ },
+ {
+  "file": "slant-064.png",
+  "kind": "slant",
+  "relH": 0.3728
+ },
+ {
+  "file": "slant-065.png",
+  "kind": "slant",
+  "relH": 0.3126
+ },
+ {
+  "file": "slant-069.png",
+  "kind": "slant",
+  "relH": 0.1689
+ },
+ {
+  "file": "slant-083.png",
+  "kind": "slant",
+  "relH": 0.1146
+ },
+ {
+  "file": "tick-012.png",
+  "kind": "tick",
+  "relH": 0.1416
+ },
+ {
+  "file": "tick-015.png",
+  "kind": "tick",
+  "relH": 0.1213
+ },
+ {
+  "file": "tick-016.png",
+  "kind": "tick",
+  "relH": 0.1236
+ },
+ {
+  "file": "tick-017.png",
+  "kind": "tick",
+  "relH": 0.1258
+ },
+ {
+  "file": "tick-018.png",
+  "kind": "tick",
+  "relH": 0.1371
+ },
+ {
+  "file": "tick-021.png",
+  "kind": "tick",
+  "relH": 0.1371
+ },
+ {
+  "file": "tick-022.png",
+  "kind": "tick",
+  "relH": 0.164
+ },
+ {
+  "file": "tick-023.png",
+  "kind": "tick",
+  "relH": 0.1146
+ },
+ {
+  "file": "tick-032.png",
+  "kind": "tick",
+  "relH": 0.1152
+ },
+ {
+  "file": "tick-034.png",
+  "kind": "tick",
+  "relH": 0.1187
+ },
+ {
+  "file": "tick-042.png",
+  "kind": "tick",
+  "relH": 0.1187
+ },
+ {
+  "file": "tick-046.png",
+  "kind": "tick",
+  "relH": 0.1728
+ },
+ {
+  "file": "tick-047.png",
+  "kind": "tick",
+  "relH": 0.1326
+ },
+ {
+  "file": "tick-048.png",
+  "kind": "tick",
+  "relH": 0.1239
+ },
+ {
+  "file": "tick-055.png",
+  "kind": "tick",
+  "relH": 0.1379
+ },
+ {
+  "file": "tick-056.png",
+  "kind": "tick",
+  "relH": 0.1065
+ },
+ {
+  "file": "tick-057.png",
+  "kind": "tick",
+  "relH": 0.1291
+ },
+ {
+  "file": "tick-063.png",
+  "kind": "tick",
+  "relH": 0.1204
+ },
+ {
+  "file": "tick-073.png",
+  "kind": "tick",
+  "relH": 0.1534
+ },
+ {
+  "file": "tick-074.png",
+  "kind": "tick",
+  "relH": 0.134
+ },
+ {
+  "file": "tick-075.png",
+  "kind": "tick",
+  "relH": 0.1379
+ },
+ {
+  "file": "tick-076.png",
+  "kind": "tick",
+  "relH": 0.1262
+ },
+ {
+  "file": "tick-078.png",
+  "kind": "tick",
+  "relH": 0.1437
+ },
+ {
+  "file": "tick-081.png",
+  "kind": "tick",
+  "relH": 0.1379
+ },
+ {
+  "file": "stroke-003.png",
+  "kind": "stroke",
+  "relH": 0.1573
+ },
+ {
+  "file": "stroke-004.png",
+  "kind": "stroke",
+  "relH": 0.1281
+ },
+ {
+  "file": "stroke-006.png",
+  "kind": "stroke",
+  "relH": 0.1865
+ },
+ {
+  "file": "stroke-036.png",
+  "kind": "stroke",
+  "relH": 0.1675
+ },
+ {
+  "file": "stroke-068.png",
+  "kind": "stroke",
+  "relH": 0.1883
+ },
+ {
+  "file": "stroke-077.png",
+  "kind": "stroke",
+  "relH": 0.1748
+ },
+ {
+  "file": "vee-038.png",
+  "kind": "vee",
+  "relH": 0.1536
+ },
+ {
+  "file": "vee-066.png",
+  "kind": "vee",
+  "relH": 0.1553
+ },
+ {
+  "file": "vee-070.png",
+  "kind": "vee",
+  "relH": 0.165
+ },
+ {
+  "file": "loop-007.png",
+  "kind": "loop",
+  "relH": 0.2966
+ },
+ {
+  "file": "loop-008.png",
+  "kind": "loop",
+  "relH": 0.4517
+ },
+ {
+  "file": "loop-037.png",
+  "kind": "loop",
+  "relH": 0.4101
+ },
+ {
+  "file": "loop-067.png",
+  "kind": "loop",
+  "relH": 0.4117
+ },
+ {
+  "file": "damma-009.png",
+  "kind": "damma",
+  "relH": 0.236
+ },
+ {
+  "file": "damma-043.png",
+  "kind": "damma",
+  "relH": 0.2147
+ },
+ {
+  "file": "damma-062.png",
+  "kind": "damma",
+  "relH": 0.2893
+ },
+ {
+  "file": "damma-071.png",
+  "kind": "damma",
+  "relH": 0.2932
+ },
+ {
+  "file": "sin-028.png",
+  "kind": "sin",
+  "relH": 0.1618
+ },
+ {
+  "file": "sin-059.png",
+  "kind": "sin",
+  "relH": 0.1483
+ }
+]
