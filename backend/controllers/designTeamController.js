@@ -1,4 +1,4 @@
-// أيادي التصميم — an isolated, retail-design-only collaboration desk.
+// أيادي التصميم — an isolated first-stage design desk (retail + rep-approved orders).
 //
 // IMPORTANT: team accounts use users.role='design_helper', not role='staff'. That
 // makes every existing attendance/payroll/general-production route deny them by
@@ -544,8 +544,17 @@ async function deactivateMember(req, res) {
 // The query is deliberately allow-listed: no phone, gender, price, cost, checkout,
 // intake, delivery, or measurements. The team sees only the visual spec it must
 // design — the color / per-side embroidery text + reference photos + the final art.
+//
+// ⚠️ OWNER 2026-10-13 («انطيهم صلاحية على الدفعات»): the desk now also works REP orders
+// (دفعات الممثلين) — but ONLY ones the ممثل already approved. «بانتظار موافقة الممثل» is
+// a dispute the shop stays out of (HANDOFF landmine), and approveJob moves the order to
+// التطريز, so admitting a pending one here would be exactly the bypass
+// productionController.advanceBlockReason exists to refuse. JOB_SOURCE_OK is the single
+// copy of that rule and is shared by the list AND the lock below.
+const JOB_SOURCE_OK = `(s.wholesaler_id IS NULL OR o.wholesaler_approval = 'approved')`;
+
 const JOB_WHERE = `
-   WHERE s.wholesaler_id IS NULL
+   WHERE ${JOB_SOURCE_OK}
      AND o.status = 'design_complete'
      AND o.design_id IS NULL
      AND o.has_embroidery = TRUE
@@ -558,6 +567,8 @@ const JOB_SELECT = `
          cg.instagram_username AS cg_instagram, cg.phone_primary AS cg_phone,
          cg.event_date, cg.governorate, cg.notes AS cg_notes,
          p.name_ar AS product_name_ar, p.type AS product_type,
+         CASE WHEN s.wholesaler_id IS NULL THEN 'retail' ELSE 'wholesaler' END AS source,
+         wu.name AS wholesaler_name, b.name_ar AS batch_name, b.deadline AS batch_deadline,
          t.status AS task_status, t.note AS task_note,
          t.assigned_to AS task_assigned_to, t.assigned_at,
          assigned.name AS assigned_name,
@@ -568,12 +579,16 @@ const JOB_SELECT = `
     JOIN users u ON u.id = s.user_id
     JOIN products p ON p.id = o.product_id
     LEFT JOIN checkout_groups cg ON cg.id = o.checkout_group_id
+    LEFT JOIN batches b ON b.id = o.batch_id
+    LEFT JOIN wholesalers w ON w.id = s.wholesaler_id
+    LEFT JOIN users wu ON wu.id = w.user_id
     LEFT JOIN design_team_tasks t
       ON t.order_id = o.id AND t.team_id = TRUE AND t.resolved_at IS NULL
     LEFT JOIN users assigned ON assigned.id = t.assigned_to
     LEFT JOIN users ready ON ready.id = t.ready_by
     LEFT JOIN LATERAL (
       SELECT json_agg(json_build_object(
+               'item_id', oi.id,
                'label', oi.label_snapshot,
                'text', oi.customer_text,
                -- Migration 080: image_url is what the STUDENT sent (the thing أيادي التصميم
@@ -622,10 +637,18 @@ function jobDto(row) {
       name_ar: row.product_name_ar,
       type: row.product_type,
     },
+    source: row.source || 'retail',
+    rep: row.wholesaler_name ? { name: row.wholesaler_name } : null,
+    batch: row.batch_name ? { name: row.batch_name, deadline: row.batch_deadline || null } : null,
     spec_lines: Array.isArray(row.spec_lines)
       ? row.spec_lines
           .filter((l) => l && (l.text || l.image_url))
-          .map((l) => ({ label: l.label || null, text: l.text || null, image_url: l.image_url || null }))
+          .map((l) => ({
+            item_id: l.item_id || null,
+            label: l.label || null,
+            text: l.text || null,
+            image_url: l.image_url || null,
+          }))
       : [],
     task: row.task_status
       ? {
@@ -667,16 +690,17 @@ async function getJob(req, res) {
   res.json({ data: jobDto(row) });
 }
 
-// Lock the order before changing a task or making a lead decision. The retail +
-// first-design-stage predicates live here as a second server-side boundary; a
-// caller cannot spoof an order id from another source (wholesaler) or stage.
-async function lockRetailPendingOrder(client, orderId) {
+// Lock the order before changing a task or making a lead decision. The source
+// (retail, or rep-APPROVED) + first-design-stage predicates live here as a second
+// server-side boundary; a caller cannot spoof an order id from an unapproved rep
+// order or from another stage.
+async function lockPendingDesignOrder(client, orderId) {
   const o = await client.query(
     `SELECT o.id, o.student_id, s.user_id AS student_user_id
        FROM orders o
        JOIN students s ON s.id = o.student_id
       WHERE o.id = $1
-        AND s.wholesaler_id IS NULL
+        AND ${JOB_SOURCE_OK}
         AND o.status = 'design_complete'
         AND o.design_id IS NULL
         AND o.has_embroidery = TRUE
@@ -697,7 +721,7 @@ async function claimJob(req, res) {
   if (!validUuid(orderId)) return res.status(400).json({ error: 'الطلب غير صحيح', code: 'ERR_VALIDATION' });
   try {
     const outcome = await tx(async (client) => {
-      const job = await lockRetailPendingOrder(client, orderId);
+      const job = await lockPendingDesignOrder(client, orderId);
       if (!job) return { missing: true };
       const claimed = await client.query(
         `INSERT INTO design_team_tasks
@@ -744,7 +768,7 @@ async function markReady(req, res) {
   }
   try {
     const outcome = await tx(async (client) => {
-      const job = await lockRetailPendingOrder(client, orderId);
+      const job = await lockPendingDesignOrder(client, orderId);
       if (!job) return { missing: true };
       const override = isLead(req);
       const ready = await client.query(
@@ -796,7 +820,7 @@ async function uploadFinalDesign(req, res) {
   if (!req.file) return res.status(400).json({ error: 'لم يتم رفع ملف', code: 'ERR_VALIDATION' });
   const url = publicUrl(req, 'images', req.file.filename);
   const outcome = await tx(async (client) => {
-    const job = await lockRetailPendingOrder(client, orderId);
+    const job = await lockPendingDesignOrder(client, orderId);
     if (!job) return null;
     await client.query(`UPDATE orders SET final_design_url = $1 WHERE id = $2`, [url, orderId]);
     await client.query(
@@ -808,6 +832,101 @@ async function uploadFinalDesign(req, res) {
   });
   if (!outcome) return res.status(404).json({ error: 'مهمة التصميم غير موجودة', code: 'ERR_NOT_FOUND' });
   res.json({ data: { url } });
+}
+
+// ── Editing the order's text + photos ────────────────────────────────────────
+// Owner 2026-10-13 («خليهم يكدرون يعدلون عالطلب» → «النص والصور بس»). Only two columns of
+// an order line are ever written here: `customer_text` and `customer_image_url` — never a
+// price, option, quantity or product, and never `plate_image_url` (the generator's output,
+// migration 080). A line that carried neither text nor a photo is not editable, so a priced
+// option row cannot be turned into a free-text line. The order must still be inside the desk
+// (lockPendingDesignOrder), and the old values go into audit_log so any edit can be undone.
+const MAX_LINE_TEXT = 500;
+
+async function lockEditableLine(client, orderId, itemId) {
+  const job = await lockPendingDesignOrder(client, orderId);
+  if (!job) return null;
+  const { rows } = await client.query(
+    `SELECT id, label_snapshot, customer_text, customer_image_url
+       FROM order_items
+      WHERE id = $1 AND order_id = $2
+        AND (customer_text IS NOT NULL OR customer_image_url IS NOT NULL)
+      FOR UPDATE`,
+    [itemId, orderId]
+  );
+  return rows[0] ? { job, line: rows[0] } : { job, line: null };
+}
+
+async function editLine(req, res) {
+  const { orderId, itemId } = req.params;
+  if (!validUuid(orderId) || !validUuid(itemId)) {
+    return res.status(400).json({ error: 'الطلب غير صحيح', code: 'ERR_VALIDATION' });
+  }
+  const body = req.body || {};
+  const hasText = Object.prototype.hasOwnProperty.call(body, 'text');
+  const removeImage = body.remove_image === true;
+  if (!hasText && !removeImage) return res.status(400).json({ error: 'لا يوجد تعديل', code: 'ERR_VALIDATION' });
+  let text = null;
+  if (hasText) {
+    text = String(body.text ?? '').trim();
+    if (text.length > MAX_LINE_TEXT) return res.status(400).json({ error: 'النص طويل جداً', code: 'ERR_VALIDATION' });
+    if (!text) text = null;
+  }
+  const outcome = await tx(async (client) => {
+    const found = await lockEditableLine(client, orderId, itemId);
+    if (!found?.job) return { missing: true };
+    if (!found.line) return { badLine: true };
+    const before = found.line;
+    const nextText = hasText ? text : before.customer_text;
+    const nextImage = removeImage ? null : before.customer_image_url;
+    if (!nextText && !nextImage) return { empty: true };
+    await client.query(
+      `UPDATE order_items SET customer_text = $1, customer_image_url = $2 WHERE id = $3`,
+      [nextText, nextImage, itemId]
+    );
+    await client.query(
+      `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
+       VALUES ($1, 'design_team_edit_line', 'order', $2, $3)`,
+      [req.user.id, orderId, JSON.stringify({
+        item_id: itemId, label: before.label_snapshot,
+        old_text: before.customer_text, new_text: nextText,
+        old_image_url: before.customer_image_url, new_image_url: nextImage,
+      })]
+    );
+    return { ok: true };
+  });
+  if (outcome.missing) return res.status(404).json({ error: 'مهمة التصميم غير موجودة', code: 'ERR_NOT_FOUND' });
+  if (outcome.badLine) return res.status(400).json({ error: 'هذا السطر غير قابل للتعديل', code: 'ERR_VALIDATION' });
+  if (outcome.empty) return res.status(400).json({ error: 'السطر لازم يبقى بيه نص أو صورة', code: 'ERR_VALIDATION' });
+  res.json({ data: jobDto(await jobByOrderId(orderId)) });
+}
+
+// Replace (or add) the student's reference photo on one line.
+async function uploadLineImage(req, res) {
+  const { orderId, itemId } = req.params;
+  if (!validUuid(orderId) || !validUuid(itemId)) {
+    return res.status(400).json({ error: 'الطلب غير صحيح', code: 'ERR_VALIDATION' });
+  }
+  if (!req.file) return res.status(400).json({ error: 'لم يتم رفع ملف', code: 'ERR_VALIDATION' });
+  const url = publicUrl(req, 'images', req.file.filename);
+  const outcome = await tx(async (client) => {
+    const found = await lockEditableLine(client, orderId, itemId);
+    if (!found?.job) return { missing: true };
+    if (!found.line) return { badLine: true };
+    await client.query(`UPDATE order_items SET customer_image_url = $1 WHERE id = $2`, [url, itemId]);
+    await client.query(
+      `INSERT INTO audit_log (actor_id, action, entity, entity_id, details)
+       VALUES ($1, 'design_team_edit_line', 'order', $2, $3)`,
+      [req.user.id, orderId, JSON.stringify({
+        item_id: itemId, label: found.line.label_snapshot,
+        old_image_url: found.line.customer_image_url, new_image_url: url,
+      })]
+    );
+    return { ok: true };
+  });
+  if (outcome.missing) return res.status(404).json({ error: 'مهمة التصميم غير موجودة', code: 'ERR_NOT_FOUND' });
+  if (outcome.badLine) return res.status(400).json({ error: 'هذا السطر غير قابل للتعديل', code: 'ERR_VALIDATION' });
+  res.json({ data: jobDto(await jobByOrderId(orderId)) });
 }
 
 // ── Finishing a job ──────────────────────────────────────────────────────────
@@ -832,7 +951,7 @@ async function uploadFinalDesign(req, res) {
 //         holds (assigned_to IS NULL, or no task row yet). A job ANOTHER member claimed
 //         is 409 ERR_TASK_UNAVAILABLE — the same code claimJob/markReady already return.
 //     The member's rule is the WHERE on the upsert, not a read-then-write, and it runs
-//     BEFORE the order moves. Both matter: `lockRetailPendingOrder` holds the order row
+//     BEFORE the order moves. Both matter: `lockPendingDesignOrder` holds the order row
 //     FOR UPDATE (claimJob and markReady take the same lock, so the three cannot
 //     interleave), and `tx` COMMITS on a normal return — a `return {conflict:true}`
 //     placed after the orders UPDATE would have shipped the piece to التطريز anyway.
@@ -854,7 +973,7 @@ async function approveJob(req, res) {
   const manage = canManage(req);
   const memberRole = isActiveMember(req) ? req.designTeamMember.member_role : null;
   const result = await tx(async (client) => {
-    const job = await lockRetailPendingOrder(client, orderId);
+    const job = await lockPendingDesignOrder(client, orderId);
     if (!job) return { missing: true };
     if (manage) {
       await client.query(
@@ -930,7 +1049,7 @@ async function rejectJob(req, res) {
     throw err;
   }
   const result = await tx(async (client) => {
-    const job = await lockRetailPendingOrder(client, orderId);
+    const job = await lockPendingDesignOrder(client, orderId);
     if (!job) return null;
     // Reopen the task for the helper with the lead's note. The order stays at
     // design_complete in the desk — the design was not accepted, but nothing in
@@ -974,6 +1093,8 @@ module.exports = {
   claimJob,
   markReady,
   uploadFinalDesign,
+  editLine,
+  uploadLineImage,
   approveJob,
   rejectJob,
 };

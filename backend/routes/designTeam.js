@@ -1,7 +1,7 @@
 const router = require('express').Router();
 const rateLimit = require('express-rate-limit');
 const { authRequired, requireRole } = require('../middleware/auth');
-const { imageUpload, imageUploadLimit, validateUploadedArtwork } = require('../lib/upload');
+const { imageUpload, imageUploadLimit, validateUploadedArtwork, validateUploadedImage } = require('../lib/upload');
 const { accountLoginLimit } = require('../lib/accountLoginLimit');
 const c = require('../controllers/designTeamController');
 
@@ -27,7 +27,8 @@ router.post('/members', c.requireTeamLead, c.createHelper);
 router.patch('/members/:userId', c.requireTeamLead, c.updateMember);
 router.delete('/members/:userId', c.requireTeamLead, c.deactivateMember);
 
-// Retail first-stage design work only. Jobs are keyed on the order id.
+// First-stage design work — retail + rep-APPROVED orders (دفعات الممثلين, 2026-10-13).
+// Jobs are keyed on the order id.
 router.get('/jobs', c.requireTeamAccess, c.listJobs);
 router.get('/jobs/:orderId', c.requireTeamAccess, c.getJob);
 router.post('/jobs/:orderId/claim', c.requireTeamWorker, c.claimJob);
@@ -38,6 +39,9 @@ router.post('/jobs/:orderId/final-design', c.requireTeamWorker, imageUploadLimit
 // union «admin OR any active member» — the guard cannot be `requireTeamWorker`, which
 // demands a membership row the admin deliberately does not have. Which job a member may
 // finish (theirs, or unclaimed) is decided inside approveJob, under the order's own lock.
+// Editing the order's TEXT + PHOTOS only (owner 2026-10-13) — any active member or admin.
+router.patch('/jobs/:orderId/lines/:itemId', c.requireTeamAccess, c.editLine);
+router.post('/jobs/:orderId/lines/:itemId/image', c.requireTeamAccess, imageUploadLimit, imageUpload.single('file'), validateUploadedImage, c.uploadLineImage);
 router.post('/jobs/:orderId/approve', c.requireTeamAccess, c.approveJob);
 // Sending a job BACK to a member stays a lead/admin decision.
 router.post('/jobs/:orderId/reject', c.requireTeamLead, c.rejectJob);

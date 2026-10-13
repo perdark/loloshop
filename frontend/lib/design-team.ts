@@ -36,6 +36,8 @@ export interface DesignTeamSession {
 }
 
 export interface DesignTeamSpecLine {
+  /** order_items.id — the handle for editing the line's text/photo. */
+  itemId: string | null;
   label: string | null;
   text: string | null;
   /** What the STUDENT sent — the reference to follow. */
@@ -66,6 +68,11 @@ export interface DesignTeamJob {
   student: DesignTeamStudent;
   productName: string;
   productType: string;
+  /** retail = طالب عادي; wholesaler = a rep-APPROVED order from a ممثل's دفعة. */
+  source: "retail" | "wholesaler";
+  repName: string | null;
+  batchName: string | null;
+  batchDeadline: string | null;
   createdAt: string;
   finalDesignUrl: string | null;
   specLines: DesignTeamSpecLine[];
@@ -113,7 +120,11 @@ interface ApiJob {
     notes?: string | null;
   };
   product: { name_ar: string; type: string };
+  source?: "retail" | "wholesaler";
+  rep?: { name: string } | null;
+  batch?: { name: string; deadline: string | null } | null;
   spec_lines: {
+    item_id?: string | null;
     label: string | null;
     text: string | null;
     /** What the STUDENT sent — the reference أيادي التصميم is asked to follow. */
@@ -164,9 +175,14 @@ function mapJob(row: ApiJob): DesignTeamJob {
     },
     productName: row.product.name_ar,
     productType: row.product.type,
+    source: row.source ?? "retail",
+    repName: row.rep?.name ?? null,
+    batchName: row.batch?.name ?? null,
+    batchDeadline: row.batch?.deadline ?? null,
     createdAt: row.created_at,
     finalDesignUrl: row.final_design_url ?? null,
     specLines: (row.spec_lines ?? []).map((line) => ({
+      itemId: line.item_id ?? null,
       label: line.label ?? null,
       text: line.text ?? null,
       imageUrl: line.image_url ?? null,
@@ -281,6 +297,41 @@ export async function uploadDesignTeamFinal(id: string, file: File): Promise<str
     { headers: { "Content-Type": "multipart/form-data" } }
   );
   return data.data.url;
+}
+
+/**
+ * Edit ONE order line's text, or remove its photo (owner 2026-10-13: «النص والصور بس»).
+ * The server writes only customer_text / customer_image_url and returns the fresh job.
+ */
+export async function editDesignTeamLine(
+  orderId: string,
+  itemId: string,
+  change: { text?: string; removeImage?: boolean }
+): Promise<DesignTeamJob> {
+  const body: Record<string, unknown> = {};
+  if (change.text !== undefined) body.text = change.text;
+  if (change.removeImage) body.remove_image = true;
+  const { data } = await api.patch<{ data: ApiJob }>(
+    `/design-team/jobs/${orderId}/lines/${itemId}`,
+    body
+  );
+  return mapJob(data.data);
+}
+
+/** Replace (or add) the student's reference photo on one line. */
+export async function uploadDesignTeamLineImage(
+  orderId: string,
+  itemId: string,
+  file: File
+): Promise<DesignTeamJob> {
+  const form = new FormData();
+  form.append("file", file);
+  const { data } = await api.post<{ data: ApiJob }>(
+    `/design-team/jobs/${orderId}/lines/${itemId}/image`,
+    form,
+    { headers: { "Content-Type": "multipart/form-data" } }
+  );
+  return mapJob(data.data);
 }
 
 export async function createDesignTeamMember(input: {

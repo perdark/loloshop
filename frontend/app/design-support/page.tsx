@@ -20,6 +20,7 @@ import {
   claimDesignTeamJob,
   createDesignTeamLead,
   createDesignTeamMember,
+  editDesignTeamLine,
   getDesignTeamJobs,
   getDesignTeamMembers,
   getDesignTeamSession,
@@ -28,7 +29,9 @@ import {
   removeDesignTeamMember,
   updateDesignTeamMember,
   uploadDesignTeamFinal,
+  uploadDesignTeamLineImage,
   type DesignTeamJob,
+  type DesignTeamSpecLine,
   type DesignTeamMember,
   type DesignTeamSession,
 } from "@/lib/design-team";
@@ -82,6 +85,14 @@ function TaskCard({ job, onOpen }: { job: DesignTeamJob; onOpen: () => void }) {
           {job.student.instagram && (
             <p className="mt-0.5 text-xs font-semibold text-orange-ink" dir="ltr">@{job.student.instagram}</p>
           )}
+          {job.source === "wholesaler" && (
+            <p className="mt-1.5 inline-flex max-w-full rounded-full border border-line bg-surface-sink px-2 py-0.5 text-xs font-semibold text-ink-soft">
+              <span className="truncate">
+                ممثل: {job.repName ?? "—"}
+                {job.batchName ? ` · ${job.batchName}` : ""}
+              </span>
+            </p>
+          )}
         </div>
         <span className={`shrink-0 rounded-full border px-2.5 py-1 text-xs font-semibold ${task.className}`}>
           {task.label}
@@ -96,6 +107,10 @@ function TaskCard({ job, onOpen }: { job: DesignTeamJob; onOpen: () => void }) {
       </div>
     </button>
   );
+}
+
+function chipClass(on: boolean) {
+  return `inline-flex min-h-11 items-center rounded-full border px-4 text-sm font-semibold transition-colors ${on ? "border-orange-ink bg-orange-ink text-white" : "border-line bg-surface text-ink-soft hover:border-orange-ink/40 hover:text-ink"}`;
 }
 
 const GENDER_AR: Record<string, string> = { male: "ذكر", female: "أنثى" };
@@ -167,6 +182,105 @@ function SpecPhoto({ url, alt }: { url: string; alt: string }) {
   );
 }
 
+// One order line inside the job modal. Editing writes ONLY the line's text or its photo
+// (owner 2026-10-13: «النص والصور بس») — prices, options and the product are untouchable
+// from this desk, and the generated plate (plate_image_url) is never written here.
+function SpecLineRow({
+  line,
+  canEdit,
+  busy,
+  onSaveText,
+  onRemoveImage,
+  onReplaceImage,
+}: {
+  line: DesignTeamSpecLine;
+  canEdit: boolean;
+  busy: boolean;
+  onSaveText: (text: string) => Promise<boolean>;
+  onRemoveImage: () => Promise<boolean>;
+  onReplaceImage: (file: File) => Promise<boolean>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(line.text ?? "");
+  const fileRef = useRef<HTMLInputElement>(null);
+  const editable = canEdit && Boolean(line.itemId);
+
+  async function save() {
+    if (await onSaveText(draft)) setEditing(false);
+  }
+
+  function pick(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (file) void onReplaceImage(file);
+  }
+
+  return (
+    <li className="rounded-xl border border-line bg-surface p-3">
+      <div className="flex items-start gap-3">
+        {line.imageUrl && <SpecPhoto url={line.imageUrl} alt={line.label ?? "صورة"} />}
+        {/* The generated plate is shown BESIDE the student's photo, never instead of
+            it. Until migration 080 one column held both, so the plate replaced the
+            photo here and the team designed from the machine's output. */}
+        {line.plateImageUrl && <SpecPhoto url={line.plateImageUrl} alt="الخط المولّد" />}
+        <div className="min-w-0 flex-1">
+          {line.label && <p className="text-xs font-semibold text-orange-ink">{line.label}</p>}
+          {!editing && line.text && <p className="mt-0.5 whitespace-pre-wrap text-sm leading-6 text-ink">{line.text}</p>}
+          {!editing && line.imageUrl && !line.text && <p className="mt-0.5 text-xs text-ink-soft">صورة مرفقة — اضغط للتكبير</p>}
+          {line.plateImageUrl && <p className="mt-0.5 text-xs text-ink-soft">يوجد خط مولّد لهذا السطر</p>}
+          {editing && (
+            <textarea
+              autoFocus
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              rows={3}
+              maxLength={500}
+              className="mt-1.5 min-h-20 w-full resize-y rounded-xl border border-line bg-beige px-3 py-2 text-sm text-ink outline-none focus:border-orange-ink focus:ring-2 focus:ring-orange-ink/20"
+            />
+          )}
+        </div>
+      </div>
+      {editable && (
+        <div className="mt-2.5 flex flex-wrap gap-2 border-t border-line/70 pt-2.5">
+          <input ref={fileRef} type="file" accept="image/*" hidden onChange={pick} />
+          {editing ? (
+            <>
+              <Button size="sm" onClick={save} loading={busy} disabled={busy}>
+                حفظ النص
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={busy}
+                onClick={() => {
+                  setDraft(line.text ?? "");
+                  setEditing(false);
+                }}
+              >
+                إلغاء
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button size="sm" variant="ghost" disabled={busy} onClick={() => setEditing(true)}>
+                {line.text ? "تعديل النص" : "إضافة نص"}
+              </Button>
+              <Button size="sm" variant="ghost" disabled={busy} onClick={() => fileRef.current?.click()}>
+                {line.imageUrl ? "تبديل الصورة" : "إضافة صورة"}
+              </Button>
+              {line.imageUrl && line.text && (
+                <Button size="sm" variant="ghost" disabled={busy} onClick={() => void onRemoveImage()}>
+                  حذف الصورة
+                </Button>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </li>
+  );
+}
+
 function JobDetail({
   job,
   viewerId,
@@ -178,6 +292,8 @@ function JobDetail({
   onApprove,
   onReject,
   onUpload,
+  onEditLine,
+  onLineImage,
 }: {
   job: DesignTeamJob;
   viewerId: string;
@@ -189,6 +305,8 @@ function JobDetail({
   onApprove: () => Promise<void>;
   onReject: (reason: string) => Promise<void>;
   onUpload: (file: File) => Promise<void>;
+  onEditLine: (itemId: string, change: { text?: string; removeImage?: boolean }) => Promise<boolean>;
+  onLineImage: (itemId: string, file: File) => Promise<boolean>;
 }) {
   const [note, setNote] = useState(job.task.note ?? "");
   const [rejectMode, setRejectMode] = useState(false);
@@ -298,6 +416,12 @@ function JobDetail({
             {job.universityName || "—"}
             {job.department ? ` · ${job.department}` : ""}
           </span>
+          {job.source === "wholesaler" && (
+            <span className="rounded-full border border-line bg-surface-sink px-2.5 py-1 text-ink-soft">
+              ممثل: {job.repName ?? "—"}
+              {job.batchName ? ` · ${job.batchName}` : ""}
+            </span>
+          )}
         </div>
 
         <StudentInfo student={job.student} />
@@ -309,19 +433,15 @@ function JobDetail({
           ) : (
             <ul className="mt-3 space-y-3">
               {job.specLines.map((line, index) => (
-                <li key={index} className="flex items-start gap-3 rounded-xl border border-line bg-surface p-3">
-                  {line.imageUrl && <SpecPhoto url={line.imageUrl} alt={line.label ?? "صورة"} />}
-                  {/* The generated plate is shown BESIDE the student's photo, never instead of
-                      it. Until migration 080 one column held both, so the plate replaced the
-                      photo here and the team designed from the machine's output. */}
-                  {line.plateImageUrl && <SpecPhoto url={line.plateImageUrl} alt="الخط المولّد" />}
-                  <div className="min-w-0">
-                    {line.label && <p className="text-xs font-semibold text-orange-ink">{line.label}</p>}
-                    {line.text && <p className="mt-0.5 text-sm leading-6 text-ink">{line.text}</p>}
-                    {line.imageUrl && !line.text && <p className="mt-0.5 text-xs text-ink-soft">صورة مرفقة — اضغط للتكبير</p>}
-                    {line.plateImageUrl && <p className="mt-0.5 text-xs text-ink-soft">يوجد خط مولّد لهذا السطر</p>}
-                  </div>
-                </li>
+                <SpecLineRow
+                  key={line.itemId ?? index}
+                  line={line}
+                  canEdit={canWork || canManage}
+                  busy={busy === `line:${line.itemId}`}
+                  onSaveText={(text) => onEditLine(line.itemId!, { text })}
+                  onRemoveImage={() => onEditLine(line.itemId!, { removeImage: true })}
+                  onReplaceImage={(file) => onLineImage(line.itemId!, file)}
+                />
               ))}
             </ul>
           )}
@@ -685,11 +805,42 @@ export default function DesignSupportPage() {
   const [selected, setSelected] = useState<DesignTeamJob | null>(null);
   const [action, setAction] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  // Source → ممثل → دفعة drill-down (owner 2026-10-13: the desk now works دفعات الممثلين).
+  const [source, setSource] = useState<"all" | "retail" | "wholesaler">("all");
+  const [rep, setRep] = useState<string | null>(null);
+  const [batch, setBatch] = useState<string | null>(null);
+
+  const reps = useMemo(() => {
+    const map = new Map<string, Map<string, number>>();
+    for (const job of jobs) {
+      if (job.source !== "wholesaler") continue;
+      const name = job.repName ?? "—";
+      const batches = map.get(name) ?? new Map<string, number>();
+      if (job.batchName) batches.set(job.batchName, (batches.get(job.batchName) ?? 0) + 1);
+      map.set(name, batches);
+    }
+    return [...map.entries()]
+      .map(([name, batches]) => ({
+        name,
+        count: jobs.filter((j) => j.source === "wholesaler" && (j.repName ?? "—") === name).length,
+        batches: [...batches.entries()].map(([b, n]) => ({ name: b, count: n })),
+      }))
+      .sort((a, b) => b.count - a.count);
+  }, [jobs]);
+
+  const retailCount = useMemo(() => jobs.filter((j) => j.source === "retail").length, [jobs]);
+  const activeRep = rep ? reps.find((r) => r.name === rep) ?? null : null;
 
   const filteredJobs = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return jobs;
-    return jobs.filter((job) =>
+    const scoped = jobs.filter((job) => {
+      if (source !== "all" && job.source !== source) return false;
+      if (source === "wholesaler" && rep && (job.repName ?? "—") !== rep) return false;
+      if (source === "wholesaler" && rep && batch && job.batchName !== batch) return false;
+      return true;
+    });
+    if (!q) return scoped;
+    return scoped.filter((job) =>
       [
         job.studentName,
         job.student.fullName,
@@ -698,12 +849,14 @@ export default function DesignSupportPage() {
         job.student.instagram,
         job.student.phone,
         job.productName,
+        job.repName,
+        job.batchName,
       ]
         .filter(Boolean)
         // Spelling-insensitive Arabic match — see lib/arabic.ts.
         .some((field) => matchesAr(String(field), q))
     );
-  }, [jobs, search]);
+  }, [jobs, search, source, rep, batch]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -768,6 +921,23 @@ export default function DesignSupportPage() {
     }
   }
 
+  // Line edits keep the modal open and swap in the fresh job the server returns.
+  async function runLineEdit(itemId: string, work: () => Promise<DesignTeamJob>, done: string) {
+    setAction(`line:${itemId}`);
+    try {
+      const updated = await work();
+      setSelected(updated);
+      setJobs((prev) => prev.map((job) => (job.id === updated.id ? updated : job)));
+      toast.success(done);
+      return true;
+    } catch (editError) {
+      toast.error(getApiErrorMessage(editError, "تعذر حفظ التعديل"));
+      return false;
+    } finally {
+      setAction(null);
+    }
+  }
+
   if (authLoading || !user || loading) return <PageLoader />;
 
   const canManage = Boolean(session?.viewer.canManage);
@@ -817,7 +987,7 @@ export default function DesignSupportPage() {
       <main className="mx-auto w-full max-w-6xl px-4 py-6 lg:px-8 lg:py-8">
         <PageHeader
           title={title}
-          subtitle="تصميم طلبات التجزئة ومراجعتها"
+          subtitle="تصميم طلبات التجزئة ودفعات الممثلين ومراجعتها"
           action={
             <Button variant="ghost" onClick={() => void load()} loading={loading}>
               تحديث
@@ -853,15 +1023,64 @@ export default function DesignSupportPage() {
         ) : tab === "team" && canManage && session ? (
           <TeamTab session={session} isAdmin={isAdmin} onReload={load} />
         ) : jobs.length === 0 ? (
-          <EmptyState title="لا توجد طلبات تحتاج تصميماً الآن" message="ستظهر هنا طلبات التجزئة التي تحتاج تصميماً." />
+          <EmptyState title="لا توجد طلبات تحتاج تصميماً الآن" message="ستظهر هنا طلبات التجزئة ودفعات الممثلين التي تحتاج تصميماً." />
         ) : (
           <div className="space-y-4">
+            <div className="flex flex-wrap gap-2">
+              {([
+                ["all", `الكل · ${jobs.length}`],
+                ["retail", `تجزئة · ${retailCount}`],
+                ["wholesaler", `دفعات الممثلين · ${jobs.length - retailCount}`],
+              ] as const).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => {
+                    setSource(key);
+                    setRep(null);
+                    setBatch(null);
+                  }}
+                  className={chipClass(source === key)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {source === "wholesaler" && reps.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={() => { setRep(null); setBatch(null); }} className={chipClass(rep === null)}>
+                  كل الممثلين
+                </button>
+                {reps.map((r) => (
+                  <button
+                    key={r.name}
+                    type="button"
+                    onClick={() => { setRep(r.name); setBatch(null); }}
+                    className={chipClass(rep === r.name)}
+                  >
+                    {r.name} · {r.count}
+                  </button>
+                ))}
+              </div>
+            )}
+            {source === "wholesaler" && activeRep && activeRep.batches.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={() => setBatch(null)} className={chipClass(batch === null)}>
+                  كل الدفعات
+                </button>
+                {activeRep.batches.map((b) => (
+                  <button key={b.name} type="button" onClick={() => setBatch(b.name)} className={chipClass(batch === b.name)}>
+                    {b.name} · {b.count}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="relative">
               <input
                 type="search"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="ابحث باسم الطالب أو الجامعة أو الانستغرام…"
+                placeholder="ابحث باسم الطالب أو الجامعة أو الممثل أو الانستغرام…"
                 className="min-h-11 w-full rounded-xl border border-line bg-surface ps-4 pe-10 text-sm text-ink outline-none transition-colors placeholder:text-ink/50 focus:border-orange-ink focus:ring-2 focus:ring-orange-ink/20"
               />
               <span className="pointer-events-none absolute inset-y-0 end-3 flex items-center text-ink-soft">🔍</span>
@@ -870,12 +1089,12 @@ export default function DesignSupportPage() {
               {/* PIECES. A design job is one `orders` row (designTeamController JOB_SELECT,
                   `FROM orders o`), so a student's sash and cap are two jobs here — calling
                   them «طلب» made this screen disagree with /admin about the same cohort. */}
-              {search.trim()
+              {search.trim() || source !== "all"
                 ? `${filteredJobs.length} من ${jobs.length} قطعة`
                 : `${jobs.length} قطعة بانتظار التصميم`}
             </p>
             {filteredJobs.length === 0 ? (
-              <EmptyState title="لا نتائج" message="لا يوجد طالب يطابق بحثك." />
+              <EmptyState title="لا نتائج" message="لا توجد قطعة تطابق البحث أو الفلتر." />
             ) : (
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {filteredJobs.map((job) => (
@@ -899,6 +1118,13 @@ export default function DesignSupportPage() {
           onApprove={() => runAction("approve", () => approveDesignTeamJob(selected.orderId))}
           onReject={(reason) => runAction("reject", () => rejectDesignTeamJob(selected.orderId, reason))}
           onUpload={handleUpload}
+          onEditLine={(itemId, change) =>
+            runLineEdit(itemId, () => editDesignTeamLine(selected.orderId, itemId, change),
+              change.removeImage ? "تم حذف الصورة" : "تم حفظ النص")
+          }
+          onLineImage={(itemId, file) =>
+            runLineEdit(itemId, () => uploadDesignTeamLineImage(selected.orderId, itemId, file), "تم تبديل الصورة")
+          }
         />
       )}
     </div>
