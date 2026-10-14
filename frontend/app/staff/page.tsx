@@ -37,6 +37,7 @@ import {
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 import { useProductionEvents } from "@/hooks/useProductionEvents";
 import { useCoalesced } from "@/hooks/useCoalesced";
+import { useRenderCap, ShowMoreButton } from "@/hooks/useRenderCap";
 import { useScrollRestore } from "@/hooks/useScrollRestore";
 import type { ProductionQueueItem, MonitorData } from "@/lib/staff-types";
 import type { StaffOrderScope, StaffType, OrderStatus } from "@/lib/types";
@@ -325,6 +326,11 @@ function QueueView({
         : searchedItems,
     [searchedItems, stage]
   );
+  // iPhone: never put the whole queue in the DOM — see useRenderCap's header.
+  const capped = useRenderCap(
+    visibleItems,
+    `${stage}|${search}|${sourceFilter}|${zoneFilter}`
+  );
   const stageCounts = useMemo(() => {
     const m: Partial<Record<OrderStatus, number>> = {};
     for (const i of searchedItems) m[i.status] = (m[i.status] ?? 0) + 1;
@@ -538,12 +544,13 @@ function QueueView({
                 </p>
               )}
               <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {visibleItems.map((item) => (
+                {capped.shown.map((item) => (
                   <li key={item.id}>
                     <OrderCard order={item} />
                   </li>
                 ))}
               </ul>
+              <ShowMoreButton hidden={capped.hidden} onClick={capped.showMore} />
             </>
           )}
         </>

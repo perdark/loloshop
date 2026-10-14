@@ -43,6 +43,7 @@ import { getQueue, advanceOrder, advanceBulk } from "@/lib/staff";
 import { getApiErrorMessage } from "@/lib/api";
 import { useProductionEvents } from "@/hooks/useProductionEvents";
 import { useCoalesced } from "@/hooks/useCoalesced";
+import { useRenderCap, ShowMoreButton } from "@/hooks/useRenderCap";
 import { useScrollRestore } from "@/hooks/useScrollRestore";
 import { GARMENT_FILTER_ORDER, PRODUCT_TYPE_LABELS, STUDY_TYPE_LABELS } from "@/lib/constants";
 import { toArabicDigits } from "@/lib/format";
@@ -341,6 +342,8 @@ export function PrepConsole({ showSourceFilter }: { showSourceFilter: boolean })
     for (const g of built) g.set = summarizeSet(g.pieces);
     return built;
   }, [pieces]);
+  // iPhone: never put every student in the DOM — see useRenderCap's header.
+  const cappedGroups = useRenderCap(groups, `${view}|${search}|${sourceFilter}|${repFilter}|${garment}`);
 
   const pieceCount = pieces.length;
 
@@ -588,8 +591,9 @@ export function PrepConsole({ showSourceFilter }: { showSourceFilter: boolean })
       ) : groups.length === 0 ? (
         <EmptyState message={search.trim() ? "لا نتائج لهذا البحث" : VIEW_META[view].empty} />
       ) : (
+        <>
         <ul className="space-y-2.5">
-          {groups.map((g) => (
+          {cappedGroups.shown.map((g) => (
             <li key={g.key}>
               <button
                 type="button"
@@ -631,6 +635,8 @@ export function PrepConsole({ showSourceFilter }: { showSourceFilter: boolean })
             </li>
           ))}
         </ul>
+          <ShowMoreButton hidden={cappedGroups.hidden} onClick={cappedGroups.showMore} />
+        </>
       )}
 
       {sheetOpen && (

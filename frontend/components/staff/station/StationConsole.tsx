@@ -35,6 +35,7 @@ import { PRODUCT_TYPE_LABELS, STUDY_TYPE_LABELS, ORDER_STATUS_LABELS } from "@/l
 import { usePolling } from "@/lib/hooks/usePolling";
 import { useProductionEvents } from "@/hooks/useProductionEvents";
 import { useCoalesced } from "@/hooks/useCoalesced";
+import { useRenderCap, ShowMoreButton } from "@/hooks/useRenderCap";
 import { useScrollRestore } from "@/hooks/useScrollRestore";
 import { Button } from "@/components/ui/Button";
 import { Select } from "@/components/ui/Select";
@@ -354,7 +355,10 @@ export function StationConsole({
     if (view === "done" && kind === "tailor") loadDone();
   }, [view, kind, loadDone]);
 
-  usePolling(() => load({ silent: true }), 15000, view !== "done");
+  // 60 s, not 15: live events already reload on every move, so this is only a backstop — and
+  // each tick re-downloads the WHOLE line (12 MB on 2026-10-14), which on an iPhone over
+  // mobile data never finished before the next one started.
+  usePolling(() => load({ silent: true }), 60000, view !== "done");
   // Coalesced: a bulk zone tick / bulk advance emits one event PER PIECE (up to 200).
   const liveReload = useCoalesced(() => load({ silent: true }));
   useProductionEvents((e) => {
@@ -461,6 +465,8 @@ export function StationConsole({
     }
     return [...m.values()];
   }, [inStage]);
+  // iPhone: never put every student in the DOM — see useRenderCap's header.
+  const cappedGroups = useRenderCap(groups, `${view}|${search}|${sourceFilter}|${repFilter}|${effectiveStage}`);
 
   // ─── «عرض بالقطع» chips + rows ──────────────────────────────────────────────
   // Counted over the ACTIVE stage, matching the rows below them: counting across the whole
@@ -517,6 +523,13 @@ export function StationConsole({
       .filter((p) => activeType === "all" || p.productType === activeType)
       .map((p) => ({ piece: p, zone: undefined as StationZone | undefined }));
   }, [inStage, zoneMode, activeZone, activeType]);
+
+  // iPhone: never put the whole stage in the DOM — see useRenderCap's header. «تحديد الكل»
+  // below still selects every row, shown or not, exactly as before.
+  const cappedRows = useRenderCap(
+    pieceRows,
+    `${view}|${search}|${sourceFilter}|${repFilter}|${effectiveStage}|${activeZone}|${activeType}`
+  );
 
   const selectableIds = useMemo(
     () => pieceRows.filter((r) => r.piece.canComplete).map((r) => r.piece.id),
@@ -925,8 +938,9 @@ export function StationConsole({
           }» حالياً`}
         />
       ) : view === "students" ? (
+        <>
         <ul className="space-y-2.5">
-          {groups.map((g) => (
+          {cappedGroups.shown.map((g) => (
             <li key={g.key}>
               <button
                 type="button"
@@ -955,6 +969,8 @@ export function StationConsole({
             </li>
           ))}
         </ul>
+          <ShowMoreButton hidden={cappedGroups.hidden} onClick={cappedGroups.showMore} />
+        </>
       ) : (
         <>
           {/* Chips: zones (التطريز) or piece types (الفصال/الكوي) */}
@@ -1043,7 +1059,7 @@ export function StationConsole({
               )}
 
               <ul className="space-y-2.5">
-                {pieceRows.map(({ piece, zone }) => {
+                {cappedRows.shown.map(({ piece, zone }) => {
                   const img = zone ? resolveUploadUrl(zone.image_url) : null;
                   const checked = selected.has(piece.id);
                   return (
@@ -1109,6 +1125,7 @@ export function StationConsole({
                   );
                 })}
               </ul>
+              <ShowMoreButton hidden={cappedRows.hidden} onClick={cappedRows.showMore} />
             </>
           )}
         </>

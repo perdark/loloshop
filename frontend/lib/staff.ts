@@ -148,6 +148,42 @@ export async function getQueueScoped(
   if (source) params.source = source;
   if (zone) params.zone = zone;
   if (station) params.station = "1"; // enrich rows with zones / advance grants (station console)
+  // ⚠️ ONE DOWNLOAD AT A TIME PER QUERY (2026-10-14). This response is the whole line —
+  // 8–12 MB on prod — and polling + a live reload per production event used to start a new
+  // one while the last was still arriving. On an iPhone over mobile data they piled up and
+  // none ever finished: the proxy log is a wall of `queue?station=1` «no recent network
+  // activity», and the staff screen sat on its loader. Now at most ONE is downloading and ONE
+  // is queued behind it: every caller that asks mid-download shares that single follow-up,
+  // which starts only after the current one lands — so an answer is never older than the
+  // ask (a piece just advanced does not reappear), and a burst of events costs two requests.
+  const key = JSON.stringify(params);
+  const slot = queueSlots.get(key) ?? {};
+  queueSlots.set(key, slot);
+  if (slot.queued) return slot.queued;
+  if (slot.running) {
+    slot.queued = slot.running
+      .catch(() => undefined)
+      .then(() => {
+        slot.queued = undefined;
+        return startQueueFetch(slot, params);
+      });
+    return slot.queued;
+  }
+  return startQueueFetch(slot, params);
+}
+
+type QueueSlot = { running?: Promise<ScopedQueue>; queued?: Promise<ScopedQueue> };
+const queueSlots = new Map<string, QueueSlot>();
+
+function startQueueFetch(slot: QueueSlot, params: Record<string, string>): Promise<ScopedQueue> {
+  const p = fetchQueueScoped(params).finally(() => {
+    if (slot.running === p) slot.running = undefined;
+  });
+  slot.running = p;
+  return p;
+}
+
+async function fetchQueueScoped(params: Record<string, string>): Promise<ScopedQueue> {
   const { data } = await api.get<{
     data: ProductionQueueItem[];
     my_stages?: OrderStatus[];
