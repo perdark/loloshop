@@ -113,7 +113,7 @@ export function SupportChat() {
           was not. The padding goes INSIDE the row so this header's own gradient fills the
           status-bar strip rather than leaving a bare gap above it, and both utilities are
           no-ops with no inset — so the sm+ floating card keeps its designed padding. */}
-      <div className="safe-top safe-x flex items-center gap-3 border-b border-line bg-[linear-gradient(180deg,#fff6ea_0%,#ffe7cf_100%)] px-4 py-3 sm:rounded-t-3xl">
+      <div className="safe-top safe-px-4 flex items-center gap-3 border-b border-line bg-[linear-gradient(180deg,#fff6ea_0%,#ffe7cf_100%)] py-3 sm:rounded-t-3xl">
         <LoloFace emotion={emotion} size={42} float />
         <div className="min-w-0 flex-1">
           <p className="font-semibold text-ink">لولو</p>

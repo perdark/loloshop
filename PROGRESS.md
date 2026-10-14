@@ -1,5 +1,16 @@
 # Progress
 
+## 2026-10-14 (b) — 📱 /staff و /admin بلا هوامش على الآيفون
+
+Owner screenshot: «خط الإنتاج» flush against both screen edges on an iPhone, title clipped. Cause:
+`.safe-x` in `globals.css` is UNLAYERED CSS, so it beats Tailwind's `@layer utilities` and its
+`env(safe-area-inset-*)` (0 on a portrait phone) replaced every `px-4`/`p-4` it shared an element
+with. New `safe-px-3` / `safe-px-4` utilities = max(gutter, inset), in the utilities layer so
+`lg:p-8` still wins on desktop. Swapped on the 7 elements that combined the two: staff + admin
+header and main, LegalPage, LoloChatPage and SupportChat headers. `next build` clean; measured
+16px/16px at 390px on `/privacy`. ⚠️ `.safe-x` + a `px-*` on one element is now a known trap
+(commented above the rule).
+
 ## 2026-10-14 — 📣 إشعارات الموظفين: خصم الخروج المؤقت للكل + نجم اليوم + رسالة لولو (غير مرفوع)
 
 Owner rulings this session: the deduction is announced to ALL staff **by name and amount**; the AI

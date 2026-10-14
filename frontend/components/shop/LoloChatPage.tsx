@@ -130,7 +130,7 @@ export function LoloChatPage() {
     >
       {/* Header — `safe-top safe-x` because this row now starts at y=0, exactly like the
           floating sheet's header, so it sits under the status bar without them. */}
-      <div className="safe-top safe-x flex shrink-0 items-center gap-3 border-b border-line bg-[linear-gradient(180deg,#fff6ea_0%,#ffe7cf_100%)] px-3 py-3">
+      <div className="safe-top safe-px-3 flex shrink-0 items-center gap-3 border-b border-line bg-[linear-gradient(180deg,#fff6ea_0%,#ffe7cf_100%)] py-3">
         <button
           type="button"
           onClick={goBack}

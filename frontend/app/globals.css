@@ -307,6 +307,22 @@ html {
   padding-right: env(safe-area-inset-right, 0px);
 }
 
+/* ⚠️ NEVER PUT `.safe-x` AND A `px-*`/`p-*` ON THE SAME ELEMENT.
+   `.safe-x` is unlayered CSS and Tailwind's utilities live in `@layer utilities`,
+   so `.safe-x` ALWAYS wins — and on a portrait phone the inset is 0, so the
+   designed gutter silently became 0px. That is what put the whole /staff and
+   /admin content flush against the iPhone's screen edges. Use these instead:
+   the gutter OR the inset, whichever is larger. They live in the utilities
+   layer, so a later `lg:px-8` still overrides them on desktop. */
+@utility safe-px-3 {
+  padding-left: max(0.75rem, env(safe-area-inset-left, 0px));
+  padding-right: max(0.75rem, env(safe-area-inset-right, 0px));
+}
+@utility safe-px-4 {
+  padding-left: max(1rem, env(safe-area-inset-left, 0px));
+  padding-right: max(1rem, env(safe-area-inset-right, 0px));
+}
+
 /* ⚠️ HOME-INDICATOR CLEARANCE FOR CONTENT THAT REACHES THE BOTTOM EDGE.
    The mirror of `.safe-top`, and it was missing for months: `.safe-top` and
    `.safe-x` existed, so the notch was handled everywhere, while the bottom

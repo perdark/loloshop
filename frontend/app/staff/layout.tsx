@@ -29,7 +29,7 @@ function StaffShell({ children }: { children: React.ReactNode }) {
 
       <div className="lg:ms-64">
         {/* Mobile header — flat bg-cream (no backdrop-blur for low-end Android perf) */}
-        <header className="safe-top safe-x sticky top-0 z-20 flex items-center gap-3 border-b border-line bg-cream px-4 py-3 lg:hidden">
+        <header className="safe-top safe-px-4 sticky top-0 z-20 flex items-center gap-3 border-b border-line bg-cream py-3 lg:hidden">
           <button
             type="button"
             onClick={() => setSidebarOpen(true)}
@@ -66,7 +66,7 @@ function StaffShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <main className="safe-bottom safe-x p-4 lg:p-8 animate-fade-page-in">{children}</main>
+        <main className="safe-bottom safe-px-4 py-4 lg:p-8 animate-fade-page-in">{children}</main>
       </div>
     </div>
   );
