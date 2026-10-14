@@ -1,3 +1,4 @@
+import { toast } from "sonner";
 import { nativeShellPlatform } from "./native-shell";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -49,6 +50,33 @@ function shareableFiles(file: File): boolean {
   }
 }
 
+/** A persistent «الملف جاهز — احفظه» toast whose button opens the share sheet. */
+function shareOnNextTap(file: File): Promise<SaveOutcome> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (o: SaveOutcome) => {
+      if (!settled) {
+        settled = true;
+        resolve(o);
+      }
+    };
+    toast("الملف جاهز", {
+      description: file.name,
+      duration: Infinity,
+      action: {
+        label: "احفظ / شارك",
+        onClick: () => {
+          navigator.share({ files: [file], title: file.name }).then(
+            () => done("shared"),
+            () => done("cancelled")
+          );
+        },
+      },
+      onDismiss: () => done("cancelled"),
+    });
+  });
+}
+
 /** Save a blob we already hold (a ZIP from the API, a canvas export, a fetched image). */
 export async function saveFile(blob: Blob, filename: string): Promise<SaveOutcome> {
   const file = new File([blob], filename, {
@@ -61,9 +89,14 @@ export async function saveFile(blob: Blob, filename: string): Promise<SaveOutcom
       await navigator.share({ files: [file], title: filename });
       return "shared";
     } catch (e) {
-      // A dismissed sheet is not a failure. Anything else (no user gesture left, share
-      // unavailable for this type) falls through to the anchor below.
+      // A dismissed sheet is not a failure.
       if ((e as Error)?.name === "AbortError") return "cancelled";
+      // ⚠️ NotAllowedError = the tap's user activation expired while we were still
+      // fetching (a ZIP of many plates takes seconds). WebKit then refuses the sheet, and
+      // the anchor below is INERT in WKWebView, so falling through looked like a success
+      // toast with no file — the «الماك ما ينزل الخط» report (iOS app on a Mac/iPad,
+      // 2026-10-14). Ask for one more tap: that tap is a fresh gesture the sheet accepts.
+      if ((e as Error)?.name === "NotAllowedError") return shareOnNextTap(file);
     }
   }
 
