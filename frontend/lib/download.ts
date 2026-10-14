@@ -66,7 +66,7 @@ function shareOnNextTap(file: File): Promise<SaveOutcome> {
       action: {
         label: "احفظ / شارك",
         onClick: () => {
-          navigator.share({ files: [file], title: file.name }).then(
+          navigator.share({ files: [file] }).then(
             () => done("shared"),
             () => done("cancelled")
           );
@@ -84,9 +84,11 @@ export async function saveFile(blob: Blob, filename: string): Promise<SaveOutcom
   });
 
   // The iOS shell has no downloader behind `download`; the share sheet is the only exit.
+  // ⚠️ FILES ONLY — no `title`/`text`. Telegram/WhatsApp send the title as a separate text
+  // message, so the recipient got «اسم الملف.png» as words instead of (or before) the file.
   if (nativeShellPlatform() === "ios" && shareableFiles(file)) {
     try {
-      await navigator.share({ files: [file], title: filename });
+      await navigator.share({ files: [file] });
       return "shared";
     } catch (e) {
       // A dismissed sheet is not a failure.
