@@ -5,6 +5,7 @@ const { getBoss, QUEUE_GENERATION } = require('./lib/queue');
 const { processNextBatch } = require('./lib/calligraphyEngine');
 const staffReport = require('./lib/staffReportJob');
 const calligSweep = require('./lib/calligraphySweep');
+const staffEngagement = require('./lib/staffEngagement');
 const { enqueueGeneration } = require('./lib/queue');
 
 // Drains one calligraphy job: batch after batch (≤10 names each) until nothing is
@@ -47,6 +48,14 @@ async function handleGeneration(jobId) {
     await staffReport.register(boss);
   } catch (err) {
     console.error('staff report schedule failed (calligraphy unaffected):', err.message);
+  }
+
+  // Staff engagement notices (2026-10-14): break-deduction announcements, «نجم اليوم» and the
+  // AI's daily message to each worker. Same isolation rule as the report above.
+  try {
+    await staffEngagement.register(boss);
+  } catch (err) {
+    console.error('staff engagement schedule failed (calligraphy unaffected):', err.message);
   }
 
   // The batching sweep. Same isolation as the report above and for a stronger reason: if this

@@ -62,6 +62,32 @@ async function recordAppOpen({ userId, platform = null, now = new Date() }) {
 }
 
 /**
+ * One minute of FOREGROUND time (migration 115). The client calls this once a minute only while
+ * the app is visible, so `active_minutes` is time actually spent looking at the app — not the
+ * first-seen → last-seen span, which counts a phone left in a pocket all afternoon.
+ *
+ * ⚠️ The `last_active_at < now − 50s` guard is the whole anti-inflation rule: two tabs, a retry
+ * or a hand-rolled loop all collapse to at most one minute per minute. Upserts so a worker whose
+ * first signal of the day is this ping still gets a row.
+ */
+async function recordActiveMinute({ userId, now = new Date() }) {
+  const { rows } = await query(
+    `INSERT INTO staff_app_opens (user_id, work_date, first_seen_at, last_seen_at, opens,
+                                  active_minutes, last_active_at)
+     VALUES ($1, $2, $3, $3, 1, 1, $3)
+     ON CONFLICT (user_id, work_date) DO UPDATE
+       SET active_minutes = staff_app_opens.active_minutes + 1,
+           last_active_at = EXCLUDED.last_active_at,
+           last_seen_at   = GREATEST(staff_app_opens.last_seen_at, EXCLUDED.last_seen_at)
+     WHERE staff_app_opens.last_active_at IS NULL
+        OR staff_app_opens.last_active_at < EXCLUDED.last_active_at - INTERVAL '50 seconds'
+     RETURNING active_minutes`,
+    [userId, shopToday(now), now]
+  );
+  return rows[0] ? Number(rows[0].active_minutes) : null;
+}
+
+/**
  * The day's report for every `role = 'staff'` employee.
  *
  * One query, four LEFT JOINs. The two aggregate joins (breaks, activity) are lateral
@@ -82,12 +108,14 @@ async function dailyReport(dateISO, now = new Date()) {
             o.first_seen_at,
             o.last_seen_at,
             o.platform,
+            COALESCE(o.active_minutes, 0)::int     AS active_minutes,
             r.check_in_at,
             r.check_out_at,
             r.late_minutes,
             r.status                               AS attendance_status,
             COALESCE(b.break_minutes, 0)::int      AS break_minutes,
-            COALESCE(a.actions, 0)::int            AS production_actions
+            COALESCE(a.actions, 0)::int            AS production_actions,
+            COALESCE(w.moves, 0)::int              AS work_moves
        FROM users u
        LEFT JOIN staff_attendance_user_settings us ON us.user_id = u.id
        LEFT JOIN staff_app_opens o  ON o.user_id = u.id AND o.work_date = $1::date
@@ -103,6 +131,20 @@ async function dailyReport(dateISO, now = new Date()) {
                WHERE user_id = u.id
                  AND (created_at AT TIME ZONE 'UTC' AT TIME ZONE $2)::date = $1::date
             ) a ON TRUE
+       -- «حركات الشغل» (2026-10-14): finished work only. production_actions above is every
+       -- staff_activity_log row, and ~75% of those are «claim» — picking a piece up is not doing
+       -- it. Work that never reaches staff_activity_log (embroidery zones, tailor completions)
+       -- lives in audit_log, so both ledgers are read, exactly as stage_history does.
+       LEFT JOIN LATERAL (
+              SELECT (SELECT COUNT(*) FROM staff_activity_log
+                       WHERE user_id = u.id AND action = 'advance'
+                         AND (created_at AT TIME ZONE $2)::date = $1::date)
+                   + (SELECT COUNT(*) FROM audit_log
+                       WHERE actor_id = u.id
+                         AND action IN ('embroidery_zone', 'tailor_complete', 'approve_design')
+                         AND (created_at AT TIME ZONE $2)::date = $1::date)
+                     AS moves
+            ) w ON TRUE
       WHERE u.role = 'staff' AND u.deleted_at IS NULL
       ORDER BY u.name`,
     [date, TZ]
@@ -131,6 +173,7 @@ async function dailyReport(dateISO, now = new Date()) {
       first_seen_at: row.first_seen_at,
       last_seen_at: row.last_seen_at,
       platform: row.platform,
+      active_minutes: Number(row.active_minutes || 0),
       check_in_at: row.check_in_at,
       check_out_at: row.check_out_at,
       still_in: Boolean(checkIn && !checkOut),
@@ -139,6 +182,7 @@ async function dailyReport(dateISO, now = new Date()) {
       break_minutes: Number(row.break_minutes || 0),
       attendance_status: row.attendance_status,
       production_actions: Number(row.production_actions || 0),
+      work_moves: Number(row.work_moves || 0),
     };
   });
 
@@ -164,6 +208,7 @@ async function dailyReport(dateISO, now = new Date()) {
 
 module.exports = {
   recordAppOpen,
+  recordActiveMinute,
   dailyReport,
   shopToday,
   TZ,

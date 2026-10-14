@@ -360,6 +360,79 @@ const METRICS = {
     },
   },
 
+  // 2026-10-14 — «الادمن كلشي يعرف»: one row per worker with every behaviour signal we hold.
+  staff_behavior: {
+    desc: 'سلوك كل موظف خلال فترة: حركات الشغل، الوقت الفعلي بالتطبيق، التأخير، الخروج المؤقت، والخصومات (params: days)',
+    params: ['days'],
+    run: async ({ days }) => {
+      const d = Math.min(Math.max(parseInt(days, 10) || 7, 1), 120);
+      const { rows } = await query(
+        `SELECT u.name,
+                -- Finished work only (claims excluded) — same definition as dailyReport.work_moves.
+                ((SELECT COUNT(*) FROM staff_activity_log a
+                   WHERE a.user_id = u.id AND a.action = 'advance'
+                     AND a.created_at > NOW() - make_interval(days => $1))
+                 + (SELECT COUNT(*) FROM audit_log l
+                   WHERE l.actor_id = u.id
+                     AND l.action IN ('embroidery_zone', 'tailor_complete', 'approve_design')
+                     AND l.created_at > NOW() - make_interval(days => $1)))::int AS moves,
+                (SELECT COALESCE(SUM(o.active_minutes), 0) FROM staff_app_opens o
+                  WHERE o.user_id = u.id AND o.work_date > CURRENT_DATE - $1::int)::int
+                  AS app_minutes,
+                (SELECT COALESCE(SUM(r.late_minutes), 0) FROM staff_attendance_records r
+                  WHERE r.user_id = u.id AND r.work_date > CURRENT_DATE - $1::int)::int
+                  AS late_minutes,
+                (SELECT COUNT(*) FROM staff_attendance_records r
+                  WHERE r.user_id = u.id AND r.work_date > CURRENT_DATE - $1::int
+                    AND r.check_in_at IS NOT NULL)::int AS days_present,
+                (SELECT COALESCE(SUM(b.minutes), 0) FROM staff_attendance_breaks b
+                  WHERE b.user_id = u.id AND b.state = 'returned'
+                    AND b.work_date > CURRENT_DATE - $1::int)::int AS break_minutes,
+                (SELECT COALESCE(SUM(b.deduction_amount), 0) FROM staff_attendance_breaks b
+                  WHERE b.user_id = u.id AND b.state = 'returned'
+                    AND b.work_date > CURRENT_DATE - $1::int)::bigint AS deducted
+           FROM users u
+          WHERE u.role = 'staff' AND u.deleted_at IS NULL
+          ORDER BY moves DESC, u.name`,
+        [d]
+      );
+      if (!rows.length) return { label: `آخر ${d} يوم`, facts: ['ماكو موظفين'] };
+      return {
+        label: `سلوك الموظفين — آخر ${d} يوم`,
+        facts: rows.map(
+          (r) =>
+            `${r.name}: ${r.moves} حركة شغل · ${fmtHours(r.app_minutes)} بالتطبيق · ` +
+            `حضر ${r.days_present} يوم · تأخير ${fmtHours(r.late_minutes)} · ` +
+            `خروج مؤقت ${fmtHours(r.break_minutes)}` +
+            `${Number(r.deducted) > 0 ? ` · انخصم ${fmtIQD(r.deducted)}` : ''}`
+        ),
+      };
+    },
+  },
+
+  staff_ai_messages: {
+    desc: 'الرسائل اللي بعثتها لولو للموظفين ونجم اليوم (params: days)',
+    params: ['days'],
+    run: async ({ days }) => {
+      const d = Math.min(Math.max(parseInt(days, 10) || 1, 1), 30);
+      const { rows } = await query(
+        `SELECT u.name, to_char(m.work_date, 'YYYY/FMMM/FMDD') AS day, m.body_ar, m.source
+           FROM staff_ai_messages m JOIN users u ON u.id = m.user_id
+          WHERE m.work_date > CURRENT_DATE - $1::int
+          ORDER BY m.work_date DESC, u.name
+          LIMIT 60`,
+        [d]
+      );
+      if (!rows.length) return { label: 'رسائل لولو', facts: ['ما انبعثت رسائل بهذي الفترة'] };
+      return {
+        label: `رسائل لولو للموظفين — آخر ${d} يوم`,
+        facts: rows.map(
+          (r) => `${r.day} · ${r.name}${r.source === 'template' ? ' (رسالة جاهزة)' : ''}: ${r.body_ar}`
+        ),
+      };
+    },
+  },
+
   breaks_pending: {
     desc: 'طلبات الخروج المؤقت المنتظرة قرار',
     params: [],

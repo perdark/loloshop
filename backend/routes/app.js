@@ -47,6 +47,30 @@ router.post('/open', openLimit, async (req, res) => {
   return res.status(204).end();
 });
 
+// One per minute is the contract; a little slack for a clock that fires early.
+const activeLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 4,
+  handler: (req, res) => res.status(204).end(),
+});
+
+/**
+ * POST /api/app/active — «الموظف شايف التطبيق هسه» (migration 115).
+ *
+ * Staff only, and a no-op for everyone else: the owner asked for time-in-app for EMPLOYEES, and
+ * a once-a-minute ping from 2,000 students would be load with no question behind it. Always 204,
+ * for the same reason as /open.
+ */
+router.post('/active', activeLimit, async (req, res) => {
+  if (req.user.role !== 'staff') return res.status(204).end();
+  try {
+    await staffPresence.recordActiveMinute({ userId: req.user.id });
+  } catch (err) {
+    console.error('app-active track failed:', err.message);
+  }
+  return res.status(204).end();
+});
+
 /**
  * POST /api/app/push-error — «هذا الجهاز رفض يسجّل للإشعارات، وهذا السبب».
  *

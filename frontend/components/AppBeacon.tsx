@@ -50,9 +50,14 @@ const HEARTBEAT_MS = 30 * 60 * 1000;
 // — all of them no-ops server-side, all of them real requests on a slow Iraqi connection.
 const FOREGROUND_DEBOUNCE_MS = 60 * 1000;
 
+// Staff only (migration 115): one ping per VISIBLE minute = one minute of «وقت بالتطبيق».
+// A hidden tab or a phone in a pocket sends nothing, so the figure is time actually looking.
+const ACTIVE_TICK_MS = 60 * 1000;
+
 export function AppBeacon() {
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null;
+    let activeTimer: ReturnType<typeof setInterval> | null = null;
     let lastPing = 0;
 
     // Resolved once per mount and reused: it is a bridge round-trip, and the installed version
@@ -96,6 +101,19 @@ export function AppBeacon() {
       }
     }
 
+    function activeTick() {
+      if (document.visibilityState !== "visible") return;
+      if (getUser()?.role !== "staff") return;
+      const token = localStorage.getItem("token");
+      if (!token) return;
+      fetch(`${API_BASE}/api/app/active`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        keepalive: true,
+        cache: "no-store",
+      }).catch(() => {});
+    }
+
     function onVisible() {
       if (document.visibilityState === "visible") ping();
     }
@@ -104,6 +122,8 @@ export function AppBeacon() {
       ping();
       if (timer) clearInterval(timer);
       timer = setInterval(onVisible, HEARTBEAT_MS);
+      if (activeTimer) clearInterval(activeTimer);
+      activeTimer = setInterval(activeTick, ACTIVE_TICK_MS);
     }
 
     start();
@@ -114,6 +134,7 @@ export function AppBeacon() {
 
     return () => {
       if (timer) clearInterval(timer);
+      if (activeTimer) clearInterval(activeTimer);
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener(AUTH_CHANGED_EVENT, start);
     };

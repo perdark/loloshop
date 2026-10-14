@@ -1,5 +1,30 @@
 # Progress
 
+## 2026-10-14 — 📣 إشعارات الموظفين: خصم الخروج المؤقت للكل + نجم اليوم + رسالة لولو (غير مرفوع)
+
+Owner rulings this session: the deduction is announced to ALL staff **by name and amount**; the AI
+messages each worker **without review**. `lib/staffEngagement.js`, migration **115** (also in
+`schema.sql`), two pg-boss queues registered in `worker.js`.
+- **خصم الخروج المؤقت** — a once-a-minute sweep (not a hook: 11 `recomputeMonth` call sites, all in
+  transactions). Ledger `break_deduction_announcements` keyed on the BREAK, so an admin correction
+  that replaces the salary txn never re-announces. Worker gets a personal copy; everyone else + admins
+  the public one. Breaks older than 3h are never announced (covers first deploy).
+- **نجم اليوم** — 45 min before that weekday's close from `staff_schedule_days` (الجمعة → 23:15),
+  checked every 15 min. Two leaders: most «حركات شغل» and most time in the app.
+- **«حركات الشغل» ≠ production_actions.** ~75% of `staff_activity_log` is `claim`. New
+  `dailyReport.work_moves` = `advance` + audit_log `embroidery_zone`/`tailor_complete`/`approve_design`.
+- **وقت بالتطبيق** — new `POST /api/app/active`, staff only, one ping per VISIBLE minute from
+  `AppBeacon`; server caps to one minute per 50s → `staff_app_opens.active_minutes`. Starts at 0 on deploy.
+- **رسالة لولو** — one per worker present that day (`staff_ai_messages`, UNIQUE per day). Model output
+  must pass `adminAnswerGuard.inspect` (no number outside the facts) + no English/insults/threats, else a
+  template from the same facts is sent. Admin gets a digest push. Kill switch `STAFF_AI_MESSAGES=off`.
+  Dry-run on 4 real workers: 4/4 passed the guard.
+- Admin AI: new metrics `staff_behavior` (per-worker moves · app time · lateness · breaks · deductions)
+  and `staff_ai_messages`.
+- Verified: `test/staffEngagement.test.js` 10/10; full suite 884 pass / 9 fail — **the same 9 fail with
+  this diff stashed** (snapshot-dependent, see memory). `tsc` + eslint clean.
+- ⚠️ Deploy order: migration 115 must apply before the worker restarts (deploy.sh's migrate does it).
+
 ## 2026-10-13 — ✏️ أيادي التصميم: تعديل نص وصور الطلب + دفعات الممثلين (`33f93f1`, منشور)
 
 - **الدفعات:** مكتب `/design-support` صار يشمل طلبات الممثلين **الموافق عليها فقط**؛ «بانتظار
