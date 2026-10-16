@@ -201,6 +201,63 @@ async function fetchQueueScoped(params: Record<string, string>): Promise<ScopedQ
 }
 
 /**
+ * GET /production/queue/view — what /staff/queue shows: ONE page of rows plus every count
+ * around it (stage rail, KPI strip, source tabs, rep cards, garment chips), computed on the
+ * server. Replaces downloading the whole line (8k rows, ~8 MB) to show 30 of them; see
+ * backend/lib/queueView.js. The station consoles still use getQueueScoped.
+ */
+export interface QueueStageStat {
+  count: number;
+  overdue: number;
+  missing: number;
+}
+
+export interface QueueView {
+  data: ProductionQueueItem[];
+  total: number;
+  page: number;
+  per_page: number;
+  stage_stats: Partial<Record<OrderStatus, QueueStageStat>>;
+  kpi: { in_production: number; ready: number; delivered: number; overdue: number; missing: number };
+  source_counts: { all: number; retail: number; wholesaler: number };
+  reps: { name: string; batches: string[]; orderCount: number; readyCount: number }[];
+  /** null when no rep is selected; false when the selected rep has no live orders left. */
+  rep_exists: boolean | null;
+  rep_batches: string[];
+  garments: Partial<Record<string, number>>;
+  ids_window: string[];
+  ids_offset: number;
+  show_price: boolean;
+  my_stages: OrderStatus[];
+  view_stages: OrderStatus[];
+}
+
+export interface QueueViewParams {
+  stage?: OrderStatus;
+  source?: "retail" | "wholesaler";
+  rep?: string | null;
+  batch?: string;
+  garment?: string;
+  zone?: string;
+  q?: string;
+  page?: number;
+}
+
+export async function getQueueView(p: QueueViewParams): Promise<QueueView> {
+  const params: Record<string, string> = {};
+  if (p.stage) params.stage = p.stage;
+  if (p.source) params.source = p.source;
+  if (p.rep != null && p.source === "wholesaler") params.rep = p.rep;
+  if (p.batch) params.batch = p.batch;
+  if (p.garment) params.garment = p.garment;
+  if (p.zone) params.zone = p.zone;
+  if (p.q && p.q.trim()) params.q = p.q.trim();
+  if (p.page && p.page > 1) params.page = String(p.page);
+  const { data } = await api.get<QueueView>("/production/queue/view", { params });
+  return data;
+}
+
+/**
  * GET /production/orders/:id
  * Returns the projected detail respecting the caller's staff_type
  * (presser sees no canvas; can_see_design=false).

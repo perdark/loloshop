@@ -3,7 +3,8 @@ const shawlPiece = require('../lib/shawlPiece');
 const { canStaffTransition, STATUS_LABEL_AR, TRANSITIONS, orderZoneClause, LINE_STAFF } = require('./orderController');
 const { signSseTicket, staffScopeAllows, staffTypesOf } = require('../middleware/auth');
 const { imageUpload, publicUrl } = require('../lib/upload');
-const { addClient, publish } = require('../lib/eventBus');
+const { addClient, publish, onPublish } = require('../lib/eventBus');
+const { buildQueueView } = require('../lib/queueView');
 // رف التجهيز: a piece leaving التجهيز (revert) or being deleted must give up its خانة,
 // otherwise the shelf shows a bin occupied by something no longer physically there.
 // NB lib/shelf.js lazily requires THIS module back (for performAdvance) — that cycle is
@@ -514,11 +515,15 @@ async function getAssemblyBoard(req, res) {
 }
 
 // ---------- Stage-scoped work queue for the requesting staff member ----------
-async function getQueue(req, res) {
+// The rows behind both GET /queue (the whole line, for the station consoles) and
+// GET /queue/view (one page of it + its counts, for /staff/queue). `opts.stageParam` /
+// `opts.sourceParam` are the SQL narrowings /queue has always honoured; /queue/view passes
+// neither, because its stage rail and source tabs count the stages it is NOT showing.
+async function loadQueueRows(req, opts = {}) {
   const u = req.user;
   let stages;
   if (isManager(u)) {
-    const filter = req.query.stage;
+    const filter = opts.stageParam;
     stages = filter && MANAGER_VIEW_STAGES.includes(filter) ? [filter] : MANAGER_VIEW_STAGES;
   } else {
     // Union of: the whole line (for anyone who works it) + this person's own station. The
@@ -531,17 +536,38 @@ async function getQueue(req, res) {
     }
     stages = [...set];
   }
-  if (!stages.length) return res.json({ data: [] });
+  if (!stages.length) return { rows: [], stages };
 
   // A designer only reviews designs still awaiting a verdict — but this narrows ONLY the
   // design_complete stage, so a multi-role designer (e.g. designer+embroiderer) still sees
   // their other merged stages unfiltered. Design-less embroidery orders (cap/robe) the
   // designer also handles (design_id IS NULL).
   const designerPending = staffTypesOf(u).includes('designer') && !isManager(u);
-  const sourceFilter = resolveSourceFilter(u, req.query.source);
+  const sourceFilter = resolveSourceFilter(u, opts.sourceParam);
   const srcClause = sourceClause(sourceFilter);
   // Embroidery-zone / pleat filter (sash R/L/back · cap side/top · robe pleats).
   const zoneClause = req.query.zone ? orderZoneClause(req.query.zone, 'o') : null;
+
+  // /queue/view only: share one read of the line between every screen that would get the
+  // same rows (see viewRowsCache). Everything that shapes a row is in the key — the stage
+  // set, the designer narrowing, the source scope, the zone, the staff types (shawl rows
+  // carry a per-role can_advance) and money visibility (price is deleted per role below).
+  if (opts.shared) {
+    const key = JSON.stringify([
+      [...stages].sort(), designerPending, sourceFilter || '', req.query.zone || '',
+      [...staffTypesOf(u)].sort(), u.role,
+    ]);
+    const hit = viewRowsCache.get(key);
+    if (hit && Date.now() - hit.at < VIEW_ROWS_TTL_MS) return { rows: await hit.rows, stages };
+    const rows = fetchQueueRows(req, { u, stages, designerPending, sourceFilter, srcClause, zoneClause });
+    viewRowsCache.set(key, { at: Date.now(), rows });
+    rows.catch(() => viewRowsCache.delete(key));
+    return { rows: await rows, stages };
+  }
+  return { rows: await fetchQueueRows(req, { u, stages, designerPending, sourceFilter, srcClause, zoneClause }), stages };
+}
+
+async function fetchQueueRows(req, { u, stages, designerPending, sourceFilter, srcClause, zoneClause }) {
   const { rows } = await query(
     // ⚠️ THE THREE PER-ROW LOOKUPS BELOW ARE CTEs, NOT CORRELATED SUBQUERIES, AND THAT IS
     // A MEASUREMENT — do not "simplify" one back inline. This query has no LIMIT (the board
@@ -795,8 +821,52 @@ async function getQueue(req, res) {
   // ⚠️ `require` is INSIDE the function on purpose: staffController requires THIS module at
   // top level (nextStageFor + QUEUE_STAGES), so a top-level require here is a cycle. Same
   // resolution lib/shelf.js already uses in the other direction.
+  return rows;
+}
+
+// /queue/view's shared read of the line. Without it, ONE production event makes every open
+// /staff/queue tab re-ask within the same second, and each ask is a full read of the line.
+// With it they share one. It can never serve rows from before a move: every publish() clears
+// it (a move, a new order, a presence change), and the clients only re-ask BECAUSE of a
+// publish, so the cache only ever spans the gap between two events. TTL is the backstop.
+const viewRowsCache = new Map();
+const VIEW_ROWS_TTL_MS = 5000;
+onPublish(() => viewRowsCache.clear());
+
+async function getQueue(req, res) {
+  const { rows, stages } = await loadQueueRows(req, {
+    stageParam: req.query.stage,
+    sourceParam: req.query.source,
+  });
+  if (!stages.length) return res.json({ data: [] });
   const { viewerStages } = require('./staffController');
-  res.json({ data: rows, my_stages: viewerStages(u), view_stages: stages });
+  res.json({ data: rows, my_stages: viewerStages(req.user), view_stages: stages });
+}
+
+// ---------- GET /queue/view — /staff/queue's one page + every count around it ----------
+// See lib/queueView.js for why. Never ?station=1: the enrichment is the station consoles'.
+async function getQueueView(req, res) {
+  const viewReq = { ...req, query: { ...req.query, station: undefined } };
+  const { rows, stages } = await loadQueueRows(viewReq, { shared: true });
+  const { viewerStages } = require('./staffController');
+  const u = req.user;
+  const view = buildQueueView(rows, {
+    stage: typeof req.query.stage === 'string' ? req.query.stage : null,
+    source: req.query.source,
+    rep: typeof req.query.rep === 'string' ? req.query.rep : null,
+    batch: typeof req.query.batch === 'string' ? req.query.batch : null,
+    garment: typeof req.query.garment === 'string' ? req.query.garment : null,
+    q: typeof req.query.q === 'string' ? req.query.q.slice(0, 200) : '',
+    page: req.query.page,
+  });
+  res.json({
+    ...view,
+    // Money is a property of the ROLE (the same rule that deleted price above), so the
+    // column must not depend on whether this page happens to hold a priced row.
+    show_price: isManager(u) || staffTypesOf(u).includes('preparer'),
+    my_stages: stages.length ? viewerStages(u) : [],
+    view_stages: stages,
+  });
 }
 
 // ---------- Stage-appropriate order projection (presser NEVER receives the canvas) ----------
@@ -2533,7 +2603,7 @@ async function deleteOrder(req, res) {
 }
 
 module.exports = {
-  getQueue, getAssemblyBoard, getOrder, advance, advanceBulk, deliver, revert, returnToCustomer, claim, release, completed, uploadFinalDesign, monitor, presence,
+  getQueue, getQueueView, getAssemblyBoard, getOrder, advance, advanceBulk, deliver, revert, returnToCustomer, claim, release, completed, uploadFinalDesign, monitor, presence,
   issueEventsTicket, streamEvents, nextStageFor, markEmbroideryZone, markEmbroideryZoneBulk,
   tailorQueue, tailorComplete, tailorReopen, tailorCompleteBulk, tailorSummary,
   deleteOrder,

@@ -17,11 +17,15 @@
 
 const KEY = "loloshop-console:queue-order";
 
-/** Remember the ids the console is currently showing, in the order it shows them. */
-export function rememberQueueOrder(ids: string[]): void {
+/** Remember the ids the console is currently showing, in the order it shows them.
+ *
+ * `slice` — when the console holds only a WINDOW of a longer server-side list (/staff/queue
+ * since 2026-10-16 gets ~5 pages of ids, not all 8k), where that window starts and how long
+ * the whole list is, so «٣ من ١٢٠» still counts the real list rather than the window. */
+export function rememberQueueOrder(ids: string[], slice?: { offset: number; total: number }): void {
   if (typeof window === "undefined") return;
   try {
-    sessionStorage.setItem(KEY, JSON.stringify(ids));
+    sessionStorage.setItem(KEY, JSON.stringify(slice ? { ids, ...slice } : ids));
   } catch {
     /* private mode / quota — the feature degrades to "no neighbours", which is the old behaviour */
   }
@@ -47,6 +51,15 @@ export function queueNeighbors(orderId: string): QueueNeighbors | null {
   } catch {
     return null;
   }
+  // Two stored shapes: a plain array (the whole list) or { ids, offset, total } (a window).
+  let offset = 0;
+  let total: number | null = null;
+  if (ids && !Array.isArray(ids) && typeof ids === "object") {
+    const w = ids as { ids?: unknown; offset?: unknown; total?: unknown };
+    offset = typeof w.offset === "number" ? w.offset : 0;
+    total = typeof w.total === "number" ? w.total : null;
+    ids = w.ids;
+  }
   if (!Array.isArray(ids)) return null;
   const list = ids.filter((v): v is string => typeof v === "string");
   const i = list.indexOf(orderId);
@@ -54,7 +67,7 @@ export function queueNeighbors(orderId: string): QueueNeighbors | null {
   return {
     prev: i > 0 ? list[i - 1] : null,
     next: i < list.length - 1 ? list[i + 1] : null,
-    position: i + 1,
-    total: list.length,
+    position: offset + i + 1,
+    total: total ?? list.length,
   };
 }

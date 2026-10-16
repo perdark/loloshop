@@ -14,6 +14,8 @@ router.get('/events', authQuery, requireRole('admin', 'staff'), c.streamEvents);
 router.use(authRequired, requireRole('admin', 'staff'));
 
 router.get('/queue', c.getQueue);
+// /staff/queue: one page + its counts (lib/queueView.js) instead of the whole line.
+router.get('/queue/view', c.getQueueView);
 // «التجميع» board (برزان): rep sashes arriving from التطريز + ready to sew. Line-wide read,
 // same rule as the queue; the controller refuses مفصل/non-line types itself.
 router.get('/assembly', c.getAssemblyBoard);

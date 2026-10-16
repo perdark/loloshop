@@ -8,10 +8,9 @@ import { PageLoader } from "@/components/ui/Spinner";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { AssemblyBoard } from "@/components/staff/station/AssemblyBoard";
-import { deleteProductionOrder, getQueueScoped } from "@/lib/staff";
+import { deleteProductionOrder, getQueueView, type QueueStageStat, type QueueView } from "@/lib/staff";
 import { getUser } from "@/lib/auth";
 import { getApiErrorMessage } from "@/lib/api";
-import { matchesQueueSearch } from "@/lib/queue-search";
 import { rememberQueueOrder } from "@/lib/queue-neighbors";
 import {
   ORDER_STATUS_LABELS,
@@ -24,7 +23,7 @@ import {
   type EmbroideryZone,
 } from "@/lib/constants";
 import { formatIQD } from "@/lib/format";
-import { usePolling } from "@/lib/hooks/usePolling";
+import { useProductionEvents, type ProductionEvent } from "@/hooks/useProductionEvents";
 import { useScrollRestore } from "@/hooks/useScrollRestore";
 import type { ProductionQueueItem } from "@/lib/staff-types";
 import type { OrderStatus, StaffType } from "@/lib/types";
@@ -44,7 +43,8 @@ const STAGES: OrderStatus[] = [
   "delivered",
 ];
 
-const PER_PAGE = 30;
+const PER_PAGE = 30; // must match backend lib/queueView.js PER_PAGE
+const EMPTY_STAGES: OrderStatus[] = [];
 
 // Stage pill visual coding — WARM brand palette only (no blue/purple/navy).
 const STAGE_PILL: Record<OrderStatus, string> = {
@@ -119,29 +119,13 @@ function deadlineLabel(item: ProductionQueueItem): { text: string; cls: string }
   return { text: `منذ ${Math.floor(hrs / 24)} يوم`, cls: "text-muted" };
 }
 
-// ─── Rep grouping (derived from loaded data, no extra API call) ───────────────
+// ─── Rep cards (computed by the server — lib/queueView.js) ─────────────────────
 
 interface RepCard {
   name: string;
   batches: string[];
   orderCount: number;
   readyCount: number;
-}
-
-function buildRepsOverview(items: ProductionQueueItem[]): RepCard[] {
-  const map = new Map<string, ProductionQueueItem[]>();
-  for (const item of items) {
-    const key = item.wholesaler_name ?? "—";
-    const list = map.get(key) ?? [];
-    list.push(item);
-    map.set(key, list);
-  }
-  return Array.from(map.entries()).map(([name, repItems]) => ({
-    name,
-    batches: [...new Set(repItems.map((i) => i.batch_name).filter(Boolean) as string[])],
-    orderCount: repItems.length,
-    readyCount: repItems.filter((i) => i.status === "ready").length,
-  }));
 }
 
 // ─── Skeleton ─────────────────────────────────────────────────────────────────
@@ -159,7 +143,10 @@ function TableSkeleton() {
 // ─── Stage rail (desktop: vertical sidebar; mobile: horizontal chip strip) ───
 
 interface StageRailProps {
-  items: ProductionQueueItem[];
+  /** Per-stage numbers for the whole line, from the server. */
+  stats: Partial<Record<OrderStatus, QueueStageStat>>;
+  /** «الكل» — everything still in production (delivered has its own chip). */
+  total: number;
   activeStage: OrderStatus | undefined;
   onSelect: (s: OrderStatus | undefined) => void;
   /** The viewer's own station(s) — backend `my_stages`. Marked «مرحلتي» and pulled to the
@@ -168,28 +155,13 @@ interface StageRailProps {
   mine: OrderStatus[];
 }
 
-function StageRail({ items, activeStage, onSelect, mine }: StageRailProps) {
+function StageRail({ stats: statByStage, total, activeStage, onSelect, mine }: StageRailProps) {
   const mineSet = useMemo(() => new Set<OrderStatus>(mine), [mine]);
   // «مرحلتي» first, then the rest of the line in walking order.
   const orderedStages = useMemo(
     () => [...STAGES.filter((s) => mineSet.has(s)), ...STAGES.filter((s) => !mineSet.has(s))],
     [mineSet]
   );
-  // "الكل" counts in-production only; delivered has its own chip (matches the list filter).
-  const total = items.filter((i) => i.status !== "delivered").length;
-
-  const statByStage = useMemo(() => {
-    const m: Record<string, { count: number; overdue: number; missing: number }> = {};
-    for (const item of items) {
-      const s = item.status;
-      if (!m[s]) m[s] = { count: 0, overdue: 0, missing: 0 };
-      m[s].count++;
-      if (isOverdue(item)) m[s].overdue++;
-      if (isMissingDesign(item)) m[s].missing++;
-    }
-    return m;
-  }, [items]);
-
   // ── Mobile: horizontal scrollable chips ──────────────────────────────────────
   // ── Desktop: vertical list (handled by parent grid) ─────────────────────────
 
@@ -368,12 +340,8 @@ function StageRail({ items, activeStage, onSelect, mine }: StageRailProps) {
 
 // ─── KPI strip ────────────────────────────────────────────────────────────────
 
-function KpiStrip({ items }: { items: ProductionQueueItem[] }) {
-  const inProd    = items.filter((i) => i.status !== "ready" && i.status !== "delivered").length;
-  const ready     = items.filter((i) => i.status === "ready").length;
-  const delivered = items.filter((i) => i.status === "delivered").length;
-  const overdue   = items.filter(isOverdue).length;
-  const missing   = items.filter(isMissingDesign).length;
+function KpiStrip({ kpi: totals }: { kpi: QueueView["kpi"] }) {
+  const { in_production: inProd, ready, delivered, overdue, missing } = totals;
 
   const kpi = (val: number, label: string, valCls: string) => (
     <div className="flex items-center gap-2 rounded-lg border border-line bg-surface-sink px-3 py-1.5">
@@ -418,11 +386,6 @@ function orderPriceLabel(item: ProductionQueueItem): { text: string; isSet: bool
   const n = Number(raw);
   if (!Number.isFinite(n)) return null;
   return { text: formatIQD(n), isSet: bundled };
-}
-
-/** True once any row carries money — drives the desktop column header on/off as one unit. */
-function anyPriceVisible(items: ProductionQueueItem[]): boolean {
-  return items.some((i) => i.price !== undefined || i.group_price !== undefined);
 }
 
 // ─── Mobile order card ────────────────────────────────────────────────────────
@@ -869,54 +832,90 @@ function ConsoleContent() {
 
   // True once the restored stage/source/rep/zone (if any) are actually reflected in the URL —
   // either nothing needed rehydrating, or the mount-time `router.replace` below has committed.
-  // Next's search-param update runs as a low-priority transition, so the (normal-priority) first
-  // fetch's `setItems`/`setLoadedOnce` can commit BEFORE it — at that instant `stage`/`source`/
-  // `repParam` still read their pre-rehydration (empty) values even though `loadedOnce` just
-  // became true. The page-clamp effect below must wait for BOTH `loadedOnce` AND this flag, else
-  // it clamps a restored page against a `filtered` list computed from stale (unrehydrated)
-  // filters. `searchParams.toString() !== ""` is a safe proxy for "the rehydration landed" since
+  // Next's search-param update runs as a low-priority transition, so until it commits
+  // `stage`/`source`/`repParam` still read their pre-rehydration (empty) values. The fetch waits
+  // for this flag, so a restored console asks the server once — with the restored filters —
+  // instead of first asking for «الكل» and having the server clamp the restored page to 1.
+  // `searchParams.toString() !== ""` is a safe proxy for "the rehydration landed" since
   // rehydration is the only thing that can turn an initially-bare URL non-empty.
   const needsRehydration = Boolean(stored.stage || stored.source || stored.rep || stored.zone);
   const rehydrated = searchParams.toString() !== "" || !needsRehydration;
 
   // ── Local state ────────────────────────────────────────────────────────────
-  const [items,      setItems]      = useState<ProductionQueueItem[]>([]);
+  // ONE PAGE + ITS COUNTS, from the server (GET /production/queue/view, 2026-10-16). This
+  // screen used to download the whole line — 8k rows, ~8 MB — every 15 s per open tab, and
+  // filter/count/page it here to show 30 rows. Every filter below is now a request param, and
+  // the page refreshes on production EVENTS, not on a timer (see the useProductionEvents call).
+  const [view,       setView]       = useState<QueueView | null>(null);
   const [loading,    setLoading]    = useState(true);
+  // A later load (filter change, live event) keeps the current list on screen, dimmed.
+  const [fetching,   setFetching]   = useState(false);
   // TRUE after the first successful fetch — restored rep/batch/page validation must not run
-  // (and wrongly wipe restored state) against the EMPTY pre-fetch `items` list.
+  // (and wrongly wipe restored state) before the server has answered once.
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [error,      setError]      = useState(false);
   const [search,     setSearch]     = useState(stored.search ?? "");
+  // What the server is asked for: the box, 300 ms after the last keystroke.
+  const [searchQ,    setSearchQ]    = useState(stored.search ?? "");
   const [page,       setPage]       = useState(stored.page ?? 1);
   const [selectedBatch, setSelectedBatch] = useState(stored.batch ?? "");
   const [zonesOpen,  setZonesOpen]  = useState(stored.zonesOpen ?? false);
   const [pieceType,  setPieceType]  = useState(stored.pieceType ?? "");
+  const [stageDefaulted, setStageDefaulted] = useState(stored.stageDefaulted === true);
+
+  const items = view?.data ?? [];
   // The stages this viewer personally works — «مرحلتي». `[]` for manager/admin/مفصل, who
   // have no station and correctly keep opening on «الكل». Comes from the backend; never
   // re-derived here (see the viewerStages landmine).
-  const [myStages,   setMyStages]   = useState<OrderStatus[]>([]);
-  const [stageDefaulted, setStageDefaulted] = useState(stored.stageDefaulted === true);
+  const myStages = view?.my_stages ?? EMPTY_STAGES;
 
-  // ── Fetch — zone is the only server-side filter ────────────────────────────
+  useEffect(() => {
+    const t = setTimeout(() => setSearchQ(search), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  // ── Fetch ──────────────────────────────────────────────────────────────────
+  // Latest request wins: a slow answer for an old filter must never overwrite a newer one.
+  const reqSeq = useRef(0);
   const load = useCallback(
     async (silent = false) => {
-      if (!silent) setLoading(true);
-      setError(false);
+      const seq = ++reqSeq.current;
+      if (!silent) setFetching(true);
       try {
-        // Pass zone only — stage/source/rep are client-side filters
-        const res = await getQueueScoped(undefined, undefined, effectiveZone);
-        setItems(res.items);
-        setMyStages(res.myStages);
+        const res = await getQueueView({
+          stage,
+          source,
+          rep: repParam,
+          batch: repParam !== null && source === "wholesaler" ? selectedBatch : undefined,
+          garment: pieceType || undefined,
+          zone: effectiveZone,
+          q: searchQ,
+          page,
+        });
+        if (seq !== reqSeq.current) return;
+        setView(res);
+        setError(false);
         setLoadedOnce(true);
+        // The server clamps a page past the end to 1 (a restored page, or the last row of a
+        // page just moved on). Follow it so the pager and the rows agree.
+        if (res.page !== page) setPage(res.page);
       } catch (err) {
+        if (seq !== reqSeq.current) return;
         toast.error(getApiErrorMessage(err, "تعذر تحميل قائمة الإنتاج"));
         setError(true);
       } finally {
-        setLoading(false);
+        if (seq === reqSeq.current) {
+          setLoading(false);
+          setFetching(false);
+        }
       }
     },
-    [effectiveZone]
+    [stage, source, repParam, selectedBatch, pieceType, effectiveZone, searchQ, page]
   );
+  const loadRef = useRef(load);
+  useEffect(() => {
+    loadRef.current = load;
+  });
 
   async function handleDelete(orderId: string) {
     if (!window.confirm("سيُحذف هذه القطعة فقط نهائياً — بقية قطع الطلب (إن وجدت) تبقى كما هي. هل أنت متأكد؟")) return;
@@ -958,7 +957,7 @@ function ConsoleContent() {
     if (!loadedOnce || stageDefaulted || !rehydrated) return;
     setStageDefaulted(true);
     if (stage || !myStages.length) return;
-    const own = myStages.find((st) => items.some((i) => i.status === st)) ?? myStages[0];
+    const own = myStages.find((st) => (view?.stage_stats[st]?.count ?? 0) > 0) ?? myStages[0];
     router.replace(buildUrl({ stage: own, source, rep: repParam ?? undefined, zone: zoneParam }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadedOnce, rehydrated, stageDefaulted, myStages, stage]);
@@ -988,22 +987,51 @@ function ConsoleContent() {
   // switching stage starts at the top (a new list), while «رجوع» from a piece does not.
   useScrollRestore(`staff-queue:${stage}:${page}`, loadedOnce && !loading);
 
-  // `load` only changes identity when `effectiveZone` genuinely changes (the mount-time URL
-  // rehydration above never flips it — see storedZoneFallback), so this still fires exactly
-  // once per real zone change. Skip the very first (mount) run's page reset so a restored page
-  // survives; every later run is a real filter change.
-  const isFirstLoadRef = useRef(true);
+  // Every filter is a request param now, so any change re-asks the server. Held until the
+  // restored filters have landed in the URL, so a restore costs one request, not two.
   useEffect(() => {
-    load();
-    if (isFirstLoadRef.current) {
-      isFirstLoadRef.current = false;
-    } else {
-      setPage(1);
-    }
-  }, [load]);
+    if (!rehydrated) return;
+    void load();
+  }, [load, rehydrated]);
 
-  // ── Silent 15 s polling ────────────────────────────────────────────────────
-  usePolling(() => load(true), 15000);
+  // ── Live updates — events, not a timer ─────────────────────────────────────
+  // A piece moving anywhere on the line can change this page's rows AND its counts, so an
+  // order event re-asks for the current page (a burst of moves coalesces into one request).
+  // A presence change only renames «يعمل عليه» on a row already on screen — patched in place.
+  // `onResync` covers what events cannot: a stream that dropped (a deploy cuts every one)
+  // or a tab that slept, either of which may have missed moves.
+  const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (reloadTimer.current) clearTimeout(reloadTimer.current);
+  }, []);
+  const scheduleReload = useCallback(() => {
+    if (reloadTimer.current) return;
+    reloadTimer.current = setTimeout(() => {
+      reloadTimer.current = null;
+      void loadRef.current(true);
+    }, 800);
+  }, []);
+  useProductionEvents(
+    (e: ProductionEvent) => {
+      if (e.type === "presence") {
+        if (!e.orderId) return;
+        setView((v) =>
+          v && v.data.some((r) => r.id === e.orderId)
+            ? {
+                ...v,
+                data: v.data.map((r) =>
+                  r.id === e.orderId ? { ...r, working_staff_name: e.working_staff_name ?? null } : r
+                ),
+              }
+            : v
+        );
+        return;
+      }
+      scheduleReload();
+    },
+    true,
+    scheduleReload
+  );
 
   // Reset batch when rep changes. Skip while the initial fetch hasn't resolved yet — the
   // mount-time URL rehydration above can flip repParam from empty to a restored value before
@@ -1038,6 +1066,11 @@ function ConsoleContent() {
     setPage(1);
   }
 
+  function setBatch(b: string) {
+    setSelectedBatch(b);
+    setPage(1);
+  }
+
   function setZone(z: EmbroideryZone | undefined) {
     // The garment row and the pleat row are two answers to one question («أي قطعة؟»), so
     // they are exclusive: «شال» + «روب بكسرات» is an empty list dressed up as a filter.
@@ -1061,118 +1094,63 @@ function ConsoleContent() {
   const visibleZones: EmbroideryZone[] =
     zoneParam && !zoneOptions.includes(zoneParam) ? [...zoneOptions, zoneParam] : zoneOptions;
 
-  // ── Client-side filtering ──────────────────────────────────────────────────
-  // Plain derived value, deliberately unmemoised: a manual useMemo here could not be
-  // preserved because it aliased/reassigned `items`. ⚠️ It is NOT compiler-memoised either —
-  // this line used to claim the React Compiler handled it, and the compiler is not enabled in
-  // this app (no `experimental.reactCompiler`, no babel plugin). So this really does re-run on
-  // every render; it is accepted at this row count, not free.
-  const q = search.trim().toLowerCase();
-  // Everything EXCEPT the garment chip — this is the population the chips count, so a chip
-  // never disappears the moment it is pressed (same rule as PrepConsole's garmentChips).
-  const beforeGarment = items.filter((i) => {
-    if (stage && i.status !== stage) return false;
-    // "الكل" means everything still in production — delivered shows only under its own chip.
-    if (!stage && i.status === "delivered") return false;
-    if (source === "retail" && i.source !== "retail") return false;
-    if (source === "wholesaler" && i.source !== "wholesaler") return false;
-    if (repParam !== null && source === "wholesaler") {
-      if ((i.wholesaler_name ?? "—") !== repParam) return false;
-      if (selectedBatch && i.batch_name !== selectedBatch) return false;
-    }
-    // Student / university / department / rep AND the التطريز text, Arabic-normalised —
-    // shared with المجهز's console so the two screens cannot disagree about what "search"
-    // means. See lib/queue-search.ts.
-    if (!matchesQueueSearch(i, q)) return false;
-    return true;
-  });
-  const filtered = pieceType
-    ? beforeGarment.filter((i) => i.product_type === pieceType)
-    : beforeGarment;
+  // ── What the server computed ───────────────────────────────────────────────
+  const total = view?.total ?? 0;
 
-  // The garments actually present, in a fixed order — a chip is never offered for a garment
-  // this list does not hold, so «شال ٠» can't happen.
+  // The garments actually present (counted before the garment chip, so a chip never vanishes
+  // the moment it is pressed), in a fixed order — so «شال ٠» can't happen.
   const garmentChips = GARMENT_FILTER_ORDER.map((t) => ({
     type: t,
-    count: beforeGarment.filter((i) => i.product_type === t).length,
+    count: view?.garments[t] ?? 0,
   })).filter((c) => c.count > 0);
 
   // A garment that leaves the list (switching stage, or the last شال packed) would otherwise
   // filter the page to nothing behind a chip row that no longer offers it.
   const garmentKeys = garmentChips.map((c) => c.type).join(",");
   useEffect(() => {
-    if (!loadedOnce || !pieceType) return;
+    if (!loadedOnce || !pieceType || fetching) return;
     if (!garmentKeys.split(",").includes(pieceType)) setPieceType("");
-  }, [garmentKeys, pieceType, loadedOnce]);
+  }, [garmentKeys, pieceType, loadedOnce, fetching]);
 
-  // Hand the order page its «السابق»/«التالي» (bug 8, part 3). The FILTERED list, not the
-  // visible page, so stepping past the bottom of page 1 continues instead of dead-ending.
+  // Hand the order page its «السابق»/«التالي» (bug 8, part 3): the filtered list's ids around
+  // this page, plus where that window sits, so stepping past the bottom of a page continues.
   // In an effect, not during render: this writes to sessionStorage.
-  const filteredIds = filtered.map((i) => i.id).join(",");
+  const idsKey = view ? `${view.ids_offset}:${view.total}:${view.ids_window.join(",")}` : "";
   useEffect(() => {
-    rememberQueueOrder(filteredIds ? filteredIds.split(",") : []);
-  }, [filteredIds]);
+    if (!view) return;
+    rememberQueueOrder(view.ids_window, { offset: view.ids_offset, total: view.total });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idsKey]);
 
   // ── Source counts (for tab badges) ────────────────────────────────────────
-  const stageItems   = stage ? items.filter((i) => i.status === stage) : items;
-  const countAll     = stageItems.length;
-  const countRetail  = stageItems.filter((i) => i.source === "retail").length;
-  const countWholer  = stageItems.filter((i) => i.source === "wholesaler").length;
+  const countAll    = view?.source_counts.all ?? 0;
+  const countRetail = view?.source_counts.retail ?? 0;
+  const countWholer = view?.source_counts.wholesaler ?? 0;
 
   // ── Reps overview ──────────────────────────────────────────────────────────
-  const wholesalerItems = useMemo(
-    () => items.filter((i) => i.source === "wholesaler"),
-    [items]
-  );
-  const repsOverview = useMemo(() => buildRepsOverview(wholesalerItems), [wholesalerItems]);
-
-  // Batches for selected rep (memoized — it's a dependency of the prune effect below).
-  const repBatches: string[] = useMemo(
-    () =>
-      !repParam
-        ? []
-        : [
-            ...new Set(
-              items
-                .filter((i) => i.source === "wholesaler" && (i.wholesaler_name ?? "—") === repParam)
-                .map((i) => i.batch_name)
-                .filter((b): b is string => Boolean(b))
-            ),
-          ],
-    [items, repParam]
-  );
+  const repsOverview: RepCard[] = view?.reps ?? [];
+  const repBatches: string[] = view?.rep_batches ?? [];
 
   // A restored rep/batch (from a stale sessionStorage snapshot) may no longer have live
   // orders — degrade to "الكل"/"كل الدفعات" instead of a stuck-empty drill-down. Gated on
-  // loadedOnce so it never runs against the empty pre-fetch list.
+  // loadedOnce so it never runs before the server has answered.
+  const repExists = view?.rep_exists;
+  const repBatchesKey = repBatches.join("\u0001");
   useEffect(() => {
-    if (!loadedOnce || !repParam) return;
-    const repStillExists = items.some(
-      (i) => i.source === "wholesaler" && (i.wholesaler_name ?? "—") === repParam
-    );
-    if (!repStillExists) {
+    if (!loadedOnce || !repParam || fetching) return;
+    if (repExists === false) {
       router.replace(buildUrl({ stage, zone: zoneParam }));
       return;
     }
     if (selectedBatch && !repBatches.includes(selectedBatch)) setSelectedBatch("");
-  }, [loadedOnce, items, repParam, selectedBatch, repBatches, stage, zoneParam, router]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadedOnce, fetching, repExists, repParam, selectedBatch, repBatchesKey, stage, zoneParam, router]);
 
   // ── Pagination ────────────────────────────────────────────────────────────
-  const pageItems = filtered.slice((page - 1) * PER_PAGE, (page - 1) * PER_PAGE + PER_PAGE);
-  // Derived from the WHOLE fetch, not the current page: whether money is visible is a
-  // property of the viewer's role, so the column must not appear and vanish while paging
-  // through (a page that happens to hold only rows with a null price would otherwise drop it).
-  const showPrice = anyPriceVisible(items);
-
-  // A restored page number may exceed the fresh list's page count — degrade to page 1 instead
-  // of silently rendering an empty slice. Gated on `rehydrated` too (see definition above) so
-  // this never clamps against a `filtered` count computed before the mount-time URL rehydration
-  // has actually landed.
-  useEffect(() => {
-    if (!loadedOnce || !rehydrated) return;
-    const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
-    if (page > totalPages) setPage(1);
-  }, [loadedOnce, rehydrated, filtered.length, page]);
+  const pageItems = items;
+  // A property of the viewer's ROLE, sent by the server — so the column never appears and
+  // vanishes while paging through a page that happens to hold only unpriced rows.
+  const showPrice = view?.show_price ?? false;
 
   // Whether to show rep grid vs table
   const showRepGrid     = source === "wholesaler" && repParam === null;
@@ -1235,7 +1213,7 @@ function ConsoleContent() {
       {/* ── KPI strip ──────────────────────────────────────────────────────── */}
       {!loading && !error && (
         <div className="mb-4">
-          <KpiStrip items={items} />
+          <KpiStrip kpi={view?.kpi ?? { in_production: 0, ready: 0, delivered: 0, overdue: 0, missing: 0 }} />
         </div>
       )}
 
@@ -1244,7 +1222,8 @@ function ConsoleContent() {
 
         {/* Stage rail (desktop left sidebar + mobile horizontal strip) */}
         <StageRail
-          items={items}
+          stats={view?.stage_stats ?? {}}
+          total={view ? Object.entries(view.stage_stats).reduce((n, [st, v]) => (st === "delivered" ? n : n + (v?.count ?? 0)), 0) : 0}
           activeStage={stage}
           mine={myStages}
           onSelect={setStage}
@@ -1259,7 +1238,10 @@ function ConsoleContent() {
             <AssemblyBoard />
           </div>
         )}
-        <div className="flex w-full min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-line bg-surface">
+        <div
+          className={`flex w-full min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-line bg-surface transition-opacity ${fetching ? "opacity-60" : ""}`}
+          aria-busy={fetching}
+        >
 
           {/* Toolbar */}
           <div className="border-b border-line bg-beige px-4 py-2 space-y-2">
@@ -1327,7 +1309,7 @@ function ConsoleContent() {
                   <>
                     <button
                       type="button"
-                      onClick={() => setSelectedBatch("")}
+                      onClick={() => setBatch("")}
                       className={chipCls(selectedBatch === "")}
                     >
                       كل الدفعات
@@ -1336,7 +1318,7 @@ function ConsoleContent() {
                       <button
                         key={b}
                         type="button"
-                        onClick={() => setSelectedBatch(b)}
+                        onClick={() => setBatch(b)}
                         className={chipCls(selectedBatch === b)}
                       >
                         {b}
@@ -1365,8 +1347,8 @@ function ConsoleContent() {
 
               {!loading && (
                 <span className="me-auto text-xs text-muted ms-auto">
-                  {/* PIECES — `filtered` holds queue rows, one per piece. */}
-                  يُعرض <strong className="text-ink">{filtered.length}</strong> قطعة
+                  {/* PIECES — the server counts queue rows, one per piece. */}
+                  يُعرض <strong className="text-ink">{total}</strong> قطعة
                 </span>
               )}
             </div>
@@ -1435,7 +1417,7 @@ function ConsoleContent() {
               reps={repsOverview}
               onSelect={(name) => setRep(name)}
             />
-          ) : filtered.length === 0 ? (
+          ) : total === 0 ? (
             <EmptyState message="لا توجد طلبات مطابقة في هذه المرحلة" />
           ) : (
             <>
@@ -1486,7 +1468,7 @@ function ConsoleContent() {
 
               {/* Pagination */}
               <Pagination
-                total={filtered.length}
+                total={total}
                 page={page}
                 onPage={(p) => setPage(p)}
               />
