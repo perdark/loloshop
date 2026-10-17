@@ -1,5 +1,15 @@
 # Progress
 
+## 2026-10-17 — ↩️ الرجوع من قطعة ثانية بنفس الطلب يرجّع لمكانك بالفصال
+
+Report: worker scrolls deep in الفصال → opens a student's وشاح → taps the قبعة in «الباقة الكاملة»
+→ goes back → lands at the TOP of الفصال. Cause: the package/«افتح الوشاح» links on
+`staff/orders/[orderId]/page.tsx` dropped `?from=`, so on the second piece every exit (العودة +
+every action's `router.push(back.href)`) went to the role home (`/staff` → replaced to the top of
+`/staff/tailor` for the tailor, `/admin` for admin). Now they use `siblingHref` and `replace`, so one
+swipe back from the قبعة lands on the list at the saved offset. Verified locally at 375px: list
+y=20000 → وشاح → قبعة → one back → `/staff/tailor` y=20000. ⚠️ In the built-in browser pane rAF
+pauses when the pane isn't painted, which makes `useScrollRestore` look broken — click the page first.
 ## 2026-10-16 — ⚡ «خط الإنتاج» يجيب صفحة وحدة + الأرقام، ويتحدّث بالأحداث مو كل 15 ثانية
 
 `/staff/queue` كانت تنزّل الطابور كامل (8,536 صف، 8.4 MB خام، ~900 KB مضغوط) كل 15 ثانية لكل

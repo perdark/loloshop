@@ -1204,6 +1204,11 @@ function ProductionOrderDetailContent() {
     }
   }
 
+  // Every hop to another piece of the SAME student (package box, «افتح الوشاح», السابق/التالي)
+  // must carry `from`, or that page's back + every action exits to the role home and the
+  // worker loses his place in the list. The package hops also REPLACE rather than push: they
+  // are switching tabs inside one order, so one swipe back from the قبعة lands on the list
+  // where he was, not on the وشاح he just left (workshop report 2026-10-17).
   const siblingHref = (id: string) =>
     `/staff/orders/${id}?from=${encodeURIComponent(back.href)}`;
 
@@ -1647,7 +1652,8 @@ function ProductionOrderDetailContent() {
           نفسه.{" "}
           {order.carrier_order_id && (
             <Link
-              href={`/staff/orders/${order.carrier_order_id}`}
+              href={siblingHref(order.carrier_order_id)}
+              replace
               className="font-semibold text-orange-ink underline underline-offset-2"
             >
               افتح الوشاح
@@ -2221,7 +2227,7 @@ function ProductionOrderDetailContent() {
                           {rowInner}
                         </div>
                       ) : (
-                        <Link href={`/staff/orders/${bi.id}`} className={rowClass}>
+                        <Link href={siblingHref(bi.id)} replace className={rowClass}>
                           {rowInner}
                         </Link>
                       )}
@@ -2240,7 +2246,8 @@ function ProductionOrderDetailContent() {
                 {package_orders.map((po) => (
                   <li key={po.id} className="flex items-center justify-between gap-2 text-sm">
                     <Link
-                      href={`/staff/orders/${po.id}`}
+                      href={siblingHref(po.id)}
+                      replace
                       className="font-medium text-orange-ink hover:underline"
                     >
                       {po.product_name}
