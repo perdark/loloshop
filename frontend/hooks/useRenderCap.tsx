@@ -15,15 +15,49 @@ import { useEffect, useState } from "react";
  * The cap resets whenever `resetKey` changes (a new search, stage or filter), so a worker
  * never lands in the middle of a list they did not scroll.
  */
-export function useRenderCap<T>(items: T[], resetKey: string, step = 100) {
-  const [limit, setLimit] = useState(step);
+const CAP_PREFIX = "loloshop-cap:";
+
+/** sessionStorage, like useScrollRestore: how far a worker expanded is only meaningful this sitting. */
+function readCap(persistKey: string | undefined, resetKey: string): number | null {
+  if (!persistKey || typeof window === "undefined") return null;
+  try {
+    const n = Number(sessionStorage.getItem(CAP_PREFIX + persistKey + "|" + resetKey));
+    return n > 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCap(persistKey: string | undefined, resetKey: string, n: number) {
+  if (!persistKey) return;
+  try {
+    sessionStorage.setItem(CAP_PREFIX + persistKey + "|" + resetKey, String(n));
+  } catch {
+    /* storage full/unavailable — best-effort */
+  }
+}
+
+/**
+ * ⚠️ `persistKey` IS WHAT MAKES BACK-NAVIGATION WORK (workshop report 2026-10-17). Without it a
+ * worker who pressed «عرض المزيد» four times, opened a student and came back got 100 rows again:
+ * the page was too short for useScrollRestore's saved offset, the browser clamped it, and he
+ * landed far above where he was. The expanded size is remembered per (screen, resetKey), so a
+ * new search/filter still starts at one page — only returning to the SAME list restores it.
+ */
+export function useRenderCap<T>(items: T[], resetKey: string, step = 100, persistKey?: string) {
+  const [limit, setLimit] = useState(() => readCap(persistKey, resetKey) ?? step);
   useEffect(() => {
-    setLimit(step);
-  }, [resetKey, step]);
+    setLimit(readCap(persistKey, resetKey) ?? step);
+  }, [resetKey, step, persistKey]);
   return {
     shown: items.length > limit ? items.slice(0, limit) : items,
     hidden: Math.max(0, items.length - limit),
-    showMore: () => setLimit((n) => n + step),
+    showMore: () =>
+      setLimit((n) => {
+        const next = n + step;
+        writeCap(persistKey, resetKey, next);
+        return next;
+      }),
   };
 }
 

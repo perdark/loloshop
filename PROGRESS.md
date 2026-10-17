@@ -1,5 +1,14 @@
 # Progress
 
+## 2026-10-17 (ب) — «عرض المزيد» ما يضيع لما ترجع من الطالب
+
+Report: worker presses «عرض المزيد» 4× (100 → 500 students), opens one, comes back → list is 100
+again, too short for the saved scroll, so he lands far above. `useRenderCap` now takes a
+`persistKey` and remembers the expanded size in sessionStorage per (screen, resetKey); a new
+search/filter still starts at 100. Wired on الفصال/التطريز/الكوي (StationConsole ×2), التجهيز
+(PrepConsole) and `/staff`. Verified at 375px: 4× more → 500 → student → sibling piece → one back →
+500 rows, y=40002 = where he was.
+
 ## 2026-10-17 — ↩️ الرجوع من قطعة ثانية بنفس الطلب يرجّع لمكانك بالفصال
 
 Report: worker scrolls deep in الفصال → opens a student's وشاح → taps the قبعة in «الباقة الكاملة»

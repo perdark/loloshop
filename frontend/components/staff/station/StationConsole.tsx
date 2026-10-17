@@ -466,7 +466,12 @@ export function StationConsole({
     return [...m.values()];
   }, [inStage]);
   // iPhone: never put every student in the DOM — see useRenderCap's header.
-  const cappedGroups = useRenderCap(groups, `${view}|${search}|${sourceFilter}|${repFilter}|${effectiveStage}`);
+  const cappedGroups = useRenderCap(
+    groups,
+    `${view}|${search}|${sourceFilter}|${repFilter}|${effectiveStage}`,
+    100,
+    `station:${kind}:students`
+  );
 
   // ─── «عرض بالقطع» chips + rows ──────────────────────────────────────────────
   // Counted over the ACTIVE stage, matching the rows below them: counting across the whole
@@ -528,7 +533,9 @@ export function StationConsole({
   // below still selects every row, shown or not, exactly as before.
   const cappedRows = useRenderCap(
     pieceRows,
-    `${view}|${search}|${sourceFilter}|${repFilter}|${effectiveStage}|${activeZone}|${activeType}`
+    `${view}|${search}|${sourceFilter}|${repFilter}|${effectiveStage}|${activeZone}|${activeType}`,
+    100,
+    `station:${kind}:rows`
   );
 
   const selectableIds = useMemo(

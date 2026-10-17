@@ -343,7 +343,12 @@ export function PrepConsole({ showSourceFilter }: { showSourceFilter: boolean })
     return built;
   }, [pieces]);
   // iPhone: never put every student in the DOM — see useRenderCap's header.
-  const cappedGroups = useRenderCap(groups, `${view}|${search}|${sourceFilter}|${repFilter}|${garment}`);
+  const cappedGroups = useRenderCap(
+    groups,
+    `${view}|${search}|${sourceFilter}|${repFilter}|${garment}`,
+    100,
+    "prep"
+  );
 
   const pieceCount = pieces.length;
 

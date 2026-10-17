@@ -329,7 +329,9 @@ function QueueView({
   // iPhone: never put the whole queue in the DOM — see useRenderCap's header.
   const capped = useRenderCap(
     visibleItems,
-    `${stage}|${search}|${sourceFilter}|${zoneFilter}`
+    `${stage}|${search}|${sourceFilter}|${zoneFilter}`,
+    100,
+    `staff-home:${activeTab}`
   );
   const stageCounts = useMemo(() => {
     const m: Partial<Record<OrderStatus, number>> = {};
