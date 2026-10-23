@@ -12,6 +12,13 @@
 // blocks the whole deploy on a new advisory, so a new package here would put the Studio tool
 // permanently inside that gate for no benefit.
 const sharp = require('sharp');
+// SmartAPI sometimes appends a stray `data: [DONE]` line to a non-stream body; a bare JSON.parse
+// fails on it and the image the shop already paid for is thrown away.
+function parseBody(text) {
+  let t = String(text || '').trim().replace(/\s*data:\s*\[DONE\]\s*$/, '');
+  if (t.startsWith('data:')) t = t.slice(5).trim();
+  return JSON.parse(t);
+}
 
 const BASE_URL = 'https://smartapi.shop/v1';
 
@@ -21,7 +28,9 @@ const CHAT_MODEL_FOR = {
   gpt: process.env.STUDIO_GPT_MODEL || 'gpt-5.5',
   claude: process.env.STUDIO_CLAUDE_MODEL || 'claude-sonnet-5',
 };
-const IMAGE_MODEL = process.env.STUDIO_IMAGE_MODEL || 'gpt-6-sol';
+// gpt-6-luna, not gpt-6-sol: measured 2026-10-24 on one prompt, luna was charged 79k tokens vs
+// sol's 242k (coefficient ×1.5 vs ×4) at the same or better quality — its Arabic was legible.
+const IMAGE_MODEL = process.env.STUDIO_IMAGE_MODEL || 'gpt-6-luna';
 
 // Owner's SmartAPI rate (same env as lib/smartapi.js / lib/aiChat.js): 15M tokens for $1.5.
 const USD_PER_TOKEN = Number(process.env.SMARTAPI_USD_PER_MTOK || 0.1) / 1e6;
@@ -42,9 +51,16 @@ function modelIdFor(uiModel) {
   return CHAT_MODEL_FOR[uiModel] || CHAT_MODEL_FOR.gpt;
 }
 
+// SmartAPI bills images by base64 length (see lib/smartapi.js IMAGE_OUT); the real charge is the
+// X-SmartAPI-Charged-Tokens header, stamped onto usage as `charged_tokens` where we read it.
+function chargedUsage(resp, usage) {
+  const charged = Number(resp && resp.headers && resp.headers.get ? resp.headers.get('x-smartapi-charged-tokens') : NaN);
+  return Number.isFinite(charged) && charged > 0 ? { ...(usage || {}), charged_tokens: charged } : usage;
+}
+
 function usageUsd(usage) {
   if (!usage) return 0;
-  const tokens = Number(usage.total_tokens
+  const tokens = Number(usage.charged_tokens || usage.total_tokens
     || (Number(usage.input_tokens || usage.prompt_tokens || 0) + Number(usage.output_tokens || usage.completion_tokens || 0)));
   return Number((tokens * USD_PER_TOKEN).toFixed(6));
 }
@@ -95,7 +111,7 @@ async function chat({ uiModel, messages, maxTokens = 4000, temperature = 0.6 }) 
     throw tagged('الاستوديو مو متوفر حالياً، جرّب بعد شوية', 502, 'ERR_STUDIO_UPSTREAM');
   }
   let data;
-  try { data = JSON.parse(text); } catch {
+  try { data = parseBody(text); } catch {
     throw tagged('استجابة غير صالحة من الاستوديو', 502, 'ERR_STUDIO_SHAPE');
   }
   const msg = data && data.choices && data.choices[0] && data.choices[0].message;
@@ -110,7 +126,7 @@ async function chat({ uiModel, messages, maxTokens = 4000, temperature = 0.6 }) 
   const usage = data.usage || {};
   const promptTokens = Number(usage.prompt_tokens || usage.input_tokens || 0);
   const completionTokens = Number(usage.completion_tokens || usage.output_tokens || 0);
-  const costUsd = usageUsd(usage) || Number((((promptTokens + completionTokens) * USD_PER_TOKEN)).toFixed(6));
+  const costUsd = usageUsd(chargedUsage(resp, usage)) || Number((((promptTokens + completionTokens) * USD_PER_TOKEN)).toFixed(6));
   return { text: content, model, promptTokens, completionTokens, costUsd };
 }
 
@@ -140,7 +156,7 @@ async function generateImage({ prompt, images = [], size = '1024x1024' }) {
       body: JSON.stringify({
         model: IMAGE_MODEL,
         input: [{ role: 'user', content }],
-        tools: [{ type: 'image_generation', size, quality: 'high', background: 'opaque' }],
+        tools: [{ type: 'image_generation', size, quality: 'high', background: 'opaque', output_format: 'jpeg', output_compression: 85 }],
         tool_choice: { type: 'image_generation' },
       }),
       signal: controller.signal,
@@ -157,7 +173,7 @@ async function generateImage({ prompt, images = [], size = '1024x1024' }) {
     throw tagged('تعذّر توليد الصورة حالياً، جرّب بعد شوية', 502, 'ERR_STUDIO_UPSTREAM');
   }
   let data;
-  try { data = JSON.parse(text); } catch {
+  try { data = parseBody(text); } catch {
     throw tagged('استجابة غير صالحة من الاستوديو', 502, 'ERR_STUDIO_SHAPE');
   }
   const call = (data.output || []).find((o) => o && o.type === 'image_generation_call' && o.result);
@@ -165,7 +181,7 @@ async function generateImage({ prompt, images = [], size = '1024x1024' }) {
     throw tagged('المولّد رجّع بلا صورة — أعد المحاولة', 502, 'ERR_STUDIO_NO_IMAGE', { retriable: true });
   }
   const buffer = await sharp(Buffer.from(call.result, 'base64')).png().toBuffer();
-  return { buffer, costUsd: usageUsd(data.usage) };
+  return { buffer, costUsd: usageUsd(chargedUsage(resp, data.usage)) };
 }
 
 module.exports = {
