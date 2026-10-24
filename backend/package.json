@@ -20,7 +20,8 @@
     "payroll-statements": "node scripts/publish-payroll-statements.js",
     "friday-deduction-report": "node scripts/friday-deduction-report.js",
     "stranded-orders": "node scripts/stranded-orders.js",
-    "reroll-audit": "node scripts/calligraphy-reroll-audit.js"
+    "reroll-audit": "node scripts/calligraphy-reroll-audit.js",
+    "design-credit": "node scripts/design-credit-report.js"
   },
   "keywords": [],
   "author": "",

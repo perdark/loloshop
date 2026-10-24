@@ -43,4 +43,36 @@ async function allowToolUser(req, res, next) {
   }
 }
 
-module.exports = { mayUseTool, mayPushOrder, allowToolUser, TOOL_STAFF_TYPES, PUSH_STAFF_TYPES };
+// «تحويل للتطريز» — the order-level send. Owner 2026-10-25: «ايادي التصميم تكون تقريبا
+// كموظفة تكدر تنطي تم للطلب». Measured on the 2026-10-25 prod dump: since 2026-09-09 every
+// design that أيادي التصميم drew in this tool was pushed into التطريز by somebody else —
+// 262 orders carry a helper's plate text and مضر's advance — so the work went down under the
+// pusher's name in staff_activity_log. An ACTIVE member may now send it themselves, and the
+// advance is written under THEIR id. Same fail-closed membership rule as allowToolUser.
+// Still excluded: embroiderer (PUSH_STAFF_TYPES is unchanged) and a deactivated helper.
+async function isActiveDesignMember(user) {
+  if (!user || user.role !== 'design_helper') return false;
+  const { rows } = await query(
+    `SELECT 1 FROM design_team_members WHERE user_id = $1 AND active = TRUE LIMIT 1`,
+    [user.id]
+  );
+  return rows.length > 0;
+}
+
+async function allowPushUser(req, res, next) {
+  try {
+    if (mayPushOrder(req.user)) return next();
+    if (await isActiveDesignMember(req.user)) {
+      req.designTeamPusher = true;
+      return next();
+    }
+    return res.status(403).json({ error: 'ممنوع', code: 'ERR_FORBIDDEN' });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+module.exports = {
+  mayUseTool, mayPushOrder, allowToolUser, allowPushUser, isActiveDesignMember,
+  TOOL_STAFF_TYPES, PUSH_STAFF_TYPES,
+};

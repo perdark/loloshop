@@ -4,7 +4,7 @@ const rateLimit = require('express-rate-limit');
 const multer = require('multer');
 const { authRequired } = require('../middleware/auth');
 const { imageUploadLimit } = require('../lib/upload');
-const { mayPushOrder, allowToolUser } = require('../lib/calligraphyAccess');
+const { allowPushUser, allowToolUser } = require('../lib/calligraphyAccess');
 const c = require('../controllers/calligraphyController');
 
 const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -16,14 +16,10 @@ const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 
 // ACTIVE design_team member. Behaviour here is unchanged.
 
 // «تحويل للتطريز» (advance an order out of بانتظار التصميم) is STRICTER than the tool
-// itself, and stays that way on purpose: `mayPushOrder` admits only admin + staff
-// manager/designer — NOT embroiderer, and NOT design_helper. محمد عماد can generate and
-// download plates for his own station but never pushes an order into التطريز; that keeps
-// going through the designer/أيادي التصميم flow via محمد هيثم's approval, same as before.
-function requireDesignerOrAdmin(req, res, next) {
-  if (mayPushOrder(req.user)) return next();
-  return res.status(403).json({ error: 'ممنوع', code: 'ERR_FORBIDDEN' });
-}
+// itself, and stays that way on purpose: `allowPushUser` admits admin + staff
+// manager/designer + an ACTIVE أيادي التصميم member (owner 2026-10-25 — they draw the
+// design, so they give it its تم and the credit lands on them). NOT embroiderer: محمد عماد
+// can generate and download plates for his own station but never pushes an order.
 
 router.use(authRequired, allowToolUser);
 
@@ -41,7 +37,7 @@ router.post('/plates/:id/reroll', genLimit, c.reroll);
 // action is the order-level send below.
 router.post('/plates/zip', c.platesZip);
 router.get('/orders-zones', c.ordersZones);
-router.post('/orders/:orderId/send', requireDesignerOrAdmin, c.sendOrder);
+router.post('/orders/:orderId/send', allowPushUser, c.sendOrder);
 
 // Queue endpoints
 // /retail-queue is the «تجزئة» review board — read-only; generation goes through POST /jobs

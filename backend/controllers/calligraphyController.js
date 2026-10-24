@@ -861,7 +861,10 @@ async function sendOrder(req, res) {
   if (blocked) return bad(res, blocked.message, blocked.code, 409);
   const to = production.nextStageFor(row);
   if (!to) return bad(res, 'التصميم بحاجة لاعتماد المصمم أولاً', 'ERR_BAD_STATUS', 409);
-  if (!canStaffTransition(req.user, 'design_complete', to)) {
+  // An active أيادي التصميم member was admitted by allowPushUser (routes/calligraphy.js);
+  // their role is design_helper, which STAGE_AUTHZ knows nothing about, so the staff edge
+  // check would refuse them. They may only make the one edge this endpoint makes.
+  if (!req.designTeamPusher && !canStaffTransition(req.user, 'design_complete', to)) {
     return res.status(403).json({ error: 'ممنوع', code: 'ERR_FORBIDDEN' });
   }
   // Catch-up: attach any DONE plates generated before auto-linking shipped (idempotent —

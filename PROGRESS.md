@@ -1,5 +1,31 @@
 # Progress
 
+## 2026-10-25 — أيادي التصميم ينطون «تم» بنفسهم · تحديد الكل لبرزان · الكوي يفصل الوشاح عن الشال · «فرّغ الرف» لمحمد عادل
+
+Branch `feat/design-helper-send` (off `main`), **not merged**. 915 backend tests: 911 pass, 3 fail —
+all three pre-existing (`app-open` and marketing-audience flaps; `assemblyBoard` test 2 compares
+zone order without ORDER BY and fails ~half the runs on clean `main` too).
+
+- **أيادي التصميم → «تحويل للتطريز».** Measured on the 2026-10-25 prod dump: in 50 days **325**
+  orders were drawn by a helper (text match of her plate to the order line) and sent by someone
+  else — **260 مريم → مضر**, 50 هدى → محمد هيثم. The advance is what payroll/goals count, so the
+  work went down under the sender. `lib/calligraphyAccess.allowPushUser` now admits an ACTIVE
+  design-team member on `POST /calligraphy/orders/:id/send`; `sendOrder` skips the staff-edge
+  check only for that flag; the button shows for `design_helper`. Embroiderer still excluded.
+  Detection: `npm run design-credit -- --days 30 [--rows]` (read-only, ~10s, a floor — retyped
+  text does not match). Tests: `designHelperSendOrder.test.js`, `calligraphyAccess.test.js` 6-8.
+- **التجميع: تحديد الكل.** Checkbox per piece + «تحديد الكل» + sticky bar → `advance-bulk`.
+  130 pieces were sitting at التجميع on the dump.
+- **الكوي: الوشاح / الشال.** «عرض بالطلب» now honours the type chips (الكل · روب · وشاح · شال)
+  that «عرض بالقطع» already had, so a rep sash and its carried شال are two lists.
+- **«فرّغ الرف» لمحمد عادل.** Migration **117** seeds `site_settings.shelf_clear_users` by name
+  (ON CONFLICT DO NOTHING, repeated in `schema.sql`); `lib/shelfAccess.js` gates the route and
+  `GET /production/shelf` returns `can_clear`. Adding/removing a person = edit that row.
+  ⚠️ 116 left free: `feat/package-profit` carries an unmerged `115_package_profit.sql` that
+  collides with `115_staff_engagement` and must be renumbered before it merges.
+- Prod backup: `/root/loloshop-prod-2026-10-25-0012.dump` + `~/Desktop/_private/loloshop-db/`
+  (22.9 MB, 94 tables). Restored locally as `loloshop_1025`.
+
 ## 2026-10-17 (ب) — «عرض المزيد» ما يضيع لما ترجع من الطالب
 
 Report: worker presses «عرض المزيد» 4× (100 → 500 students), opens one, comes back → list is 100

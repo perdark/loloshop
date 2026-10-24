@@ -2589,3 +2589,12 @@ CREATE TABLE IF NOT EXISTS staff_ai_messages (
   UNIQUE (user_id, work_date)
 );
 CREATE INDEX IF NOT EXISTS idx_staff_ai_messages_date ON staff_ai_messages(work_date DESC);
+
+-- 117 — «فرّغ الرف» allowlist (see db/migrations/117_shelf_clear_users.sql). DO NOTHING on
+-- purpose: re-applied every deploy, it must never re-add someone an admin removed.
+INSERT INTO site_settings (key, value)
+SELECT 'shelf_clear_users',
+       jsonb_build_object('user_ids', COALESCE(jsonb_agg(u.id), '[]'::jsonb))
+  FROM users u
+ WHERE u.name = 'محمد عادل' AND u.role = 'staff' AND u.deleted_at IS NULL
+ON CONFLICT (key) DO NOTHING;

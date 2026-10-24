@@ -435,9 +435,18 @@ export function StationConsole({
   );
 
   // ─── «عرض بالطلب» grouping ──────────────────────────────────────────────────
+  // The zone checklist is التطريز's own way of working and applies only while an embroiderer
+  // is looking AT التطريز. Stepping to another stage falls back to the plain type chips —
+  // otherwise a presser's view of التطريز would demand a zone that is not their job to tick.
+  const zoneMode = kind === "embroidery" && effectiveStage === "embroidery";
+
+  // Owner 2026-10-25 («بالكوي افصل الوشاح عن الشال»): «عرض بالطلب» honours the same piece-type
+  // chip as «عرض بالقطع», so a rep student's وشاح and the شال امريكي it carries can be worked
+  // as two lists. Zone mode (التطريز) never filters by type — its chips are zones.
   const groups = useMemo(() => {
     const m = new Map<string, StudentGroup>();
     for (const p of inStage) {
+      if (!zoneMode && activeType !== "all" && p.productType !== activeType) continue;
       const key = p.studentId || p.studentName;
       let g = m.get(key);
       if (!g) {
@@ -464,11 +473,11 @@ export function StationConsole({
       if (isPieceOverdue(p.deadline)) g.overdue = true;
     }
     return [...m.values()];
-  }, [inStage]);
+  }, [inStage, zoneMode, activeType]);
   // iPhone: never put every student in the DOM — see useRenderCap's header.
   const cappedGroups = useRenderCap(
     groups,
-    `${view}|${search}|${sourceFilter}|${repFilter}|${effectiveStage}`,
+    `${view}|${search}|${sourceFilter}|${repFilter}|${effectiveStage}|${activeType}`,
     100,
     `station:${kind}:students`
   );
@@ -509,10 +518,6 @@ export function StationConsole({
     if (activeType !== "all" && !typeChips.some((c) => c.type === activeType)) setActiveType("all");
   }, [typeChips, activeType, loadedOnce]);
 
-  // The zone checklist is التطريز's own way of working and applies only while an embroiderer
-  // is looking AT التطريز. Stepping to another stage falls back to the plain type chips —
-  // otherwise a presser's view of التطريز would demand a zone that is not their job to tick.
-  const zoneMode = kind === "embroidery" && effectiveStage === "embroidery";
 
   const pieceRows = useMemo(() => {
     if (zoneMode) {
@@ -946,6 +951,36 @@ export function StationConsole({
         />
       ) : view === "students" ? (
         <>
+        {!zoneMode && typeChips.length > 1 && (
+          <div className="mb-2.5 flex gap-2 overflow-x-auto pb-1">
+            {[{ type: "all", count: inStage.length }, ...typeChips].map((c) => (
+              <button
+                key={c.type}
+                type="button"
+                onClick={() => {
+                  if (activeType === c.type) return;
+                  setActiveType(c.type);
+                  setSelected(new Set());
+                }}
+                aria-pressed={activeType === c.type}
+                className={`flex min-h-10 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-xs font-bold transition-colors ${
+                  activeType === c.type
+                    ? "border-orange-ink bg-orange-ink text-white"
+                    : "border-line bg-surface text-ink-soft hover:text-ink"
+                }`}
+              >
+                {c.type === "all" ? "الكل" : typeLabel(c.type)}
+                <span
+                  className={`rounded-full px-1.5 py-0.5 text-[10px] ${
+                    activeType === c.type ? "bg-white/20" : "bg-ink/8"
+                  }`}
+                >
+                  {c.count}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
         <ul className="space-y-2.5">
           {cappedGroups.shown.map((g) => (
             <li key={g.key}>

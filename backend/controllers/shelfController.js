@@ -3,6 +3,7 @@
 // requests, maps ShelfError → the repo's {error, code} convention, and nothing else.
 // Route-level requireStaffType('presser','preparer') handles authorization (it auto-passes
 // manager + admin), so there are no permission checks here.
+const { mayClearShelf } = require('../lib/shelfAccess');
 const shelf = require('../lib/shelf');
 
 function sendShelfError(res, err) {
@@ -14,6 +15,9 @@ function sendShelfError(res, err) {
 
 async function getBoard(req, res) {
   const data = await shelf.buildBoard();
+  // The server's own answer to «may this person press فرّغ الرف» — the button follows it, so
+  // a name added to site_settings.shelf_clear_users shows the button with no frontend deploy.
+  data.can_clear = await mayClearShelf(req.user);
   res.json({ data });
 }
 
@@ -63,9 +67,9 @@ async function releasePlacement(req, res) {
   res.json({ data: { released: true } });
 }
 
-// «فرّغ الرف» — manager/admin only (route-level requireStaffType() with no types).
-// Deliberately NOT open to the preparer: it wipes the whole map in one press, and the
-// preparer already has a per-piece «إرجاع» for the ordinary mistake.
+// «فرّغ الرف» — manager/admin + the named allowlist (lib/shelfAccess.js, migration 117).
+// Still NOT open to the preparer role as a whole: it wipes the whole map in one press, and
+// the preparer already has a per-piece «إرجاع» for the ordinary mistake.
 async function clear(req, res) {
   try {
     const data = await shelf.clearShelf((req.body || {}).shelf_code);

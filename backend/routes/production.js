@@ -64,13 +64,15 @@ router.post('/uploads/image', requireStaffType(), imageUploadLimit, imageUpload.
 // manager + admin, so this is presser + preparer + manager + admin. The presser needs it to
 // shelve what he just pressed; the preparer to shelve caps/شال (which skip الكوي) and to pack.
 const shelfC = require('../controllers/shelfController');
+const { allowShelfClear } = require('../lib/shelfAccess');
 router.get('/shelf', requireStaffType('presser', 'preparer'), shelfC.getBoard);
 router.post('/shelf/place', requireStaffType('presser', 'preparer'), shelfC.place);
 router.post('/shelf/collect', requireStaffType('presser', 'preparer'), shelfC.collect);
 router.post('/shelf/close-set', requireStaffType('presser', 'preparer'), shelfC.closeSet);
 router.delete('/shelf/placement/:orderId', requireStaffType('presser', 'preparer'), shelfC.releasePlacement);
-// Destructive and shelf-wide → manager/admin only, like patchSection below.
-router.post('/shelf/clear', requireStaffType(), shelfC.clear);
+// Destructive and shelf-wide → manager/admin, plus the named people in
+// site_settings.shelf_clear_users (migration 117 — محمد عادل). See lib/shelfAccess.js.
+router.post('/shelf/clear', allowShelfClear, shelfC.clear);
 // Shelf layout config (عدد الخانات / الحد الأقصى) — manager + admin only.
 router.patch('/shelf/sections/:id', requireStaffType(), shelfC.patchSection);
 

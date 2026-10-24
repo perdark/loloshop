@@ -554,7 +554,7 @@ export function ShelfConsole({ canClear = false }: ShelfConsoleProps) {
 
       {/* ── Zone 3: الرف ─────────────────────────────────────────── */}
       <section>
-        {canClear ? (
+        {canClear || board?.can_clear ? (
           <header className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-xl font-black text-[#1A1A1A]">الرف</h2>
             <button

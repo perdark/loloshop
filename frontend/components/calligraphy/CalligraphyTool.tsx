@@ -624,11 +624,10 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
   // Role gating (send + order links). The tool is OPENED by admin + staff
   // manager/designer/embroiderer/design_helper — see `lib/calligraphyAccess.js`'s
   // `TOOL_STAFF_TYPES` on the backend and the page-level gates in
-  // app/staff/calligraphy/page.tsx / StaffSidebar.tsx. design_helper generates plates
-  // but never pushes orders (their desk flow goes through محمد هيثم) and can't open
-  // /staff routes. embroiderer opens the tool (2026-09-02) but never sees «تحويل
-  // للتطريز» — canSendOrders below stays designer/manager/admin only
-  // (`PUSH_STAFF_TYPES`), deliberately excluding embroiderer.
+  // app/staff/calligraphy/page.tsx / StaffSidebar.tsx. design_helper can't open /staff
+  // routes, but since 2026-10-25 sends «تحويل للتطريز» itself (backend `allowPushUser`
+  // re-checks the membership is ACTIVE). embroiderer opens the tool (2026-09-02) but never
+  // sees «تحويل للتطريز» — deliberately excluded (`PUSH_STAFF_TYPES`).
   const me = getUser();
   const myStaffTypes: string[] =
     (me as unknown as { staff_types?: string[] })?.staff_types ??
@@ -637,6 +636,7 @@ export function CalligraphyTool({ backHref }: { backHref?: string } = {}) {
       : []);
   const canSendOrders =
     me?.role === "admin" ||
+    me?.role === "design_helper" ||
     (me?.role === "staff" && myStaffTypes.some((t) => t === "designer" || t === "manager"));
   const canOpenOrders = me?.role === "admin" || me?.role === "staff";
 

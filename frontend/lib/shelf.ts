@@ -125,6 +125,8 @@ export interface ShelfBoard {
   sets: ShelfSet[];
   inbox: ShelfInboxItem[];
   collected: ShelfCollectedItem[];
+  /** Server's answer to «may I press فرّغ الرف» — manager/admin + site_settings.shelf_clear_users. */
+  can_clear?: boolean;
 }
 
 export interface PlaceResult {

@@ -9,6 +9,9 @@
  *
  *   «جاهزة للتجميع» — status = assembly. Every zone ticked. One button: the row's own
  *                     `advance_label` (الكوي, or التجهيز when the piece needs no pressing).
+ *                     Owner 2026-10-25 («ضيف لبرزان تحديد الكل»): each piece also has a
+ *                     checkbox, «تحديد الكل» picks every movable piece, and a sticky bar
+ *                     sends the selection through the same `advance-bulk` every station uses.
  *   «قطع واصلة»     — status = embroidery with ≥1 ticked zone. Chips show which half is here
  *                     and which is still under the needle. No button — nothing to sew yet.
  *
@@ -24,7 +27,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { getApiErrorMessage } from "@/lib/api";
-import { advanceOrder, getAssemblyBoard } from "@/lib/staff";
+import { advanceBulk, advanceOrder, getAssemblyBoard } from "@/lib/staff";
+import { Button } from "@/components/ui/Button";
 import { formatDateShort } from "@/lib/format";
 import { usePolling } from "@/lib/hooks/usePolling";
 import { useProductionEvents } from "@/hooks/useProductionEvents";
@@ -111,6 +115,8 @@ export function AssemblyBoard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<Set<string>>(() => new Set());
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [bulkLoading, setBulkLoading] = useState(false);
 
   const load = useCallback(async (opts: { silent?: boolean } = {}) => {
     if (!opts.silent) setLoading(true);
@@ -143,11 +149,71 @@ export function AssemblyBoard() {
   const readyGroups = useMemo(() => groupByStudent(ready), [ready]);
   const arrivingGroups = useMemo(() => groupByStudent(arriving), [arriving]);
 
+  // Only pieces this person may actually move are selectable — same rule as the row button.
+  const selectableIds = useMemo(
+    () => ready.filter((r) => r.can_advance && r.advance_label).map((r) => r.id),
+    [ready]
+  );
+  // A live reload can take a selected piece off the board (someone else moved it); never
+  // keep an id that is no longer here, or the bar's count lies.
+  useEffect(() => {
+    setSelected((prev) => {
+      const live = new Set(selectableIds);
+      const next = new Set([...prev].filter((id) => live.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [selectableIds]);
+  const allChecked = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id));
+  const toggleOne = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const toggleAll = () => setSelected(allChecked ? new Set() : new Set(selectableIds));
+
+  // The bar names the stage the selection is going to when every selected piece agrees.
+  const bulkLabel = (() => {
+    const labels = new Set(ready.filter((r) => selected.has(r.id)).map((r) => r.advance_label));
+    const one = labels.size === 1 ? [...labels][0] : null;
+    return `${one ?? "نقل المحدد"} (${selected.size})`;
+  })();
+
+  const doBulk = async () => {
+    if (!selected.size || bulkLoading) return;
+    setBulkLoading(true);
+    try {
+      const res = await advanceBulk([...selected]);
+      if (res.advanced > 0) {
+        toast.success(
+          res.skipped > 0
+            ? `تم نقل ${res.advanced} قطعة · تخطّي ${res.skipped}`
+            : `تم نقل ${res.advanced} قطعة`
+        );
+      } else {
+        toast.error("ما انتقلت ولا قطعة من المحدد");
+      }
+      setSelected(new Set());
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "تعذر نقل القطع"));
+    } finally {
+      setBulkLoading(false);
+      void load({ silent: true });
+    }
+  };
+
   const advance = async (row: AssemblyRow) => {
     if (busy.has(row.id)) return;
     setBusy((s) => new Set(s).add(row.id));
     // Optimistic: the piece leaves the board; a failure puts it back.
     setReady((rows) => rows.filter((r) => r.id !== row.id));
+    setSelected((s) => {
+      if (!s.has(row.id)) return s;
+      const n = new Set(s);
+      n.delete(row.id);
+      return n;
+    });
     try {
       const res = await advanceOrder(row.id);
       toast.success(`«${row.product_name}» — ${row.student_name}: ${advancedLabelFor(res.status)}`);
@@ -201,7 +267,7 @@ export function AssemblyBoard() {
   }
 
   return (
-    <div className="space-y-6 pb-[env(safe-area-inset-bottom)]">
+    <div className={`space-y-6 ${selected.size > 0 ? "pb-28" : "pb-[env(safe-area-inset-bottom)]"}`}>
       {/* ── جاهزة للتجميع ─────────────────────────────────────────────── */}
       <section aria-labelledby="assembly-ready">
         <h2 id="assembly-ready" className="mb-2 flex items-center gap-2 text-sm font-extrabold text-ink">
@@ -214,6 +280,24 @@ export function AssemblyBoard() {
           </p>
         ) : (
           <div className="space-y-3">
+            {selectableIds.length > 0 && (
+              <button
+                type="button"
+                onClick={toggleAll}
+                aria-pressed={allChecked}
+                className="flex min-h-11 w-full items-center gap-3 rounded-xl border border-line bg-surface px-4 text-sm font-semibold text-ink-soft transition-colors hover:border-orange-ink/30"
+              >
+                <span
+                  className={`flex h-5 w-5 items-center justify-center rounded-md border-2 ${
+                    allChecked ? "border-orange-ink bg-orange-ink text-white" : "border-ink/30"
+                  }`}
+                  aria-hidden
+                >
+                  {allChecked ? "✓" : ""}
+                </span>
+                تحديد الكل ({selectableIds.length})
+              </button>
+            )}
             {readyGroups.map((g) => (
               <article key={g.key} className="rounded-2xl border border-line bg-surface p-3.5 shadow-[var(--shadow-soft)]">
                 <GroupHeader g={g} />
@@ -221,7 +305,19 @@ export function AssemblyBoard() {
                   {g.rows.map((row) => (
                     <li key={row.id} className="rounded-xl bg-[var(--shop-sink)] p-3">
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="text-sm font-bold text-ink">{row.product_name}</span>
+                        {row.can_advance && row.advance_label ? (
+                          <label className="-m-1.5 flex min-h-11 cursor-pointer items-center gap-2.5 p-1.5">
+                            <input
+                              type="checkbox"
+                              checked={selected.has(row.id)}
+                              onChange={() => toggleOne(row.id)}
+                              className="h-5 w-5 shrink-0 accent-[var(--color-orange-ink)]"
+                            />
+                            <span className="text-sm font-bold text-ink">{row.product_name}</span>
+                          </label>
+                        ) : (
+                          <span className="text-sm font-bold text-ink">{row.product_name}</span>
+                        )}
                         <span className="text-xs text-muted">
                           {row.done_count}/{row.total_count} منطقة
                         </span>
@@ -294,6 +390,23 @@ export function AssemblyBoard() {
           </div>
         )}
       </section>
+
+      {selected.size > 0 && (
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/95 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-4px_16px_rgba(0,0,0,0.06)] backdrop-blur lg:ms-64">
+          <div className="mx-auto flex max-w-3xl items-center justify-between gap-3">
+            <button
+              type="button"
+              onClick={() => setSelected(new Set())}
+              className="min-h-11 px-2 text-sm font-medium text-ink-soft hover:text-ink"
+            >
+              إلغاء التحديد ({selected.size})
+            </button>
+            <Button onClick={() => void doBulk()} loading={bulkLoading} className="min-w-[9rem]">
+              {bulkLabel}
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
