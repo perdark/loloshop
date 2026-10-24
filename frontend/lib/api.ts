@@ -1,6 +1,6 @@
 import axios, { type AxiosError } from "axios";
 import { logout } from "./auth";
-import { compressImageForUpload } from "./imageCompress";
+import { compressImageForUpload, isHeic } from "./imageCompress";
 import type { ApiError } from "./types";
 
 const baseURL =
@@ -48,7 +48,8 @@ export async function apiUploadFile(
   fieldName = "file",
   { compress = true }: { compress?: boolean } = {}
 ): Promise<unknown> {
-  const payload = compress ? await compressImageForUpload(file) : file;
+  // `compress: false` keeps artwork pixel-exact — except a HEIC, which the server cannot read.
+  const payload = compress || isHeic(file) ? await compressImageForUpload(file) : file;
   const form = new FormData();
   form.append(fieldName, payload, payload.name);
   const { data } = await api.post(path, form);

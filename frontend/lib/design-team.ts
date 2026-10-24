@@ -1,4 +1,5 @@
 import { api } from "./api";
+import { compressImageForUpload, isHeic } from "./imageCompress";
 import type { User } from "./types";
 
 /**
@@ -289,8 +290,10 @@ export async function rejectDesignTeamJob(id: string, reason: string): Promise<v
 }
 
 export async function uploadDesignTeamFinal(id: string, file: File): Promise<string> {
+  // Artwork stays pixel-exact — only an iPhone HEIC is converted (the server cannot read it).
+  const payload = isHeic(file) ? await compressImageForUpload(file) : file;
   const form = new FormData();
-  form.append("file", file);
+  form.append("file", payload, payload.name);
   const { data } = await api.post<{ data: { url: string } }>(
     `/design-team/jobs/${id}/final-design`,
     form,
@@ -324,8 +327,9 @@ export async function uploadDesignTeamLineImage(
   itemId: string,
   file: File
 ): Promise<DesignTeamJob> {
+  const payload = await compressImageForUpload(file);
   const form = new FormData();
-  form.append("file", file);
+  form.append("file", payload, payload.name);
   const { data } = await api.post<{ data: ApiJob }>(
     `/design-team/jobs/${orderId}/lines/${itemId}/image`,
     form,

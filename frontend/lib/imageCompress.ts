@@ -57,8 +57,21 @@ async function decode(file: File): Promise<ImageBitmap | HTMLImageElement> {
   }
 }
 
+/**
+ * iPhone HEIC/HEIF. The server's image library has no HEVC decoder, so a raw HEIC upload is
+ * refused with «ملف الصورة غير صالح» (9 on prod by 2026-10-25), and staff Chrome could not show
+ * one anyway. iOS Safari/WKWebView CAN decode HEIC, so it is converted here — always, whatever
+ * its size, and even when the JPEG comes out bigger. Android Chrome cannot decode it; there the
+ * original still goes up, exactly as before.
+ */
+export function isHeic(file: File): boolean {
+  const t = file.type.toLowerCase();
+  return t === "image/heic" || t === "image/heif" || /\.(heic|heif)$/i.test(file.name);
+}
+
 export async function compressImageForUpload(file: File): Promise<File> {
-  if (!file.type.startsWith("image/") || file.size <= MIN_BYTES) return file;
+  const heic = isHeic(file);
+  if (!heic && (!file.type.startsWith("image/") || file.size <= MIN_BYTES)) return file;
   if (typeof document === "undefined") return file;
 
   let bitmap: ImageBitmap | HTMLImageElement | null = null;
@@ -80,14 +93,15 @@ export async function compressImageForUpload(file: File): Promise<File> {
     if (!ctx) return file;
     ctx.drawImage(bitmap as CanvasImageSource, 0, 0, w, h);
 
-    const keepAlpha = file.type === "image/png" && hasTransparency(ctx, w, h);
+    const keepAlpha = !heic && file.type === "image/png" && hasTransparency(ctx, w, h);
     const type = keepAlpha ? "image/png" : "image/jpeg";
 
     const blob = await new Promise<Blob | null>((resolve) =>
       canvas.toBlob(resolve, type, keepAlpha ? undefined : JPEG_QUALITY)
     );
     // A "compressed" file that grew is not an optimisation.
-    if (!blob || blob.size >= file.size) return file;
+    // (A HEIC is converted even when it grows — the original is a format the server refuses.)
+    if (!blob || (!heic && blob.size >= file.size)) return file;
 
     // The API rejects a MIME/extension mismatch (`imageFilter` in backend/lib/upload.js),
     // and FormData sends `file.name` verbatim — so the extension HAS to be rewritten

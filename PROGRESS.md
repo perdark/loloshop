@@ -23,6 +23,14 @@ zone order without ORDER BY and fails ~half the runs on clean `main` too).
   `GET /production/shelf` returns `can_clear`. Adding/removing a person = edit that row.
   ⚠️ 116 left free: `feat/package-profit` carries an unmerged `115_package_profit.sql` that
   collides with `115_staff_engagement` and must be renumbered before it merges.
+- **طابور الإنتاج:** the `gp`/`oi` CTEs in `fetchQueueRows` now carry the stage filter only
+  (a superset — md5 of every row identical on prod). 261–297 → 225–293 ms on prod. Most of what
+  is left is the size: ~8,700 rows per load incl. 1,845 «تم التسليم». Next real win = load
+  التسليم lazily / page the board, not SQL.
+- **HEIC:** `lib/imageCompress.isHeic` — an iPhone HEIC is ALWAYS converted to JPEG on the
+  client (was: skipped under 500 KB, and returned raw when the JPEG came out bigger, which HEIC
+  usually does). Also for `compress:false` artwork and the two design-team uploads that
+  bypassed `apiUploadFile`. Server has no HEVC decoder → 9 refused uploads on prod.
 - Prod backup: `/root/loloshop-prod-2026-10-25-0012.dump` + `~/Desktop/_private/loloshop-db/`
   (22.9 MB, 94 tables). Restored locally as `loloshop_1025`.
 

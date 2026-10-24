@@ -577,14 +577,18 @@ async function fetchQueueRows(req, { u, stages, designerPending, sourceFilter, s
     // joining costs one extra pass over `orders`/`order_items` and pays for itself ~5×.
     // Measured on prod, same 4,961 rows, byte-identical output on every column:
     //   before  186–199 ms, 55,678 buffers    after  117–121 ms, 23,601 buffers
-    // The two CTEs are unfiltered on purpose: Postgres cannot push the outer WHERE into
-    // them, and restricting them by the stage list would need the predicate duplicated in
-    // three places — the shape that lets two copies drift apart.
+    // The two CTEs carry ONLY the stage filter ($1), never the rest of the outer WHERE: that
+    // is a SUPERSET of the rows they are joined to, so the result cannot change, and nothing
+    // that can drift is duplicated. 2026-10-25, measured on prod (presser view, 8,676 rows):
+    // byte-identical output (md5 of every row), 261–297 ms → 225–293 ms — the oi pass stops
+    // aggregating items of cancelled/old orders. Most of what is left is the queue's size.
     `WITH gp AS (
        -- Bundle total per checkout group (see the طقم note on group_price below).
        SELECT checkout_group_id, SUM(price) AS group_price
          FROM orders
         WHERE checkout_group_id IS NOT NULL AND status::text <> 'cancelled'
+          AND checkout_group_id IN (SELECT checkout_group_id FROM orders
+                                     WHERE status::text = ANY($1) AND checkout_group_id IS NOT NULL)
         GROUP BY checkout_group_id
      ), oi AS (
        -- One pass over order_items feeds BOTH has_design_images and search_text.
@@ -594,6 +598,7 @@ async function fetchQueueRows(req, { u, stages, designerPending, sourceFilter, s
               string_agg(DISTINCT customer_text, ' ')
                 FILTER (WHERE customer_text IS NOT NULL AND customer_text <> '') AS search_text
          FROM order_items
+        WHERE order_id IN (SELECT id FROM orders WHERE status::text = ANY($1))
         GROUP BY order_id
      )
      SELECT o.id, o.status, o.created_at, o.design_id, o.checkout_group_id,
