@@ -54,11 +54,19 @@ async function loadAttendance(fromDate) {
                 ELSE time '10:00' END)) / 60 AS lm
          FROM d JOIN users u ON u.id = d.uid
      )
+     , y AS (
+       -- «نص شفت»: a non-Friday arrival at 14:00 or later is a half shift by the payroll rule,
+       -- paid as half — NOT lateness. Only the rest can be late.
+       SELECT x.*, (extract(dow FROM bday) <> 5 AND (first_in - interval '0')::time >= time '14:00'
+                    AND (first_in - interval '0')::time < time '23:59') AS half
+         FROM x
+     )
      SELECT uid, count(*)::int AS days,
-            COALESCE(sum(lm - 15) FILTER (WHERE lm > 15 AND lm <= 60), 0)::int AS late_min,
-            count(*) FILTER (WHERE lm > 60)::int AS late_days,
+            count(*) FILTER (WHERE half)::int AS half_days,
+            COALESCE(sum(lm - 15) FILTER (WHERE NOT half AND lm > 15 AND lm <= 60), 0)::int AS late_min,
+            count(*) FILTER (WHERE NOT half AND lm > 60)::int AS late_days,
             round(sum(extract(epoch FROM last_out - first_in) / 3600)::numeric)::int AS hours
-       FROM x GROUP BY uid`,
+       FROM y GROUP BY uid`,
     [fromDate]
   );
   return new Map(rows.map((r) => [r.uid, r]));
@@ -284,14 +292,29 @@ ${month ? monthSections(month, nm) : ''}
 //   No device punches (admin, أيادي التصميم) → effort is shown, no verdict.
 function monthSections({ data, att, ret, from }, nm) {
   const credit = tally(data.moves, data.tailor);
+  // Points are summed per MOVE, not per column: a design or embroidery credit that rests on
+  // no evidence (the sender by default) is a button press, worth 1 — otherwise pressing
+  // «تحويل للتطريز» on someone else's design scores as if you had drawn it.
+  const pts = new Map();
+  const noEv = new Map();
+  for (const m of data.moves) {
+    const st = STAGE_OF[m.from_stage];
+    if (!st) continue;
+    const weak = (st === 'design' || st === 'embroidery') && !m.evidence;
+    pts.set(m.worker_id, (pts.get(m.worker_id) || 0) + (weak ? 1 : WEIGHT[st]));
+    if (weak) noEv.set(m.worker_id, (noEv.get(m.worker_id) || 0) + 1);
+  }
+  for (const t of data.tailor) pts.set(t.worker_id, (pts.get(t.worker_id) || 0) + WEIGHT.tailor);
   const rows = [...credit.entries()].map(([id, row]) => {
     const moves = COLS.reduce((a, c) => a + (row[c] || 0), 0);
-    const points = COLS.reduce((a, c) => a + (row[c] || 0) * WEIGHT[c], 0);
+    const points = pts.get(id) || 0;
     const a = att.get(id);
     return {
       id, row, moves, points, a,
-      perDay: a && a.days ? points / a.days : null,
+      // A half shift is half a day of opportunity.
+      perDay: a && a.days ? points / (a.days - a.half_days / 2) : null,
       returns: ret.get(id) || 0,
+      weak: noEv.get(id) || 0,
     };
   }).filter((r) => r.moves > 0);
   const perDays = rows.filter((r) => r.perDay != null && r.moves >= 50).map((r) => r.perDay).sort((x, y) => x - y);
@@ -333,16 +356,16 @@ function monthSections({ data, att, ret, from }, nm) {
 
   return `
 <h2>حركات الشهر — من ${from} (باستحقاق)</h2>
-<div class="card"><table><thead><tr><th>الموظف</th>${COLS.map((c) => `<th>${STAGE_AR[c]}</th>`).join('')}<th>المجموع</th><th>رجعت عليه</th><th>أيام دوام</th><th>متأخر +ساعة</th><th>دقائق تأخير</th><th>التقييم</th><th>السبب</th></tr></thead>
-<tbody>${byMoves.map((r) => `<tr><td>${esc(nm(r.id))}</td>${COLS.map((c) => `<td>${fmt(r.row[c])}</td>`).join('')}<td class="tot">${fmt(r.moves)}</td><td>${fmt(r.returns)}</td><td>${r.a ? r.a.days : '<span class="z">—</span>'}</td><td>${r.a ? fmt(r.a.late_days) : '<span class="z">—</span>'}</td><td>${r.a ? fmt(r.a.late_min) : '<span class="z">—</span>'}</td><td>${tag(r.verdict)}</td><td class="why">${esc(r.why)}</td></tr>`).join('')}</tbody>
-<tfoot><tr><td>المجموع</td>${colTotals.map((n) => `<td>${fmt(n)}</td>`).join('')}<td class="tot">${fmt(colTotals.reduce((a, b) => a + b, 0))}</td><td colspan="6"></td></tr></tfoot></table>
-<p class="note"><b>هذا اقتراح مو قرار.</b> حافز = تعبه باليوم ربع أكثر من الوسط أو أكثر، والقطع اللي رجعت عليه أقل من 2% من شغله، وما تأخر أكثر من ساعة إلا يومين بالأكثر. خصم = تعبه باليوم 60% من الوسط أو أقل، أو تأخر أكثر من ساعة 5 أيام أو أكثر، أو رجعت عليه 10 قطع أو أكثر وهي 5% من شغله أو أكثر. «رجعت عليه» = قطعة رجّعها <i>غيره</i> للمرحلة اللي هو سلّمها (اللي يرجّع شغله بنفسه تصحيح، ما ينحسب). الدوام والتأخير محسوبين من بصمة الجهاز نفسها، مو من سجل الدوام بالنظام، وبقواعد كشف الراتب: الدوام يبدي 10:00، برزان 12:00، الجمعة 15:00، ومهلة 15 دقيقة. «دقائق تأخير» تنحسب بس للأيام اللي تأخيرها بين 15 دقيقة وساعة.</p>
+<div class="card"><table><thead><tr><th>الموظف</th>${COLS.map((c) => `<th>${STAGE_AR[c]}</th>`).join('')}<th>المجموع</th><th>رجعت عليه</th><th>أيام دوام</th><th>نص شفت</th><th>متأخر +ساعة</th><th>دقائق تأخير</th><th>التقييم</th><th>السبب</th></tr></thead>
+<tbody>${byMoves.map((r) => `<tr><td>${esc(nm(r.id))}</td>${COLS.map((c) => `<td>${fmt(r.row[c])}</td>`).join('')}<td class="tot">${fmt(r.moves)}</td><td>${fmt(r.returns)}</td><td>${r.a ? r.a.days : '<span class="z">—</span>'}</td><td>${r.a ? fmt(r.a.half_days) : '<span class="z">—</span>'}</td><td>${r.a ? fmt(r.a.late_days) : '<span class="z">—</span>'}</td><td>${r.a ? fmt(r.a.late_min) : '<span class="z">—</span>'}</td><td>${tag(r.verdict)}</td><td class="why">${esc(r.why)}</td></tr>`).join('')}</tbody>
+<tfoot><tr><td>المجموع</td>${colTotals.map((n) => `<td>${fmt(n)}</td>`).join('')}<td class="tot">${fmt(colTotals.reduce((a, b) => a + b, 0))}</td><td colspan="7"></td></tr></tfoot></table>
+<p class="note"><b>هذا اقتراح مو قرار.</b> حافز = تعبه باليوم ربع أكثر من الوسط أو أكثر، والقطع اللي رجعت عليه أقل من 2% من شغله، وما تأخر أكثر من ساعة إلا يومين بالأكثر. خصم = تعبه باليوم 60% من الوسط أو أقل، أو تأخر أكثر من ساعة 5 أيام أو أكثر، أو رجعت عليه 10 قطع أو أكثر وهي 5% من شغله أو أكثر. «رجعت عليه» = قطعة رجّعها <i>غيره</i> للمرحلة اللي هو سلّمها (اللي يرجّع شغله بنفسه تصحيح، ما ينحسب). الدوام والتأخير محسوبين من بصمة الجهاز نفسها، مو من سجل الدوام بالنظام، وبقواعد كشف الراتب: الدوام يبدي 10:00، برزان 12:00، الجمعة 15:00، ومهلة 15 دقيقة. «نص شفت» = وصل الساعة 2 الظهر أو بعدها بغير الجمعة: ينحسب نص يوم، وما ينحسب تأخير. «دقائق تأخير» تنحسب بس للأيام اللي تأخيرها بين 15 دقيقة وساعة.</p>
 <p class="note"><b>انتبه:</b> التصميم اللي ما بيه دليل (نص خط مطابق أو صورة مربوطة) ينحسب للي ضغط الزر، فرقم مضر بالتصميم يشمل طلبات صممتها أيادي التصميم بنص مكتوب بشكل ثاني. وعمّال الورشة (حمزة، ابو جمال، محمود) مو بهذا التقرير لأنهم ينحسبون بالقطعة بشاشة الورشة.</p></div>
 
 <h2>ترتيب التعب — من ${from}</h2>
-<div class="card"><table><thead><tr><th>#</th><th>الموظف</th><th>نقاط التعب</th><th>أيام دوام</th><th>نقاط باليوم</th><th>ساعات</th><th>مقارنة بالوسط</th></tr></thead>
-<tbody>${byEffort.map((r, i) => `<tr><td>${i + 1}</td><td>${esc(nm(r.id))}</td><td class="tot">${fmt(Math.round(r.points))}</td><td>${r.a ? r.a.days : '<span class="z">—</span>'}</td><td>${r.perDay != null ? one(Math.round(r.perDay * 10) / 10) : '<span class="z">—</span>'}</td><td>${r.a ? fmt(r.a.hours) : '<span class="z">—</span>'}</td><td>${r.perDay != null && median ? `<span class="bar"><i style="width:${Math.min(100, Math.round((r.perDay / median) * 50))}%"></i></span> ${Math.round((r.perDay / median) * 100)}%` : '<span class="z">—</span>'}</td></tr>`).join('')}</tbody></table>
-<p class="note">نقاط التعب = كل حركة × وزنها: التصميم 3 · التطريز 3 · الفصال 3 · التجميع 2 · الكوي 2 · التجهيز 1 · التسليم 0.5. الترتيب حسب «نقاط باليوم» حتى ما يظلم اللي داوم أيام أقل. الوسط = ${one(Math.round(median * 10) / 10)} نقطة باليوم. الأوزان تقدير، وتنعدّل. ⚠️ المقارنة بين شغلات مختلفة تقريبية: قطعة تطريز تاخذ وقت أكثر بهواية من تسليم، فالأدق تقارن الموظف بزميله بنفس المحطة (محمد عادل ↔ علي مهند بالكوي).</p></div>
+<div class="card"><table><thead><tr><th>#</th><th>الموظف</th><th>نقاط التعب</th><th>منها ضغط بلا دليل</th><th>أيام دوام (نص شفت)</th><th>نقاط باليوم</th><th>ساعات</th><th>مقارنة بالوسط</th></tr></thead>
+<tbody>${byEffort.map((r, i) => `<tr><td>${i + 1}</td><td>${esc(nm(r.id))}</td><td class="tot">${fmt(Math.round(r.points))}</td><td>${fmt(r.weak)}</td><td>${r.a ? r.a.days + (r.a.half_days ? ` (${r.a.half_days})` : '') : '<span class="z">—</span>'}</td><td>${r.perDay != null ? one(Math.round(r.perDay * 10) / 10) : '<span class="z">—</span>'}</td><td>${r.a ? fmt(r.a.hours) : '<span class="z">—</span>'}</td><td>${r.perDay != null && median ? `<span class="bar"><i style="width:${Math.min(100, Math.round((r.perDay / median) * 50))}%"></i></span> ${Math.round((r.perDay / median) * 100)}%` : '<span class="z">—</span>'}</td></tr>`).join('')}</tbody></table>
+<p class="note">نقاط التعب = كل حركة × وزنها: التصميم 3 · التطريز 3 · الفصال 3 · التجميع 2 · الكوي 2 · التجهيز 1 · التسليم 0.5. تصميم أو تطريز بدون دليل إنه هو اشتغله (نص خط، صورة مربوطة، تأشير مناطق) ينحسب ضغطة زر = نقطة وحدة. الترتيب حسب «نقاط باليوم» حتى ما يظلم اللي داوم أيام أقل. الوسط = ${one(Math.round(median * 10) / 10)} نقطة باليوم. الأوزان تقدير، وتنعدّل. ⚠️ المقارنة بين شغلات مختلفة تقريبية: قطعة تطريز تاخذ وقت أكثر بهواية من تسليم، فالأدق تقارن الموظف بزميله بنفس المحطة (محمد عادل ↔ علي مهند بالكوي).</p></div>
 `;
 }
 
