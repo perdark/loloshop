@@ -21,7 +21,8 @@
     "friday-deduction-report": "node scripts/friday-deduction-report.js",
     "stranded-orders": "node scripts/stranded-orders.js",
     "reroll-audit": "node scripts/calligraphy-reroll-audit.js",
-    "design-credit": "node scripts/design-credit-report.js"
+    "design-credit": "node scripts/design-credit-report.js",
+    "credit-report": "node scripts/staff-credit-report.js"
   },
   "keywords": [],
   "author": "",
