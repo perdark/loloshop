@@ -1,5 +1,20 @@
 # Progress
 
+## 2026-10-26 — أيادي التصميم بلا اعتماد محمد + «لولو» رجع يجاوب (branch `fix/design-desk-and-ai`, NOT pushed)
+
+- **Desk «إنهاء التصميم» no longer needs an upload first** (`app/design-support/page.tsx`). The
+  server never required artwork on this edge; the greyed button was the only wall, so every job
+  waited for محمد هيثم. Same UI, button always live. «جاهز لمراجعة محمد» stays as an option.
+- **A desk finish now writes `staff_activity_log` (`approve_design`)** under the member's id —
+  goals/«سجل نشاطي» count that table; before, the finish wrote only audit_log and credited nobody.
+  (The calligraphy-page «تحويل للتطريز» half shipped 10-25 in `a6e98d8`.)
+- **«لولو» returned ERR_AI_EMPTY on every call.** SmartAPI's models now burn ~150–550 hidden
+  reasoning tokens that count against `max_tokens`; the 300 cap left nothing visible. Fix: +2000
+  headroom (`AI_CHAT_REASONING_HEADROOM`) in `aiChat.completeSmartapi` and `smartapi.chat`.
+- ⚠️ **Studio images: SmartAPI-side outage, not fixed in code.** No image model in `/v1/models`,
+  `image_generation` tool ignored (models answer with SVG text), `/images/generations` →
+  model_not_found. Studio TEXT chat works. Prod calligraphy is on OpenRouter, unaffected.
+
 ## 2026-10-25 — أيادي التصميم ينطون «تم» بنفسهم · تحديد الكل لبرزان · الكوي يفصل الوشاح عن الشال · «فرّغ الرف» لمحمد عادل
 
 Branch `feat/design-helper-send` (off `main`), **not merged**. 915 backend tests: 911 pass, 3 fail —

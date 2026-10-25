@@ -161,7 +161,12 @@ async function completeSmartapi({ messages, maxTokens, temperature, jsonMode, ma
   if (!key) throw tagged('مفتاح SmartAPI غير مهيأ', 500, 'ERR_OPENROUTER_KEY');
   const model = process.env.AI_CHAT_SMARTAPI_MODEL || DEFAULT_SMARTAPI_MODEL;
   let msgs = messages;
-  const body = { model, messages: msgs, max_tokens: Math.min(maxTokens || maxOutputCap, maxOutputCap), temperature };
+  // ⚠️ 2026-10-26: SmartAPI's models now spend ~150–550 HIDDEN reasoning tokens before the
+  // first visible word, and `max_tokens` counts them. Under the assistant's 300 cap every
+  // «لولو» answer came back EMPTY (ERR_AI_EMPTY, measured). The cap still bounds the VISIBLE
+  // answer's intent (the prompt asks for 2–3 sentences); this headroom only pays for thinking.
+  const REASONING_HEADROOM = Number(process.env.AI_CHAT_REASONING_HEADROOM || 2000);
+  const body = { model, messages: msgs, max_tokens: Math.min(maxTokens || maxOutputCap, maxOutputCap) + REASONING_HEADROOM, temperature };
   if (jsonMode) {
     body.response_format = { type: 'json_object' };
     // Upstream refuses json_object unless a message says "json", and reports it as an outage.

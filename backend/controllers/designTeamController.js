@@ -1023,6 +1023,14 @@ async function approveJob(req, res) {
        VALUES ($1, 'approve_design', 'order', $2, $3)`,
       [req.user.id, orderId, JSON.stringify({ design_team: true, self_finished: !manage, member_role: memberRole })]
     );
+    // Counted like a designer's move (owner 2026-10-26: «احتساب لهم حركات كانه موظفات
+    // تصميم»). Goals/payroll/«سجل نشاطي» count `staff_activity_log`, not audit_log — this
+    // finish used to write only the audit row, so the person who did the work got nothing.
+    await client.query(
+      `INSERT INTO staff_activity_log (user_id, action, order_id, from_stage, to_stage)
+       VALUES ($1, 'approve_design', $2, 'design_complete', 'embroidery')`,
+      [req.user.id, orderId]
+    );
     await client.query(
       `INSERT INTO notifications (user_id, type, title_ar, body_ar, link)
        VALUES ($1, 'design_approved', $2, $3, '/')`,

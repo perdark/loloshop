@@ -386,11 +386,7 @@ function JobDetail({
             </Button>
           )}
           {canWork && !finishMode && (
-            <Button
-              onClick={() => setFinishMode(true)}
-              disabled={actionBusy || !finalSrc}
-              title={finalSrc ? undefined : "ارفع التصميم النهائي أولاً"}
-            >
+            <Button onClick={() => setFinishMode(true)} disabled={actionBusy}>
               إنهاء التصميم وإرساله للتطريز
             </Button>
           )}
@@ -484,14 +480,8 @@ function JobDetail({
               </Button>
             </>
           )}
-          {/* The two halves of the finish rule have to agree. The SERVER does not require
-              artwork — `orders.final_design_url` is empty on every job in this pool, and the
-              staff designer's own advance never checks it, so refusing there would shut the
-              desk. So the rule is a UI one and lives ONLY here: a member is nudged to upload
-              before self-finishing, and «جاهز لمراجعة محمد» is always still open to them. */}
-          {canWork && !finalSrc && (
-            <p className="mt-3 text-xs font-medium text-orange-ink">ارفع التصميم النهائي أولاً لتتمكن من إنهاء التصميم بنفسك.</p>
-          )}
+          {/* Owner 2026-10-26: finishing needs no upload and no اعتماد from محمد — the
+              server never required artwork on this edge, and the UI gate was the only wall. */}
         </section>
 
         {job.task.note && !rejectMode && (

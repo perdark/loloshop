@@ -125,7 +125,9 @@ function usageUsd(usage) {
  * lib/calligraphyProvider.js can swap one for the other.
  */
 async function chat({ messages, maxTokens = 1000, temperature = 0, jsonMode = false, model = TEXT_MODEL }) {
-  const body = { model, messages, max_tokens: maxTokens, temperature };
+  // + headroom: hidden reasoning tokens count against max_tokens and starve small caps
+  // (an 80-token call came back empty, 2026-10-26). Same fix as aiChat.completeSmartapi.
+  const body = { model, messages, max_tokens: maxTokens + Number(process.env.AI_CHAT_REASONING_HEADROOM || 2000), temperature };
   if (jsonMode) {
     body.response_format = { type: 'json_object' };
     // Upstream refuses json_object unless some message contains the word "json", and SmartAPI
