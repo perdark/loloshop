@@ -401,6 +401,20 @@ export async function getMaintenance(): Promise<MaintenanceConfig> {
   return data.data;
 }
 
+// ─── Retail booking lock («الحجز مقفول للمفرد») ─────────────────────────────
+
+export interface RetailBookingLock {
+  active: boolean;
+  message_ar: string;
+}
+
+/** Public endpoint — no auth required. While active, retail students without a rep
+ *  can browse and fill the cart but the server refuses checkout (423). */
+export async function getRetailBookingLock(): Promise<RetailBookingLock> {
+  const { data } = await api.get<{ data: RetailBookingLock }>("/catalog/retail-booking");
+  return data.data;
+}
+
 /** @deprecated Use getShopFeed */
 export async function listCatalogProducts(): Promise<CatalogProductSummary[]> {
   return listCatalogProductsAdmin();

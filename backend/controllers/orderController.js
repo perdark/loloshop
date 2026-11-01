@@ -1,4 +1,5 @@
 const { query, tx } = require('../lib/db');
+const { refuseIfRetailLocked } = require('../lib/retailBookingLock');
 const { moneyCalculations, calculationFor } = require('../lib/moneyCalculation');
 const { priceRoleForUser } = require('./catalogController');
 const { publish } = require('../lib/eventBus');
@@ -647,6 +648,7 @@ async function configureOrder(req, res) {
       code: 'ERR_REP_ORDER_FLOW',
     });
   }
+  if (await refuseIfRetailLocked(res, student)) return;
   const role = await priceRoleForUser(req.user);
 
   // Fetch product type for robe validation
@@ -842,6 +844,7 @@ async function configurePackage(req, res) {
       code: 'ERR_REP_ORDER_FLOW',
     });
   }
+  if (await refuseIfRetailLocked(res, student)) return;
   let resolvedBatchId = null;
   if (batch_id) {
     const owned = await query(
@@ -1006,6 +1009,7 @@ async function configureFullSet(req, res) {
       code: 'ERR_REP_ORDER_FLOW',
     });
   }
+  if (await refuseIfRetailLocked(res, student)) return;
   const pkg = await query(
     `SELECT id, name_ar, price FROM packages
      WHERE id = $1 AND active = TRUE AND is_full_set = TRUE`,

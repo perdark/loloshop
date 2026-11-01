@@ -8,6 +8,7 @@ import { PromoControl } from "@/components/admin/PromoControl";
 import { DiscountRestorePanel } from "@/components/admin/DiscountRestorePanel";
 import { DiscountStartPanel } from "@/components/admin/DiscountStartPanel";
 import { MaintenanceControl } from "@/components/admin/MaintenanceControl";
+import { RetailBookingControl } from "@/components/admin/RetailBookingControl";
 import { AnalyticsAsk } from "@/components/admin/AnalyticsAsk";
 import { OtpGatewayStatus } from "@/components/admin/OtpGatewayStatus";
 import { getTailorSummary, getPresence, type TailorSummary } from "@/lib/staff";
@@ -737,7 +738,10 @@ export default function AdminDashboardPage() {
       {/* Maintenance mode control */}
       <section className="mt-16">
         <SectionHead title="الموقع" />
-        <MaintenanceControl />
+        <RetailBookingControl />
+        <div className="mt-6">
+          <MaintenanceControl />
+        </div>
       </section>
 
       {/* الفصال — parallel tailoring progress (independent of the pipeline) */}

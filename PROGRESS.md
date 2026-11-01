@@ -1,5 +1,21 @@
 # Progress
 
+## 2026-11-02 — «قفل الحجز للطلاب المفرد» (branch `feat/retail-booking-lock`, NOT pushed)
+
+- **One switch on `/admin` → الموقع** (`RetailBookingControl`, beside وضع الصيانة), stored in
+  `site_settings.retail_booking_lock` `{active, message_ar}`. No migration — the row is created on
+  first save; missing row = open.
+- **While on, a retail student with NO rep** can browse, configure and fill the cart, but every
+  order-creating path refuses with **423 `ERR_RETAIL_BOOKING_CLOSED`** + the admin's message:
+  cart checkout, `/orders/configure`, `/orders/configure-package`, `/orders/configure-full-set`
+  (`lib/retailBookingLock.refuseIfRetailLocked`, called after the rep-linked check).
+- **Not gated, on purpose:** rep-linked students, the wholesaler flows, and every admin/staff
+  custom order (they never call the gate). VIP upgrade of an existing order is also left open.
+- Cart page swaps «إتمام الطلب» for a lock notice («سلّتك محفوظة…»); public read is
+  `GET /api/catalog/retail-booking`, admin write `PATCH /api/admin/retail-booking`.
+- Verified: `test/retailBookingLock.test.js` 3/3 · tsc + eslint clean · real browser: admin
+  toggle saved, `/cart` at 390px shows the notice instead of the button.
+
 ## 2026-10-26 — أيادي التصميم بلا اعتماد محمد + «لولو» رجع يجاوب (branch `fix/design-desk-and-ai`, NOT pushed)
 
 - **Desk «إنهاء التصميم» no longer needs an upload first** (`app/design-support/page.tsx`). The

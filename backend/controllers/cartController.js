@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { query, tx } = require('../lib/db');
+const { refuseIfRetailLocked } = require('../lib/retailBookingLock');
 const { priceSelections } = require('./orderController');
 const { priceRoleForUser } = require('./catalogController');
 
@@ -137,6 +138,7 @@ async function checkout(req, res) {
       code: 'ERR_REP_ORDER_FLOW',
     });
   }
+  if (await refuseIfRetailLocked(res, student)) return;
   const role = await priceRoleForUser(req.user);
 
   const cart = await query(`SELECT id FROM carts WHERE user_id = $1`, [req.user.id]);

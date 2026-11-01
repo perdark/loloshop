@@ -1,6 +1,6 @@
 import { api, apiUploadFile } from "./api";
 import { mapHeroSlide } from "./catalog";
-import type { MaintenanceConfig, PromoConfig } from "./catalog";
+import type { MaintenanceConfig, PromoConfig, RetailBookingLock } from "./catalog";
 import type { CreateFullSetPayload, FullSetPackage, FullSetPricing } from "./wholesaler";
 import type {
   AdminAccounting,
@@ -407,7 +407,7 @@ export async function getPushHistory(): Promise<PushBroadcastRow[]> {
   return data.data.broadcasts;
 }
 
-export type { MaintenanceConfig };
+export type { MaintenanceConfig, RetailBookingLock };
 
 /** Admin-only: toggle/save the maintenance-mode flag. */
 export async function updateMaintenance(
@@ -415,6 +415,17 @@ export async function updateMaintenance(
 ): Promise<MaintenanceConfig> {
   const { data } = await api.patch<{ data: MaintenanceConfig }>(
     "/admin/maintenance",
+    payload
+  );
+  return data.data;
+}
+
+/** Admin-only: open/close booking for retail students without a rep. */
+export async function updateRetailBookingLock(
+  payload: RetailBookingLock
+): Promise<RetailBookingLock> {
+  const { data } = await api.patch<{ data: RetailBookingLock }>(
+    "/admin/retail-booking",
     payload
   );
   return data.data;

@@ -10,6 +10,7 @@ const attendanceBreaks = require('../controllers/attendanceBreakController');
 const devices = require('../controllers/attendanceDeviceController');
 const customOrders = require('../controllers/adminCustomOrderController');
 const payouts = require('../controllers/payoutController');
+const { setRetailBookingLock } = require('../lib/retailBookingLock');
 const discounts = require('../controllers/discountController');
 const { imageUpload, imageUploadLimit, validateUploadedImage } = require('../lib/upload');
 const { gatewayStatus } = require('../lib/otp');
@@ -151,6 +152,16 @@ router.post('/discounts/start', discounts.start);
 
 // Site settings — maintenance mode flag
 router.patch('/maintenance', c.updateMaintenance);
+
+// Site settings — «قفل الحجز للمفرد». Gates retail-without-rep order creation only;
+// admin/staff custom orders are untouched (see lib/retailBookingLock.js).
+router.patch('/retail-booking', async (req, res) => {
+  const msg = typeof req.body?.message_ar === 'string' ? req.body.message_ar.trim() : '';
+  if (msg.length > 300) {
+    return res.status(400).json({ error: 'الرسالة طويلة جداً (الحد 300 حرف)', code: 'ERR_VALIDATION' });
+  }
+  res.json({ data: await setRetailBookingLock({ active: req.body?.active, message_ar: msg }) });
+});
 
 // Money gate — reveal secret for TV/dashboard IQD amounts (hidden by default).
 router.get('/money-gate', c.getMoneyGate);

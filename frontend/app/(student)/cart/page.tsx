@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { getApiErrorMessage } from "@/lib/api";
+import { getRetailBookingLock, type RetailBookingLock } from "@/lib/catalog";
 import {
   type Cart,
   type CartItem,
@@ -216,6 +217,9 @@ export default function CartPage() {
   // The student's submitted orders — shown when the cart is empty so a completed
   // checkout doesn't dead-end on a blank cart.
   const [myOrders, setMyOrders] = useState<StudentOrder[]>([]);
+  // «الحجز مقفول» — the cart still works, only «إتمام الطلب» is replaced by the notice.
+  // The server refuses checkout on its own (423); this just says so before the press.
+  const [bookingLock, setBookingLock] = useState<RetailBookingLock | null>(null);
 
   const authed = isAuthenticated();
 
@@ -247,6 +251,9 @@ export default function CartPage() {
   useEffect(() => {
     loadCart();
     loadMyOrders();
+    getRetailBookingLock()
+      .then(setBookingLock)
+      .catch(() => setBookingLock(null));
   }, [loadCart, loadMyOrders]);
 
   async function handleUpdate(id: string, qty: number) {
@@ -305,7 +312,13 @@ export default function CartPage() {
       // add-to-cart, so checkout is the final step — staff produce the design from the order.
       setDone(true);
     } catch (e) {
-      toast.error(getApiErrorMessage(e, "تعذر إتمام الطلب — سجّل دخولك كطالب"));
+      const msg = getApiErrorMessage(e, "تعذر إتمام الطلب — سجّل دخولك كطالب");
+      const code = (e as { response?: { data?: { code?: string } } })?.response?.data?.code;
+      if (code === "ERR_RETAIL_BOOKING_CLOSED") {
+        setBookingLock({ active: true, message_ar: msg });
+        return;
+      }
+      toast.error(msg);
     } finally {
       setCheckingOut(false);
     }
@@ -477,18 +490,50 @@ export default function CartPage() {
       {!isEmpty && (
         <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line surface-glass px-4 py-3.5 shadow-[var(--shadow-float)]">
           <div className="mx-auto max-w-lg">
-            <Button
-              fullWidth
-              size="lg"
-              loading={checkingOut}
-              disabled={checkingOut || isEmpty}
-              onClick={handleCheckout}
-            >
-              {checkingOut ? "جارٍ تأكيد الطلب…" : "إتمام الطلب"}
-            </Button>
-            <p className="mt-1.5 text-center text-xs text-[var(--shop-muted)]">
-              {formatIQD(cart.total)} — الدفع نقداً عند الاستلام
-            </p>
+            {bookingLock?.active ? (
+              <div
+                role="status"
+                className="flex items-start gap-3 rounded-2xl border border-orange-ink/25 bg-blush/60 px-4 py-3"
+              >
+                <svg
+                  aria-hidden
+                  viewBox="0 0 24 24"
+                  className="mt-0.5 h-5 w-5 shrink-0 text-orange-ink"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <rect x="4" y="11" width="16" height="10" rx="2" />
+                  <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+                </svg>
+                <div className="min-w-0">
+                  <p className="text-sm font-bold text-ink">الحجز مقفول حالياً</p>
+                  <p className="mt-0.5 text-xs leading-relaxed text-ink/70">
+                    {bookingLock.message_ar}
+                  </p>
+                  <p className="mt-1 text-[11px] text-[var(--shop-muted)]">
+                    سلّتك محفوظة ({formatIQD(cart.total)}) — تكدر تكمل طلبك أول ما ينفتح الحجز.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <>
+                <Button
+                  fullWidth
+                  size="lg"
+                  loading={checkingOut}
+                  disabled={checkingOut || isEmpty}
+                  onClick={handleCheckout}
+                >
+                  {checkingOut ? "جارٍ تأكيد الطلب…" : "إتمام الطلب"}
+                </Button>
+                <p className="mt-1.5 text-center text-xs text-[var(--shop-muted)]">
+                  {formatIQD(cart.total)} — الدفع نقداً عند الاستلام
+                </p>
+              </>
+            )}
           </div>
         </div>
       )}

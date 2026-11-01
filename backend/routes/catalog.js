@@ -2,6 +2,7 @@ const router = require('express').Router();
 const { authRequired, requireRole, optionalAuth } = require('../middleware/auth');
 const { imageUpload, imageUploadLimit, validateUploadedImage } = require('../lib/upload');
 const c = require('../controllers/catalogController');
+const { getRetailBookingLock } = require('../lib/retailBookingLock');
 
 // Public-ish (auth optional for role pricing)
 router.get('/shop', optionalAuth, c.getShop);                      // packages + products grouped by type
@@ -10,6 +11,9 @@ router.get('/packages', optionalAuth, c.listPackages);             // active pac
 router.get('/hero', c.getHeroSlides);                              // active home-slider slides
 router.get('/promo', c.getPromo);                                  // discount popup config (public, no auth)
 router.get('/maintenance', c.getMaintenance);                      // maintenance-mode flag (public, no auth)
+router.get('/retail-booking', async (req, res) => {                // «الحجز مقفول للمفرد» flag (public, no auth)
+  res.json({ data: await getRetailBookingLock() });
+});
 
 // Everything below is admin-only
 router.use(authRequired, requireRole('admin'));
