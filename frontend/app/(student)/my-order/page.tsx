@@ -29,6 +29,8 @@ interface RawRepFullSetData {
   /** Only present for wholesaler-linked students; NULL for retail. */
   wholesaler_approval?: WholesalerApproval;
   wholesaler_reject_reason?: string | null;
+  /** The rep's deadline day is over — the server refuses any save. */
+  deadline_passed?: boolean;
 }
 
 // ── Approval banner — defined at module level (not inside render) ──────────────
@@ -95,6 +97,7 @@ export default function StudentMyOrderPage() {
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
   const [formKey, setFormKey] = useState(0);
+  const [deadlinePassed, setDeadlinePassed] = useState(false);
 
   // Apply a fresh /orders/rep-full-set response to state. Bumping formKey
   // re-mounts the form so it pre-fills with the latest saved values.
@@ -109,6 +112,7 @@ export default function StudentMyOrderPage() {
     const nextApproval = raw.wholesaler_approval ?? null;
     setApproval(nextApproval);
     setRejectReason(raw.wholesaler_reject_reason ?? null);
+    setDeadlinePassed(!!raw.deadline_passed);
     setFormKey((k) => k + 1);
     // Leave the post-submit "done" success screen ONLY while still pending; once
     // the rep resolves it (approved/rejected) drop to the correct resolved view.
@@ -260,6 +264,44 @@ export default function StudentMyOrderPage() {
             onSubmit={() => {}}
           />
         </div>
+      </div>
+    );
+  }
+
+  // Stage 3: the rep's deadline is over — no new order and no edits (server enforces it).
+  if (deadlinePassed) {
+    return (
+      <div className="space-y-5">
+        <header>
+          <h1 className="section-heading font-display-ar text-2xl font-bold text-ink">
+            طلبك
+          </h1>
+        </header>
+        <div
+          role="alert"
+          className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800"
+          style={{ borderInlineStart: "4px solid #dc2626" }}
+        >
+          <p className="font-semibold">انتهى الموعد النهائي لدفعتك</p>
+          <p className="mt-1 text-red-700">
+            {ctx.existing
+              ? "ما يمكن تعديل الطلب بعد الآن. لأي تغيير تواصل مع ممثلك أو مع المحل."
+              : "ما يمكن إرسال طلب جديد بعد الآن. تواصل مع ممثلك أو مع المحل."}
+          </p>
+        </div>
+        {ctx.existing && (
+          <div className="pointer-events-none select-none opacity-60">
+            <FullSetOrderForm
+              key={formKey}
+              pricing={ctx.pricing}
+              initial={ctx.existing}
+              submitting={false}
+              submitLabel="تحديث الطلب"
+              onUploadImage={uploadDesignImage}
+              onSubmit={() => {}}
+            />
+          </div>
+        )}
       </div>
     );
   }

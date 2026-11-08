@@ -1,5 +1,13 @@
 # Progress
 
+## 2026-11-08 — 🔒 طلاب الممثل ما يگدرون يطلبون أو يعدّلون بعد الموعد النهائي (غير مرفوع)
+
+- **الخلل:** `ERR_DEADLINE_PASSED` كان موجود بـ API.md من أول commit بس ما انربط أبداً — الموعد كان عدّاد بس. 109 طلب انعمل بعد موعد الممثل (6 ممثلين، نسخة 09-12).
+- **الحل:** `backend/middleware/repDeadline.js` على كل مسارات الطالب اللي تكتب: `/orders/{configure,configure-package,configure-full-set,rep-full-set,upgrade-vip}` · `/cart/{items POST/PATCH,checkout}` · `/designs/{save,complete,uploads/*}`. يقفل **بعد نهاية يوم الموعد بتوقيت بغداد** (الموعد ينحفظ تاريخ فقط). المشاهدة وحذف سطر من السلة مفتوحة.
+- **مستثنى:** الموظفين/الإدارة (مساراتهم `/production` و`/staff` ما تمر بالحارس) والممثل نفسه. لإعادة الفتح: «تمديد الموعد» أو `edit_exception` للطالب.
+- `/my-order` يستلم `deadline_passed` ويعرض بانر أحمر + الطلب للقراءة فقط بدل ما يملي الطالب النموذج كله ويطلعله خطأ.
+- **التحقق:** `test/repDeadlineGuard.test.js` 6/6 · المجموعة 925/929 (الـ3 الفاشلة ما تمس هذا الكود، تفشل لوحدها) · tsc + lint نظيف · curl كطالب منتهي موعده: كل الكتابة 403، القراءة 200. ⚠️ الشاشة ما انفتحت بالمتصفح — بورت 3000 محجوز بجلسة khatuna.
+
 ## 2026-11-02 — «قفل الحجز للطلاب المفرد» (branch `feat/retail-booking-lock`, NOT pushed)
 
 - **One switch on `/admin` → الموقع** (`RetailBookingControl`, beside وضع الصيانة), stored in

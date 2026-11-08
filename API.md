@@ -713,4 +713,4 @@ Per-user spend over the last 30 days. `{ data: [{ user_id, name, messages, image
 | `ERR_INVALID_CREDENTIALS` | 401 | Wrong login |
 | `ERR_PHONE_TAKEN` | 409 | Phone already registered |
 | `ERR_REFERRAL_INVALID` | 404 | Bad/expired referral code |
-| `ERR_DEADLINE_PASSED` | 400 | Action after deadline |
+| `ERR_DEADLINE_PASSED` | 403 | Rep-linked student creating/adding/editing an order after the rep's deadline day (Baghdad). Staff/admin paths are not gated; `students.edit_exception` reopens one student |

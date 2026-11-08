@@ -8,6 +8,7 @@ const { persistFullSetOrder, readFullSetOrder, loadWholesalerPricing } = require
 const { capturePlates, plateFor } = require('../lib/platePreservation');
 const memoCache = require('../lib/memoCache');
 const { notifyStageChange, notifySetReady } = require('../lib/studentOrderNotices');
+const { repDeadlineOpen } = require('../middleware/repDeadline');
 
 const ALL_STATUSES = [
   'pending_approval', 'designing', 'design_complete', 'converting',
@@ -1580,6 +1581,9 @@ async function repFullSetContext(req, res) {
       is_rep_student: isRep, approved, packages, existing, pricing,
       wholesaler_approval: wholesalerApproval,
       wholesaler_reject_reason: wholesalerRejectReason,
+      // The POST is refused with ERR_DEADLINE_PASSED; tell the page up front so the
+      // student is not left filling a whole form that cannot be sent.
+      deadline_passed: isRep ? !(await repDeadlineOpen(req.user.id)) : false,
     },
   });
 }
